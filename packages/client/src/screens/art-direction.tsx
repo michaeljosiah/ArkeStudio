@@ -14,6 +14,7 @@ import { ReferencePickerBody, worldPickerSources } from "../components/reference
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
+import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { shortDate } from "../lib/format.js";
 import {
   acceptProposal,
@@ -730,6 +731,7 @@ export function ArtDirectionProposalScreen() {
   // and the words in the box are a draft of the change, not a preset's.
   const [presetId, setPresetId] = useState<string | null>(null);
   const [sendFailed, setSendFailed] = useState(false);
+  const change = useSingleAct();
   if (!world || world.meta.worldId !== worldId) return null;
 
   const direction = world.artDirection;
@@ -832,9 +834,7 @@ export function ArtDirectionProposalScreen() {
             variant="primary"
             disabled={Boolean(staged) || draft.trim().length === 0}
             onClick={() => {
-              if (setArtDirection(world.meta.worldId, draft, direction.masterLook ?? null)) {
-                navigate(`/w/${world.meta.worldId}/art-direction`);
-              } else {
+              if (!change.track(setArtDirection(world.meta.worldId, draft, direction.masterLook ?? null))) {
                 setSendFailed(true);
               }
             }}
@@ -848,6 +848,7 @@ export function ArtDirectionProposalScreen() {
             when the coordinator is back.
           </div>
         )}
+        <SingleActFeedback result={change.result} undoLabel="Restore previous look" onUndo={change.undo} />
       </main>
       <aside className="fy-artproposal__ripple">
         <div className="fy-artproposal__eyebrow">RIPPLES</div>

@@ -471,6 +471,20 @@ export function subscribeSheetEditResults(listener: (result: SheetEditResult) =>
   return () => sheetEditResultListeners.delete(listener);
 }
 
+export type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
+const singleActResultListeners = new Set<(result: SingleActResult) => void>();
+export function subscribeSingleActResults(listener: (result: SingleActResult) => void): () => void {
+  singleActResultListeners.add(listener);
+  return () => singleActResultListeners.delete(listener);
+}
+
+export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
+const canonContradictionListeners = new Set<(result: CanonContradictions) => void>();
+export function subscribeCanonContradictions(listener: (result: CanonContradictions) => void): () => void {
+  canonContradictionListeners.add(listener);
+  return () => canonContradictionListeners.delete(listener);
+}
+
 export type PlanResult = Extract<DomainEvent, { type: "production.plan-result" }>;
 export type PlanStateEvent = Extract<DomainEvent, { type: "production.plan-state" }>;
 const planResultListeners = new Set<(result: PlanResult) => void>();
@@ -895,6 +909,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "sheet.edit-result") {
       for (const listener of sheetEditResultListeners) listener(event);
+    }
+    if (event.type === "single-act.result") {
+      for (const listener of singleActResultListeners) listener(event);
+    }
+    if (event.type === "canon.contradictions") {
+      for (const listener of canonContradictionListeners) listener(event);
     }
     if (event.type === "timeline.command-refused") {
       for (const listener of timelineRefusalListeners) listener(event);
@@ -1746,13 +1766,15 @@ export function stageArtDirectionChange(
  * Returns whether the command was actually sent — a disconnected studio must not read as a
  * change made, or the caller navigates away over a lost edit.
  */
-export function setArtDirection(worldId: string, description: string, masterLook?: string | null): boolean {
+export function setArtDirection(worldId: string, description: string, masterLook?: string | null): string | null {
+  const requestId = ulid();
   return send({
     kind: "set-art-direction",
     worldId,
+    requestId,
     description,
     ...(masterLook !== undefined ? { masterLook } : {}),
-  });
+  }) ? requestId : null;
 }
 
 export function acceptProposal(worldId: string, proposalId: string, confirmRipples?: string): void {
@@ -1952,12 +1974,14 @@ export function stageCanonEntry(
   entryType: "rule" | "lore" | "location" | "faction" | "timeline" | "tone",
   title: string,
   statement: string,
-): void {
-  send({ kind: "stage-canon-entry", worldId, entryType, title, statement });
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "stage-canon-entry", worldId, requestId, entryType, title, statement }) ? requestId : null;
 }
 
-export function stageCanonAmendment(worldId: string, entryId: string, statement: string): void {
-  send({ kind: "stage-canon-amendment", worldId, entryId, statement });
+export function stageCanonAmendment(worldId: string, entryId: string, statement: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "stage-canon-amendment", worldId, requestId, entryId, statement }) ? requestId : null;
 }
 
 export function openThread(worldId: string, title: string, question: string, candidates: string[]): void {
@@ -1969,8 +1993,39 @@ export function settleThread(
   entryId: string,
   resolvedType: "rule" | "lore" | "location" | "faction" | "timeline" | "tone",
   statement: string,
-): void {
-  send({ kind: "settle-thread", worldId, entryId, resolvedType, statement });
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "settle-thread", worldId, requestId, entryId, resolvedType, statement }) ? requestId : null;
+}
+
+export function requestCanonContradictions(
+  worldId: string,
+  title: string,
+  statement: string,
+  excludeEntryId?: string,
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "canon-contradictions",
+    worldId,
+    requestId,
+    title,
+    statement,
+    ...(excludeEntryId !== undefined ? { excludeEntryId } : {}),
+  }) ? requestId : null;
+}
+
+export function undoSingleAct(result: SingleActResult): string | null {
+  if (!result.undo) return null;
+  const requestId = ulid();
+  return send({
+    kind: "undo-single-act",
+    worldId: result.worldId,
+    requestId,
+    operation: result.operation,
+    path: result.path,
+    undo: result.undo,
+  }) ? requestId : null;
 }
 
 /**
@@ -2030,20 +2085,24 @@ export function createSheetFromSentence(
 }
 
 /** SPEC-020 R-14: clear the guest's owner. No file moves and no citation breaks. */
-export function promoteGuest(worldId: string, path: string): void {
-  send({ kind: "promote-guest", worldId, path });
+export function promoteGuest(worldId: string, path: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "promote-guest", worldId, requestId, path }) ? requestId : null;
 }
 
-export function duplicateSheet(worldId: string, path: string, newName: string): void {
-  send({ kind: "duplicate-sheet", worldId, path, newName });
+export function duplicateSheet(worldId: string, path: string, newName: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "duplicate-sheet", worldId, requestId, path, newName }) ? requestId : null;
 }
 
-export function setSheetStatus(worldId: string, path: string, status: "sketch" | "locked"): void {
-  send({ kind: "set-sheet-status", worldId, path, status });
+export function setSheetStatus(worldId: string, path: string, status: "sketch" | "locked"): string | null {
+  const requestId = ulid();
+  return send({ kind: "set-sheet-status", worldId, requestId, path, status }) ? requestId : null;
 }
 
-export function renameSheet(worldId: string, path: string, name: string): void {
-  send({ kind: "rename-sheet", worldId, path, name });
+export function renameSheet(worldId: string, path: string, name: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "rename-sheet", worldId, requestId, path, name }) ? requestId : null;
 }
 
 export function assignVoice(
@@ -2828,8 +2887,9 @@ export function proposeStoryOverview(
     targetLength?: string;
     acts?: Array<{ title: string; summary?: string }>;
   },
-): void {
-  send({ kind: "propose-story-overview", worldId, productionId, ...overview });
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "propose-story-overview", worldId, requestId, productionId, ...overview }) ? requestId : null;
 }
 
 /** Have the studio draft the overview into a staged proposal (issue 385). */
@@ -2854,8 +2914,9 @@ export function proposeSeason(
       payoff?: string;
     }>;
   },
-): void {
-  send({ kind: "propose-season", worldId, productionId, ...season });
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "propose-season", worldId, requestId, productionId, ...season }) ? requestId : null;
 }
 
 /** Stage one episode — a create mints identity from the title; an amend names its id (issue 397). */
@@ -2869,8 +2930,9 @@ export function proposeEpisode(
     promise?: { opens?: string; turn?: string; closes?: string };
     scenes?: string[];
   },
-): void {
-  send({ kind: "propose-episode", worldId, productionId, ...episode });
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "propose-episode", worldId, requestId, productionId, ...episode }) ? requestId : null;
 }
 
 /** Reorder episodes by stable id — order fields rewrite, nothing renames (issue 397). */

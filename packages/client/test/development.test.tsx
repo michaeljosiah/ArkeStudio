@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, Episode, StagedProposal } from "@arke-studio/contracts";
@@ -98,6 +101,24 @@ function renderApp(state: ClientState, path: string): string {
 
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
+
+describe("Development single-act reachability", () => {
+  const screens = ["development.tsx", "production.tsx"].map((file) =>
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/screens", file), "utf8"),
+  );
+
+  it("correlates the reachable existing-episode edit at its initiating control", () => {
+    assert.match(screens[0]!, /edit\.track\(proposeEpisode\(worldId, prodId, \{[\s\S]*?episodeId: episode\.id/);
+    assert.match(screens[0]!, /<SingleActFeedback result=\{edit\.result\}/);
+  });
+
+  it("has no reachable story-overview or season form sender to misclassify", () => {
+    for (const source of screens) {
+      assert.doesNotMatch(source, /proposeStoryOverview\(/);
+      assert.doesNotMatch(source, /proposeSeason\(/);
+    }
+  });
+});
 
 describe("shot take selection", () => {
   it("excludes a reviewed board-sheet parent that covers the whole board", () => {

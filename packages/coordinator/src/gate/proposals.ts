@@ -125,6 +125,14 @@ export interface MergeSheetFormInput {
   expectedDraftRevision: number;
 }
 
+export interface MergeFormInput {
+  proposalId: string;
+  requestId: string;
+  path: string;
+  expectedDraftRevision: number;
+  edit(content: string): { content: string } | { reason: string };
+}
+
 export interface ResolveOpenChoiceInput {
   proposalId: string;
   requestId: string;
@@ -232,6 +240,19 @@ export async function acceptDecided(gate: ProposalManager, proposalId: string): 
    * the world between these two calls, and that is exactly the case the reconfirmation is for.
    */
   return gate.accept(proposalId, { confirmRipples: first.signature });
+}
+
+/** Apply a person's look fields over an existing proposal without accepting its unread fields. */
+export function artDirectionFormContent(
+  content: string,
+  description: string,
+  masterLook: string | null | undefined,
+): string {
+  const current = ArtDirectionRecordSchema.parse(JSON.parse(content));
+  const next = { ...current, description: description.trim() };
+  if (masterLook) next.masterLook = masterLook;
+  else delete next.masterLook;
+  return JSON.stringify(ArtDirectionRecordSchema.parse(next), null, 2) + "\n";
 }
 
 /**
@@ -500,6 +521,35 @@ export class ProposalManager {
    * current bytes keeps that work for the proposal's own decision without treating it as consent.
    */
   async mergeSheetFormEdit(input: MergeSheetFormInput): Promise<UpdateFieldOutcome> {
+    const edits = [
+      ...input.sections.map((section) => ({ field: section.heading, value: section.body })),
+      ...(input.role === undefined ? [] : [{ field: "Role", value: input.role }]),
+    ];
+    if (edits.length === 0) return { status: "rejected", message: "No changed sheet fields were submitted." };
+    return this.mergeFormEdit({
+      proposalId: input.proposalId,
+      requestId: input.requestId,
+      path: input.path,
+      expectedDraftRevision: input.expectedDraftRevision,
+      edit(content) {
+        if (classify(input.path).track !== "sheet") {
+          return { reason: "That target is not a sheet." };
+        }
+        for (const edit of edits) {
+          const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
+          if (!changed.ok) return { reason: safeFieldEditMessage(changed.problem) };
+          content = changed.content;
+        }
+        return { content };
+      },
+    });
+  }
+
+  /**
+   * Merge a form's named fields into the proposal already occupying its target (SPEC-040 R-9a).
+   * The caller owns the entity-shaped edit; this owns the revision fence and recoverable journal.
+   */
+  async mergeFormEdit(input: MergeFormInput): Promise<UpdateFieldOutcome> {
     return this.store.gateOp(async () => {
       const dir = this.proposalDir(input.proposalId);
       const recovery = await this.recoverDrafts(input.proposalId);
@@ -510,22 +560,14 @@ export class ProposalManager {
       if (proposal.draftRevision !== input.expectedDraftRevision) {
         return { status: "stale", currentDraftRevision: proposal.draftRevision };
       }
-      if (classify(input.path).track !== "sheet" || !proposal.targets.some((target) => target.path === input.path)) {
+      if (!proposal.targets.some((target) => target.path === input.path)) {
         return { status: "unknown-target" };
       }
 
-      let content = await this.readProposalFile(input.proposalId, input.path);
-      if (content === null) return { status: "unknown-target" };
-      const edits = [
-        ...input.sections.map((section) => ({ field: section.heading, value: section.body })),
-        ...(input.role === undefined ? [] : [{ field: "Role", value: input.role }]),
-      ];
-      if (edits.length === 0) return { status: "rejected", message: "No changed sheet fields were submitted." };
-      for (const edit of edits) {
-        const changed = applyFieldEdit(input.path, content, edit.field, edit.value);
-        if (!changed.ok) return { status: "rejected", message: safeFieldEditMessage(changed.problem) };
-        content = changed.content;
-      }
+      const current = await this.readProposalFile(input.proposalId, input.path);
+      if (current === null) return { status: "unknown-target" };
+      const edited = input.edit(current);
+      if ("reason" in edited) return { status: "rejected", message: edited.reason };
 
       const nextManifest: Proposal = {
         ...proposal,
@@ -540,12 +582,12 @@ export class ProposalManager {
         currentDraftRevision: proposal.draftRevision,
         nextDraftRevision: nextManifest.draftRevision,
         state: "prepared",
-        files: [{ path: input.path, content }],
+        files: [{ path: input.path, content: edited.content }],
         nextManifest: ProposalSchema.parse(nextManifest) as Record<string, unknown>,
         at: this.store.now(),
       };
       await writeDraftRecord(dir, op);
-      await atomicWriteFile(draftStagingPath(dir, op.operationId, input.path), content);
+      await atomicWriteFile(draftStagingPath(dir, op.operationId, input.path), edited.content);
       await writeDraftRecord(dir, { ...op, state: "committing" });
       await this.commitDraft(dir, { ...op, state: "committing" });
       return { status: "updated", proposal: nextManifest };

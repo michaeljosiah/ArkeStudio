@@ -70,6 +70,10 @@ import {
   type QueueCommand,
   type RuntimeProbes,
   type RippleItem,
+  type Proposal,
+  type SingleActOperation,
+  type SingleActUndo,
+  ART_DIRECTION_PATH,
   type VoiceCandidate,
   type ArtifactGeneration,
   type CharacterReferenceWorkflow,
@@ -126,6 +130,9 @@ import {
   proposeEpisode,
   proposeSeason,
   proposeStoryOverview,
+  episodeFormContent,
+  seasonFormContent,
+  storyOverviewFormContent,
   reorderChapters,
   reorderEpisodes,
   reorderScenes,
@@ -347,7 +354,9 @@ import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
+  amendCanonContent,
   openThread,
+  settleThreadContent,
   stageCanonAmendment,
   stageCanonEntry,
   stageThreadSettlement,
@@ -375,7 +384,13 @@ import type { ComfyUiEngineService } from "./comfyui/engine.js";
 import { GrantStore } from "./harness/grants.js";
 import { WorldQueryServer } from "./harness/world-query.js";
 import { ConversationInUseError, WorldChatService } from "./world-chat/service.js";
-import { acceptDecided, explainAcceptRefusal, landed } from "./gate/proposals.js";
+import {
+  acceptDecided,
+  artDirectionFormContent,
+  explainAcceptRefusal,
+  landed,
+  type AcceptOutcome,
+} from "./gate/proposals.js";
 import { rejectPoint, returnToRail, savePoint, wrapUp, WrapUpError } from "./world-chat/wrapup.js";
 import { materialiseDuplicateChoice } from "./world-chat/materialise.js";
 import { recoverConversations } from "./world-chat/recovery.js";
@@ -401,10 +416,13 @@ import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
-import { refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
+import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
   createSheetFromSentence,
   duplicateSheet,
+  guestPromotionContent,
+  sheetRenameContent,
+  sheetStatusContent,
   stageGuestPromotion,
   stageSheetRename,
   stageSheetStatus,
@@ -415,6 +433,48 @@ import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
 import type { WorldProvider } from "./world-provider.js";
 import type { WorldStore } from "./world/store.js";
+
+type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
+
+function blockedReason(outcome: AcceptOutcome): Extract<DomainEvent, { type: "proposal.blocked" }>["reason"] {
+  switch (outcome.status) {
+    case "needs-reconfirm": return "needs-reconfirm";
+    case "stale": return "stale";
+    case "pending-review": return "pending-review";
+    case "unresolved-conflicts": return "unresolved-conflicts";
+    case "open-choices": return "open-choices";
+    case "invalid": return "invalid";
+    case "draft-unresolved": return "draft-unresolved";
+    case "target-retired": return "target-retired";
+    case "no-op": return "no-op";
+    case "accepted": return "invalid";
+  }
+}
+
+function validSingleActUndo(operation: SingleActOperation, undo: SingleActUndo): boolean {
+  const track = classify(undo.path).track;
+  switch (undo.kind) {
+    case "restore-version":
+      return (
+        ((operation === "canon-amend" || operation === "canon-settle") && track === "canon") ||
+        (operation === "story-overview-edit" && track === "story") ||
+        (operation === "season-edit" && track === "season") ||
+        (operation === "episode-edit" && track === "episode") ||
+        (operation === "art-direction-edit" && track === "art-direction")
+      );
+    case "restore-derived-art-direction":
+      return operation === "art-direction-edit" && undo.path === ART_DIRECTION_PATH;
+    case "retire":
+      return (
+        (operation === "canon-create" && track === "canon") ||
+        ((operation === "sheet-duplicate" || operation === "guest-promotion") && track === "sheet")
+      );
+    case "rename-sheet":
+      return operation === "sheet-rename" && track === "sheet";
+    case "set-sheet-status":
+      return operation === "sheet-status" && track === "sheet";
+  }
+}
 
 /**
  * The coordinator: the application's domain layer, embedded in the Electron main process
@@ -1881,6 +1941,9 @@ export class Coordinator {
       parsed.type !== "world-chat.ripples" &&
       // A correlated form receipt: proposal and commit events remain the durable account.
       parsed.type !== "sheet.edit-result" &&
+      parsed.type !== "single-act.result" &&
+      // A form preflight response is recomputed from the live index and has no domain lifecycle.
+      parsed.type !== "canon.contradictions" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
       // append-only audit file must never hold (SPEC-030 R-1).
       parsed.type !== "vendor-auth.status" &&
@@ -3298,6 +3361,175 @@ export class Coordinator {
     }
   }
 
+  private emitSingleAct(input: Omit<SingleActResult, "at" | "type">): void {
+    this.emit({ at: this.nowIso(), type: "single-act.result", ...input });
+  }
+
+  /** Stage and decide one labelled press, leaving a refusal only at the control that made it. */
+  private async runSingleAct(input: {
+    worldId: string;
+    requestId: string;
+    operation: SingleActOperation;
+    path(proposal?: Proposal): string;
+    stage(): Promise<Proposal>;
+    undo(proposal: Proposal): SingleActUndo | undefined;
+    successDisposition?: "accepted" | "undone";
+  }): Promise<void> {
+    const gate = this.opts.provider.gate?.();
+    if (!gate) {
+      this.emitSingleAct({
+        worldId: input.worldId,
+        requestId: input.requestId,
+        operation: input.operation,
+        path: input.path(),
+        disposition: "refused",
+        reason: "The accept gate is unavailable.",
+      });
+      return;
+    }
+    let proposal: Proposal | undefined;
+    try {
+      proposal = await input.stage();
+      this.emit({
+        at: this.nowIso(),
+        type: "proposal.staged",
+        worldId: input.worldId,
+        proposalId: proposal.id,
+      });
+      const outcome = await acceptDecided(gate, proposal.id);
+      if (!landed(outcome)) {
+        const reason = explainAcceptRefusal(outcome);
+        this.emit({
+          at: this.nowIso(),
+          type: "proposal.blocked",
+          worldId: input.worldId,
+          proposalId: proposal.id,
+          reason: blockedReason(outcome),
+          detail: reason,
+          ...(outcome.status === "needs-reconfirm" ? { authoritativeSignature: outcome.signature } : {}),
+        });
+        this.emitSingleAct({
+          worldId: input.worldId,
+          requestId: input.requestId,
+          operation: input.operation,
+          path: input.path(proposal),
+          disposition: "refused",
+          proposalId: proposal.id,
+          reason,
+        });
+        await gate.discard(proposal.id);
+        return;
+      }
+      this.emit({
+        at: this.nowIso(),
+        type: "proposal.resolved",
+        worldId: input.worldId,
+        proposalId: proposal.id,
+        outcome: "accepted",
+      });
+      const undo = outcome.status === "accepted" ? input.undo(proposal) : undefined;
+      this.emitSingleAct({
+        worldId: input.worldId,
+        requestId: input.requestId,
+        operation: input.operation,
+        path: input.path(proposal),
+        disposition: input.successDisposition ?? "accepted",
+        proposalId: proposal.id,
+        ...(outcome.status === "accepted" && outcome.ripples.length > 0 ? { ripples: outcome.ripples } : {}),
+        ...(undo !== undefined ? { undo } : {}),
+      });
+    } catch (err) {
+      if (proposal !== undefined) await gate.discard(proposal.id).catch(() => {});
+      this.emitSingleAct({
+        worldId: input.worldId,
+        requestId: input.requestId,
+        operation: input.operation,
+        path: input.path(proposal),
+        disposition: "refused",
+        ...(proposal !== undefined ? { proposalId: proposal.id } : {}),
+        reason: err instanceof Error ? err.message : "The change could not be written.",
+      });
+    }
+  }
+
+  /** Presence dominates: a form edits the draft already on its target and never accepts unread work. */
+  private async mergePresentSingleAct(input: {
+    worldId: string;
+    requestId: string;
+    operation: SingleActOperation;
+    path: string;
+    edit(content: string): string;
+  }): Promise<boolean> {
+    const gate = this.opts.provider.gate?.();
+    if (!gate) return false;
+    const existing = (await gate.listOpen())
+      .filter((proposal) => proposal.targets.some((target) => target.path === input.path))
+      .sort((a, b) => a.created.localeCompare(b.created))[0];
+    if (!existing) return false;
+    if (this.refuseWhileDrafting(input.worldId, existing.id)) {
+      this.emitSingleAct({
+        worldId: input.worldId,
+        requestId: input.requestId,
+        operation: input.operation,
+        path: input.path,
+        disposition: "refused",
+        proposalId: existing.id,
+        reason: "the studio is still writing into this proposal — cancel the run first",
+      });
+      return true;
+    }
+    const merged = await gate.mergeFormEdit({
+      proposalId: existing.id,
+      requestId: input.requestId,
+      path: input.path,
+      expectedDraftRevision: existing.draftRevision,
+      edit(content) {
+        try {
+          return { content: input.edit(content) };
+        } catch (err) {
+          return { reason: err instanceof Error ? err.message : "That draft could not be edited." };
+        }
+      },
+    });
+    if (merged.status === "updated") {
+      this.emitSingleAct({
+        worldId: input.worldId,
+        requestId: input.requestId,
+        operation: input.operation,
+        path: input.path,
+        disposition: "merged",
+        proposalId: existing.id,
+      });
+      return true;
+    }
+    const reason =
+      merged.status === "stale"
+        ? "This proposal changed while the form was being saved. Review its latest version and try again."
+        : merged.status === "rejected"
+          ? merged.message
+          : merged.status === "unknown-target"
+            ? "This proposal no longer contains the item being edited."
+            : "An earlier edit to this proposal did not finish, so it cannot safely be changed.";
+    this.emit({
+      at: this.nowIso(),
+      type: "proposal.blocked",
+      worldId: input.worldId,
+      proposalId: existing.id,
+      reason: merged.status === "stale" ? "stale" : merged.status === "draft-unresolved" ? "draft-unresolved" : "invalid",
+      detail: reason,
+    });
+    this.emitSingleAct({
+      worldId: input.worldId,
+      requestId: input.requestId,
+      operation: input.operation,
+      path: input.path,
+      disposition: "refused",
+      proposalId: existing.id,
+      reason,
+    });
+    return true;
+  }
+
   private async handleClientMessage(
     msg: ClientMessage,
     benchTakeActionHeld = false,
@@ -3641,17 +3873,49 @@ export class Coordinator {
         return;
       }
       case "set-art-direction": {
-        // The human's own action (the assign-voice rule): stage and accept in one motion, so
-        // the history and ripples are identical to a reviewed change — the only thing removed
-        // is the proposal waiting on the person who just typed it. If the accept refuses, the
-        // staged proposal is left standing rather than the work lost.
         const gate = this.opts.provider.gate?.();
-        if (!gate) return;
+        const store = this.opts.provider.openStore?.();
+        const wasDerived = store?.getBundle().artDirection.derived === true;
         try {
-          const proposal = await gate.stageArtDirectionChange(msg.description, msg.masterLook);
-          await gate.accept(proposal.id, {});
-        } catch {
-          /* the refreshed snapshot is authoritative */
+          if (
+            await this.mergePresentSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "art-direction-edit",
+              path: ART_DIRECTION_PATH,
+              edit: (content) => artDirectionFormContent(content, msg.description, msg.masterLook),
+            })
+          ) {
+            await this.refreshWorldSnapshot(msg.worldId);
+            return;
+          }
+          await this.runSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "art-direction-edit",
+            path: () => ART_DIRECTION_PATH,
+            stage: async () => {
+              if (!gate || !store) throw new Error("The world is not open.");
+              return gate.stageArtDirectionChange(msg.description, msg.masterLook);
+            },
+            undo: (proposal) => {
+              const version = proposal.targets[0]?.baseVersion;
+              return version === null || version === undefined
+                ? wasDerived
+                  ? { kind: "restore-derived-art-direction", path: ART_DIRECTION_PATH }
+                  : undefined
+                : { kind: "restore-version", path: ART_DIRECTION_PATH, version };
+            },
+          });
+        } catch (err) {
+          this.emitSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "art-direction-edit",
+            path: ART_DIRECTION_PATH,
+            disposition: "refused",
+            reason: err instanceof Error ? err.message : "The world look could not be changed.",
+          });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -4717,6 +4981,24 @@ export class Coordinator {
         });
         return;
       }
+      case "canon-contradictions": {
+        const index = this.opts.provider.openStore?.()?.getIndex();
+        const candidates = index
+          ? contradictionCandidates(index.db, {
+              title: msg.title,
+              statement: msg.statement,
+              ...(msg.excludeEntryId !== undefined ? { excludeEntryId: msg.excludeEntryId } : {}),
+            })
+          : [];
+        this.emit({
+          at: this.nowIso(),
+          type: "canon.contradictions",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          candidates: candidates.map(({ entryId, title, statement }) => ({ entryId, title, statement })),
+        });
+        return;
+      }
       case "canon-refs": {
         const store = this.opts.provider.openStore?.();
         const index = store?.getIndex();
@@ -4747,32 +5029,64 @@ export class Coordinator {
       case "stage-canon-entry": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        try {
-          const proposal = await stageCanonEntry(store, gate, {
-            entryType: msg.entryType,
-            title: msg.title,
-            statement: msg.statement,
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
-            worldId: msg.worldId,
-            proposalId: proposal.id,
-          });
-        } catch {
-          /* the refreshed snapshot carries whatever resulted */
-        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "canon-create",
+          path: (proposal) => proposal?.targets[0]?.path ?? "canon/new",
+          stage: async () => {
+            if (!gate || !store) throw new Error("The world is not open.");
+            return stageCanonEntry(store, gate, {
+              entryType: msg.entryType,
+              title: msg.title,
+              statement: msg.statement,
+            });
+          },
+          undo: (proposal) => ({ kind: "retire", path: proposal.targets[0]!.path }),
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "stage-canon-amendment": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await stageCanonAmendment(store, gate, { entryId: msg.entryId, statement: msg.statement }).catch(
-          () => {},
-        );
+        const path = `canon/${msg.entryId}.md`;
+        if (
+          await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "canon-amend",
+            path,
+            edit: (content) => amendCanonContent(content, msg.statement),
+          }).catch((err) => {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "canon-amend",
+              path,
+              disposition: "refused",
+              reason: err instanceof Error ? err.message : "The amendment could not be saved.",
+            });
+            return true;
+          })
+        ) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "canon-amend",
+          path: () => path,
+          stage: async () => {
+            if (!gate || !store) throw new Error("The world is not open.");
+            return stageCanonAmendment(store, gate, { entryId: msg.entryId, statement: msg.statement });
+          },
+          undo: (proposal) => {
+            const version = proposal.targets[0]?.baseVersion;
+            return version === null || version === undefined ? undefined : { kind: "restore-version", path, version };
+          },
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4791,12 +5105,47 @@ export class Coordinator {
       case "settle-thread": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await stageThreadSettlement(store, gate, {
-          entryId: msg.entryId,
-          resolvedType: msg.resolvedType,
-          statement: msg.statement,
-        }).catch(() => {});
+        const path = `canon/${msg.entryId}.md`;
+        if (
+          await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "canon-settle",
+            path,
+            edit: (content) => settleThreadContent(content, msg.resolvedType, msg.statement),
+          }).catch((err) => {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "canon-settle",
+              path,
+              disposition: "refused",
+              reason: err instanceof Error ? err.message : "The settlement could not be saved.",
+            });
+            return true;
+          })
+        ) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "canon-settle",
+          path: () => path,
+          stage: async () => {
+            if (!gate || !store) throw new Error("The world is not open.");
+            return stageThreadSettlement(store, gate, {
+              entryId: msg.entryId,
+              resolvedType: msg.resolvedType,
+              statement: msg.statement,
+            });
+          },
+          undo: (proposal) => {
+            const version = proposal.targets[0]?.baseVersion;
+            return version === null || version === undefined ? undefined : { kind: "restore-version", path, version };
+          },
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4817,6 +5166,128 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         await store.retire(msg.path, "form").catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "undo-single-act": {
+        const store = this.opts.provider.openStore?.();
+        const gate = this.opts.provider.gate?.();
+        const refuse = (reason: string) =>
+          this.emitSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: msg.operation,
+            path: msg.path,
+            disposition: "refused",
+            reason,
+          });
+        if (!store || store.worldId !== msg.worldId || msg.undo.path !== msg.path) {
+          refuse("That undo no longer belongs to the open world.");
+          return;
+        }
+        const undo = msg.undo;
+        if (!validSingleActUndo(msg.operation, undo)) {
+          refuse("That undo does not belong to this kind of change.");
+          return;
+        }
+        try {
+          if (undo.kind === "restore-version") {
+            if (![
+              "canon-amend",
+              "canon-settle",
+              "story-overview-edit",
+              "season-edit",
+              "episode-edit",
+              "art-direction-edit",
+            ].includes(msg.operation)) throw new Error("That operation is not undone by restoring a version.");
+            await store.restoreVersion(undo.path, undo.version, "form:undo");
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: msg.operation,
+              path: msg.path,
+              disposition: "undone",
+            });
+          } else if (undo.kind === "restore-derived-art-direction") {
+            if (msg.operation !== "art-direction-edit") {
+              throw new Error("That undo is not a derived world look.");
+            }
+            await store.restoreDerivedArtDirection("form:undo");
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: msg.operation,
+              path: msg.path,
+              disposition: "undone",
+            });
+          } else if (undo.kind === "retire") {
+            if (!["canon-create", "sheet-duplicate", "guest-promotion"].includes(msg.operation)) {
+              throw new Error("That operation is not undone by retirement.");
+            }
+            await store.retire(undo.path, "form:undo");
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: msg.operation,
+              path: msg.path,
+              disposition: "undone",
+            });
+          } else if (undo.kind === "rename-sheet") {
+            if (msg.operation !== "sheet-rename") throw new Error("That undo is not a sheet rename.");
+            if (
+              await this.mergePresentSingleAct({
+                worldId: msg.worldId,
+                requestId: msg.requestId,
+                operation: msg.operation,
+                path: msg.path,
+                edit: (content) => sheetRenameContent(content, undo.name),
+              })
+            ) {
+              await this.refreshWorldSnapshot(msg.worldId);
+              return;
+            }
+            await this.runSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: msg.operation,
+              path: () => msg.path,
+              stage: async () => {
+                if (!gate) throw new Error("The accept gate is unavailable.");
+                return stageSheetRename(store, gate, { path: msg.path, name: undo.name });
+              },
+              undo: () => undefined,
+              successDisposition: "undone",
+            });
+          } else {
+            if (msg.operation !== "sheet-status") throw new Error("That undo is not a sheet status change.");
+            if (
+              await this.mergePresentSingleAct({
+                worldId: msg.worldId,
+                requestId: msg.requestId,
+                operation: msg.operation,
+                path: msg.path,
+                edit: (content) => sheetStatusContent(content, undo.status),
+              })
+            ) {
+              await this.refreshWorldSnapshot(msg.worldId);
+              return;
+            }
+            await this.runSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: msg.operation,
+              path: () => msg.path,
+              stage: async () => {
+                if (!gate) throw new Error("The accept gate is unavailable.");
+                return stageSheetStatus(store, gate, { path: msg.path, status: undo.status });
+              },
+              undo: () => undefined,
+              successDisposition: "undone",
+            });
+          }
+        } catch (err) {
+          refuse(err instanceof Error ? err.message : "That change could not be undone.");
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -4892,32 +5363,136 @@ export class Coordinator {
       case "duplicate-sheet": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await duplicateSheet(store, gate, { path: msg.path, newName: msg.newName }).catch(() => {});
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "sheet-duplicate",
+          path: (proposal) => proposal?.targets[0]?.path ?? msg.path,
+          stage: async () => {
+            if (!gate || !store) throw new Error("The world is not open.");
+            return duplicateSheet(store, gate, { path: msg.path, newName: msg.newName });
+          },
+          undo: (proposal) => ({ kind: "retire", path: proposal.targets[0]!.path }),
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "set-sheet-status": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await stageSheetStatus(store, gate, { path: msg.path, status: msg.status }).catch(() => {});
+        const sheet = store?.getBundle().sheets.find((one) => msg.path.endsWith(`/${one.id}.md`));
+        if (
+          await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "sheet-status",
+            path: msg.path,
+            edit: (content) => sheetStatusContent(content, msg.status),
+          }).catch((err) => {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "sheet-status",
+              path: msg.path,
+              disposition: "refused",
+              reason: err instanceof Error ? err.message : "The sheet status could not be changed.",
+            });
+            return true;
+          })
+        ) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "sheet-status",
+          path: () => msg.path,
+          stage: async () => {
+            if (!gate || !store || !sheet) throw new Error("That sheet is not in the open world.");
+            return stageSheetStatus(store, gate, { path: msg.path, status: msg.status });
+          },
+          undo: () => ({ kind: "set-sheet-status", path: msg.path, status: sheet!.status }),
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "rename-sheet": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await stageSheetRename(store, gate, { path: msg.path, name: msg.name }).catch(() => {});
+        const sheet = store?.getBundle().sheets.find((one) => msg.path.endsWith(`/${one.id}.md`));
+        if (
+          await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "sheet-rename",
+            path: msg.path,
+            edit: (content) => sheetRenameContent(content, msg.name),
+          }).catch((err) => {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "sheet-rename",
+              path: msg.path,
+              disposition: "refused",
+              reason: err instanceof Error ? err.message : "The sheet could not be renamed.",
+            });
+            return true;
+          })
+        ) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "sheet-rename",
+          path: () => msg.path,
+          stage: async () => {
+            if (!gate || !store || !sheet) throw new Error("That sheet is not in the open world.");
+            return stageSheetRename(store, gate, { path: msg.path, name: msg.name });
+          },
+          undo: () => ({ kind: "rename-sheet", path: msg.path, name: sheet!.name }),
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "promote-guest": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        await stageGuestPromotion(store, gate, { path: msg.path }).catch(() => {});
+        if (
+          await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "guest-promotion",
+            path: msg.path,
+            edit: guestPromotionContent,
+          }).catch((err) => {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "guest-promotion",
+              path: msg.path,
+              disposition: "refused",
+              reason: err instanceof Error ? err.message : "The guest could not be promoted.",
+            });
+            return true;
+          })
+        ) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "guest-promotion",
+          path: () => msg.path,
+          stage: async () => {
+            if (!gate || !store) throw new Error("The world is not open.");
+            return stageGuestPromotion(store, gate, { path: msg.path });
+          },
+          undo: () => ({ kind: "retire", path: msg.path }),
+        });
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -5767,72 +6342,164 @@ export class Coordinator {
       case "propose-story-overview": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        try {
-          const { proposalId } = await proposeStoryOverview(store, gate, {
-            productionId: msg.productionId,
-            source: "form",
-            overview: {
-              ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
-              ...(msg.spine !== undefined ? { spine: msg.spine } : {}),
-              ...(msg.targetLength !== undefined ? { targetLength: msg.targetLength } : {}),
-              ...(msg.acts !== undefined ? { acts: msg.acts } : {}),
-            },
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
+        const path = `productions/${msg.productionId}/story.json`;
+        const overview = {
+          ...(msg.logline !== undefined ? { logline: msg.logline } : {}),
+          ...(msg.spine !== undefined ? { spine: msg.spine } : {}),
+          ...(msg.targetLength !== undefined ? { targetLength: msg.targetLength } : {}),
+          ...(msg.acts !== undefined ? { acts: msg.acts } : {}),
+        };
+        if (!store?.getBundle().productions.find((one) => one.meta.id === msg.productionId)?.story) {
+          this.emitSingleAct({
             worldId: msg.worldId,
-            proposalId,
+            requestId: msg.requestId,
+            operation: "story-overview-edit",
+            path,
+            disposition: "refused",
+            reason: "A new story overview has no supported undo, so this form can only accept edits to an existing overview.",
           });
-          await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
-          this.transport.broadcastSnapshot();
+          return;
         }
+        if (await this.mergePresentSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "story-overview-edit",
+          path,
+          edit: (content) => storyOverviewFormContent(content, overview),
+        })) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "story-overview-edit",
+          path: () => path,
+          stage: async () => {
+            if (!gate) throw new Error("The accept gate is unavailable.");
+            const { proposalId } = await proposeStoryOverview(store, gate, {
+              productionId: msg.productionId,
+              source: "form",
+              overview,
+            });
+            return gate.readManifest(proposalId);
+          },
+          undo: (proposal) => ({ kind: "restore-version", path, version: proposal.targets[0]!.baseVersion! }),
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "propose-season": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
-        if (!gate || !store) return;
-        try {
-          const { proposalId } = await proposeSeason(store, gate, {
-            productionId: msg.productionId,
-            source: "form",
-            season: {
-              ...(msg.question !== undefined ? { question: msg.question } : {}),
-              ...(msg.ending !== undefined ? { ending: msg.ending } : {}),
-              ...(msg.direction !== undefined ? { direction: msg.direction } : {}),
-              ...(msg.arcs !== undefined ? { arcs: msg.arcs } : {}),
-            },
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
+        const path = `productions/${msg.productionId}/season.json`;
+        const season = {
+          ...(msg.question !== undefined ? { question: msg.question } : {}),
+          ...(msg.ending !== undefined ? { ending: msg.ending } : {}),
+          ...(msg.direction !== undefined ? { direction: msg.direction } : {}),
+          ...(msg.arcs !== undefined ? { arcs: msg.arcs } : {}),
+        };
+        if (!store?.getBundle().productions.find((one) => one.meta.id === msg.productionId)?.season) {
+          this.emitSingleAct({
             worldId: msg.worldId,
-            proposalId,
+            requestId: msg.requestId,
+            operation: "season-edit",
+            path,
+            disposition: "refused",
+            reason: "A new season record has no supported undo, so this form can only accept edits to an existing season.",
           });
-          await this.refreshWorldSnapshot(msg.worldId);
-        } catch {
-          this.transport.broadcastSnapshot();
+          return;
         }
+        if (await this.mergePresentSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "season-edit",
+          path,
+          edit: (content) => seasonFormContent(content, season),
+        })) {
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        await this.runSingleAct({
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          operation: "season-edit",
+          path: () => path,
+          stage: async () => {
+            if (!gate) throw new Error("The accept gate is unavailable.");
+            const { proposalId } = await proposeSeason(store, gate, {
+              productionId: msg.productionId,
+              source: "form",
+              season,
+            });
+            return gate.readManifest(proposalId);
+          },
+          undo: (proposal) => ({ kind: "restore-version", path, version: proposal.targets[0]!.baseVersion! }),
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
       case "propose-episode": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
         if (!gate || !store) return;
+        const episode = {
+          ...(msg.title !== undefined ? { title: msg.title } : {}),
+          ...(msg.order !== undefined ? { order: msg.order } : {}),
+          ...(msg.promise !== undefined ? { promise: msg.promise } : {}),
+          ...(msg.scenes !== undefined ? { scenes: msg.scenes } : {}),
+        };
+        if (msg.episodeId !== undefined) {
+          const production = store.getBundle().productions.find((one) => one.meta.id === msg.productionId);
+          const stem = production?.episodeFiles[msg.episodeId];
+          const path = `productions/${msg.productionId}/episodes/${stem ?? msg.episodeId}.json`;
+          if (stem === undefined) {
+            this.emitSingleAct({
+              worldId: msg.worldId,
+              requestId: msg.requestId,
+              operation: "episode-edit",
+              path,
+              disposition: "refused",
+              reason: `Episode ${msg.episodeId} is not in ${msg.productionId}.`,
+            });
+            return;
+          }
+          if (await this.mergePresentSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "episode-edit",
+            path,
+            edit: (content) => episodeFormContent(content, episode),
+          })) {
+            await this.refreshWorldSnapshot(msg.worldId);
+            return;
+          }
+          await this.runSingleAct({
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            operation: "episode-edit",
+            path: () => path,
+            stage: async () => {
+              const { proposalId } = await proposeEpisode(store, gate, {
+                productionId: msg.productionId,
+                source: "form",
+                episodeId: msg.episodeId,
+                episode,
+              });
+              return gate.readManifest(proposalId);
+            },
+            undo: (proposal) => ({ kind: "restore-version", path, version: proposal.targets[0]!.baseVersion! }),
+          });
+          await this.refreshWorldSnapshot(msg.worldId);
+          return;
+        }
+        // Episode creation is deliberately still reviewed: episode JSON has no retirement path,
+        // so accepting it here would violate SPEC-040 R-25.
         try {
           const { proposalId } = await proposeEpisode(store, gate, {
             productionId: msg.productionId,
             source: "form",
-            ...(msg.episodeId !== undefined ? { episodeId: msg.episodeId } : {}),
-            episode: {
-              ...(msg.title !== undefined ? { title: msg.title } : {}),
-              ...(msg.order !== undefined ? { order: msg.order } : {}),
-              ...(msg.promise !== undefined ? { promise: msg.promise } : {}),
-              ...(msg.scenes !== undefined ? { scenes: msg.scenes } : {}),
-            },
+            episode,
           });
           this.emit({
             at: new Date().toISOString(),

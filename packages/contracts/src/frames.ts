@@ -43,6 +43,7 @@ import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
+import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -315,6 +316,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-art-direction"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       description: z.string().trim().min(1).max(4000),
       masterLook: z.string().min(1).nullable().optional(),
     })
@@ -754,6 +756,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("stage-canon-entry"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       entryType: z.enum(["rule", "lore", "location", "faction", "timeline", "tone"]),
       title: z.string().min(1).max(200),
       statement: z.string().min(1).max(5000),
@@ -764,6 +767,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("stage-canon-amendment"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       entryId: z.string().min(1),
       statement: z.string().min(1).max(5000),
     })
@@ -783,6 +787,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("settle-thread"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       entryId: z.string().min(1),
       resolvedType: z.enum(["rule", "lore", "location", "faction", "timeline", "tone"]),
       statement: z.string().min(1).max(5000),
@@ -790,6 +795,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** SPEC-006 R-19: retire an entity — stays resolvable, drops out of retrieval. */
   z.object({ kind: z.literal("retire-entity"), worldId: UlidSchema, path: z.string().min(1) }).strict(),
+  /** Apply the exact inverse returned by a successful single act (SPEC-040 R-24). */
+  z
+    .object({
+      kind: z.literal("undo-single-act"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      operation: SingleActOperationSchema,
+      path: z.string().min(1),
+      undo: SingleActUndoSchema,
+    })
+    .strict(),
+  /** Contradiction candidates are shown while composing canon, never after acceptance. */
+  z
+    .object({
+      kind: z.literal("canon-contradictions"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      title: z.string().min(1).max(200),
+      statement: z.string().min(1).max(5000),
+      excludeEntryId: z.string().min(1).optional(),
+    })
+    .strict(),
   /** SPEC-007 R-10: create a sheet from a sentence — lands as a sketch through the gate. */
   z
     .object({
@@ -819,12 +846,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * SPEC-020 R-14: promote a guest into the world. Clears `production` and nothing else — no
    * file moves, no slug changes, no version resets, so every citation survives it.
    */
-  z.object({ kind: z.literal("promote-guest"), worldId: UlidSchema, path: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("promote-guest"), worldId: UlidSchema, requestId: UlidSchema, path: z.string().min(1) }).strict(),
   /** SPEC-007 R-12: duplicate a sheet — sketch, origin recorded at the source's version. */
   z
     .object({
       kind: z.literal("duplicate-sheet"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       path: z.string().min(1),
       newName: z.string().min(1).max(200),
     })
@@ -834,6 +862,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-sheet-status"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       path: z.string().min(1),
       status: z.enum(["sketch", "locked"]),
     })
@@ -855,6 +884,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("rename-sheet"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       path: z.string().min(1),
       name: z.string().min(1).max(200),
     })
@@ -1472,6 +1502,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("propose-story-overview"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       productionId: SlugSchema,
       logline: z.string().min(1).max(500).optional(),
       spine: z.string().min(1).max(4000).optional(),
@@ -1496,6 +1527,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("propose-season"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       productionId: SlugSchema,
       question: z.string().min(1).max(500).optional(),
       ending: z.string().min(1).max(1000).optional(),
@@ -1525,6 +1557,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("propose-episode"),
       worldId: UlidSchema,
+      requestId: UlidSchema,
       productionId: SlugSchema,
       episodeId: z.string().optional(),
       title: z.string().min(1).max(200).optional(),

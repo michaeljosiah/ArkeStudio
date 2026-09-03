@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
+import { ART_DIRECTION_PATH, BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
@@ -319,26 +319,30 @@ export class WorldStore {
     });
   }
 
+  /** Undo the first authored look by returning the world to its metadata-derived direction. */
+  async restoreDerivedArtDirection(source: string): Promise<CommitResult> {
+    const live = await this.readEntity(ART_DIRECTION_PATH);
+    if (live === null) throw new CommitPlanError("the world look is already derived");
+    return this.commit({
+      kind: "art-direction-restore-derived",
+      source,
+      files: [{ path: ART_DIRECTION_PATH, action: "delete", baseHash: sha256(live) }],
+    });
+  }
+
   /**
    * Restore a historical version as a new version (R-20): the content of v<n> becomes the
    * next version; v(n+1)…current stay in history untouched.
    */
   async restoreVersion(portablePath: string, version: number, source: string): Promise<CommitResult> {
     const kind = classify(portablePath);
-    let historyPath: string;
-    if (kind.track === "sheet") historyPath = `.history/${kind.collection}/${kind.id}/v${version}.md`;
-    else if (kind.track === "canon") historyPath = `.history/canon/${kind.id}/v${version}.md`;
-    // The bible is ungated, so restore is not a convenience here — it is the undo that stands in
-    // for the accept step every other authored file gets (master §4.5).
-    else if (kind.track === "bible") historyPath = `.history/bible/v${version}.md`;
-    // Scenes joined the ungated-save club with turn 97: the storyboard writes directly, so the
-    // same undo has to stand in for the same absent accept.
-    else if (kind.track === "scene")
-      historyPath = `.history/productions/${kind.production}/scenes/${kind.file}/v${version}.json`;
-    else
+    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "season", "episode", "art-direction"]);
+    const historyPath = restorable.has(kind.track) ? historyPathForVersion(portablePath, version) : null;
+    if (historyPath === null) {
       throw new CommitPlanError(
-        `restore is defined for sheets, canon, the bible and scenes, not ${kind.track}`,
+        `restore is not defined for ${kind.track}`,
       );
+    }
 
     const snapshot = await this.readEntity(historyPath);
     if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);

@@ -312,6 +312,51 @@ describe("sheets", () => {
         "restore-sheet-version",
       );
     });
+
+    it("round-trips the generic single-act result and its exact inverse", () => {
+      const accepted = DomainEventSchema.parse({
+        at: "2026-09-03T12:00:00Z",
+        type: "single-act.result",
+        requestId: ulid(),
+        worldId: WORLD_ID,
+        operation: "sheet-rename",
+        path: "characters/maren-kest.md",
+        disposition: "accepted",
+        ripples: [{ kind: "owning-canon-rules", summary: "Two citations keep the stable id", targets: ["CANON-002"] }],
+        undo: { kind: "rename-sheet", path: "characters/maren-kest.md", name: "Maren Kest" },
+      });
+      assert.equal(accepted.type, "single-act.result");
+      assert.equal(
+        ClientMessageSchema.parse({
+          kind: "undo-single-act",
+          worldId: WORLD_ID,
+          requestId: ulid(),
+          operation: "sheet-rename",
+          path: "characters/maren-kest.md",
+          undo: accepted.type === "single-act.result" ? accepted.undo : undefined,
+        }).kind,
+        "undo-single-act",
+      );
+    });
+
+    it("carries pre-press canon contradiction candidates", () => {
+      const requestId = ulid();
+      assert.equal(ClientMessageSchema.parse({
+        kind: "canon-contradictions",
+        worldId: WORLD_ID,
+        requestId,
+        title: "Tide calling",
+        statement: "A caller must stand in the tide.",
+      }).kind, "canon-contradictions");
+      const answer = DomainEventSchema.parse({
+        at: "2026-09-03T12:00:00Z",
+        type: "canon.contradictions",
+        worldId: WORLD_ID,
+        requestId,
+        candidates: [{ entryId: "CANON-002", title: "Tide-calling", statement: "A caller stands in the tide." }],
+      });
+      assert.equal(answer.type, "canon.contradictions");
+    });
   });
 });
 

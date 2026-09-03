@@ -51,6 +51,7 @@ import {
 import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
+import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -123,6 +124,23 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       medium: MediaOpportunityMediumSchema,
       sessionId: SessionIdSchema.nullable(),
       reason: z.string().max(500).optional(),
+    })
+    .strict(),
+
+  /** Correlated outcome for any SPEC-040 single act, including its exact reachable inverse. */
+  z
+    .object({
+      ...base,
+      type: z.literal("single-act.result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      operation: SingleActOperationSchema,
+      path: z.string().min(1),
+      disposition: z.enum(["accepted", "merged", "undone", "refused"]),
+      proposalId: ProposalIdSchema.optional(),
+      reason: z.string().min(1).optional(),
+      ripples: z.array(RippleItemSchema).min(1).optional(),
+      undo: SingleActUndoSchema.optional(),
     })
     .strict(),
   z
@@ -1232,6 +1250,18 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       searched: z.number().int().min(0),
       floorCleared: z.boolean(),
       candidates: z.array(AskCandidateSchema),
+    })
+    .strict(),
+  /** Advisory lexical overlaps for a canon form, returned before its deciding press (SPEC-040 R-9b). */
+  z
+    .object({
+      ...base,
+      type: z.literal("canon.contradictions"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      candidates: z.array(
+        z.object({ entryId: z.string().min(1), title: z.string().min(1), statement: z.string() }).strict(),
+      ),
     })
     .strict(),
   /** An entry's computed detail: cited-by, history and speculative ripples (SPEC-006 §2.5). */
