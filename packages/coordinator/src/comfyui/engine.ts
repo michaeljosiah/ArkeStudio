@@ -88,6 +88,7 @@ const STATUS_RECOMPUTE_LIMIT = 4;
 const DEFAULT_PORT_URL = "http://127.0.0.1:8188";
 const MANAGED_DIR = "comfyui-runtime";
 const VERSION_FLOOR = "0.3.45";
+const MIB = 1024 * 1024;
 
 interface ResolvedEngine {
   source: "user-path" | "user-url" | "managed" | "absent";
@@ -202,14 +203,49 @@ export function comfyUiUrlIsLoopback(value: string): boolean {
 const gb = (mb: number): string => `${Math.round(mb / 1024)} GB`;
 
 /**
- * What readiness assumes dispatch can hand back by unloading the engine (SPEC-022 §2.6).
+ * What readiness assumes dispatch can hand back when an older engine does not report its own
+ * reservation (SPEC-022 §2.6).
  *
- * A loaded IndexTTS measured ~6 GB resident on the reference machine, and `POST /free` returns
- * all of it. This allowance is set below that on purpose: high enough that a machine merely
- * hosting a warm model is not refused work it would do, low enough that a card with almost
- * nothing free is still told so rather than left to find out.
+ * A live `torch_vram_total` is better: it is the PyTorch pool `POST /free` can actually release.
+ * This fixed allowance remains only for engines that omit or malform that field.
  */
-const RECLAIMABLE_VRAM_MB = 4096;
+const FALLBACK_RECLAIMABLE_VRAM_MB = 4096;
+
+interface SystemStatsProbe {
+  reachable: boolean;
+  version: string | null;
+  reclaimableVramMb: number | null;
+  detail: string | null;
+}
+
+function systemStatsReading(body: unknown): Pick<SystemStatsProbe, "version" | "reclaimableVramMb"> {
+  if (typeof body !== "object" || body === null) return { version: null, reclaimableVramMb: null };
+  const record = body as Record<string, unknown>;
+  const system = record["system"];
+  const version =
+    typeof system === "object" && system !== null && typeof (system as Record<string, unknown>)["comfyui_version"] === "string"
+      ? ((system as Record<string, unknown>)["comfyui_version"] as string)
+      : null;
+  const devices = record["devices"];
+  const primary = Array.isArray(devices) ? devices[0] : null;
+  if (typeof primary !== "object" || primary === null) return { version, reclaimableVramMb: null };
+  const device = primary as Record<string, unknown>;
+  const reservedBytes = device["torch_vram_total"];
+  const totalBytes = device["vram_total"];
+  if (
+    device["type"] !== "cuda" ||
+    typeof reservedBytes !== "number" ||
+    !Number.isSafeInteger(reservedBytes) ||
+    reservedBytes < 0 ||
+    typeof totalBytes !== "number" ||
+    !Number.isSafeInteger(totalBytes) ||
+    totalBytes <= 0 ||
+    reservedBytes > totalBytes
+  ) {
+    return { version, reclaimableVramMb: null };
+  }
+  return { version, reclaimableVramMb: Math.floor(reservedBytes / MIB) };
+}
 
 /**
  * ComfyUI needs a few ordinary Windows process variables, not Electron's credentials and service
@@ -252,12 +288,15 @@ export class ComfyUiEngineService {
   private supervisorStatusListener: (() => void) | null = null;
   private supervisorExitBackstop: (() => void) | null = null;
   private detected: ComfyUiDetectedInstall[] = [];
-  /** What the engine last reported to /system_stats — version and reachability. */
-  private probed: { version: string | null; reachable: boolean; detail: string | null } = {
+  /** What the engine last reported to /system_stats. */
+  private probed: SystemStatsProbe = {
     version: null,
     reachable: false,
+    reclaimableVramMb: null,
     detail: null,
   };
+  /** Fences a status calculation from returning a superseded warm/cold engine measurement. */
+  private reclaimableVramGeneration = 0;
   /**
    * The re-probe for an engine we do not spawn (#632).
    *
@@ -298,6 +337,13 @@ export class ComfyUiEngineService {
   private disposePromise: Promise<void> | null = null;
 
   constructor(private readonly deps: EngineServiceDeps) {}
+
+  private recordProbe(next: SystemStatsProbe): boolean {
+    const reclaimChanged = this.probed.reclaimableVramMb !== next.reclaimableVramMb;
+    this.probed = next;
+    if (reclaimChanged) this.reclaimableVramGeneration += 1;
+    return reclaimChanged;
+  }
 
   /** Notified whenever the engine's state moves (a supervised child restarting, failing…). */
   subscribe(listener: () => void): () => void {
@@ -427,16 +473,22 @@ export class ComfyUiEngineService {
    * abort. An engine answering `/system_stats` in five milliseconds was reported as silent, and
    * the only way to find out otherwise was to read the source. A failure names itself here.
    */
-  private async systemStats(base: string): Promise<{ reachable: boolean; version: string | null; detail: string | null }> {
+  private async systemStats(base: string): Promise<SystemStatsProbe> {
     const url = `${base.replace(/\/+$/, "")}/system_stats`;
     try {
       const res = await this.deps.fetch(url, { signal: AbortSignal.timeout(3_000) });
-      if (!res.ok) return { reachable: false, version: null, detail: `${url} answered HTTP ${res.status}` };
-      const body = (await res.json().catch(() => null)) as { system?: { comfyui_version?: unknown } } | null;
-      const version = body?.system?.comfyui_version;
-      return { reachable: true, version: typeof version === "string" ? version : null, detail: null };
+      if (!res.ok) {
+        return { reachable: false, version: null, reclaimableVramMb: null, detail: `${url} answered HTTP ${res.status}` };
+      }
+      const reading = systemStatsReading(await res.json().catch(() => null));
+      return { reachable: true, ...reading, detail: null };
     } catch (err) {
-      return { reachable: false, version: null, detail: `${url} — ${transportErrorDetail(err)}` };
+      return {
+        reachable: false,
+        version: null,
+        reclaimableVramMb: null,
+        detail: `${url} — ${transportErrorDetail(err)}`,
+      };
     }
   }
 
@@ -494,23 +546,24 @@ export class ComfyUiEngineService {
       env: comfyUiChildEnvironment(),
       inheritEnv: false,
       validateHealth: async (response) => {
-        const body = (await response.json().catch(() => null)) as {
-          system?: { comfyui_version?: unknown };
-        } | null;
-        const version = body?.system?.comfyui_version;
-        if (typeof version !== "string") {
+        const reading = systemStatsReading(await response.json().catch(() => null));
+        if (reading.version === null) {
           return {
             ok: false,
             reason: `the engine did not report a ComfyUI version — Arke supports ${VERSION_FLOOR} and later`,
           };
         }
-        if (meetsFloor(version) !== true) {
+        if (meetsFloor(reading.version) !== true) {
           return {
             ok: false,
-            reason: `ComfyUI ${version} is older than the ${VERSION_FLOOR} floor Arke supports`,
+            reason: `ComfyUI ${reading.version} is older than the ${VERSION_FLOOR} floor Arke supports`,
           };
         }
-        this.probed = { version, reachable: true, detail: null };
+        const wasReachable = this.probed.reachable;
+        const reclaimChanged = this.recordProbe({ ...reading, reachable: true, detail: null });
+        // Healthy-to-healthy supervisor probes emit no status event, but a loaded or unloaded model
+        // changes readiness just as surely as reachability does.
+        if (wasReachable && reclaimChanged) void this.publish();
         return { ok: true };
       },
     });
@@ -609,7 +662,7 @@ export class ComfyUiEngineService {
       this.resolved = { source: "absent", root: null, url: null, problem: null };
       return;
     }
-    this.probed = { version: null, reachable: false, detail: null };
+    this.recordProbe({ version: null, reachable: false, reclaimableVramMb: null, detail: null });
     this.resolved = await this.resolve();
     if (this.disposed) return;
     this.detected = this.resolved.source === "absent" ? await this.detectExisting() : [];
@@ -640,11 +693,12 @@ export class ComfyUiEngineService {
       this.resolved.url !== url
     )
       return;
-    this.probed = {
+    this.recordProbe({
       version: stats.version,
       reachable: stats.reachable,
+      reclaimableVramMb: stats.reclaimableVramMb,
       detail: stats.reachable ? null : (stats.detail ?? "the engine did not answer"),
-    };
+    });
   }
 
   /**
@@ -662,6 +716,7 @@ export class ComfyUiEngineService {
         const changed =
           before.reachable !== this.probed.reachable ||
           before.version !== this.probed.version ||
+          before.reclaimableVramMb !== this.probed.reclaimableVramMb ||
           before.detail !== this.probed.detail;
         if (changed) await this.publish();
       })();
@@ -1084,6 +1139,7 @@ export class ComfyUiEngineService {
     for (let attempt = 0; ; attempt += 1) {
       const settled = attempt >= STATUS_RECOMPUTE_LIMIT;
       const generation = this.verificationGeneration;
+      const reclaimGeneration = this.reclaimableVramGeneration;
       const engine = this.engineStatus();
       const base = this.baseUrl();
       if (engine.state === "ready" && base !== null && this.nodeClasses === null) {
@@ -1091,10 +1147,21 @@ export class ComfyUiEngineService {
         if (!settled && (generation !== this.verificationGeneration || base !== this.baseUrl())) continue;
         this.nodeClasses = nodeClasses;
       }
+      const reclaimableVramMb = engine.locality === "remote" ? null : this.probed.reclaimableVramMb;
+      let freeVramReading: Promise<number | null> | null = null;
+      const freeVramMb = (): Promise<number | null> => {
+        if (freeVramReading === null) {
+          freeVramReading = this.deps.freeVramMb?.().catch(() => null) ?? Promise.resolve(null);
+        }
+        return freeVramReading;
+      };
       const recipes: RecipeReadiness[] = [];
       for (const recipe of this.deps.recipes) {
-        recipes.push(await this.recipeReadiness(recipe, engine, probes));
+        recipes.push(await this.recipeReadiness(recipe, engine, probes, reclaimableVramMb, freeVramMb));
       }
+      // Unlike verification churn, a changed reservation cannot be returned stale: the health
+      // interval is slow and every pass awaits real work, so retrying here cannot spin a core.
+      if (reclaimGeneration !== this.reclaimableVramGeneration) continue;
       if (!settled && generation !== this.verificationGeneration) continue;
       return { engine, recipes, checkedAt: (this.deps.clock ?? (() => new Date().toISOString()))() };
     }
@@ -1104,6 +1171,8 @@ export class ComfyUiEngineService {
     recipe: ComfyUiRecipeFacts,
     engine: ComfyUiEngineStatus,
     probes: RuntimeProbes | null,
+    measuredReclaimableVramMb: number | null,
+    freeVramMb: () => Promise<number | null>,
   ): Promise<RecipeReadiness> {
     const base = {
       recipeId: recipe.id,
@@ -1245,8 +1314,9 @@ export class ComfyUiEngineService {
      * But raw free memory is the wrong number to refuse on, because it counts the engine's own
      * resident model against us — and dispatch unloads that before it gives up (`POST /free`).
      * Readiness will not call `/free` itself: that discards the model cache every twenty seconds
-     * to answer a status poll. So it assumes the reclaim instead, and refuses only what no amount
-     * of unloading could rescue.
+     * to answer a status poll. `/system_stats` reports the engine's PyTorch reservation without
+     * unloading it, so readiness adds that measured reclaim and refuses only what unloading could
+     * not rescue. Older engines retain the deliberately optimistic fixed fallback.
      *
      * The result is deliberately optimistic. Readiness is advisory and dispatch is authoritative:
      * a "ready" that later refuses in a quarter of a second costs a click, while a "disabled" on
@@ -1258,20 +1328,18 @@ export class ComfyUiEngineService {
      * one number for both refused the configuration H3 was verified on: a streaming recipe's
      * card floor can equal the whole card while the free requirement is a fraction of it.
      */
-    const free =
-      engine.locality === "remote" || !this.deps.freeVramMb
-        ? null
-        : await this.deps.freeVramMb().catch(() => null);
+    const free = engine.locality === "remote" ? null : await freeVramMb();
     /*
-     * The allowance is capped below the recipe's own free floor: a floor at or under the reclaim
-     * assumption (H3's 4 GB against the 4 GB allowance) would otherwise make this inequality
-     * unsatisfiable for any nonnegative reading — a slammed card advertised ready, and Generate
-     * bought the dependency verification walk before dispatch refused. Half the floor is the
-     * largest assumption that still leaves the busy sentence sayable.
+     * Only the compatibility fallback is capped below the recipe's free floor. A measured value
+     * may exceed the floor because it names memory the engine demonstrably owns and `/free` can
+     * release; zero is equally meaningful and must not fall through to the fallback.
      */
-    const assumedReclaimMb =
-      RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb ? RECLAIMABLE_VRAM_MB : Math.floor(recipe.minFreeVramMb / 2);
-    if (free !== null && free + assumedReclaimMb < recipe.minFreeVramMb) {
+    const fallbackReclaimableVramMb =
+      FALLBACK_RECLAIMABLE_VRAM_MB < recipe.minFreeVramMb
+        ? FALLBACK_RECLAIMABLE_VRAM_MB
+        : Math.floor(recipe.minFreeVramMb / 2);
+    const reclaimableVramMb = measuredReclaimableVramMb ?? fallbackReclaimableVramMb;
+    if (free !== null && free + reclaimableVramMb < recipe.minFreeVramMb) {
       return disabled(
         "vram-busy",
         `Needs ${gb(recipe.minFreeVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
