@@ -312,13 +312,15 @@ export function ComfyUiDetail() {
   const [urlDraft, setUrlDraft] = useState("");
   const engine = comfyui?.engine ?? null;
   const sourceLabel =
-    engine?.source === "user-path"
-      ? "Your install"
-      : engine?.source === "user-url"
-        ? "Your URL · never spawned"
-        : engine?.source === "managed"
-          ? "Arke-managed"
-          : "Not installed";
+    comfyui === null
+      ? "Not yet known"
+      : engine?.source === "user-path"
+        ? "Your install"
+        : engine?.source === "user-url"
+          ? "Your URL · never spawned"
+          : engine?.source === "managed"
+            ? "Arke-managed"
+            : "Not installed";
   // The exception, in the product's words. `remote` was ours; `another machine` is what the
   // reader is being told, and this line is one of exactly two places it is said (SPEC-034 R-9) —
   // the other is `elsewhere` in the rail, which says *that* it is rather than where.
@@ -428,7 +430,11 @@ export function ComfyUiDetail() {
       </RuntimeSection>
       <RuntimeSection label="RECIPES">
         <span className="fy-rt__count">
-          {recipes.length === 0 ? "NONE IN THIS BUILD" : `${ready} OF ${recipes.length} READY`}
+          {comfyui === null
+            ? "NOT YET KNOWN"
+            : recipes.length === 0
+              ? "NONE IN THIS BUILD"
+              : `${ready} OF ${recipes.length} READY`}
         </span>
       </RuntimeSection>
       {recipes.map((recipe) => {
