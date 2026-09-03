@@ -3212,21 +3212,40 @@ export function acceptTake(worldId: string, productionId: string, takeId: string
   send({ kind: "accept-take", worldId, productionId, takeId, shotId });
 }
 
-/** Pick one local image, retain it as a Variant, and use it for this shot's frame. */
 /**
- * File a Stage export. The bytes go the way a pasted picture does — the host spools both and
- * sends their paths in one frame — so a browser session, which has no host, answers with the
- * reason rather than pretending.
+ * File a Stage export. The host encodes its fixed RGBA frames, then sends that MP4 and the
+ * opening PNG in one frame; a browser session has no encoder and refuses before rendering.
  */
+export async function beginStageExport(spec: { width: number; height: number; frameRate: number; frameCount: number }): Promise<string> {
+  const host = bridge;
+  if (!host?.startStageExport) throw new Error("deterministic playblast export needs the desktop app");
+  const result = await host.startStageExport(spec);
+  if (!result.ok) throw new Error(result.reason);
+  return result.jobId;
+}
+
+export async function writeStageExportFrame(jobId: string, index: number, bytes: Uint8Array): Promise<void> {
+  const host = bridge;
+  if (!host?.writeStageExportFrame) throw new Error("deterministic playblast export needs the desktop app");
+  const result = await host.writeStageExportFrame(jobId, index, bytes);
+  if (!result.ok) throw new Error(result.reason);
+}
+
+export async function cancelStageExport(jobId: string): Promise<void> {
+  await bridge?.cancelStageExport?.(jobId);
+}
+
 export async function stagePlayblast(
   target: Extract<AttachTarget, { kind: "stage-playblast" }>,
-  files: { playblast: Uint8Array; openingFrame: Uint8Array },
+  jobId: string,
+  openingFrame: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const host = bridge;
-  if (!host?.attachStageExport) return { ok: false, reason: "filing needs the desktop app — the files were downloaded instead" };
+  if (!host?.finishStageExport) return { ok: false, reason: "deterministic playblast export needs the desktop app" };
   try {
-    return await host.attachStageExport(target, files.playblast, files.openingFrame);
+    return await host.finishStageExport(target, jobId, openingFrame);
   } catch {
+    await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
   }
 }

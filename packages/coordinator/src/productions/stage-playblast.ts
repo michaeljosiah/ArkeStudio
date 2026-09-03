@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editShot, orderedShots, ulid, type ArtifactSidecar, type ShotStaging } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
-import { imageFormatOf } from "../queue/verify.js";
+import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -64,16 +64,18 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
     ]);
     if (bytes === null) return refused(`${input.sourcePath} is not readable`);
     if (openingFrameBytes === null) return refused(`${input.openingFrameSourcePath} is not readable`);
-    // A recorder that stopped without a chunk hands over an empty file; pinned, it would read
+    // An encoder that stopped without output hands over an empty file; pinned, it would read
     // as the current playblast and ride into a session with nothing in it.
     if (bytes.byteLength === 0) return refused("the recording came back empty — export it again");
+    const videoProblem = verifyArtifact({ name: "playblast.mp4", contentType: "video/mp4", data: bytes });
+    if (videoProblem !== null) return refused(`the playblast is not a valid MP4: ${videoProblem}`);
     if (imageFormatOf(openingFrameBytes)?.extension !== ".png") {
       return refused("the opening frame is not a valid PNG — export it again");
     }
 
     const id = `ar_${ulid()}`;
     const openingFrameId = `ar_${ulid()}`;
-    const file = `playblast-${input.shotId}-${id.slice(-8).toLowerCase()}.webm`;
+    const file = `playblast-${input.shotId}-${id.slice(-8).toLowerCase()}.mp4`;
     const openingFrameFile = `stage-opening-${input.shotId}-${openingFrameId.slice(-8).toLowerCase()}.png`;
     const artifact: ArtifactSidecar = {
       id,

@@ -61,6 +61,7 @@ import { launchDesktop, StartupController, type StartupState } from "./startup.j
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
 import { saveMediaHandler } from "./save-media.js";
+import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
 import {
@@ -195,6 +196,7 @@ let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
+let stageExporter: StageExporter | null = null;
 
 async function closeProviderTransport(): Promise<void> {
   const transport = providerTransport;
@@ -290,6 +292,7 @@ function publishStartup(state: StartupState): void {
 }
 
 function registerHostIpc(): void {
+  stageExporter = createStageExporter(appRoot, ffmpegPath());
   ipcMain.handle("arke:spool", async (event, input: { name?: unknown; bytes?: unknown }) => {
     if (!window || event.sender !== window.webContents) return { reason: "that window cannot attach" };
     const raw = input?.bytes;
@@ -297,6 +300,29 @@ function registerHostIpc(): void {
     if (!bytes) return { reason: "the clipboard gave us nothing we could write" };
     const name = typeof input?.name === "string" ? input.name : "pasted";
     return await spoolBytes(appRoot, name, bytes).catch((err: unknown) => ({ reason: String(err) }));
+  });
+  ipcMain.handle("arke:stage-export-start", async (event, input: unknown) => {
+    if (!window || event.sender !== window.webContents || !stageExporter) return { ok: false, reason: "that window cannot export" };
+    return await stageExporter.start(input);
+  });
+  ipcMain.handle("arke:stage-export-frame", async (event, input: { jobId?: unknown; index?: unknown; bytes?: unknown }) => {
+    if (!window || event.sender !== window.webContents || !stageExporter) return { ok: false, reason: "that window cannot export" };
+    const raw = input?.bytes;
+    const bytes = raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
+    if (typeof input?.jobId !== "string" || !Number.isInteger(input?.index) || !bytes) {
+      return { ok: false, reason: "the Stage frame is invalid" };
+    }
+    return await stageExporter.write(input.jobId, input.index as number, bytes);
+  });
+  ipcMain.handle("arke:stage-export-finish", async (event, jobId: unknown) => {
+    if (!window || event.sender !== window.webContents || !stageExporter || typeof jobId !== "string") {
+      return { ok: false, reason: "that window cannot export" };
+    }
+    return await stageExporter.finish(jobId);
+  });
+  ipcMain.handle("arke:stage-export-cancel", async (event, jobId: unknown) => {
+    if (!window || event.sender !== window.webContents || !stageExporter || typeof jobId !== "string") return;
+    await stageExporter.cancel(jobId);
   });
   /*
    * Save a world image somewhere of the person's choosing (issue 478).
@@ -438,6 +464,7 @@ async function createWindow(): Promise<void> {
     if (isMainFrame && !isInPlace) {
       activityActivationReady = false;
       rendererThemeReady = false;
+      void stageExporter?.cancelAll();
       if (window?.isVisible()) window.hide();
     }
   });
@@ -451,6 +478,7 @@ async function createWindow(): Promise<void> {
   });
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
+    void stageExporter?.cancelAll();
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
   });
   window.on("close", (event) => {
@@ -463,6 +491,7 @@ async function createWindow(): Promise<void> {
     });
   });
   window.on("closed", () => {
+    void stageExporter?.cancelAll();
     if (windowShowFallback) clearTimeout(windowShowFallback);
     windowShowFallback = null;
     window = null;

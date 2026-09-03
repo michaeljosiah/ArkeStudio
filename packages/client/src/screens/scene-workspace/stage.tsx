@@ -18,7 +18,7 @@ import {
 } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
-import { stagePlayblast } from "../../lib/store.js";
+import { beginStageExport, cancelStageExport, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
@@ -435,14 +435,20 @@ export function SceneStage({
     setNote(null);
     setExporting(0);
     try {
-      const { playblast, openingFrame } = await view.record(setExporting);
+      const { jobId, openingFrame } = await view.record({
+        start: beginStageExport,
+        write: writeStageExportFrame,
+        cancel: cancelStageExport,
+      }, setExporting);
       // The viewport is disposed when the shot changes, and its recording ends early: a partial
       // take is never filed as the whole shot.
       if (viewport.current !== view) {
+        await cancelStageExport(jobId);
         setNote("export stopped — the shot changed");
         return;
       }
-      if (playblast.size === 0 || openingFrame.size === 0) {
+      if (openingFrame.size === 0) {
+        await cancelStageExport(jobId);
         setNote("the Stage export came back empty — export it again");
         return;
       }
@@ -461,24 +467,11 @@ export function SceneStage({
           // An unset lens is recorded as the empty string, so setting one later reads as a change.
           lens: framing.lens ?? "",
         },
-        {
-          playblast: new Uint8Array(await playblast.arrayBuffer()),
-          openingFrame: new Uint8Array(await openingFrame.arrayBuffer()),
-        },
+        jobId,
+        new Uint8Array(await openingFrame.arrayBuffer()),
       );
       if (!outcome.ok) {
         setNote(outcome.reason);
-        // A browser session has no host to file into; both files are still the person's to keep.
-        for (const [blob, name] of [
-          [playblast, `shot-${shot.number}-playblast.webm`],
-          [openingFrame, `shot-${shot.number}-opening-frame.png`],
-        ] as const) {
-          const link = document.createElement("a");
-          link.href = URL.createObjectURL(blob);
-          link.download = name;
-          link.click();
-          setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
-        }
       }
     } catch (error) {
       setNote(error instanceof Error ? error.message : "the playblast could not be recorded");

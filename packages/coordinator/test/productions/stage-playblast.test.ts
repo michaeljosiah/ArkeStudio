@@ -15,11 +15,14 @@ const SCENE_FILE = "04-the-verse-rises";
 const SCENE = "sc_04";
 const SHOT = "sh_12";
 
-/** Any bytes will do: filing hashes and copies, it does not decode. The extension names the kind. */
-async function playblastFile(bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4, 5, 6, 7, 8])): Promise<string> {
+async function playblastFile(bytes = new Uint8Array([
+  0, 0, 0, 12, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+  0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x76,
+  0, 0, 0, 9, 0x6d, 0x64, 0x61, 0x74, 0,
+])): Promise<string> {
   const dir = await tempDir("stage-playblast-");
   await mkdir(dir, { recursive: true });
-  const path = join(dir, "playblast.webm");
+  const path = join(dir, "playblast.mp4");
   await writeFile(path, bytes);
   return path;
 }
@@ -110,6 +113,7 @@ describe("filing a playblast from the Stage", () => {
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
       assert.ok(artifact, "the pinned id resolves on the shelf");
       assert.equal(artifact.kind, "video");
+      assert.match(artifact.file, /\.mp4$/);
       assert.equal(artifact.production, PRODUCTION, "owned by the production, not the world");
       assert.ok(artifact.links.includes(SHOT), "linked to the shot it was rendered for");
       assert.ok((await readFile(join(worldDir, "artifacts", artifact.file))).byteLength > 0);
@@ -164,7 +168,7 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(bundle().artifacts.length, shelfBefore);
       assert.equal(shot().shot.staging?.playblast, undefined);
 
-      // A recorder that stopped without a chunk: nothing to pin, and nothing pinned.
+      // An encoder that stopped without output: nothing to pin, and nothing pinned.
       const empty = await playblastFile(new Uint8Array());
       await send({
         kind: "stage-playblast",
