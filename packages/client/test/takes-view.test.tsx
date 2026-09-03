@@ -6,7 +6,7 @@ import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
-import { episodeThumbnailPath, filterTakeEpisodes, GenerateScreen } from "../src/screens/production.js";
+import { episodeThumbnailPath, filterTakeEpisodes, GenerateScreen, takeMediaView } from "../src/screens/production.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -156,6 +156,48 @@ function unassignedState(): ClientState {
   });
 }
 
+function withVideoChallenger(p: Production): Production {
+  const source = p.takes.find((take) => take.id === "tk_01J8F0000000000000000000B2")!;
+  return {
+    ...p,
+    takes: [
+      ...p.takes,
+      {
+        ...source,
+        id: "tk_01J8F0000000000000000000C4",
+        jobId: "jb_01J8E0000000000000000000C4",
+        media: "challenger.mp4",
+      },
+    ],
+  };
+}
+
+function withPassSegment(p: Production): Production {
+  const source = p.takes.find((take) => take.id === "tk_01J8F0000000000000000000B2")!;
+  const pass = {
+    ...source,
+    id: "tk_01J8F0000000000000000000P1",
+    jobId: "jb_01J8E0000000000000000000P1",
+    coversShots: ["sh_12", "sh_13"],
+    media: "whole-scene.mp4",
+  };
+  return {
+    ...p,
+    takes: [
+      ...p.takes,
+      pass,
+      {
+        ...source,
+        id: "tk_01J8F0000000000000000000S1",
+        jobId: "jb_01J8E0000000000000000000S1",
+        coversShots: ["sh_13"],
+        media: undefined,
+        segment: { passTakeId: pass.id, inSec: 4, outSec: 9 },
+      },
+    ],
+  };
+}
+
 describe("the takes, watched (turn 102c)", () => {
   it("opens on the takes with the accepted one marked, and the foot can act", () => {
     const html = render(FIXTURE_STATE, GENERATE);
@@ -166,6 +208,77 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(html.includes("Accept take"), "and accept");
     assert.ok(html.includes("Reject"), "and teach");
     assert.ok(html.includes("Contact sheet") && html.includes("Advanced"), "the other lenses are doors, not tabs");
+    assert.ok(html.includes("<video"), "a clip is playable where it is reviewed");
+    assert.ok(!html.includes('class="fy-playbtn"'), "the grid promises no inert play control");
+  });
+
+  it("plays video media with real controls while still frames remain pictures (#729)", async () => {
+    const mounted = await mount(FIXTURE_STATE);
+    const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
+    assert.ok(video.getAttribute("src")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4"));
+    assert.ok(video.getAttribute("poster")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png"));
+    assert.equal(video.getAttribute("controls"), "");
+    assert.equal(video.getAttribute("preload"), "metadata");
+    assert.ok(video.getAttributeNames().some((name) => name.toLowerCase() === "playsinline"));
+    assert.equal(video.hasAttribute("autoplay"), false, "opening Takes never starts sound");
+    assert.equal(video.closest("button"), null, "native media controls are never nested in the selection control");
+
+    const cards = mounted.container.querySelectorAll<HTMLElement>(".fy-take");
+    assert.equal(cards.length, 2);
+    assert.ok(cards[1]!.querySelector("img"), "a frame take stays an image");
+    assert.equal(cards[1]!.querySelector("video"), null);
+    const choices = mounted.container.querySelectorAll<HTMLButtonElement>(".fy-take__pick");
+    assert.equal(choices.length, 2);
+    assert.equal(choices[0]!.getAttribute("aria-pressed"), "true", "the accepted take is initially picked");
+    await act(async () => choices[1]!.click());
+    assert.equal(choices[1]!.getAttribute("aria-pressed"), "true", "stills remain keyboard-selectable");
+  });
+
+  it("selects the take being watched, pauses the previous tile, and keeps failure reviewable", async () => {
+    const mounted = await mount(withSaltlight(withVideoChallenger));
+    const videos = mounted.container.querySelectorAll<HTMLVideoElement>(".fy-take video");
+    assert.equal(videos.length, 2);
+    let pauses = 0;
+    videos[0]!.pause = () => { pauses += 1; };
+    await act(async () => videos[0]!.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
+    await act(async () => videos[1]!.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
+
+    assert.equal(pauses, 1, "only one take can sound at once");
+    assert.ok(videos[1]!.closest(".fy-take")?.classList.contains("fy-take--on"));
+    assert.ok([...mounted.container.querySelectorAll("button")].some((button) => button.textContent === "Accept take 3"));
+    assert.ok(mounted.container.textContent?.includes("✓ SELECTED"), "watching does not rewrite durable acceptance");
+
+    await act(async () => videos[1]!.dispatchEvent(new dom.window.Event("error")));
+    const challenger = mounted.container.querySelectorAll<HTMLElement>(".fy-take")[2]!;
+    assert.ok(challenger.textContent?.includes("Could not play video"));
+    assert.ok(challenger.querySelector("img"), "the poster remains when playback fails");
+    assert.ok(challenger.querySelector(".fy-take__pick"), "failure does not strand selection or acceptance");
+  });
+
+  it("plays a selectable pass segment from its backing media and inside its authored range", async () => {
+    const state = withSaltlight(withPassSegment);
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const segment = production.takes.find((take) => take.id === "tk_01J8F0000000000000000000S1")!;
+    assert.deepEqual(takeMediaView(production, segment), {
+      sourcePath: "productions/saltlight/takes/tk_01J8F0000000000000000000P1/whole-scene.mp4",
+      posterPath: "productions/saltlight/takes/tk_01J8F0000000000000000000P1/frame.png",
+      isVideo: true,
+    });
+
+    const mounted = await mount(state, `${GENERATE}?shot=sh_13`);
+    const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
+    video.currentTime = 0;
+    await act(async () => video.dispatchEvent(new dom.window.Event("loadedmetadata")));
+    assert.equal(video.currentTime, 4);
+    video.currentTime = 9;
+    await act(async () => video.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
+    assert.equal(video.currentTime, 4, "replay returns to the segment start");
+    let pauses = 0;
+    video.pause = () => { pauses += 1; };
+    video.currentTime = 9.1;
+    await act(async () => video.dispatchEvent(new dom.window.Event("timeupdate", { bubbles: true })));
+    assert.equal(pauses, 1);
+    assert.equal(video.currentTime, 9, "playback stops at the segment boundary");
   });
 
   it("honours the shot the address carries (?shot=), which is how the storyboard sends one", () => {
