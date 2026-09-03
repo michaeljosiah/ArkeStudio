@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject 
 import {
   aspectSupport,
   formatMicroUsd,
+  isReplayableFinalization,
   orderedShots,
   PROVIDERS,
   resolveCast,
@@ -10,6 +11,7 @@ import {
   type FrameRunQuote,
   type FrameRunState,
   type FrameRunStepState,
+  type Job,
   type ManifestModel,
   type ProductionBundle,
   type SceneRecord,
@@ -23,6 +25,7 @@ import {
   clearFrameRunQuote,
   clearFrameRunStartResult,
   frameRunCommand,
+  retryJobFinalization,
   subscribeFrameRunQuote,
   subscribeFrameRunStartResult,
   type useClientState,
@@ -54,6 +57,17 @@ export function frameRunShotState(run: FrameRunState | null, shotId: string): Ru
     }
   }
   return null;
+}
+
+export function finalizationRetryJobId(
+  run: FrameRunState,
+  stepIndex: number,
+  jobs: readonly Job[],
+): string | null {
+  const jobId = run.run.steps[stepIndex]?.jobId;
+  if (jobId === null || jobId === undefined) return null;
+  const job = jobs.find((candidate) => candidate.id === jobId);
+  return job?.finalization?.status === "failed" && isReplayableFinalization(job) ? job.id : null;
 }
 
 function moveRadio(event: KeyboardEvent<HTMLElement>, select: (index: number) => void): void {
@@ -620,7 +634,17 @@ export function FrameRunBar({ run, worldId, productionId, onReview }: { run: Fra
   );
 }
 
-export function FrameRunBoardFailures({ run, worldId, productionId }: { run: FrameRunState; worldId: string; productionId: string }) {
+export function FrameRunBoardFailures({
+  run,
+  jobs,
+  worldId,
+  productionId,
+}: {
+  run: FrameRunState;
+  jobs: readonly Job[];
+  worldId: string;
+  productionId: string;
+}) {
   if (run.run.mode !== "board") return null;
   const failures = run.steps.flatMap((state, index) => {
     const step = run.run.steps[index]!;
@@ -629,12 +653,19 @@ export function FrameRunBoardFailures({ run, worldId, productionId }: { run: Fra
   if (failures.length === 0) return null;
   return (
     <div className="fy-swrunboards" aria-label="Frame run board failures">
-      {failures.map(({ state, step, index }) => (
-        <div key={index} className="fy-swboard__failure" role="status">
-          <strong>{step.label}</strong><span>{runFailureCopy(state)}</span>
-          {state.canRetry ? <button type="button" onClick={() => frameRunCommand({ kind: "frame-run-retry-step", worldId, productionId, runId: run.run.id, stepIndex: index })}>Retry board</button> : null}
-        </div>
-      ))}
+      {failures.map(({ state, step, index }) => {
+        const retryJobId = finalizationRetryJobId(run, index, jobs);
+        return (
+          <div key={index} className="fy-swboard__failure" role="status">
+            <strong>{step.label}</strong><span>{runFailureCopy(state)}</span>
+            {retryJobId !== null ? (
+              <button type="button" onClick={() => retryJobFinalization(retryJobId)}>Retry finalization</button>
+            ) : state.canRetry ? (
+              <button type="button" onClick={() => frameRunCommand({ kind: "frame-run-retry-step", worldId, productionId, runId: run.run.id, stepIndex: index })}>Retry board</button>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

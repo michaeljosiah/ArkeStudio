@@ -485,7 +485,14 @@ export function SceneWorkspace({
               </button>
             ) : null}
           </div>
-          {frameRun === null ? null : <FrameRunBoardFailures run={frameRun} worldId={world.meta.worldId} productionId={production.meta.id} />}
+          {frameRun === null ? null : (
+            <FrameRunBoardFailures
+              run={frameRun}
+              jobs={state?.app.jobs ?? []}
+              worldId={world.meta.worldId}
+              productionId={production.meta.id}
+            />
+          )}
 
           {view === "storyboard" ? (
             <StoryboardRows
@@ -509,6 +516,7 @@ export function SceneWorkspace({
               onCommand={write}
               refusalVersion={refusalVersion}
               frameRun={frameRun}
+              jobs={state?.app.jobs ?? []}
               worldId={world.meta.worldId}
               onViewBoardSheet={(board: PackedBoard, trigger) => {
                 setBoardSheetTrigger(trigger);

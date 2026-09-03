@@ -15,6 +15,7 @@ import {
   type FrameRunJobFacts,
   type FrameRunQuote,
   type FrameRunState,
+  type Job,
   type ManifestModel,
   type WorldChatWorkspace,
 } from "@arke-studio/contracts";
@@ -164,6 +165,32 @@ function frameState(options: {
     ...(mode === "board" ? [] : [{ id: JOB_2, status: "queued" as const, etaSec: null, ...options.second }]),
   ];
   return FrameRunStateSchema.parse(foldFrameRun(run, facts));
+}
+
+function failedFinalizationJob(target: Job["target"]): Job {
+  return {
+    id: JOB_1,
+    idempotencyKey: "01J8E0000000000000000000K1",
+    worldId: FIXTURE_WORLD_ID,
+    productionId: "saltlight",
+    target,
+    capability: "image",
+    provider: "fal",
+    model: IMAGE_MODEL.id,
+    params: { landing: "frame-slot" },
+    estimatedMicroUsd: 37_000,
+    status: "succeeded",
+    providerJobId: "fal-frame-1",
+    attempt: 1,
+    error: null,
+    finalization: {
+      status: "failed",
+      error: "Generation completed, but its result could not be prepared. Retry finalization; this will not contact the provider or charge again.",
+      updatedAt: "2026-08-30T12:01:00Z",
+    },
+    createdAt: "2026-08-30T12:00:00Z",
+    updatedAt: "2026-08-30T12:01:00Z",
+  };
 }
 
 function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noShots?: boolean; imageModels?: ManifestModel[] } = {}): ClientState {
@@ -698,6 +725,49 @@ describe("durable run projections", () => {
     assert.match(one(item, '[data-testid="frame-run-bar"]')?.textContent ?? "", /^0 frames added · 2 failed/);
     assert.match(one(item, ".fy-swrunboards")?.textContent ?? "", /Board A.*board panels could not be prepared/);
     assert.equal(all(item, "button").some((button) => ["Pause", "Cancel"].includes(button.textContent?.trim() ?? "")), false);
+  });
+
+  it("offers the free finalization retry promised by a failed shot row", async () => {
+    const sent: ClientMessage[] = [];
+    const failed = frameState({
+      first: {
+        status: "succeeded",
+        finalization: "failed",
+        finalizationError: "Generation completed, but its result could not be prepared. Retry finalization; this will not contact the provider or charge again.",
+        etaSec: null,
+      },
+    });
+    const state = stateWith({ runs: [failed] });
+    state.app.jobs = [failedFinalizationJob({ kind: "shot", id: "sh_12", coversShots: ["sh_12"] })];
+    const item = await mount(state, sent);
+    const row = one(item, '[data-testid="workspace-row-sh_12"]')!;
+    const retry = [...row.querySelectorAll("button")].find((button) => button.textContent === "Retry finalization") as HTMLElement;
+    assert.ok(retry, "the control sits beside the sentence that promises it");
+
+    await click(retry);
+    assert.deepEqual(sent.at(-1), { kind: "retry-job-finalization", jobId: JOB_1 });
+  });
+
+  it("offers one finalization retry on a failed board rather than one per shot", async () => {
+    const sent: ClientMessage[] = [];
+    const failed = frameState({
+      mode: "board",
+      first: {
+        status: "succeeded",
+        finalization: "failed",
+        finalizationError: "board panels could not be prepared",
+        etaSec: null,
+      },
+    });
+    const state = stateWith({ runs: [failed] });
+    state.app.jobs = [failedFinalizationJob({ kind: "board-sheet", coversShots: ["sh_12", "sh_13"] })];
+    const item = await mount(state, sent);
+    const retries = all(item, "button").filter((button) => button.textContent === "Retry finalization");
+    assert.equal(retries.length, 1);
+    assert.ok(one(item, ".fy-swrunboards")?.contains(retries[0]!));
+
+    await click(retries[0]!);
+    assert.deepEqual(sent.at(-1), { kind: "retry-job-finalization", jobId: JOB_1 });
   });
 
   it("offers failed board retry only, then a cell retry only from backend per-shot facts", async () => {
