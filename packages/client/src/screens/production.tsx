@@ -167,7 +167,7 @@ import {
   exportCut,
   rejectTake,
   placeOverlay,
-  proposeEpisode,
+  createEpisode,
   removeOverlay,
   moveOverlay,
   moveTimelineHistory,
@@ -501,17 +501,6 @@ export function ProductionLayout() {
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
   const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
   const scenesById = new Map((production?.scenes ?? []).map((scene) => [scene.id, scene]));
-  const episodePrefix = prodId === undefined ? null : `productions/${prodId}/episodes/`;
-  const episodeStems = new Set(Object.values(production?.episodeFiles ?? {}));
-  const pendingEpisodeCreate =
-    episodePrefix !== null &&
-    (world?.proposals ?? []).some((staged) =>
-      staged.proposal.targets.some((target) => {
-        if (!target.path.startsWith(episodePrefix) || !target.path.endsWith(".json")) return false;
-        const stem = target.path.slice(episodePrefix.length, -".json".length);
-        return stem.length > 0 && !stem.includes("/") && !episodeStems.has(stem);
-      }),
-    );
   const generateView = new URLSearchParams(location.search).get("view");
   const inGenerate = location.pathname.endsWith("/generate");
   const takesActive = inGenerate && generateView !== "bench";
@@ -635,18 +624,17 @@ export function ProductionLayout() {
                   <button
                     type="button"
                     className="fy-prodrail__new-episode"
-                    disabled={pendingEpisodeCreate}
                     onClick={() => {
                       if (!worldId || !prodId) return;
                       const order = Math.max(0, ...production.episodes.map((episode) => episode.order)) + 1;
-                      proposeEpisode(worldId, prodId, {
+                      createEpisode(worldId, prodId, {
                         title: `Episode ${String(order).padStart(2, "0")}`,
                         order,
                       });
                     }}
                   >
                     <Plus size={11} />
-                    {pendingEpisodeCreate ? "New episode pending" : "New episode"}
+                    New episode
                   </button>
                 )}
               </div>
