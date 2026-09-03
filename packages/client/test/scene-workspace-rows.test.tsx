@@ -279,7 +279,23 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
       "Plan video",
     ]);
     const merge = byText(q(mounted, '[data-testid="workspace-board-B"]')!, "Merge up");
-    assert.equal(merge.getAttribute("title"), "Merge this board into the one above");
+    assert.equal(merge.getAttribute("title"), "Remove this hand split");
+  });
+
+  it("removes a hand split instead of leaving a latent merge override", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(split());
+    await click(q(mounted, ".fy-sw__boards-toggle")!);
+
+    await click(byText(q(mounted, '[data-testid="workspace-board-B"]')!, "Merge up"));
+
+    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.deepEqual(command.command, {
+      kind: "clear-board-override",
+      shotId: "sh_13",
+      override: "split",
+    });
   });
 
   it("puts the insert line between a band and its first row, and makes it the drop line during a band drag", async () => {
