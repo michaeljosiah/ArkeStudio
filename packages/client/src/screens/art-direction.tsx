@@ -680,13 +680,17 @@ export function ArtDirectionScreen() {
             place travels more safely than a portrait — a face here can arrive in other characters' work.
           </div>
         )}
+        {/* The door says what pressing it does (issue 747). Behind it, the person's own commit
+            is `Set the look · v2` and lands on the press — nothing is queued and no approvals
+            screen sees it — so "Propose a change" set up a review step that never came. The
+            propose wording survives only for the case that is one: a change an agent staged. */}
         <div className="fy-artdirection__action">
           <Button variant="primary" onClick={() => navigate(`/w/${worldId}/art-direction/propose`)}>
             {proposed
               ? "Review proposed change"
               : direction.derived
                 ? "Make it concrete"
-                : "Propose a change"}
+                : "Change the look"}
           </Button>
         </div>
         {/* Answered in the dialog's preview column (design 65); this only says one is waiting. */}
