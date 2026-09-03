@@ -36,6 +36,11 @@ export interface ArkeBridge {
     name: string,
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
+  attachStageExport?(
+    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+    playblast: Uint8Array,
+    openingFrame: Uint8Array,
+  ): Promise<{ ok: true } | { ok: false; reason: string }>;
   /**
    * Save a world image somewhere of the person's choosing (issue 478). Desktop only, and
    * optional for that reason: a browser session has no native save dialog, and the download

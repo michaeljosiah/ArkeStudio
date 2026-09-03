@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editShot, orderedShots, ulid, type ArtifactSidecar, type ShotStaging } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { imageFormatOf } from "../queue/verify.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -10,7 +11,7 @@ import { parseSceneRecord } from "./scene-record.js";
 import { stemOrThrow } from "./scene-commands.js";
 
 /**
- * Filing a playblast from the Stage (SPEC-036 R-34).
+ * Filing a playblast and opening frame from the Stage (SPEC-036 R-35).
  *
  * The bytes land on the shelf and the pin lands on the staging in ONE commit, under one gate, or
  * neither does. Filed first and pinned after, a scene write landing between the two left a
@@ -26,13 +27,14 @@ export interface PlayblastFiling {
   shotId: string;
   stagingVersion: number;
   sourcePath: string;
+  openingFrameSourcePath: string;
   durationSec: number;
   aspect: string;
   lens?: string;
 }
 
 export type PlayblastOutcome =
-  | { outcome: "filed"; artifact: ArtifactSidecar }
+  | { outcome: "filed"; artifacts: [ArtifactSidecar, ArtifactSidecar] }
   | { outcome: "refused"; reason: string };
 
 const refused = (reason: string): PlayblastOutcome => ({ outcome: "refused", reason });
@@ -56,14 +58,23 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
     if (record.version !== input.baseVersion) {
       return refused(`the scene moved to v${record.version} while the playblast rendered — export it again`);
     }
-    const bytes = await readFile(input.sourcePath).catch(() => null);
+    const [bytes, openingFrameBytes] = await Promise.all([
+      readFile(input.sourcePath).catch(() => null),
+      readFile(input.openingFrameSourcePath).catch(() => null),
+    ]);
     if (bytes === null) return refused(`${input.sourcePath} is not readable`);
+    if (openingFrameBytes === null) return refused(`${input.openingFrameSourcePath} is not readable`);
     // A recorder that stopped without a chunk hands over an empty file; pinned, it would read
     // as the current playblast and ride into a session with nothing in it.
     if (bytes.byteLength === 0) return refused("the recording came back empty — export it again");
+    if (imageFormatOf(openingFrameBytes)?.extension !== ".png") {
+      return refused("the opening frame is not a valid PNG — export it again");
+    }
 
     const id = `ar_${ulid()}`;
+    const openingFrameId = `ar_${ulid()}`;
     const file = `playblast-${input.shotId}-${id.slice(-8).toLowerCase()}.webm`;
+    const openingFrameFile = `stage-opening-${input.shotId}-${openingFrameId.slice(-8).toLowerCase()}.png`;
     const artifact: ArtifactSidecar = {
       id,
       kind: "video",
@@ -74,10 +85,21 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
       production: input.productionId as ArtifactSidecar["production"],
       created: store.now(),
     };
+    const openingFrameArtifact: ArtifactSidecar = {
+      id: openingFrameId,
+      kind: "image",
+      file: openingFrameFile,
+      hash: `sha256:${createHash("sha256").update(openingFrameBytes).digest("hex").slice(0, 16)}` as ArtifactSidecar["hash"],
+      origin: { by: "system", producedBy: `stage:${input.shotId}` },
+      links: [input.productionId, input.sceneId, input.shotId],
+      production: input.productionId as ArtifactSidecar["production"],
+      created: store.now(),
+    };
     const staging: ShotStaging = {
       ...shot.staging,
       playblast: {
         artifactId: id,
+        openingFrameArtifactId: openingFrameId,
         version: input.stagingVersion,
         durationSec: input.durationSec,
         aspect: input.aspect,
@@ -85,15 +107,19 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
       },
     };
     const next = editShot(record, { shotId: input.shotId, change: { staging } });
-    await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
+    await Promise.all([
+      atomicWriteFile(join(store.dir, "artifacts", file), bytes),
+      atomicWriteFile(join(store.dir, "artifacts", openingFrameFile), openingFrameBytes),
+    ]);
     await store.commitUnserialised({
       kind: "scene-command",
       source: "stage-playblast",
       files: [
         { path, action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(raw) },
         { path: `artifacts/${file}.json`, action: "create", content: `${JSON.stringify(artifact, null, 2)}\n`, baseHash: null },
+        { path: `artifacts/${openingFrameFile}.json`, action: "create", content: `${JSON.stringify(openingFrameArtifact, null, 2)}\n`, baseHash: null },
       ],
     });
-    return { outcome: "filed", artifact };
+    return { outcome: "filed", artifacts: [artifact, openingFrameArtifact] };
   });
 }

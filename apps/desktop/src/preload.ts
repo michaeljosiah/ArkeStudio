@@ -88,6 +88,27 @@ function notifyStatus(status: "connecting" | "open" | "closed"): void {
   for (const l of statusListeners) l(status);
 }
 
+function normaliseBytes(raw: unknown): Uint8Array | null {
+  return ArrayBuffer.isView(raw)
+    ? new Uint8Array(
+        (raw as ArrayBufferView).buffer,
+        (raw as ArrayBufferView).byteOffset,
+        (raw as ArrayBufferView).byteLength,
+      )
+    : raw instanceof ArrayBuffer
+      ? new Uint8Array(raw)
+      : Array.isArray(raw)
+        ? Uint8Array.from(raw as number[])
+        : null;
+}
+
+async function spoolBytes(name: string, bytes: Uint8Array): Promise<{ path: string } | { reason: string }> {
+  const result = (await ipcRenderer
+    .invoke("arke:spool", { name, bytes })
+    .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };
+  return result?.path ? { path: result.path } : { reason: result?.reason ?? "the app could not hold on to it" };
+}
+
 const bridge = {
   appVersion,
   platform: process.platform as string,
@@ -216,29 +237,49 @@ const bridge = {
     // Crossing the context bridge can hand this over as a view, a buffer or a plain array
     // depending on the shape it went in as. Normalise rather than trust — a wrong guess here
     // writes a zero-byte file and the attachment fails silently, which is the worst outcome.
-    const raw: unknown = bytes;
-    const view = ArrayBuffer.isView(raw)
-      ? new Uint8Array(
-          (raw as ArrayBufferView).buffer,
-          (raw as ArrayBufferView).byteOffset,
-          (raw as ArrayBufferView).byteLength,
-        )
-      : raw instanceof ArrayBuffer
-        ? new Uint8Array(raw)
-        : Array.isArray(raw)
-          ? Uint8Array.from(raw as number[])
-          : null;
+    const view = normaliseBytes(bytes);
     if (!view) return { ok: false, reason: "the app could not read what was pasted" };
     // send() drops a frame on a closed socket without a word; a playblast that took the shot's
     // length to record must not be reported filed when nothing carried it.
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       return { ok: false, reason: "not connected to the app — try again in a moment" };
     }
-    const result = (await ipcRenderer
-      .invoke("arke:spool", { name, bytes: view })
-      .catch((err: unknown) => ({ reason: String(err) }))) as { path?: string; reason?: string };
-    if (!result?.path) return { ok: false, reason: result?.reason ?? "the app could not hold on to it" };
+    const result = await spoolBytes(name, view);
+    if (!("path" in result)) return { ok: false, reason: result.reason };
     bridge.send(JSON.stringify({ ...target, sourcePath: result.path }));
+    return { ok: true };
+  },
+
+  /** One Stage export is one message so its video, opening frame and staging pin file together. */
+  async attachStageExport(
+    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+    playblast: Uint8Array,
+    openingFrame: Uint8Array,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const video = normaliseBytes(playblast);
+    const frame = normaliseBytes(openingFrame);
+    if (!video || !frame) return { ok: false, reason: "the app could not read the Stage export" };
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, reason: "not connected to the app — try again in a moment" };
+    }
+    const [videoResult, frameResult] = await Promise.all([
+      spoolBytes("playblast.webm", video),
+      spoolBytes("opening-frame.png", frame),
+    ]);
+    if (!("path" in videoResult)) return { ok: false, reason: videoResult.reason };
+    if (!("path" in frameResult)) return { ok: false, reason: frameResult.reason };
+    if (socket === null || socket.readyState !== WebSocket.OPEN) {
+      return { ok: false, reason: "not connected to the app — try again in a moment" };
+    }
+    try {
+      socket.send(JSON.stringify({
+        ...target,
+        sourcePath: videoResult.path,
+        openingFrameSourcePath: frameResult.path,
+      }));
+    } catch {
+      return { ok: false, reason: "the Stage export could not be handed to the app" };
+    }
     return { ok: true };
   },
 

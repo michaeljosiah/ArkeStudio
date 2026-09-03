@@ -435,15 +435,15 @@ export function SceneStage({
     setNote(null);
     setExporting(0);
     try {
-      const blob = await view.record(setExporting);
+      const { playblast, openingFrame } = await view.record(setExporting);
       // The viewport is disposed when the shot changes, and its recording ends early: a partial
       // take is never filed as the whole shot.
       if (viewport.current !== view) {
         setNote("export stopped — the shot changed");
         return;
       }
-      if (blob.size === 0) {
-        setNote("the recording came back empty — export it again");
+      if (playblast.size === 0 || openingFrame.size === 0) {
+        setNote("the Stage export came back empty — export it again");
         return;
       }
       const outcome = await stagePlayblast(
@@ -461,16 +461,24 @@ export function SceneStage({
           // An unset lens is recorded as the empty string, so setting one later reads as a change.
           lens: framing.lens ?? "",
         },
-        new Uint8Array(await blob.arrayBuffer()),
+        {
+          playblast: new Uint8Array(await playblast.arrayBuffer()),
+          openingFrame: new Uint8Array(await openingFrame.arrayBuffer()),
+        },
       );
       if (!outcome.ok) {
         setNote(outcome.reason);
-        // A browser session has no host to file into; the file is still the person's to keep.
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `shot-${shot.number}-playblast.webm`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+        // A browser session has no host to file into; both files are still the person's to keep.
+        for (const [blob, name] of [
+          [playblast, `shot-${shot.number}-playblast.webm`],
+          [openingFrame, `shot-${shot.number}-opening-frame.png`],
+        ] as const) {
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = name;
+          link.click();
+          setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
+        }
       }
     } catch (error) {
       setNote(error instanceof Error ? error.message : "the playblast could not be recorded");
