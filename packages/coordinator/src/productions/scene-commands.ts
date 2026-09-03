@@ -20,8 +20,10 @@ import {
   stagingRetimed,
   type GraphScene,
   type SceneRecord,
+  type SceneBlocking,
   type Shot,
   type ShotAnchor,
+  type ShotStageEdit,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -43,10 +45,11 @@ import type { WorldStore } from "./../world/store.js";
 
 export type SceneCommand =
   | { kind: "edit-scene"; title?: string; synopsis?: string | null }
+  | { kind: "edit-stage"; shotId: string; blocking?: Omit<SceneBlocking, "version"> | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
-  | { kind: "edit-shot"; shotId: string; change: Partial<Shot> }
+  | { kind: "edit-shot"; shotId: string; change: Partial<Omit<Shot, "id" | "number" | "staging">> }
   | { kind: "set-prompt-override"; shotId: string; text: string | null }
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
@@ -68,13 +71,17 @@ export function sceneCommandFrom(wire: WireSceneCommand): SceneCommand {
   if (wire.kind !== "edit-shot") return wire as SceneCommand;
   const change: Record<string, unknown> = { ...wire.change };
   for (const field of wire.clear ?? []) change[field] = undefined;
-  return { kind: "edit-shot", shotId: wire.shotId, change: change as Partial<Shot> };
+  return {
+    kind: "edit-shot",
+    shotId: wire.shotId,
+    change: change as Partial<Omit<Shot, "id" | "number" | "staging">>,
+  };
 }
 
 /** The wire shape, structurally — the frame owns its schema; this is what reaches the command. */
 type WireSceneCommand =
   | Exclude<SceneCommand, { kind: "edit-shot" }>
-  | { kind: "edit-shot"; shotId: string; change: Partial<Shot>; clear?: readonly string[] };
+  | { kind: "edit-shot"; shotId: string; change: Partial<Omit<Shot, "id" | "number" | "staging">>; clear?: readonly string[] };
 
 /** A refusal that names what stands in the way, never a code (R-39, R-59). */
 export class SceneCommandRefused extends Error {
@@ -267,6 +274,37 @@ async function candidateFor(
         ...(command.synopsis !== undefined ? { synopsis: command.synopsis ?? undefined } : {}),
       });
     }
+    case "edit-stage": {
+      if (command.blocking === undefined && command.staging === undefined) {
+        throw new SceneCommandRefused(["this Stage edit names neither blocking nor a camera"]);
+      }
+      const current = orderedShots(record).find((shot) => shot.id === command.shotId);
+      if (current === undefined) {
+        throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
+      }
+      let next = editScene(record, {});
+      if (command.blocking !== undefined) {
+        next = editScene(next, {
+          blocking: command.blocking === null
+            ? undefined
+            : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
+        });
+      }
+      return command.staging === undefined
+        ? next
+        : editShot(next, {
+          shotId: command.shotId,
+          change: {
+            staging: command.staging === null
+              ? undefined
+              : {
+                ...command.staging,
+                version: (current.staging?.version ?? 0) + 1,
+                ...(current.staging?.playblast === undefined ? {} : { playblast: current.staging.playblast }),
+              },
+          },
+        });
+    }
     case "insert-shot": {
       const production = productionOrThrow(store, input.productionId);
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare
@@ -285,14 +323,15 @@ async function candidateFor(
       return duplicateShot(record, { shotId: command.shotId, newShotId: nextShotIdIn(taken) });
     }
     case "edit-shot": {
+      if ("staging" in command.change) {
+        throw new SceneCommandRefused(["Stage state must be changed through edit-stage"]);
+      }
       // A retimed shot carries its staging with it: the end key is the end pose and sits at the
       // shot's length, so a duration edit that left the keys alone would leave a staging (and
       // its beats) describing seconds the shot no longer has. The version moves with it, which
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
-      // Present-with-undefined is a clear (sceneCommandFrom), and a clear is honoured: only a
-      // change that says nothing about the staging has it retimed.
-      const retimed = command.change.durationSec !== undefined && !("staging" in command.change) && current?.staging !== undefined
+      const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec)
         : undefined;
       const change = retimed === undefined || retimed === current?.staging

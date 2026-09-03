@@ -38,6 +38,7 @@ import {
  * a graph scene stays fenced by the version that introduced it.
  */
 export const GRAPH_SCENE_SCHEMA_VERSION = 3;
+export const STAGE_BLOCKING_SCHEMA_VERSION = 6;
 
 /**
  * A write refused because the graph it would land is not one path (R-59, R-61).
@@ -87,8 +88,13 @@ export function readSceneRecord(raw: string): { record: SceneRecord; scene: Scen
  * groups, and refuses the result if those groups no longer describe a valid scene.
  */
 export function upgradeLegacySceneCandidate(current: SceneRecord | null, next: Scene): GraphScene {
-  const migrated = migrateLegacyScene(next);
+  let migrated = migrateLegacyScene(next);
   if (current === null || !isGraphScene(current)) return refuseUnlessOnePath(migrated);
+  // A proposal persisted before shared Stage blocking existed cannot erase blocking authored
+  // after it was drafted. Snapshot restore passes no current record, where absence stays absence.
+  if (next.blocking === undefined && current.blocking !== undefined) {
+    migrated = { ...migrated, blocking: current.blocking };
+  }
 
   const held = linearizeSceneFlow(current);
   // A malformed graph is not quietly rewritten into a valid one (R-59): the file on disk says
@@ -199,6 +205,38 @@ export function carriesSceneFlow(raw: string): boolean {
   try {
     const value = JSON.parse(raw) as unknown;
     return typeof value === "object" && value !== null && !Array.isArray(value) && "flow" in value;
+  } catch {
+    return false;
+  }
+}
+
+/** Do these scene bytes use shared blocking or a camera that inherits it? */
+export function carriesStageBlocking(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const object = value as Record<string, unknown>;
+    if ("blocking" in object) return true;
+    const direct = Array.isArray(object["shots"]) ? object["shots"] : [];
+    const flow = object["flow"];
+    const nodes = typeof flow === "object" && flow !== null && Array.isArray((flow as Record<string, unknown>)["nodes"])
+      ? (flow as Record<string, unknown>)["nodes"] as unknown[]
+      : [];
+    const shots = [
+      ...direct,
+      ...nodes.flatMap((node) =>
+        typeof node === "object" && node !== null && (node as Record<string, unknown>)["kind"] === "shot"
+          ? [(node as Record<string, unknown>)["shot"]]
+          : []),
+    ];
+    return shots.some((shot) => {
+      if (typeof shot !== "object" || shot === null) return false;
+      const staging = (shot as Record<string, unknown>)["staging"];
+      if (typeof staging !== "object" || staging === null) return false;
+      const playblast = (staging as Record<string, unknown>)["playblast"];
+      const pinsBlocking = typeof playblast === "object" && playblast !== null && "blocking" in playblast;
+      return pinsBlocking || !("cast" in staging) || !("sets" in staging);
+    });
   } catch {
     return false;
   }

@@ -632,6 +632,21 @@ describe("semantic commands preserve graph structure and old persisted groups (R
 });
 
 describe("a persisted legacy proposal that says what a graph scene already says is a no-op (R-3)", () => {
+  it("cannot erase shared blocking authored after the proposal was drafted", async () => {
+    const { dir } = await open();
+    const legacy = SceneSchema.parse(await readJson(dir, scenePath(VERSE)));
+    const current: GraphScene = {
+      ...migrateLegacyScene(legacy),
+      blocking: { version: 3, cast: [{ sheetId: "maren-kest", x: 1, z: 2 }], sets: [] },
+    };
+    const candidate = shotsBack(current);
+    delete candidate.blocking;
+
+    const upgraded = upgradeLegacySceneCandidate(current, candidate);
+
+    assert.deepEqual(upgraded.blocking, current.blocking);
+  });
+
   it("is retired rather than committed, so it can be settled at all", async () => {
     /*
      * A proposal persisted before direct whole-scene authorship retired can be legacy-shaped

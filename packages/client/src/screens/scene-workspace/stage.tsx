@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import {
   DEFAULT_SHOT_SEC,
+  effectiveStageBlocking,
   effectiveFraming,
   orderedShots,
   resolveCast,
+  resolvedShotStaging,
   stageShot,
   stagingRetimed,
   stagingFov,
   stagingMoveWord,
+  stagePlayblastIsStale,
   type ClientMessage,
   type ProductionBundle,
   type SceneRecord,
+  type ResolvedShotStaging,
   type Shot,
-  type ShotStaging,
+  type StagingFigure,
   type StagingKey,
   type WorldBundle,
 } from "@arke-studio/contracts";
@@ -30,7 +34,7 @@ function aspectNumber(aspect: string): number {
 }
 
 /** A staging with its bookkeeping stripped, for asking whether two are the same move. */
-function moveOf(staging: ShotStaging | null): string {
+function moveOf(staging: ResolvedShotStaging | null): string {
   if (staging === null) return "";
   const { version: _version, playblast: _playblast, ...move } = staging;
   return JSON.stringify(move);
@@ -74,7 +78,7 @@ function sampledKey(keys: readonly StagingKey[], at: number): StagingKey {
 }
 
 /** Insert-or-update at the playhead: the Blender workflow, move the playhead then the camera. */
-function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>): { staging: ShotStaging; index: number } {
+function withKeyAt(staging: ResolvedShotStaging, at: number, patch: Partial<StagingKey>): { staging: ResolvedShotStaging; index: number } {
   const keys = staging.keys;
   const near = keys.findIndex((key) => Math.abs(key.t - at) < 0.12);
   if (near >= 0) {
@@ -87,7 +91,7 @@ function withKeyAt(staging: ShotStaging, at: number, patch: Partial<StagingKey>)
 }
 
 /** Where a figure stands at `at` seconds: on its walk when it has one, else where it was put. */
-function figureAt(figure: ShotStaging["cast"][number], at: number, durationSec: number): { x: number; z: number } {
+function figureAt(figure: StagingFigure, at: number, durationSec: number): { x: number; z: number } {
   if (figure.to === undefined) return { x: figure.x, z: figure.z };
   const u = durationSec <= 0 ? 0 : Math.max(0, Math.min(1, at / durationSec));
   return { x: figure.x + (figure.to[0] - figure.x) * u, z: figure.z + (figure.to[1] - figure.z) * u };
@@ -102,10 +106,9 @@ function keyName(index: number, count: number): string {
  * blocked out — cast as figures, set as massing, one camera on a motion path — and exported as a
  * playblast the generator receives beside the sheets and the prompt.
  *
- * The staging is authored state on the shot. Edits accumulate in a local draft and land through
- * one `edit-shot` on Keep, so a dozen gizmo drags are one version rather than twelve; Discard
- * is the draft going away. Staging a shot for the first time writes at once — there is nothing
- * to weigh a fresh v1 against.
+ * Cast and set blocking belong to the scene; camera keys belong to the shot. A complete shot
+ * override is the deliberate exception. Both halves share one draft and one atomic Stage command,
+ * so a dozen gizmo drags remain one version rather than twelve.
  */
 export function SceneStage({
   scene,
@@ -141,15 +144,38 @@ export function SceneStage({
   const persisted = shot?.staging ?? null;
   const durationSec = shot?.durationSec ?? DEFAULT_SHOT_SEC;
   const framing = shot === null ? {} : effectiveFraming(scene, shot);
-  const references = useMemo(() => (shot === null ? [] : resolveCast(shot.description, [...sheets]).cast), [shot, sheets]);
-  const castIds = references.filter((entry) => entry.sheet.type === "character").map((entry) => entry.sheet.id);
-  const locationIds = [
+  const sceneReferences = useMemo(
+    () => shots.flatMap((candidate) => resolveCast(candidate.description, [...sheets]).cast),
+    [shots, sheets],
+  );
+  const shotCastIds = useMemo(
+    () => shot === null
+      ? []
+      : resolveCast(shot.description, [...sheets]).cast
+        .filter((entry) => entry.sheet.type === "character")
+        .map((entry) => entry.sheet.id),
+    [shot, sheets],
+  );
+  const sceneCastIds = sceneReferences
+    .filter((entry) => entry.sheet.type === "character")
+    .map((entry) => entry.sheet.id)
+    .filter((id, position, list) => list.indexOf(id) === position);
+  const sceneLocationIds = [
     ...(scene.inherits?.location === undefined ? [] : [scene.inherits.location]),
-    ...references.filter((entry) => entry.sheet.type === "location").map((entry) => entry.sheet.id),
+    ...sceneReferences.filter((entry) => entry.sheet.type === "location").map((entry) => entry.sheet.id),
   ].filter((id, position, list) => list.indexOf(id) === position);
   const nameOf = (sheetId: string) => sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
 
-  const [draft, setDraft] = useState<ShotStaging | null>(null);
+  const resolvedPersisted = useMemo(() => {
+    if (persisted === null) return null;
+    return stagingRetimed(resolvedShotStaging(scene, persisted), durationSec) as ResolvedShotStaging;
+  }, [scene, persisted, durationSec]);
+  const persistedScope = effectiveStageBlocking(scene, persisted ?? undefined).identity.owner;
+  const [draft, setDraft] = useState<ResolvedShotStaging | null>(null);
+  const [scope, setScope] = useState<"scene" | "shot">(persistedScope);
+  const cameraDirty = useRef(false);
+  const blockingDirty = useRef(false);
+  const scopeDirty = useRef(false);
   const [at, setAt] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [keyIndex, setKeyIndex] = useState(0);
@@ -166,10 +192,19 @@ export function SceneStage({
   // The end key is the end pose, so it always sits at the shot's length: a staging kept before
   // the shot was retimed plays to its end pose here and is repaired by the next Keep.
   const working = useMemo(() => {
-    const base = draft ?? persisted;
+    const base = draft ?? resolvedPersisted;
     return base === null ? null : stagingRetimed(base, durationSec);
-  }, [draft, persisted, durationSec]);
-  const moved = draft !== null && moveOf(draft) !== moveOf(persisted);
+  }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
+  const cameraChanged = draft !== null && JSON.stringify(draft.keys) !== JSON.stringify(resolvedPersisted?.keys ?? []);
+  const currentBlocking = effectiveStageBlocking(scene, persisted ?? undefined);
+  const desiredBlocking = draft === null ? null : { cast: draft.cast, sets: draft.sets };
+  const overrideChanged = draft !== null && (
+    scope !== persistedScope ||
+    (scope === "shot" && JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: currentBlocking.cast, sets: currentBlocking.sets }))
+  );
+  const sharedChanged = draft !== null && scope === "scene" &&
+    JSON.stringify(desiredBlocking) !== JSON.stringify({ cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] });
+  const moved = draft !== null && (cameraChanged || overrideChanged || sharedChanged);
   const keys = working?.keys ?? [];
   const active = Math.max(0, Math.min(keyIndex, keys.length - 1));
   const activeKey = keys[active] ?? null;
@@ -179,16 +214,45 @@ export function SceneStage({
   latest.current = { working, active };
 
   // A new snapshot that carries the draft's move retires the draft; one that does not — an edit
-  // from elsewhere — leaves it standing, since the person's unsaved move is the newer decision.
+  // from elsewhere — rebases any half the person did not touch and leaves their own half standing.
   useEffect(() => {
-    setDraft((current) => (current !== null && moveOf(current) === moveOf(persisted) ? null : current));
+    const rebasedScope = scopeDirty.current ? scope : persistedScope;
+    if (!scopeDirty.current && scope !== persistedScope) setScope(persistedScope);
+    setDraft((current) => {
+      if (current === null) return null;
+      if (resolvedPersisted === null) {
+        cameraDirty.current = false;
+        blockingDirty.current = false;
+        scopeDirty.current = false;
+        return null;
+      }
+      const rebasedBlocking = rebasedScope === "scene"
+        ? { cast: scene.blocking?.cast ?? [], sets: scene.blocking?.sets ?? [] }
+        : { cast: resolvedPersisted.cast, sets: resolvedPersisted.sets };
+      const rebased = {
+        ...current,
+        ...(!cameraDirty.current ? { keys: resolvedPersisted.keys } : {}),
+        ...(!blockingDirty.current ? rebasedBlocking : {}),
+      };
+      if (moveOf(rebased) !== moveOf(resolvedPersisted) || rebasedScope !== persistedScope) return rebased;
+      cameraDirty.current = false;
+      blockingDirty.current = false;
+      scopeDirty.current = false;
+      return null;
+    });
     setStaging(false);
-  }, [persisted]);
+  }, [scene.blocking, resolvedPersisted, persistedScope, scope]);
+  useEffect(() => {
+    if (draft === null) setScope(persistedScope);
+  }, [draft, persistedScope]);
   // A refused write ends the wait too, or "staging…" would stand forever over a refusal.
   useEffect(() => {
     setStaging(false);
   }, [refusalVersion]);
   useEffect(() => {
+    cameraDirty.current = false;
+    blockingDirty.current = false;
+    scopeDirty.current = false;
     setDraft(null);
     setAt(0);
     setPlaying(false);
@@ -223,17 +287,24 @@ export function SceneStage({
     setPlaying(false);
     playStart.current = null;
   };
-  const patch = (change: (current: ShotStaging) => ShotStaging) => {
+  const patchCamera = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
     const current = latest.current.working;
     if (current === null) return;
+    cameraDirty.current = true;
+    setDraft(change(current));
+  };
+  const patchBlocking = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
+    const current = latest.current.working;
+    if (current === null) return;
+    blockingDirty.current = true;
     setDraft(change(current));
   };
   const patchKey = (which: number, change: Partial<StagingKey>) =>
-    patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...key, ...change } : key)) }));
+    patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === which ? { ...key, ...change } : key)) }));
 
   const data: StageData | null = useMemo(() => {
     if (working === null || shot === null) return null;
-    const ghosts = ghost && previous?.staging !== undefined ? previous.staging.cast : [];
+    const ghosts = ghost && previous?.staging !== undefined ? effectiveStageBlocking(scene, previous.staging).cast : [];
     return {
       cast: working.cast.map((figure, position) => {
         const before = ghosts.find((candidate) => candidate.sheetId === figure.sheetId);
@@ -275,7 +346,7 @@ export function SceneStage({
     const created = new StageViewport(element, data, {
       autokey: (when, p) => {
         stop();
-        patch((current) => {
+        patchCamera((current) => {
           const next = withKeyAt(current, when, { p });
           setKeyIndex(next.index);
           return next.staging;
@@ -283,7 +354,7 @@ export function SceneStage({
       },
       autoaim: (when, l) => {
         stop();
-        patch((current) => {
+        patchCamera((current) => {
           const next = withKeyAt(current, when, { l });
           const key = next.staging.keys[next.index]!;
           const { track: _track, ...free } = key;
@@ -292,9 +363,9 @@ export function SceneStage({
         });
       },
       castchange: (sheetId, x, z) =>
-        patch((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, x, z } : figure)) })),
+        patchBlocking((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, x, z } : figure)) })),
       walkchange: (sheetId, x, z) =>
-        patch((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, to: [x, z] } : figure)) })),
+        patchBlocking((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, to: [x, z] } : figure)) })),
       selchange: setSelection,
       trackpick: (sheetId) => patchKey(latest.current.active, { track: sheetId, l: [0, 1.25, 0] }),
     });
@@ -316,15 +387,56 @@ export function SceneStage({
     return <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">Add a shot to begin.</div>;
   }
 
-  const write = (next: ShotStaging): boolean =>
-    onCommand({ kind: "edit-shot", shotId: shot.id, change: { staging: next } });
   const stage = () => {
-    const fresh = stageShot(shot, { cast: castIds, sets: locationIds.map(nameOf), durationSec, framing });
-    if (write(fresh)) setStaging(true);
+    const inherited = effectiveStageBlocking(scene, undefined);
+    const firstBlock = scene.blocking === undefined
+      ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing })
+      : null;
+    const availableCast = firstBlock?.cast ?? inherited.cast;
+    const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
+    const fresh = stageShot(shot, {
+      cast: cameraCastIds,
+      sets: [],
+      durationSec,
+      framing,
+    });
+    const { cast: _cast, sets: _sets, version: _version, playblast: _playblast, ...camera } = fresh;
+    if (onCommand({
+      kind: "edit-stage",
+      shotId: shot.id,
+      staging: camera,
+      ...(firstBlock === null ? {} : { blocking: { cast: firstBlock.cast, sets: firstBlock.sets } }),
+    })) setStaging(true);
   };
   const keep = () => {
     if (draft === null || working === null || persisted === null) return;
-    write({ ...working, version: persisted.version + 1, ...(persisted.playblast === undefined ? {} : { playblast: persisted.playblast }) });
+    const command: Extract<Command, { kind: "edit-stage" }> = { kind: "edit-stage", shotId: shot.id };
+    if (cameraChanged || overrideChanged) {
+      command.staging = {
+        keys: working.keys,
+        ...(scope === "shot" ? { cast: working.cast, sets: working.sets } : {}),
+      };
+    }
+    if (sharedChanged) command.blocking = { cast: working.cast, sets: working.sets };
+    onCommand(command);
+  };
+  const discard = () => {
+    cameraDirty.current = false;
+    blockingDirty.current = false;
+    scopeDirty.current = false;
+    setDraft(null);
+  };
+  const chooseScope = (next: "scene" | "shot") => {
+    if (working === null || next === scope) return;
+    scopeDirty.current = true;
+    if (next === "scene") blockingDirty.current = false;
+    setDraft({
+      ...working,
+      ...(next === "scene" && scene.blocking !== undefined
+        ? { cast: scene.blocking.cast, sets: scene.blocking.sets }
+        : {}),
+    });
+    setScope(next);
   };
   const toggle = () => {
     if (playing) {
@@ -345,19 +457,19 @@ export function SceneStage({
     if (working === null) return;
     // A staging with no keys (the schema reads them) gets its start and end poses first.
     if (keys.length === 0) {
-      patch((current) => ({ ...current, keys: [{ t: 0, ...DEFAULT_POSE }, { t: round(durationSec), ...DEFAULT_POSE }] }));
+      patchCamera((current) => ({ ...current, keys: [{ t: 0, ...DEFAULT_POSE }, { t: round(durationSec), ...DEFAULT_POSE }] }));
       return;
     }
     const when = Math.max(0.05, Math.min(durationSec - 0.05, at));
     if (keys.some((key) => Math.abs(key.t - when) < 0.12)) return;
     const made: StagingKey = { ...sampledKey(keys, when), t: round(when) };
     const next = sortedKeys([...keys, made]);
-    patch((current) => ({ ...current, keys: next }));
+    patchCamera((current) => ({ ...current, keys: next }));
     setKeyIndex(next.indexOf(made));
   };
   const dropKey = () => {
     if (keys.length <= 2 || active === 0 || active === keys.length - 1) return;
-    patch((current) => ({ ...current, keys: current.keys.filter((_, position) => position !== active) }));
+    patchCamera((current) => ({ ...current, keys: current.keys.filter((_, position) => position !== active) }));
     setKeyIndex(Math.max(0, active - 1));
   };
   const retime = (which: number, event: ReactMouseEvent<HTMLSpanElement>) => {
@@ -408,7 +520,7 @@ export function SceneStage({
     const aim: [number, number, number] = base === undefined || !freeAim ? [...activeKey.l] : [round(activeKey.l[0] + base.x), activeKey.l[1], round(activeKey.l[2] + base.z)];
     if (sheetId === null) {
       const { anchor: _anchor, ...rest } = activeKey;
-      patch((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...rest, p: world, l: aim } : key)) }));
+      patchCamera((current) => ({ ...current, keys: current.keys.map((key, position) => (position === active ? { ...rest, p: world, l: aim } : key)) }));
       return;
     }
     const subject = standingOf(sheetId);
@@ -417,7 +529,7 @@ export function SceneStage({
     patchKey(active, { anchor: sheetId, p: offset, l: look });
   };
   const toggleWalk = (sheetId: string) =>
-    patch((current) => ({
+    patchBlocking((current) => ({
       ...current,
       cast: current.cast.map((figure) => {
         if (figure.sheetId !== sheetId) return figure;
@@ -489,14 +601,7 @@ export function SceneStage({
           ? "aim target"
           : `${nameOf(selection.sheetId)} · ${selection.kind === "cast" ? "start" : "end"}`;
   const filed = persisted?.playblast;
-  // A playblast shows one staging at one length, lens and aspect; a pin that disagrees with any
-  // of those is a file of a shot that no longer exists this way. Absent fields were never recorded.
-  const stale =
-    filed !== undefined &&
-    (filed.version !== persisted?.version ||
-      (filed.durationSec !== undefined && filed.durationSec !== durationSec) ||
-      (filed.aspect !== undefined && filed.aspect !== aspect) ||
-      (filed.lens !== undefined && filed.lens !== (framing.lens ?? "")));
+  const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   // While the playblast records, the staging it shows must hold still (R-35). Only then: a draft
@@ -566,7 +671,7 @@ export function SceneStage({
                 {moved ? (
                   <span className="fy-swstage__moved" data-testid="stage-moved">
                     <span>{keyName(active, keys.length)} moved</span>
-                    <button type="button" aria-label="Discard" title="Discard" onClick={() => setDraft(null)}><X size={11} /></button>
+                    <button type="button" aria-label="Discard" title="Discard" onClick={discard}><X size={11} /></button>
                     <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>
                 ) : null}
@@ -600,6 +705,22 @@ export function SceneStage({
                 <div className="fy-swstage__eyebrow">
                   <span>Camera</span>
                   <span>{keyName(active, keys.length)}</span>
+                </div>
+                <div className="fy-swstage__row fy-swstage__row--chips">
+                  <span title="Scene blocking is shared by every camera; This shot keeps a private variant">blocking</span>
+                  <span className="fy-swstage__chips">
+                    {(["scene", "shot"] as const).map((candidate) => (
+                      <button
+                        key={candidate}
+                        type="button"
+                        data-on={scope === candidate ? "true" : undefined}
+                        disabled={locked || frozen}
+                        onClick={() => chooseScope(candidate)}
+                      >
+                        {candidate === "scene" ? "Scene" : "This shot"}
+                      </button>
+                    ))}
+                  </span>
                 </div>
                 <div className="fy-swstage__row">
                   <span title="Drag the green arrow on the camera to raise or lower it">height</span>

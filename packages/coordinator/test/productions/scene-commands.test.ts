@@ -160,7 +160,7 @@ describe("insert, move and duplicate keep identity and refuse a stale version (T
       sceneFile: SCENE,
       sceneId: SCENE_ID,
       baseVersion: after.version,
-      command: { kind: "edit-shot", shotId: source.id, change: { staging } },
+      command: { kind: "edit-stage", shotId: source.id, staging: { cast: staging.cast, sets: staging.sets, keys: staging.keys } },
     });
     const staged = await sceneOnDisk(store);
     await applySceneCommand(store, {
@@ -440,13 +440,16 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
       ...base,
       baseVersion: before.version,
       command: {
-        kind: "edit-shot",
+        kind: "edit-stage",
         shotId: target.id,
-        change: {
-          durationSec: 4,
-          staging: { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -2], l: [0, 1, 0] }] },
-        },
+        staging: { cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -2], l: [0, 1, 0] }] },
       },
+    });
+    const prepared = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: prepared.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 4 } },
     });
     const staged = await sceneOnDisk(store);
     await applySceneCommand(store, {
@@ -466,12 +469,18 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
       command: { kind: "edit-shot", shotId: target.id, change: { title: "Retitled" } },
     });
     assert.equal(orderedShots(await sceneOnDisk(store))[1]!.staging?.version, 2, "an edit that is not a retime moves nothing");
-    // A clear said in the same edit as the retime is a clear: present-with-undefined is honoured.
+    // Clearing the camera through its owner keeps a later duration edit from resurrecting it.
     const cleared = await sceneOnDisk(store);
     await applySceneCommand(store, {
       ...base,
       baseVersion: cleared.version,
-      command: sceneCommandFrom({ kind: "edit-shot", shotId: target.id, change: { durationSec: 3 }, clear: ["staging"] }),
+      command: { kind: "edit-stage", shotId: target.id, staging: null },
+    });
+    const cameraCleared = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      ...base,
+      baseVersion: cameraCleared.version,
+      command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 3 } },
     });
     const bare = orderedShots(await sceneOnDisk(store))[1]!;
     assert.equal(bare.durationSec, 3);
@@ -732,6 +741,77 @@ describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amen
       }),
       (err: unknown) => err instanceof SceneCommandRefused && /neither a title nor a synopsis/.test(err.message),
     );
+    assert.equal(await worldPrint(dir), print);
+  });
+});
+
+describe("scene blocking and shot cameras share one Stage command (issue 754)", () => {
+  it("creates and revises shared blocking without copying it onto each camera", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const [first, second] = orderedShots(before);
+    assert.ok(first && second);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: before.version,
+      command: {
+        kind: "edit-stage",
+        shotId: first.id,
+        blocking: { cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] },
+        staging: { keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0] }] },
+      },
+    });
+    const staged = await sceneOnDisk(store);
+    assert.equal(staged.blocking?.version, 1);
+    assert.equal(orderedShots(staged)[0]?.staging?.cast, undefined);
+    assert.equal(store.getBundle().meta.schemaVersion, 6);
+
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: staged.version,
+      command: {
+        kind: "edit-stage",
+        shotId: second.id,
+        blocking: { cast: [{ sheetId: "maren-kest", x: 2, z: 0 }], sets: [] },
+      },
+    });
+    const moved = await sceneOnDisk(store);
+    assert.equal(moved.blocking?.version, 2);
+    assert.equal(moved.blocking?.cast[0]?.x, 2);
+    assert.deepEqual(orderedShots(moved)[0]?.staging, orderedShots(staged)[0]?.staging, "camera state does not fan out");
+
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: moved.version,
+      command: { kind: "edit-stage", shotId: first.id, blocking: null, staging: null },
+    });
+    const cleared = await sceneOnDisk(store);
+    assert.equal(cleared.blocking, undefined);
+    assert.equal(orderedShots(cleared)[0]?.staging, undefined);
+  });
+
+  it("refuses a blocking edit whose selected shot is not in the scene", async () => {
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    const print = await worldPrint(dir);
+
+    await assert.rejects(
+      applySceneCommand(store, {
+        productionId: PRODUCTION,
+        sceneFile: SCENE,
+        sceneId: SCENE_ID,
+        baseVersion: before.version,
+        command: { kind: "edit-stage", shotId: "sh_999", blocking: { cast: [], sets: [] } },
+      }),
+      /shot sh_999 is not in this scene/,
+    );
+
     assert.equal(await worldPrint(dir), print);
   });
 });

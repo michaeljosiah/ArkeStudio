@@ -14,7 +14,7 @@ import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
-import { ShotSchema } from "./scene.js";
+import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema } from "./scene.js";
 
 /**
  * The shot fields an edit may clear (SPEC-029 R-36). Identity and the required text are absent
@@ -31,7 +31,6 @@ export const CLEARABLE_SHOT_FIELDS = [
   "continuity",
   "covers",
   "promptOverride",
-  "staging",
 ] as const;
 import { ShotAnchorSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -1698,7 +1697,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
             kind: z.literal("edit-shot"),
             shotId: ShotIdSchema,
             /** A patch: a field the change omits is left exactly as the shot has it. */
-            change: ShotSchema.omit({ id: true, number: true }).partial(),
+            change: ShotSchema.omit({ id: true, number: true, staging: true }).partial(),
             /**
              * Fields to remove, named rather than sent as a value.
              *
@@ -1707,6 +1706,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
              * tuned prompt override, a camera line, or a continuity flag once written.
              */
             clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
+          })
+          .strict(),
+        z
+          .object({
+            kind: z.literal("edit-stage"),
+            shotId: ShotIdSchema,
+            /** Omission leaves this half untouched; null clears shared scene blocking. */
+            blocking: SceneBlockingSchema.omit({ version: true }).nullable().optional(),
+            /** Null removes the camera; omission leaves it untouched. */
+            staging: ShotStageEditSchema.nullable().optional(),
           })
           .strict(),
         z

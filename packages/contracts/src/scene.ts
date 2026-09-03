@@ -119,12 +119,38 @@ export const StagingSetSchema = z
   .strict();
 export type StagingSet = z.infer<typeof StagingSetSchema>;
 
+/** Cast marks and set massing shared by every camera that covers this scene action. */
+export const SceneBlockingSchema = z
+  .object({
+    version: z.number().int().min(1),
+    cast: z.array(StagingFigureSchema),
+    sets: z.array(StagingSetSchema),
+  })
+  .strict();
+export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
+
+const ShotBlockingOverrideShape = {
+  /** Present together only when this shot deliberately overrides the scene blocking. */
+  cast: z.array(StagingFigureSchema).optional(),
+  sets: z.array(StagingSetSchema).optional(),
+};
+
+/** The editable half of shot staging; versions and output pins are coordinator-owned. */
+export const ShotStageEditSchema = z
+  .object({ ...ShotBlockingOverrideShape, keys: z.array(StagingKeySchema) })
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.cast === undefined) !== (value.sets === undefined)) {
+      context.addIssue({ code: "custom", message: "cast and sets must both be present for a shot blocking override" });
+    }
+  });
+export type ShotStageEdit = z.infer<typeof ShotStageEditSchema>;
+
 export const ShotStagingSchema = z
   .object({
     /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
     version: z.number().int().min(1),
-    cast: z.array(StagingFigureSchema),
-    sets: z.array(StagingSetSchema),
+    ...ShotBlockingOverrideShape,
     keys: z.array(StagingKeySchema),
     /**
       * The playblast and opening frame filed from this staging, and what they were rendered from:
@@ -139,11 +165,21 @@ export const ShotStagingSchema = z
         durationSec: z.number().positive().optional(),
         aspect: z.string().min(1).optional(),
         lens: z.string().optional(),
+        /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
+        blocking: z.discriminatedUnion("owner", [
+          z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),
+          z.object({ owner: z.literal("shot") }).strict(),
+        ]).optional(),
       })
       .strict()
       .optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    if ((value.cast === undefined) !== (value.sets === undefined)) {
+      context.addIssue({ code: "custom", message: "cast and sets must both be present for a shot blocking override" });
+    }
+  });
 export type ShotStaging = z.infer<typeof ShotStagingSchema>;
 
 export const ShotSchema = z
@@ -302,6 +338,8 @@ export const SceneBaseShape = {
       .optional(),
     /** Turn 97 (14d): camera defaults every shot inherits — a shot's `framing` field wins. */
     defaults: ShotFramingSchema.optional(),
+    /** The action and set shared by the scene's cameras; a shot may carry a complete override. */
+    blocking: SceneBlockingSchema.optional(),
     /**
      * The authored board overrides (SPEC-035 R-4).
      *

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { editShot, orderedShots, ulid, type ArtifactSidecar, type ShotStaging } from "@arke-studio/contracts";
+import { editShot, effectiveStageBlocking, orderedShots, ulid, type ArtifactSidecar, type ShotStaging } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -106,6 +106,7 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
         durationSec: input.durationSec,
         aspect: input.aspect,
         ...(input.lens !== undefined ? { lens: input.lens } : {}),
+        blocking: effectiveStageBlocking(record, shot.staging).identity,
       },
     };
     const next = editShot(record, { shotId: input.shotId, change: { staging } });
