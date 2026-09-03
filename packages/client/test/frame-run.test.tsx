@@ -458,6 +458,7 @@ describe("frame-run quote authorization", () => {
     assert.equal(maren?.dataset.riding, "true");
     assert.match(vigil?.textContent ?? "", /citation only/);
     assert.equal(vigil?.dataset.riding, "false");
+    assert.equal(vigil?.querySelector("img")?.getAttribute("alt"), "", "the adjacent name leaves the thumbnail decorative");
     await click([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.deepEqual(sent.at(-1), {
       kind: "frame-run-start",
