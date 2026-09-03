@@ -576,6 +576,52 @@ describe("frame-run coordinator service", () => {
     assert.ok((q.inputs[0]!.params["references"] as string[]).includes("artifacts/fixed.png"));
   });
 
+  it("uses a singular fixed-frame reference in a blocked board quote", async () => {
+    const f = await fixture();
+    const framed = orderedShots(f.scene)[1]!;
+    const artifact = {
+      id: "ar_00000000000000000000000001",
+      kind: "image" as const,
+      file: "fixed.png",
+      hash: "sha256:0000000000000000" as const,
+      origin: { by: "user" as const },
+      links: [framed.id],
+      created: CLOCK(),
+    };
+    const production = {
+      ...f.production,
+      selections: { ...f.production.selections, [framed.id]: { trimInSec: 0, startFrameArtifactId: artifact.id } },
+    };
+    const model = { ...IMAGE, accepts: { ...IMAGE.accepts, referenceImages: 0 } };
+    const quote = await quoteFrameRun(f.store, {
+      requestId: "01J8E0000000000000000000QD",
+      quoteId: "01J8E0000000000000000000QE",
+      worldId: WORLD_ID,
+      productionId: production.meta.id,
+      sceneId: f.scene.id,
+      mode: "board",
+      modelId: model.id,
+      scope: "missing",
+      clock: CLOCK,
+      compile: () => ({
+        worldId: WORLD_ID,
+        productionId: production.meta.id,
+        scene: f.scene,
+        production,
+        world: { ...f.world, artifacts: [...f.world.artifacts, artifact] },
+        model,
+        mode: "board",
+        scope: "missing",
+        boardCapSec: 30,
+        boardPanelCap: 6,
+        eligible: true,
+        clock: CLOCK,
+      }),
+    });
+
+    assert.equal(quote.blockedReason, "board A needs 1 fixed frame reference, but Frame Image accepts 0");
+  });
+
   it("uses three columns beyond four panels and preserves each child's production aspect", async () => {
     const f = await fixture();
     const shots = orderedShots(f.scene);

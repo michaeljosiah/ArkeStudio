@@ -437,7 +437,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
       const fixedCount = panels.filter((panel) => panel.role === "fixed").length;
       if (fixedCount > input.model.accepts.referenceImages) {
         throw new Error(
-          `board ${board.letter} needs ${fixedCount} fixed frame references, but ${input.model.displayName} accepts ${input.model.accepts.referenceImages}`,
+          `board ${board.letter} needs ${fixedCount} fixed frame reference${fixedCount === 1 ? "" : "s"}, but ${input.model.displayName} accepts ${input.model.accepts.referenceImages}`,
         );
       }
       const boardPasses = board.memberShotIds.flatMap((shotId) => {

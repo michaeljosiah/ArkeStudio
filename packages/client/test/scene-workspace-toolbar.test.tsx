@@ -362,8 +362,12 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
     assert.equal(one(item, ".fy-swgen"), null);
   });
 
-  it("names a one-shot board as one shot in the packing card and on the board sheet", async () => {
-    const item = await mount(stateWith({ singleShot: true }));
+  it("uses singular labels throughout a one-shot scene", async () => {
+    const item = await mount(stateWith({ singleShot: true, allFramed: true }));
+    assert.match(one(item, ".fy-sw__metrics")?.textContent ?? "", /^1 shot · .* · 1 frame filed$/);
+    await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Flow") as HTMLElement);
+    assert.equal(one(item, '.fy-swnode[data-kind="board"] .fy-swnode__meta')?.textContent, "shot 12 · 1 cell");
+    await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Storyboard") as HTMLElement);
     await click(named(item, "Generate frames"));
     const dialog = one(item, ".fy-swgen")!;
     assert.match(dialog.querySelector(".fy-swgen__packing-head")?.textContent ?? "", /1 shot → 1 board/);

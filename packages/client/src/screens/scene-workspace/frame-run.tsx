@@ -297,6 +297,7 @@ function GenerateFramesDialogOpen({
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
   const emptyScope = shotId === undefined && scope === "missing" && missing.length === 0 && shots.length > 0;
+  const displayedCount = matchingOptions && quote.blockedReason === null ? quote.includedCount : included.length;
 
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
@@ -351,7 +352,7 @@ function GenerateFramesDialogOpen({
     >
       <div className="fy-swgen__panel">
         <header className="fy-swgen__head">
-          <h2 id={titleId}>Generate {matchingOptions ? quote.includedCount : included.length} frame{(matchingOptions ? quote.includedCount : included.length) === 1 ? "" : "s"}</h2>
+          <h2 id={titleId}>Generate {displayedCount} frame{displayedCount === 1 ? "" : "s"}</h2>
           <span className="fy-swgen__scene">scene {scene.number}</span>
         </header>
 
@@ -472,7 +473,7 @@ function GenerateFramesDialogOpen({
                 {startPending !== null
                   ? "Starting frame run..."
                   : matchingOptions
-                    ? `${quote.includedCount} frame${quote.includedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
+                    ? `${displayedCount} frame${displayedCount === 1 ? "" : "s"}${quote.estimatedMicroUsd === null ? "" : ` · ${formatMicroUsd(quote.estimatedMicroUsd)}`}`
                     : quotePending
                       ? "Checking current price..."
                       : "Quote unavailable"}
