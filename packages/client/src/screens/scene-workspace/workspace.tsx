@@ -424,7 +424,7 @@ export function SceneWorkspace({
               {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
               {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
               <span>{aspect}</span>
-              <span className="fy-sw__metrics">{shots.length} shots · {seconds(totalSec)} · {framed} frames filed</span>
+              <span className="fy-sw__metrics">{shots.length} shot{shots.length === 1 ? "" : "s"} · {seconds(totalSec)} · {framed} frame{framed === 1 ? "" : "s"} filed</span>
             </div>
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}

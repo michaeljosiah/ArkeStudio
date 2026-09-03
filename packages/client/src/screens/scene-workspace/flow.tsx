@@ -1487,7 +1487,7 @@ function buildGraph(input: {
         x: point.x,
         y: point.y,
         name: `Board ${board.letter}`,
-        meta: `${range} · ${board.memberShotIds.length} cells`,
+        meta: `${range} · ${board.memberShotIds.length} cell${board.memberShotIds.length === 1 ? "" : "s"}`,
         duration: capSec === undefined ? seconds : `${seconds} / ${capSec}s`,
         memberShotIds: [...board.memberShotIds],
         staged: stagedBoards || board.memberShotIds.some((shotId) => stagedShotIds.has(shotId)),

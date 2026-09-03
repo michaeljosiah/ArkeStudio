@@ -641,10 +641,19 @@ describe("frame-run quote authorization", () => {
     assert.match(dialog.textContent ?? "", /Frame image · unavailable/);
     assert.match(dialog.textContent ?? "", /has not been replaced by another model/);
     assert.match(dialog.textContent ?? "", /Frame image is not currently eligible to run/);
+    assert.equal(dialog.querySelector("h2")?.textContent, "Generate 2 frames");
+    assert.equal(dialog.querySelector(".fy-swgen__estimate")?.textContent?.trim(), "2 frames");
     const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
     assert.equal(__stateForTest().frameRunQuotes[request.requestId]?.sceneVersion, null, "a blocked quote with no readable scene still matches its option identity");
     assert.equal(request.modelId, IMAGE_MODEL.id, "the stored unavailable choice is quoted, not a fallback");
     assert.equal([...dialog.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Generate frames"), false);
+
+    const rowItem = await mount(stateWith(), [], true, "Frame image is not currently eligible to run");
+    const row = one(rowItem, '[data-testid="workspace-row-sh_13"]')!;
+    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Generate frame") as HTMLElement);
+    const rowDialog = one(rowItem, ".fy-swgen")!;
+    assert.equal(rowDialog.querySelector("h2")?.textContent, "Generate 1 frame");
+    assert.equal(rowDialog.querySelector(".fy-swgen__estimate")?.textContent?.trim(), "1 frame");
   });
 
   it("keeps all three zero guards behind backend quotes", async () => {
