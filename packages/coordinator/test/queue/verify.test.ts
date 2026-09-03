@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { flacProblem, verifyArtifact } from "../../src/queue/verify.js";
+import { flacProblem, mp4Problem, verifyArtifact } from "../../src/queue/verify.js";
 
 function concat(...parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((total, part) => total + part.length, 0));
@@ -179,5 +179,22 @@ describe("audio structural verification", () => {
 
     assert.equal(mp3Problem(complete), null);
     assert.equal(mp3Problem(indistinguishableBoundaryCut), null);
+  });
+});
+
+describe("MP4 structural verification", () => {
+  const box = (tag: string, payload = new Uint8Array()) => {
+    const bytes = new Uint8Array(8 + payload.length);
+    new DataView(bytes.buffer).setUint32(0, bytes.length, false);
+    writeAscii(bytes, 4, tag);
+    bytes.set(payload, 8);
+    return bytes;
+  };
+
+  it("requires complete top-level file, movie, and media boxes", () => {
+    const complete = concat(box("ftyp", new TextEncoder().encode("isom")), box("moov"), box("mdat", Uint8Array.of(1)));
+    assert.equal(mp4Problem(complete), null);
+    assert.match(mp4Problem(complete.subarray(0, complete.length - 1)) ?? "", /truncated.*mdat/i);
+    assert.match(mp4Problem(concat(box("ftyp"), box("mdat"))) ?? "", /no moov/i);
   });
 });

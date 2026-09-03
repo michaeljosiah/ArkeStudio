@@ -35,9 +35,39 @@ function webpOk(d: Uint8Array): string | null {
   return size + 8 === d.length ? null : "WebP is truncated (RIFF size does not match)";
 }
 
-function mp4Ok(d: Uint8Array): string | null {
-  const tag = new TextDecoder("latin1").decode(d.slice(4, 8));
-  return tag === "ftyp" ? null : "not an MP4 (no ftyp box)";
+export function mp4Problem(d: Uint8Array): string | null {
+  let offset = 0;
+  let hasFtyp = false;
+  let hasMoov = false;
+  let hasMdat = false;
+  const view = new DataView(d.buffer, d.byteOffset, d.byteLength);
+  while (offset < d.length) {
+    if (offset + 8 > d.length) return "MP4 is truncated (incomplete box header)";
+    const declared = view.getUint32(offset, false);
+    const tag = new TextDecoder("latin1").decode(d.slice(offset + 4, offset + 8));
+    let header = 8;
+    let size = declared;
+    if (declared === 1) {
+      if (offset + 16 > d.length) return "MP4 is truncated (incomplete extended box header)";
+      const extended = view.getBigUint64(offset + 8, false);
+      if (extended > BigInt(Number.MAX_SAFE_INTEGER)) return "MP4 box is too large to verify";
+      size = Number(extended);
+      header = 16;
+    } else if (declared === 0) {
+      size = d.length - offset;
+    }
+    if (size < header) return "MP4 has an invalid box size";
+    if (offset + size > d.length) return `MP4 is truncated (${tag || "unknown"} box is incomplete)`;
+    if (offset === 0 && tag !== "ftyp") return "not an MP4 (no ftyp box)";
+    hasFtyp ||= tag === "ftyp";
+    hasMoov ||= tag === "moov";
+    hasMdat ||= tag === "mdat";
+    offset += size;
+  }
+  if (!hasFtyp) return "not an MP4 (no ftyp box)";
+  if (!hasMoov) return "MP4 is incomplete (no moov box)";
+  if (!hasMdat) return "MP4 is incomplete (no mdat box)";
+  return null;
 }
 
 export function wavProblem(d: Uint8Array): string | null {
@@ -396,7 +426,7 @@ export function verifyArtifact(artifact: VerifiableArtifact): string | null {
   if (type.includes("png")) return pngOk(artifact.data);
   if (type.includes("jpeg") || type.includes("jpg")) return jpegOk(artifact.data);
   if (type.includes("webp")) return webpOk(artifact.data);
-  if (type.includes("mp4") || type.includes("video")) return mp4Ok(artifact.data);
+  if (type.includes("mp4") || type.includes("video")) return mp4Problem(artifact.data);
   if (type.includes("wav")) return wavProblem(artifact.data);
   if (type.includes("flac")) return flacProblem(artifact.data);
   if (type.includes("mpeg") || type.includes("mp3")) return mp3Ok(artifact.data);

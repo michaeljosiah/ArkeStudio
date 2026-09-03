@@ -40,7 +40,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import type { StagingKey, StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -89,6 +89,12 @@ export type StageSelection =
   | { kind: "cast"; sheetId: string }
   | { kind: "walkend"; sheetId: string }
   | null;
+
+export interface StageFrameSink {
+  start(spec: { width: number; height: number; frameRate: number; frameCount: number }): Promise<string>;
+  write(jobId: string, index: number, bytes: Uint8Array): Promise<void>;
+  cancel(jobId: string): Promise<void>;
+}
 
 export interface StageEvents {
   /** The camera was moved at time `at`: insert-or-update a key there. `p` is relative to the key's anchor. */
@@ -282,6 +288,7 @@ export class StageViewport {
   private proxyLive = false;
   private liveAim: Vector3 | null = null;
   private recordingAt: number | null = null;
+  private pendingData: StageData | null = null;
   private raf = 0;
   private warned = false;
   private disposed = false;
@@ -401,6 +408,10 @@ export class StageViewport {
 
   /** New attributes from the panel. Geometry is rebuilt only when the structure changed. */
   set(data: StageData): void {
+    if (this.recordingAt !== null) {
+      this.pendingData = data;
+      return;
+    }
     const previous = this.data;
     this.data = data;
     if (data.fov !== this.shot.fov || data.aspect !== this.shot.aspect) {
@@ -425,6 +436,7 @@ export class StageViewport {
   /** Select from outside — the panel's readouts and the viewport agree on what is picked. */
   select(selection: StageSelection): void {
     this.selection = selection;
+    if (this.recordingAt !== null) return;
     this.build();
   }
 
@@ -847,6 +859,11 @@ export class StageViewport {
   }
 
   private attachGizmo(): void {
+    if (this.recordingAt !== null) {
+      this.transform.detach();
+      this.transformHelper.visible = false;
+      return;
+    }
     const selection = this.selection;
     if (selection === null || this.data.mode === "camera") {
       this.transform.detach();
@@ -1190,10 +1207,10 @@ export class StageViewport {
    * at the production aspect so both files are the lens and nothing else — no gizmo, no path,
    * no labels — while the on-screen view plays along so the person can see what is being written.
    */
-  async record(onProgress: (fraction: number) => void): Promise<{ playblast: Blob; openingFrame: Blob }> {
-    if (typeof MediaRecorder === "undefined") throw new Error("this browser cannot record video");
+  async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob }> {
     const width = 1280;
-    const height = Math.round(width / this.data.aspect);
+    const height = Math.max(2, Math.round((width / this.data.aspect) / 2) * 2);
+    const frameCount = stageFrameCount(this.data.durationSec);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
@@ -1203,71 +1220,53 @@ export class StageViewport {
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
-    let stream: MediaStream | null = null;
-    let recorder: MediaRecorder | null = null;
+    let jobId: string | null = null;
+    let complete = false;
     let gizmoDetached = false;
     try {
       this.recordingAt = 0;
-      this.refresh(0);
-      this.hideStaging(true);
-      try {
-        renderer.render(this.scene, this.shot);
-      } finally {
-        this.hideStaging(this.data.mode === "camera");
-      }
+      this.transform.detach();
+      this.transformHelper.visible = false;
+      gizmoDetached = true;
+      jobId = await sink.start({ width, height, frameRate: STAGE_FRAME_RATE, frameCount });
+      if (this.disposed) throw new Error("export stopped — the shot changed");
+      const renderAt = (at: number) => {
+        this.recordingAt = at;
+        this.refresh(at);
+        this.hideStaging(true);
+        try {
+          renderer.render(this.scene, this.shot);
+        } finally {
+          this.hideStaging(this.data.mode === "camera");
+        }
+      };
+      renderAt(0);
       const openingFrame = await new Promise<Blob>((resolve, reject) => {
         canvas.toBlob((blob) => {
           if (blob === null) reject(new Error("the opening frame could not be captured"));
           else resolve(blob);
         }, "image/png");
       });
-      stream = canvas.captureStream(30);
-      const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-      const currentRecorder = new MediaRecorder(stream, type === undefined ? {} : { mimeType: type, videoBitsPerSecond: 6_000_000 });
-      recorder = currentRecorder;
-      const chunks: BlobPart[] = [];
-      currentRecorder.addEventListener("dataavailable", (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
-      });
-      // Exactly the shot's length — the pin says the take is the shot, so the take must not
-      // run past it; one frame is the floor a recorder can make anything of.
-      const duration = Math.max(1 / 30, this.data.durationSec);
-      const finished = new Promise<Blob>((resolve, reject) => {
-        currentRecorder.addEventListener("stop", () => resolve(new Blob(chunks, { type: type ?? "video/webm" })));
-        currentRecorder.addEventListener("error", () => reject(new Error("the recording failed")));
-      });
-      // The gizmo comes off for the take, so a drag cannot reshape what is being written.
-      this.transform.detach();
-      this.transformHelper.visible = false;
-      gizmoDetached = true;
-      currentRecorder.start(250);
-      // Elapsed from a start timestamp, never accumulated per tick (SPEC-036 R-29).
-      const started = Date.now();
-      await new Promise<void>((resolve) => {
-        const step = () => {
-          const at = Math.min(duration, (Date.now() - started) / 1000);
-          this.recordingAt = at;
-          this.refresh(at);
-          this.hideStaging(true);
-          try {
-            renderer.render(this.scene, this.shot);
-          } finally {
-            this.hideStaging(this.data.mode === "camera");
-          }
-          onProgress(at / duration);
-          if (at >= duration || this.disposed) resolve();
-          else requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      });
-      currentRecorder.stop();
-      const blob = await finished;
-      return { playblast: blob, openingFrame };
+      const gl = renderer.getContext();
+      const pixels = new Uint8Array(width * height * 4);
+      for (let index = 0; index < frameCount; index += 1) {
+        if (this.disposed) throw new Error("export stopped — the shot changed");
+        if (index > 0) renderAt(index / STAGE_FRAME_RATE);
+        gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+        await sink.write(jobId, index, pixels.slice());
+        onProgress((index + 1) / frameCount);
+      }
+      complete = true;
+      return { jobId, openingFrame };
     } finally {
       this.recordingAt = null;
-      if (recorder !== null && recorder.state !== "inactive") recorder.stop();
-      for (const track of stream?.getTracks() ?? []) track.stop();
-      if (gizmoDetached) this.attachGizmo();
+      if (jobId !== null && !complete) await sink.cancel(jobId).catch(() => {});
+      const pending = this.pendingData;
+      this.pendingData = null;
+      if (!this.disposed) {
+        if (pending !== null) this.set(pending);
+        else if (gizmoDetached) this.attachGizmo();
+      }
       renderer.dispose();
     }
   }

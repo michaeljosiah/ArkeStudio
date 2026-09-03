@@ -4,7 +4,9 @@ import {
   ClientMessageSchema,
   ShotSchema,
   ShotStagingSchema,
+  STAGE_FRAME_RATE,
   stageShot,
+  stageFrameCount,
   stagingBeats,
   stagingFov,
   stagingMoveWord,
@@ -59,6 +61,14 @@ describe("the Stage's arithmetic", () => {
     assert.deepEqual([24, 35, 50, 85, 135].map((mm) => rounded(`${mm}mm`, "9:16")), [42.5, 29.9, 21.1, 12.5, 7.9]);
     assert.equal(stagingFov(undefined, "16:9"), 34);
     assert.ok(stagingFov("1mm", "16:9") > 160, "a valid extreme lens is not clamped");
+  });
+
+  it("plans a fixed-rate, half-open playblast timeline", () => {
+    assert.equal(STAGE_FRAME_RATE, 30);
+    assert.equal(stageFrameCount(4), 120);
+    assert.equal(stageFrameCount(1 / 60), 1);
+    assert.equal(stageFrameCount(1.01), 31);
+    assert.equal((stageFrameCount(4) - 1) / STAGE_FRAME_RATE, 119 / 30);
   });
 
   it("writes the move as timed beats in metres, with bearings from the subject's own facing", () => {
@@ -155,7 +165,7 @@ describe("the Stage's arithmetic", () => {
       stagingVersion: 1,
       durationSec: 4,
       aspect: "16:9",
-      sourcePath: "C:/spool/playblast.webm",
+      sourcePath: "C:/spool/playblast.mp4",
       openingFrameSourcePath: "C:/spool/opening-frame.png",
     };
     assert.deepEqual(ClientMessageSchema.parse(message), message);

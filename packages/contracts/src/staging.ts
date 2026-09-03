@@ -13,6 +13,12 @@ import { parseAspect } from "./manifest.js";
 
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
+export const STAGE_FRAME_RATE = 30;
+
+/** Fixed-rate export is half-open: frame i samples i/fps, never an extra frame at the end. */
+export function stageFrameCount(durationSec: number): number {
+  return Math.max(1, Math.ceil(durationSec * STAGE_FRAME_RATE - 1e-9));
+}
 
 /** Vertical field of view on a Super 35 gate cropped to the production aspect. */
 export function stagingFov(lens: string | undefined, aspect: string): number {

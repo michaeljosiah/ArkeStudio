@@ -250,23 +250,35 @@ const bridge = {
     return { ok: true };
   },
 
-  /** One Stage export is one message so its video, opening frame and staging pin file together. */
-  async attachStageExport(
-    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
-    playblast: Uint8Array,
-    openingFrame: Uint8Array,
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const video = normaliseBytes(playblast);
-    const frame = normaliseBytes(openingFrame);
-    if (!video || !frame) return { ok: false, reason: "the app could not read the Stage export" };
+  async startStageExport(spec: { width: number; height: number; frameRate: number; frameCount: number }) {
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       return { ok: false, reason: "not connected to the app — try again in a moment" };
     }
-    const [videoResult, frameResult] = await Promise.all([
-      spoolBytes("playblast.webm", video),
-      spoolBytes("opening-frame.png", frame),
-    ]);
-    if (!("path" in videoResult)) return { ok: false, reason: videoResult.reason };
+    return await ipcRenderer.invoke("arke:stage-export-start", spec) as
+      | { ok: true; jobId: string }
+      | { ok: false; reason: string };
+  },
+
+  async writeStageExportFrame(jobId: string, index: number, bytes: Uint8Array) {
+    const view = normaliseBytes(bytes);
+    if (!view) return { ok: false, reason: "the app could not read the Stage frame" };
+    return await ipcRenderer.invoke("arke:stage-export-frame", { jobId, index, bytes: view }) as
+      | { ok: true }
+      | { ok: false; reason: string };
+  },
+
+  async finishStageExport(
+    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+    jobId: string,
+    openingFrame: Uint8Array,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const frame = normaliseBytes(openingFrame);
+    if (!frame) return { ok: false, reason: "the app could not read the Stage opening frame" };
+    const videoResult = await ipcRenderer.invoke("arke:stage-export-finish", jobId) as
+      | { ok: true; path: string }
+      | { ok: false; reason: string };
+    if (!videoResult.ok) return videoResult;
+    const frameResult = await spoolBytes("opening-frame.png", frame);
     if (!("path" in frameResult)) return { ok: false, reason: frameResult.reason };
     if (socket === null || socket.readyState !== WebSocket.OPEN) {
       return { ok: false, reason: "not connected to the app — try again in a moment" };
@@ -281,6 +293,10 @@ const bridge = {
       return { ok: false, reason: "the Stage export could not be handed to the app" };
     }
     return { ok: true };
+  },
+
+  async cancelStageExport(jobId: string): Promise<void> {
+    await ipcRenderer.invoke("arke:stage-export-cancel", jobId);
   },
 
   /**
