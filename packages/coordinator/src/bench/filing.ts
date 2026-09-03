@@ -168,6 +168,8 @@ async function imageArtifactBytes(
     if (!converted.ok) return { bytes: original, extension };
     const bytes = await readFile(toExtendedLength(staging));
     return bytes.byteLength > 0 ? { bytes, extension: ".png" } : { bytes: original, extension };
+  } catch {
+    return { bytes: original, extension };
   } finally {
     await rm(toExtendedLength(staging), { force: true }).catch(() => {});
   }
