@@ -2,6 +2,7 @@ import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
   CanonEntrySchema,
+  ChapterFrontmatterSchema,
   EpisodeSchema,
   RoutingSchema,
   SeasonSchema,
@@ -165,6 +166,22 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     doc = MarkdownFile.parse(content);
   } catch {
     return null;
+  }
+
+  if (/^productions\/[a-z0-9-]+\/chapters\/[^/]+\.md$/.test(path)) {
+    const parsed = ChapterFrontmatterSchema.safeParse(doc.data);
+    if (!parsed.success) return null;
+    const chapter = parsed.data;
+    const fields = new Map<string, string>();
+    fields.set("Chapter ID", chapter.id);
+    fields.set("Title", chapter.title);
+    if (chapter.status !== undefined) fields.set("Status", chapter.status);
+    const order = chapter.order ?? chapter.number;
+    if (order !== undefined) fields.set("Order", String(order));
+    if (chapter.draws?.sheets.length) fields.set("Draws from sheets", chapter.draws.sheets.join(", "));
+    if (chapter.draws?.canon.length) fields.set("Draws from canon", chapter.draws.canon.join(", "));
+    fields.set("Prose", doc.body.trim());
+    return { label: chapter.title, kind: `chapter · v${chapter.version}`, fields };
   }
 
   if (path.startsWith("canon/")) {

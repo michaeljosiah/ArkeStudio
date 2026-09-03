@@ -138,6 +138,42 @@ describe("sheet form inline decisions (SPEC-040)", () => {
   });
 });
 
+describe("sheet-from-a-sentence decision ownership", () => {
+  it("records the ordinary destination card, while settle=true remains cardless", async () => {
+    const h = await harness();
+    await h.send({
+      kind: "create-sheet-from-sentence",
+      worldId: WORLD_ID,
+      sheetType: "location",
+      name: "The Attended Quay",
+      sentence: "A quay whose ropes remember every departing ship.",
+    });
+    const attended = (await h.provider.gate()!.listOpen()).find((proposal) => proposal.summary.includes("Attended Quay"));
+    assert.ok(attended);
+    assert.equal(attended.origin?.surface, "sheet-list");
+    assert.deepEqual(attended.decision, {
+      mode: "attended",
+      owner: { kind: "surface", surface: "sheet-list", targetPath: attended.targets[0]!.path },
+    });
+    await h.provider.gate()!.discard(attended.id);
+
+    await h.send({
+      kind: "create-sheet-from-sentence",
+      worldId: WORLD_ID,
+      sheetType: "location",
+      name: "The Settled Quay",
+      sentence: "A quay founded by the Begin press.",
+      settle: true,
+    });
+    assert.equal(
+      (await h.provider.gate()!.listOpen()).some((proposal) => proposal.summary.includes("Settled Quay")),
+      false,
+      "the founding-build path accepts without leaving a card",
+    );
+    await h.provider.close();
+  });
+});
+
 function brokenAdapter(): HarnessAdapter {
   return {
     id: "broken",
@@ -186,6 +222,8 @@ describe("Studio proposal kind follows its target", () => {
       const proposals = await provider.gate()!.listOpen();
       assert.equal(proposals.length, 1);
       assert.equal(proposals[0]?.kind, "canon-edit");
+      assert.equal(proposals[0]?.origin?.surface, "canon-thread");
+      assert.equal(proposals[0]?.decision?.mode, "attended");
 
       await send({
         kind: "draft-with-studio",
@@ -195,6 +233,18 @@ describe("Studio proposal kind follows its target", () => {
         summary: "Unsupported draft",
       });
       assert.equal((await provider.gate()!.listOpen()).length, 1, "an unsupported target stages nothing");
+
+      await send({
+        kind: "draft-chapter",
+        worldId: WORLD_ID,
+        productionId: "the-ledger-of-nights",
+        chapterFile: "01-neap",
+        instruction: "Revise the opening.",
+      });
+      const chapter = (await provider.gate()!.listOpen()).find((proposal) => proposal.kind === "chapter-draft");
+      assert.ok(chapter, "the legacy coordinator command remains parseable");
+      assert.equal(chapter.decision, undefined, "dead code does not claim a durable attended card");
+      assert.equal(chapter.origin?.gesture, "legacy-draft-chapter-command");
     } finally {
       await coordinator.stop();
       await provider.close();

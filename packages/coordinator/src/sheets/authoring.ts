@@ -182,6 +182,8 @@ export async function createSheetFromSentence(
     sentence: string;
     /** Creating from inside a production files a guest (SPEC-020 R-1). */
     production?: string;
+    /** The existing destination surface that will hold the ordinary request's decision. */
+    attendedSurface?: "sheet-list" | "production-cast";
   },
 ): Promise<SentenceDraft> {
   const bundle = store.getBundle();
@@ -210,6 +212,18 @@ export async function createSheetFromSentence(
         ? `New ${input.sheetType} for ${input.production}: ${input.name}`
         : `New ${input.sheetType}: ${input.name}`,
     source: "chat:studio",
+    origin: {
+      surface: input.attendedSurface ?? "founding-build",
+      gesture: "create-sheet-from-sentence",
+    },
+    ...(input.attendedSurface !== undefined
+      ? {
+          decision: {
+            mode: "attended" as const,
+            owner: { kind: "surface" as const, surface: input.attendedSurface, targetPath: path },
+          },
+        }
+      : {}),
     targets: [{ path, content }],
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.

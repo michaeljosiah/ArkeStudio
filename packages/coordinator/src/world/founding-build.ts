@@ -31,7 +31,7 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
-import type { ProposalManager } from "../gate/proposals.js";
+import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
@@ -967,7 +967,7 @@ export class FoundingBuildService {
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).
-    const outcome = await gate.accept(draft.proposal.id).catch(() => null);
+    const outcome = await acceptDecided(gate, draft.proposal.id).catch(() => null);
     if (outcome === null || outcome.status !== "accepted") {
       await gate.discard(draft.proposal.id).catch(() => {});
       throw new Error(`the ${item.sheetType} sheet could not be settled${outcome ? ` (${outcome.status})` : ""}`);

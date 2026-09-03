@@ -7,6 +7,7 @@ import {
   DEFAULT_AUDIO_POLICY,
   type AudioPolicy,
   CHARACTER_ROLE_MAX,
+  ChapterFrontmatterSchema,
   EpisodeSchema,
   isGraphScene,
   newId,
@@ -20,6 +21,8 @@ import {
   StoryOverviewSchema,
   type SceneRecord,
   type Proposal,
+  type ProposalDecision,
+  type ProposalOrigin,
   type ProposalConflict,
   type ProposalOpenChoice,
   type ProposalSkill,
@@ -88,6 +91,16 @@ function sceneFlowProblem(path: string, content: string): string | null {
   if (!isGraphScene(record)) return null;
   const findings = validateSceneFlow(record.flow);
   return findings.length === 0 ? null : `the scene flow is not one path: ${findings.map((f) => f.message).join(" ")}`;
+}
+
+function chapterProblem(path: string, content: string): string | null {
+  if (classify(path).track !== "chapter") return null;
+  try {
+    ChapterFrontmatterSchema.parse(MarkdownFile.parse(content).data);
+    return null;
+  } catch (err) {
+    return `not a chapter: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`;
+  }
 }
 
 /** The refusal names the record in a person's words, not the commit track's. */
@@ -315,6 +328,10 @@ export interface StageInput {
   kind: Proposal["kind"];
   summary: string;
   source: string;
+  /** Immutable initiating surface. The source remains duplicated for old readers and commits. */
+  origin?: Omit<ProposalOrigin, "source">;
+  /** Where the still-outstanding human decision is being collected. */
+  decision?: ProposalDecision;
   /** World-relative paths to materialise. Created paths carry content and no live base. */
   targets: Array<{ path: string; content?: string }>;
   /**
@@ -403,6 +420,8 @@ export class ProposalManager {
       // #400): nothing should reach review that the scanner would then drop from the bundle.
       for (const target of input.targets) {
         if (target.content === undefined) continue;
+        const malformedChapter = chapterProblem(target.path, target.content);
+        if (malformedChapter) throw new Error(`${target.path} is ${malformedChapter}`);
         const track = classify(target.path).track;
         const schema = JSON_TRACK_SCHEMAS[track];
         if (!schema) continue;
@@ -458,6 +477,13 @@ export class ProposalManager {
         baseCanonRevision: this.store.getBundle().meta.canonRevision,
         reservedCanonIds,
         source: input.source,
+        origin: {
+          source: input.source,
+          surface: input.origin?.surface ?? input.source.split(":", 1)[0] ?? "unknown",
+          gesture: input.origin?.gesture ?? "stage",
+          ...(input.origin?.conversationId !== undefined ? { conversationId: input.origin.conversationId } : {}),
+        },
+        ...(input.decision !== undefined ? { decision: input.decision } : {}),
         ...(input.production !== undefined ? { production: input.production } : {}),
         created: at,
         draftRevision: 1,
@@ -1149,6 +1175,13 @@ export class ProposalManager {
         const collision = this.collidingShotIds(file.path, file.content);
         if (collision) problems.push({ path: file.path, message: collision });
         continue;
+      }
+      if (file.content !== undefined) {
+        const malformedChapter = chapterProblem(file.path, file.content);
+        if (malformedChapter) {
+          problems.push({ path: file.path, message: malformedChapter });
+          continue;
+        }
       }
       if (!file.path.startsWith("characters/") || file.content === undefined) continue;
       const role = roleOf(file.content);

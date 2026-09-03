@@ -96,6 +96,48 @@ export const ProposalSkillSchema = z
   .strict();
 export type ProposalSkill = z.infer<typeof ProposalSkillSchema>;
 
+/** Why and where a proposal began. Provenance never changes when decision ownership moves. */
+export const ProposalOriginSchema = z
+  .object({
+    source: z.string().min(1),
+    surface: z.string().min(1),
+    gesture: z.string().min(1),
+    conversationId: z.string().min(1).optional(),
+  })
+  .strict();
+export type ProposalOrigin = z.infer<typeof ProposalOriginSchema>;
+
+/** The durable surface currently responsible for collecting the proposal's decision. */
+export const ProposalDecisionOwnerSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("world-chat"),
+      conversationId: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("proposal-conversation"),
+      surface: z.string().min(1),
+      targetPath: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("surface"),
+      surface: z.string().min(1),
+      targetPath: z.string().min(1),
+    })
+    .strict(),
+]);
+export type ProposalDecisionOwner = z.infer<typeof ProposalDecisionOwnerSchema>;
+
+export const ProposalDecisionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("unattended") }).strict(),
+  z.object({ mode: z.literal("attended"), owner: ProposalDecisionOwnerSchema }).strict(),
+]);
+export type ProposalDecision = z.infer<typeof ProposalDecisionSchema>;
+
 export const ProposalSchema = z
   .object({
     id: ProposalIdSchema,
@@ -108,6 +150,10 @@ export const ProposalSchema = z
     reservedCanonIds: z.array(CanonIdSchema),
     /** Where the draft came from, e.g. "chat:sess_9f2" | "form" | "import:ar_…". */
     source: z.string().min(1),
+    /** Immutable initiating gesture and surface (SPEC-040 R-1a). */
+    origin: ProposalOriginSchema.optional(),
+    /** Mutable ownership of the outstanding decision; absent on records from older builds. */
+    decision: ProposalDecisionSchema.optional(),
     /**
      * The production this draft belongs to, when it stages a guest (SPEC-020 R-8).
      *
@@ -171,6 +217,52 @@ export const ProposalSchema = z
   })
   .strict();
 export type Proposal = z.infer<typeof ProposalSchema>;
+
+export interface ProposalConversationState {
+  id: string;
+  status: "open" | "closed" | "archived";
+}
+
+/**
+ * Origin for display and audit, including proposals written before origin was recorded directly.
+ * Existing source strings explain old work, but never decide whether it belongs in a queue.
+ */
+export function proposalOriginOf(proposal: Proposal): ProposalOrigin {
+  if (proposal.origin) return proposal.origin;
+  const conversationIds = [...new Set((proposal.worldChatOrigins ?? []).map((origin) => origin.conversationId))];
+  return {
+    source: proposal.source,
+    surface: conversationIds.length === 1 ? "world-chat" : proposal.source.split(":", 1)[0] || "unknown",
+    gesture: "legacy-stage",
+    ...(conversationIds.length === 1 ? { conversationId: conversationIds[0] } : {}),
+  };
+}
+
+/**
+ * Effective ownership for cards and, in #715, queue filtering (SPEC-040 R-1b/R-16).
+ * A World Chat id is evidence only while that durable conversation still exists and is open.
+ */
+export function proposalDecisionOf(
+  proposal: Proposal,
+  conversations: readonly ProposalConversationState[] = [],
+): ProposalDecision {
+  const liveConversation = (conversationId: string) =>
+    conversations.some((conversation) => conversation.id === conversationId && conversation.status === "open");
+
+  if (proposal.decision?.mode === "attended") {
+    if (proposal.decision.owner.kind !== "world-chat" || liveConversation(proposal.decision.owner.conversationId)) {
+      return proposal.decision;
+    }
+    return { mode: "unattended" };
+  }
+  if (proposal.decision?.mode === "unattended") return proposal.decision;
+
+  const conversationIds = [...new Set((proposal.worldChatOrigins ?? []).map((origin) => origin.conversationId))];
+  if (conversationIds.length === 1 && liveConversation(conversationIds[0]!)) {
+    return { mode: "attended", owner: { kind: "world-chat", conversationId: conversationIds[0]! } };
+  }
+  return { mode: "unattended" };
+}
 
 // ---------------------------------------------------------------------------
 // Ripples (§3.4) — computed from the index, never asked of the model. The set stored with a

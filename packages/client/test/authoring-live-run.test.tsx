@@ -109,6 +109,80 @@ describe("the gate over a proposal being written into (issue 239)", () => {
   });
 });
 
+describe("the reusable attended gate card (SPEC-040)", () => {
+  it("keeps every recovery control and the computed review and ripples", () => {
+    const base = staged();
+    const complete: StagedProposal = {
+      ...base,
+      proposal: {
+        ...base.proposal,
+        pendingReview: true,
+        conflicts: [{
+          path: "characters/maren-kest.md",
+          field: "Essence",
+          base: "Before",
+          mine: "Mine",
+          theirs: "Theirs",
+        }],
+        openChoices: [{
+          choiceId: "choice-1",
+          kind: "unchecked-novelty",
+          question: "Which account is true?",
+          options: [{ optionId: "mine", label: "The draft" }, { optionId: "theirs", label: "The world" }],
+        }],
+      },
+      review: {
+        targets: [{
+          path: "characters/maren-kest.md",
+          label: "Maren Kest",
+          kind: "character sheet · v4",
+          action: "amend",
+          fields: [{ field: "Essence", before: "Before", proposed: "After" }],
+        }],
+      },
+      ripple: {
+        computedAt: "2026-09-03T12:00:00.000Z",
+        governing: false,
+        items: [{ kind: "owning-canon-rules", summary: "Two rules may need review", targets: ["CANON-002"] }],
+      },
+    };
+    __setStateForTest(worldWith([complete]), {
+      gateNotices: { [PROPOSAL]: { reason: "stale", detail: "The exact stale refusal." } },
+    });
+    const html = renderToString(<ConnectedProposalPanel staged={complete} />);
+    for (const text of [
+      "Before",
+      "After",
+      "Two rules may need review",
+      "The exact stale refusal.",
+      "Rebase onto current",
+      "I&#x27;ve reviewed the merged result",
+      "This proposal",
+      "The world now",
+      "Which account is true?",
+      "Discard",
+    ]) {
+      assert.ok(html.includes(text), `${text} is on the shared card`);
+    }
+  });
+
+  it("offers explicit reconfirmation against the authoritative ripple signature", () => {
+    const proposal = staged();
+    __setStateForTest(worldWith([proposal]), {
+      gateNotices: {
+        [PROPOSAL]: {
+          reason: "needs-reconfirm",
+          detail: "The consequences grew.",
+          authoritativeSignature: "signature-2",
+        },
+      },
+    });
+    const html = renderToString(<ConnectedProposalPanel staged={proposal} />);
+    assert.match(html, /Accept with these consequences/);
+    assert.match(html, /The consequences grew/);
+  });
+});
+
 /**
  * The refusal describes the run, not the proposal — so it has to leave when the run does.
  *

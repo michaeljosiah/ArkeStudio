@@ -61,6 +61,20 @@ describe("scene identity and explicit order (issue 387)", () => {
     );
   });
 
+  it("discarding a legacy staged scene releases its claimed identity", async () => {
+    const { store, gate } = await open();
+    const first = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The discarded bell.",
+    });
+    await gate.discard(first.proposalId);
+    const replacement = await draftSceneSkeleton(store, gate, {
+      productionId: "saltlight",
+      brief: "The discarded bell.",
+    });
+    assert.equal(replacement.path, first.path, "discard releases the staged stem rather than burning it");
+  });
+
   it("a drafted scene is told where the production's shot ids start, and the gate refuses a clash", async () => {
     /*
      * Driven live 2026-08-22: two agent-drafted scenes each numbered their shots from sh_1, and

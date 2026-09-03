@@ -9,12 +9,11 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
+import { proposalDecisionOf } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
-  acceptProposal,
   cancelWorldChat,
   createWorldChat,
-  discardProposal,
   frameRunCommand,
   rejectWorldChatPoint,
   restoreBible,
@@ -31,8 +30,9 @@ import {
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { Working } from "./working.js";
-import { Badge, Button, IconButton, cx } from "./ui.js";
-import { More, Pin } from "./icons.js";
+import { ConnectedProposalPanel } from "../domain/connected.js";
+import { Button, IconButton, cx } from "./ui.js";
+import { Pin } from "./icons.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -962,11 +962,9 @@ function WrapUp({
  * not make.
  */
 export function StagedDecision({
-  worldId,
   subject,
   staged,
   writes,
-  applyLabel = "Apply changes",
   items,
   onAccepted,
 }: {
@@ -978,131 +976,23 @@ export function StagedDecision({
   writes: string;
   /** A dock can name the concrete things this draft would touch instead of repeating its file. */
   items?: readonly { label: string; meta?: string }[];
-  applyLabel?: string;
   /**
    * Where accepting lands you (turn 91). Absent when this is docked beside the thing it decides
    * (turns 99, 100): you are already on it, and the change appears where it lives.
    */
   onAccepted?: () => void;
 }) {
-  /*
-   * Set aside by `Keep discussing` (turn 101). The change is still staged and still on disk —
-   * this is a card being folded to a line, not a proposal being dropped, which is the whole
-   * difference between the two buttons.
-   */
-  const [aside, setAside] = useState(false);
-  const targets = staged.review?.targets ?? [];
-  const fields = targets.flatMap((t) => t.fields);
-  /*
-   * Whether to show the before-and-after (turn 101, binding three). A diff is what you show when
-   * a change would overwrite or delete something a person wrote; for anything additive it is a
-   * form standing between somebody and their own work. The rule reads the gate's own review
-   * rather than guessing from the proposal kind: `amend` over a field that already had words, or
-   * a field proposed as nothing, is a change that takes something away.
-   */
-  const overwrites =
-    fields.some((f) => f.proposed === null) ||
-    targets.some((t) => t.action === "amend" && t.fields.some((f) => f.before !== null));
-  const count = targets.length;
-  if (aside) {
-    return (
-      <button type="button" className="fy-madeaside" onClick={() => setAside(false)}>
-        <span className="fy-dot fy-dot--warn" />
-        {count} change{count === 1 ? "" : "s"} waiting
-        <span className="fy-mono">show</span>
-      </button>
-    );
-  }
+  const world = useStore().state?.world;
+  if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
   return (
-    <div className="fy-made" aria-label={`Changes to ${subject}`}>
-      {/*
-        The things themselves, not fields with a before and an after (turn 101). What Arke said
-        about them is the message above this card, in the transcript, where a sentence belongs.
-      */}
-      {items !== undefined && items.length > 0 ? (
-        <div className="fy-made__list">
-          {items.map((item) => (
-            <div key={`${item.label}:${item.meta ?? ""}`} className="fy-made__row">
-              <span className="fy-made__tag">SHOT</span>
-              <span className="fy-made__name">{item.label}</span>
-              {item.meta === undefined ? null : <span className="fy-mono">{item.meta}</span>}
-            </div>
-          ))}
-        </div>
-      ) : overwrites ? (
-        <div className="fy-made__diff">
-          {/* Grouped under the thing each field changes (review 2026-08-22): a wrap-up amending
-              three episodes rendered three cards all reading "Opens" with duplicate keys and
-              nothing saying which episode each replacement belonged to. */}
-          {targets.map((t) => (
-            <div key={t.path}>
-              {targets.length > 1 && (
-                <div className="fy-mono" style={{ marginBottom: 6 }}>
-                  {t.label}
-                </div>
-              )}
-              {t.fields.map((field) => (
-                <div key={`${t.path}:${field.field}`} className="fy-draftcard">
-                  <div className="fy-draftcard__head">
-                    <span className="fy-eyebrow-sm">{field.field}</span>
-                    <Badge tone="warning">replaces</Badge>
-                  </div>
-                  <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 6 }}>
-                    {field.proposed ?? "(removed)"}
-                  </div>
-                  {field.before !== null && <div className="fy-draftcard__was">Now: “{field.before}”</div>}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="fy-made__list">
-          {targets.map((t) => (
-            <div key={t.path} className="fy-made__row">
-              <span className="fy-made__tag">{t.action === "create" ? "NEW" : "CHANGED"}</span>
-              <span className="fy-made__name">{t.label}</span>
-              <span className="fy-mono">{t.kind}</span>
-            </div>
-          ))}
-          {targets.length === 0 && (
-            <div className="fy-made__row">
-              <span className="fy-made__name">{staged.proposal.summary}</span>
-            </div>
-          )}
-        </div>
+    <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
+      <ConnectedProposalPanel
+        staged={staged}
+        onAccepted={onAccepted}
+      />
+      {items !== undefined && items.length > 0 && (
+        <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>
       )}
-      <div className="fy-made__acts">
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={!worldId}
-          onClick={() => {
-            if (!worldId) return;
-            acceptProposal(worldId, staged.proposal.id);
-            // Applying lands you on the thing you changed (turn 91) — or leaves you there, when
-            // the panel is docked on it already (turns 99, 100).
-            onAccepted?.();
-          }}
-        >
-          {applyLabel}
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => setAside(true)}>
-          Keep discussing
-        </Button>
-        <span style={{ flex: 1 }} />
-        {/* Dropping it is a real act and lives where a real act lives — away from the yes. */}
-        <button
-          type="button"
-          className="fy-made__drop"
-          title="Drop these changes"
-          aria-label="Drop these changes"
-          disabled={!worldId}
-          onClick={() => worldId && discardProposal(worldId, staged.proposal.id)}
-        >
-          <More size={14} />
-        </button>
-      </div>
       <div className="fy-mono">{writes}</div>
     </div>
   );

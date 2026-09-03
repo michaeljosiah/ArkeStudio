@@ -4716,23 +4716,32 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!gate || !store || !this.authoring) return;
         try {
-          const target = classify(msg.path).track;
-          const proposalKind =
-            target === "sheet"
-              ? "sheet-edit"
-              : target === "canon"
-                ? "canon-edit"
-                : (() => {
-                    throw new Error(`Studio drafting does not support ${msg.path}`);
-                  })();
           // A proposalId continues that proposal's conversation — same session, same agent
           // context; without one, a fresh proposal is staged and the conversation begins.
           let proposalId = msg.proposalId ?? null;
           if (proposalId === null) {
+            const target = classify(msg.path).track;
+            const proposalKind =
+              target === "sheet"
+                ? "sheet-edit"
+                : target === "canon"
+                  ? "canon-edit"
+                  : (() => {
+                      throw new Error(`Studio drafting does not support ${msg.path}`);
+                    })();
             const proposal = await gate.stage({
               kind: proposalKind,
               summary: msg.summary,
               source: "chat:studio",
+              origin: { surface: target === "sheet" ? "sheet-studio" : "canon-thread", gesture: "start-draft" },
+              decision: {
+                mode: "attended",
+                owner: {
+                  kind: "proposal-conversation",
+                  surface: target === "sheet" ? "sheet-studio" : "canon-thread",
+                  targetPath: msg.path,
+                },
+              },
               targets: [{ path: msg.path }],
             });
             proposalId = proposal.id;
@@ -4743,6 +4752,11 @@ export class Coordinator {
               proposalId: proposal.id,
             });
             await this.refreshWorldSnapshot(msg.worldId);
+          } else {
+            const proposal = await gate.readManifest(proposalId);
+            if (!proposal.targets.some((target) => target.path === msg.path)) {
+              throw new Error(`${msg.path} is not part of ${proposalId}`);
+            }
           }
           const worldQueryUrl = await this.worldQuery.start();
           // Fire and watch: progress and the final status arrive as events (R-13).
@@ -5301,6 +5315,11 @@ export class Coordinator {
             name: msg.name,
             sentence: msg.sentence,
             ...(msg.production !== undefined ? { production: msg.production } : {}),
+            ...(msg.settle === true
+              ? {}
+              : {
+                  attendedSurface: msg.production !== undefined ? "production-cast" : "sheet-list",
+                }),
           });
           this.emit({
             at: new Date().toISOString(),
@@ -5315,7 +5334,7 @@ export class Coordinator {
           // stays staged and the author can settle it themselves.
           const settle = async () => {
             if (msg.settle !== true) return;
-            const outcome = await gate.accept(draft.proposal.id).catch(() => null);
+            const outcome = await acceptDecided(gate, draft.proposal.id).catch(() => null);
             if (outcome === null || outcome.status !== "accepted") {
               void this.appLog?.append({
                 kind: "sheet.settle-refused",
@@ -6570,6 +6589,9 @@ export class Coordinator {
             kind: "chapter-draft",
             summary: `Draft: ${msg.chapterFile}`,
             source: "chat:studio",
+            // There is no client caller or durable chapter conversation. This remains unattended
+            // until a real surface exists; recording an attended owner here would hide dead code.
+            origin: { surface: "coordinator", gesture: "legacy-draft-chapter-command" },
             targets: [{ path }],
           });
           this.emit({
