@@ -5,8 +5,10 @@ import {
   effectiveStageBlocking,
   ShotSchema,
   ShotStagingSchema,
+  MAX_STAGE_WALK_SPEED_MPS,
   STAGE_FRAME_RATE,
   stageShot,
+  stageWalkSpeed,
   stageFrameCount,
   stagePlayblastIsStale,
   stagingBeats,
@@ -86,14 +88,14 @@ describe("the Stage's arithmetic", () => {
         { t: 15, p: [0, 1.45, -2.9] as [number, number, number], l: [0, 1.25, 0] as [number, number, number], anchor: "maren-kest", track: "maren-kest" },
       ],
     };
-    const beats = stagingBeats(staging, (id) => (id === "maren-kest" ? "Maren" : id));
+    const beats = stagingBeats(staging, (id) => (id === "maren-kest" ? "Maren" : id), 15);
     assert.equal(beats.length, 4);
     // She walks toward -Z, so +Z is behind her and -X is her left.
     assert.match(beats[0]!, /^0\.0s — 3\.0m behind Maren, 1\.55m high, aimed at Maren$/);
     assert.match(beats[1]!, /to the left of Maren/);
     assert.match(beats[2]!, /above Maren/);
     assert.match(beats[3]!, /in front of Maren/);
-    const clause = stagingPromptClause(staging, (id) => (id === "maren-kest" ? "Maren" : id));
+    const clause = stagingPromptClause(staging, (id) => (id === "maren-kest" ? "Maren" : id), 15);
     assert.match(clause, /^Camera move, orbit, blocked out on the stage \(4 keys\)\. Maren walks through the shot\./);
     assert.ok(clause.includes(beats[3]!));
   });
@@ -110,13 +112,13 @@ describe("the Stage's arithmetic", () => {
         { t: 4, p: [0, 1.5, 3], l: [0, 1.2, 0] },
       ],
     };
-    const [tracked, free] = stagingBeats(staging, () => "Maren");
+    const [tracked, free] = stagingBeats(staging, () => "Maren", 4);
     assert.match(tracked!, /^0.0s — 5.8m /, "the beat is measured to the figure the key tracks");
     assert.match(tracked!, /Maren, 1.50m high, aimed at Maren$/);
     assert.match(free!, /^4.0s — 3.0m in front of the aim point/, "an untracked key still measures to its aim point");
     // A walker is read where the key's time puts them along the path.
     const walking: ResolvedShotStaging = { ...staging, cast: [{ sheetId: "maren-kest", x: 0, z: 0, to: [0, -8] }] };
-    const mid = stagingBeats({ ...walking, keys: [{ t: 2, p: [0, 1.5, 0], l: [0, 1.2, 0], track: "maren-kest" }, { t: 4, p: [0, 1.5, 0], l: [0, 1.2, 0] }] }, () => "Maren");
+    const mid = stagingBeats({ ...walking, keys: [{ t: 2, p: [0, 1.5, 0], l: [0, 1.2, 0], track: "maren-kest" }, { t: 4, p: [0, 1.5, 0], l: [0, 1.2, 0] }] }, () => "Maren", 4);
     assert.match(mid[0]!, /^2.0s — 4.0m /, "halfway through a four-second shot she is 4m down an 8m walk");
   });
 
@@ -128,6 +130,33 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagingMoveWord(keys, [{ sheetId: "maren-kest", x: 0, z: 0, to: [0, -6] }]), "tracking");
     assert.equal(stagingMoveWord(keys, [{ sheetId: "maren-kest", x: 0, z: 0 }]), "static", "the same offset from a figure who holds is a static camera");
     assert.equal(stagingMoveWord(keys), "static", "without the cast the word is what the keys alone say");
+  });
+
+  it("warns instead of calling an implausible path a walk", () => {
+    const figure = { sheetId: "maren-kest", x: 0, z: 0, to: [20, 0] as [number, number] };
+    assert.equal(stageWalkSpeed(figure, 3), 20 / 3);
+    assert.equal(stageWalkSpeed({ ...figure, to: [4.4, 0] }, 2), MAX_STAGE_WALK_SPEED_MPS, "the ceiling is still a walk");
+    const staging: ResolvedShotStaging = {
+      version: 1,
+      cast: [figure],
+      sets: [],
+      keys: [
+        { t: 0, p: [0, 1.5, 3], l: [0, 1, 0], track: "maren-kest" },
+        { t: 10, p: [0, 1.5, 3], l: [0, 1, 0], track: "maren-kest" },
+      ],
+    };
+    const beats = stagingBeats(staging, () => "Maren", 3);
+    assert.match(beats[0]!, /Maren · 20\.0m in 3\.0s · 6\.67m\/s · too fast for a walk/);
+    const clause = stagingPromptClause(staging, () => "Maren", 3);
+    assert.doesNotMatch(clause, /Maren walks through the shot/);
+    assert.match(clause, /Blocking warning/);
+    assert.doesNotMatch(clause, /10\.0s/, "camera beats use the actual shot duration too");
+    const limit = { ...staging, cast: [{ ...figure, to: [4.4, 0] as [number, number] }] };
+    assert.doesNotMatch(stagingPromptClause(limit, () => "Maren", 2), /Blocking warning/);
+    const over = { ...staging, cast: [{ ...figure, to: [4.42, 0] as [number, number] }] };
+    assert.match(stagingPromptClause(over, () => "Maren", 2), /2\.21m\/s · too fast/);
+    const barelyOver = { ...staging, cast: [{ ...figure, to: [6.61, 0] as [number, number] }] };
+    assert.match(stagingPromptClause(barelyOver, () => "Maren", 3), /2\.21m\/s · too fast/);
   });
 
   it("holds a staging to the shot's length: the end key moves to the duration and interior keys keep ahead of it", () => {

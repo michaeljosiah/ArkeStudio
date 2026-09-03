@@ -402,6 +402,23 @@ describe("scene detail owns the workspace", () => {
     assert.match(stage.textContent ?? "", /1\.55m/);
   });
 
+  it("marks a blocked walk whose implied speed is too fast", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.durationSec = 3;
+    shot.staging = {
+      version: 1,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0, to: [20, 0] }],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }, { t: 3, p: [0, 1.5, 3], l: [0, 1, 0] }],
+    };
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /Maren Kestwalks · too fast/);
+  });
+
   it("plays a staging kept before the shot was retimed to its end pose, and repairs it on Keep", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

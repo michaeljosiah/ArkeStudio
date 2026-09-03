@@ -3,10 +3,12 @@ import {
   DEFAULT_SHOT_SEC,
   effectiveStageBlocking,
   effectiveFraming,
+  MAX_STAGE_WALK_SPEED_MPS,
   orderedShots,
   resolveCast,
   resolvedShotStaging,
   stageShot,
+  stageWalkSpeed,
   stagingRetimed,
   stagingFov,
   stagingMoveWord,
@@ -764,13 +766,17 @@ export function SceneStage({
               {working.cast.length === 0 ? null : (
                 <div className="fy-swstage__block">
                   <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
-                  {working.cast.map((figure, position) => (
-                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen} onClick={() => toggleWalk(figure.sheetId)}>
-                      <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
-                      <span>{nameOf(figure.sheetId)}</span>
-                      <span data-walks={figure.to === undefined ? undefined : "true"}>{figure.to === undefined ? "holds" : "walks"}</span>
-                    </button>
-                  ))}
+                  {working.cast.map((figure, position) => {
+                    const speed = stageWalkSpeed(figure, durationSec);
+                    const tooFast = speed !== null && speed > MAX_STAGE_WALK_SPEED_MPS;
+                    return (
+                      <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen} onClick={() => toggleWalk(figure.sheetId)}>
+                        <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
+                        <span>{nameOf(figure.sheetId)}</span>
+                        <span data-walks={figure.to === undefined ? undefined : "true"}>{figure.to === undefined ? "holds" : tooFast ? "walks · too fast" : "walks"}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               )}
 
