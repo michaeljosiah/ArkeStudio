@@ -19,6 +19,7 @@ function staged(over: {
   summary?: string;
   paths?: string[];
   review?: StagedProposal["review"];
+  existing?: boolean;
 }): StagedProposal {
   return {
     proposal: {
@@ -27,8 +28,8 @@ function staged(over: {
       summary: over.summary ?? "New location: The Bell Market",
       targets: (over.paths ?? ["locations/the-bell-market.md"]).map((path) => ({
         path,
-        baseVersion: null,
-        baseHash: null,
+        baseVersion: over.existing ? 1 : null,
+        baseHash: over.existing ? "sha256:9f2c66a1b0e4d8c2" : null,
       })),
       baseCanonRevision: 42,
       reservedCanonIds: [],
@@ -49,7 +50,12 @@ describe("sheets that have been asked for and have not arrived (issue 228)", () 
   it("finds the pending sheet of a kind, named as the staged file names it", () => {
     const pending = pendingSheets([staged({ review: review("locations/the-bell-market.md", "The Bell Market") })], "location");
     assert.deepEqual(pending, [
-      { proposalId: PROPOSAL_ID, name: "The Bell Market", path: "locations/the-bell-market.md" },
+      {
+        proposalId: PROPOSAL_ID,
+        name: "The Bell Market",
+        path: "locations/the-bell-market.md",
+        decision: { mode: "unattended" },
+      },
     ]);
   });
 
@@ -65,11 +71,16 @@ describe("sheets that have been asked for and have not arrived (issue 228)", () 
     assert.deepEqual(pendingSheets(proposals, "faction").map((p) => p.path), ["factions/the-ebb-council.md"]);
   });
 
-  it("counts nothing that is not a sheet arriving", () => {
+  it("counts no existing sheet target, whatever display kind the proposal carries", () => {
     for (const kind of ["sheet-edit", "new-canon", "art-direction", "scene-draft"] as const) {
-      const proposals = [staged({ kind, paths: ["locations/the-bell-market.md"] })];
-      assert.deepEqual(pendingSheets(proposals, "location"), [], `${kind} is not a sheet arriving`);
+      const proposals = [staged({ kind, paths: ["locations/the-bell-market.md"], existing: true })];
+      assert.deepEqual(pendingSheets(proposals, "location"), [], `${kind} targets an existing sheet`);
     }
+  });
+
+  it("finds a real creation even when an old handler assigned the wrong kind", () => {
+    const pending = pendingSheets([staged({ kind: "sheet-edit" })], "location");
+    assert.deepEqual(pending.map((item) => item.path), ["locations/the-bell-market.md"]);
   });
 
   it("skips an amend that rides along on a new-sheet proposal", () => {
@@ -129,14 +140,9 @@ describe("sheets that have been asked for and have not arrived (issue 228)", () 
     assert.deepEqual(pending.map((p) => p.name), ["The Bell Market"]);
   });
 
-  it("declines to guess when a wrap-up target has no review to say create or amend", () => {
-    // A `new-sheet` is a creation by definition, so it counts without one. A `worldbuilding`
-    // target could be either, and inventing a drafting card for an edit would double a sheet
-    // that is already on the screen.
-    const unreviewed = (kind: StagedProposal["proposal"]["kind"]) =>
-      pendingSheets([staged({ kind, paths: ["locations/the-bell-market.md"] })], "location").length;
-    assert.equal(unreviewed("new-sheet"), 1);
-    assert.equal(unreviewed("worldbuilding"), 0);
+  it("uses the captured base when a review projection is unavailable", () => {
+    assert.equal(pendingSheets([staged({ kind: "worldbuilding" })], "location").length, 1);
+    assert.equal(pendingSheets([staged({ kind: "new-sheet", existing: true })], "location").length, 0);
   });
 
   it("still shows a row when the review could not be computed", () => {

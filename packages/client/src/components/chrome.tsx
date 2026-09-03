@@ -2,6 +2,7 @@ import { useNavigate } from "react-router";
 import { ActivityIcon, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
+import { computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
 
 /**
  * The app's chrome: one bar, drawn the same way on every screen.
@@ -46,15 +47,15 @@ export function AppChrome({
 }) {
   const navigate = useNavigate();
   const { state } = useStore();
-  // The dot is the notification: a job that could not be reconciled, or a queue someone paused.
-  // Same source as the Activity screen's "Needs you" — it never lights for anything else.
-  const attention =
-    (state?.app.jobs.some((j) => j.status === "needs-reconciliation") ?? false) ||
-    (state?.app.queues.some((q) => q.paused) ?? false);
+  // Same derivation as Activity: rare unattended proposals must light this from every screen,
+  // alongside reconciliation, paused providers, external edits and paid work awaiting review.
+  const attention = state ? computeNeedsYou(state).length > 0 : false;
   // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the
   // world navigation follows. Its dot means the same thing as activity's: something wants you.
   const openWorldId = state?.world?.meta.worldId;
-  const waiting = state?.world?.proposals.length ?? 0;
+  const waiting = state?.world
+    ? unattendedProposalsOf(state.world.proposals, state.world.conversations).length
+    : 0;
   return (
     <div className={cx("fy-titlebar", divided && "fy-titlebar--divided")}>
       <div className="fy-titlebar__side">

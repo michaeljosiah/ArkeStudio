@@ -19,7 +19,13 @@ import { HealthStatusSchema } from "./events.js";
 import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
-import { ProposalSchema, RipplePreviewSchema } from "./proposal.js";
+import {
+  ProposalSchema,
+  RipplePreviewSchema,
+  proposalDecisionOf,
+  type ProposalConversationState,
+  type ProposalDecision,
+} from "./proposal.js";
 import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
@@ -102,6 +108,7 @@ export const WorldSummarySchema = z
     attention: z
       .object({
         unreviewedTakes: z.number().int().min(0),
+        /** Unattended open proposals as of this snapshot; the field name remains wire-compatible. */
         openProposals: z.number().int().min(0),
         asOf: IsoDateTimeSchema,
       })
@@ -569,6 +576,8 @@ export interface PendingSheet {
   path: string;
   /** The production it will belong to, if it is a guest (SPEC-020 R-8). */
   production?: string;
+  /** The effective place that owns its decision now, including orphaned World Chat drafts. */
+  decision: ProposalDecision;
 }
 
 /** "New location: The Bell Market" → "The Bell Market". */
@@ -589,15 +598,9 @@ function nameFromPath(path: string): string {
  * Matched on the target path, because that is what decides which list a sheet lands in — the
  * summary is display copy and the slug is not a type.
  *
- * Two kinds of proposal can bring a sheet into being, and they are read differently. A
- * `new-sheet` is a creation by definition — the form staged one skeleton — so its target counts
- * even when the review could not be computed; a file that will not parse is exactly when
- * someone most needs to see that something is there, and the name degrades through the summary
- * to the slug rather than the row disappearing. A `worldbuilding` proposal is the several
- * changes one World Chat turned into, and it mixes creations with amendments freely, so only a
- * target the review calls a create counts. Without a review there is no way to tell those
- * apart, and inventing a drafting card for an edit to a sheet already in the list would double
- * it on screen.
+ * Creation comes from the target's review action, falling back to its captured null base when a
+ * malformed draft has no review. Proposal kind is deliberately irrelevant: older handlers have
+ * mislabelled valid targets, while the captured base still says whether the file already existed.
  */
 /**
  * The pending sheets the world itself is waiting on (SPEC-020 R-8). A guest under review is not
@@ -613,21 +616,26 @@ export function pendingGuestsOf(pending: PendingSheet[], productionId: string): 
   return pending.filter((p) => p.production === productionId);
 }
 
-export function pendingSheets(proposals: readonly StagedProposal[], kind: SheetKind): PendingSheet[] {
+export function pendingSheets(
+  proposals: readonly StagedProposal[],
+  kind: SheetKind,
+  conversations: readonly ProposalConversationState[] = [],
+): PendingSheet[] {
   const prefix = `${sheetDir(kind)}/`;
   const pending: PendingSheet[] = [];
   for (const staged of proposals) {
-    const creation = staged.proposal.kind === "new-sheet";
-    if (!creation && staged.proposal.kind !== "worldbuilding") continue;
     for (const target of staged.proposal.targets) {
       if (!target.path.startsWith(prefix)) continue;
       const reviewed = staged.review?.targets.find((candidate) => candidate.path === target.path);
-      if (reviewed ? reviewed.action !== "create" : !creation) continue;
+      // The target says whether a sheet is being created. Kind is display/provenance data and
+      // legacy handlers assigned it incorrectly, so it must not decide this projection.
+      if (reviewed ? reviewed.action !== "create" : target.baseVersion !== null || target.baseHash !== null) continue;
       pending.push({
         proposalId: staged.proposal.id,
         name: reviewed?.label ?? nameFromSummary(staged.proposal.summary) ?? nameFromPath(target.path),
         path: target.path,
         ...(staged.proposal.production !== undefined ? { production: staged.proposal.production } : {}),
+        decision: proposalDecisionOf(staged.proposal, conversations),
       });
     }
   }

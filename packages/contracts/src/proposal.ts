@@ -246,6 +246,10 @@ export function proposalDecisionOf(
   proposal: Proposal,
   conversations: readonly ProposalConversationState[] = [],
 ): ProposalDecision {
+  // A question only the person can answer is itself the reason Approvals exists. While it is
+  // unanswered it owns the decision, even if the draft began in a conversation still open.
+  if ((proposal.openChoices?.length ?? 0) > 0) return { mode: "unattended" };
+
   const liveConversation = (conversationId: string) =>
     conversations.some((conversation) => conversation.id === conversationId && conversation.status === "open");
 
@@ -262,6 +266,14 @@ export function proposalDecisionOf(
     return { mode: "attended", owner: { kind: "world-chat", conversationId: conversationIds[0]! } };
   }
   return { mode: "unattended" };
+}
+
+/** Proposals whose decision has no live attended owner (SPEC-040 R-18/R-19). */
+export function unattendedProposalsOf<T extends { proposal: Proposal }>(
+  proposals: readonly T[],
+  conversations: readonly ProposalConversationState[] = [],
+): T[] {
+  return proposals.filter((staged) => proposalDecisionOf(staged.proposal, conversations).mode === "unattended");
 }
 
 // ---------------------------------------------------------------------------

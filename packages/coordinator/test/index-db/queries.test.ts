@@ -190,6 +190,32 @@ describe("needs-you (R-14) — computed, never stored", () => {
     const review = items.find((i) => i.kind === "review")!;
     assert.equal(review.count, 2, "tk_A1 (frame) and tk_D4 await review");
   });
+
+  it("projects only unattended proposals", async () => {
+    const { bundle } = await openFixtureIndex().then(async (x) => {
+      x.index.close();
+      return x;
+    });
+    const conversation = bundle.conversations[0]!;
+    const template = bundle.proposals[0]!;
+    const attended = {
+      ...template,
+      proposal: {
+        ...template.proposal,
+        decision: { mode: "attended" as const, owner: { kind: "world-chat" as const, conversationId: conversation.id } },
+      },
+    };
+    const orphaned = {
+      ...template,
+      proposal: {
+        ...template.proposal,
+        id: "pr_01J8H0000000000000000000Q1" as typeof template.proposal.id,
+        decision: { mode: "attended" as const, owner: { kind: "world-chat" as const, conversationId: "cv_missing" } },
+      },
+    };
+    const item = needsYou({ ...bundle, proposals: [attended, orphaned] }, []).find((entry) => entry.kind === "proposal");
+    assert.equal(item?.count, 1);
+  });
 });
 
 describe("sheet search (#70 §9.2)", () => {

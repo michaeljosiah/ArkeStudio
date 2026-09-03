@@ -1702,7 +1702,7 @@ describe("the generation-session handoff (SPEC-036 R-23)", () => {
 });
 
 describe("staged scene changes stay in place but inert until applied (T-12)", () => {
-  it("draws a proposed shot in both views, excludes it from metrics, and keeps it after Keep discussing", async () => {
+  it("draws a proposed shot in both views, excludes it from metrics, and accepts it from the attended card", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -1720,6 +1720,10 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
         baseCanonRevision: 42,
         reservedCanonIds: [],
         source: "chat:scene",
+        decision: {
+          mode: "attended",
+          owner: { kind: "proposal-conversation", surface: "scene-workspace", targetPath: path },
+        },
         created: "2026-08-30T12:00:00Z",
         draftRevision: 1,
       },
@@ -1734,19 +1738,14 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
     assert.equal(stagedRow.getAttribute("data-staged"), "true");
     assert.equal(stagedRow.getAttribute("aria-disabled"), "true");
     assert.match(q(mounted, ".fy-sw__metrics")?.textContent ?? "", new RegExp(`^${orderedShots(accepted).length} shots`));
-    assert.ok(all(mounted, "button").some((button) => button.textContent === "Apply to shots"));
-    assert.match(q(mounted, ".fy-made")?.textContent ?? "", /Maren hears it land.*new/);
+    assert.ok(all(mounted, "button").some((button) => button.textContent === "Accept"));
+    assert.match(q(mounted, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren hears it land/);
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     assert.equal(q(mounted, '.fy-swnode[data-shot-id="sh_999"]')?.getAttribute("data-staged"), "true");
-    const sentBeforeKeepDiscussing = sent.length;
-    await click(all(mounted, "button").find((button) => button.textContent === "Keep discussing")!);
-    assert.ok(q(mounted, '.fy-swnode[data-shot-id="sh_999"]'), "folding the decision does not drop the proposal");
-    assert.equal(sent.length, sentBeforeKeepDiscussing, "Keep discussing is not a write or a discard");
 
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
-    await click(q(mounted, ".fy-madeaside")!);
-    await click(all(mounted, "button").find((button) => button.textContent === "Apply to shots")!);
+    await click(all(mounted, "button").find((button) => button.textContent === "Accept")!);
     assert.equal(sent.at(-1)?.kind, "proposal-accept");
   });
 });

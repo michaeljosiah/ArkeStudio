@@ -61,7 +61,11 @@ function worldChatProposal(over: Partial<StagedProposal["proposal"]> = {}): Stag
   } as StagedProposal;
 }
 
-function stateWith(proposals: StagedProposal[], notCarried: unknown[] = []): ClientState {
+function stateWith(
+  proposals: StagedProposal[],
+  notCarried: unknown[] = [],
+  status: "open" | "closed" = "closed",
+): ClientState {
   return {
     ...FIXTURE_STATE,
     world: {
@@ -71,7 +75,7 @@ function stateWith(proposals: StagedProposal[], notCarried: unknown[] = []): Cli
         {
           id: CONVERSATION as never,
           title: "The bells and the lock",
-          status: "closed",
+          status,
           updatedAt: AT,
           pointCount: 0,
           openProposalCount: proposals.length,
@@ -121,6 +125,7 @@ describe("the approvals screen head", () => {
 
   it("refuses accept-all while one still asks a question", () => {
     const withChoice = worldChatProposal({
+      decision: { mode: "attended", owner: { kind: "world-chat", conversationId: CONVERSATION } },
       openChoices: [
         {
           choiceId: "c1",
@@ -133,7 +138,7 @@ describe("the approvals screen head", () => {
         },
       ],
     });
-    const html = render(stateWith([withChoice]));
+    const html = render(stateWith([withChoice], [], "open"));
     assert.match(html, /still asking a question/);
     assert.match(html, /Is it new, or a change to CANON-018\?/);
     assert.match(html, /Changes CANON-018/, "the question can be answered where it is shown");
@@ -142,6 +147,50 @@ describe("the approvals screen head", () => {
       /title="Answer the question above before accepting"[^>]*disabled|disabled=""[^>]*title="Answer the question above before accepting"/,
       "the proposal's own Accept is blocked as well as Accept all",
     );
+  });
+
+  it("shows every unattended proposal and excludes a draft held by an open conversation", () => {
+    const attended = worldChatProposal({
+      summary: "Held beside the conversation",
+      decision: { mode: "attended", owner: { kind: "world-chat", conversationId: CONVERSATION } },
+    });
+    const unattended = worldChatProposal({
+      id: "pr_01J8H0000000000000000000W2",
+      summary: "An external edit needs review",
+      source: "external-edit",
+      worldChatOrigins: undefined,
+      decision: { mode: "unattended" },
+    });
+    const html = render(stateWith([attended, unattended], [], "open"));
+    assert.match(html, /1 waiting/);
+    assert.match(html, /An external edit needs review/);
+    assert.doesNotMatch(html, /Held beside the conversation/);
+  });
+
+  it("queues the same attended draft when its World Chat conversation closes", () => {
+    const proposal = worldChatProposal({
+      decision: { mode: "attended", owner: { kind: "world-chat", conversationId: CONVERSATION } },
+      conflicts: [{
+        path: "canon/CANON-900.md",
+        field: "Statement",
+        base: "Before",
+        mine: "Mine",
+        theirs: "Theirs",
+      }],
+    });
+    const html = render(stateWith([proposal], [], "closed"));
+    assert.match(html, /1 waiting/);
+    assert.match(html, /This proposal/);
+    assert.match(html, /The world now/);
+  });
+
+  it("describes the empty screen as an exception queue, not a hand-written-change queue", () => {
+    const html = render(stateWith([]));
+    assert.match(html, /orphaned drafts/);
+    assert.match(html, /unanswered choices/);
+    assert.match(html, /rebase reviews or conflicts/);
+    assert.match(html, /outside the app/);
+    assert.doesNotMatch(html, /anything written by hand/);
   });
 });
 
