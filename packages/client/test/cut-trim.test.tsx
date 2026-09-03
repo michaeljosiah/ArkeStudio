@@ -98,6 +98,22 @@ function storyTimelineState(base: ClientState = structuredClone(FIXTURE_STATE) a
   return base;
 }
 
+/** A one-frame trim exposes the runtime fraction; the duplicate must not invent another shot. */
+function editedStoryTimelineState(): ClientState {
+  const state = storyTimelineState();
+  const production = state.world!.productions[0]!;
+  const saved = production.timeline;
+  assert.ok(saved && saved.status === "ready");
+  production.timeline = {
+    status: "ready",
+    timeline: applyTimelineCommands(saved.timeline, [
+      { kind: "trim", clipId: "cl_sh-13", edge: "end", deltaFrames: -1 },
+      { kind: "duplicate", clipId: "cl_sh-12", newClipId: "cl_again" },
+    ]),
+  };
+  return state;
+}
+
 /**
  * React's server renderer separates adjacent text expressions with an empty comment, so
  * `budget {n}s` arrives as `budget <!-- -->8.0<!-- -->s` and every copy assertion misses for a
@@ -351,6 +367,15 @@ describe("the artifact panel and the overlay lane (82a)", () => {
   it("pluralises the count, because two clips are not 2 clip", () => {
     // Two shots on the saved timeline: the header counts what the record holds, on every track.
     assert.match(renderCut(storyTimelineState()), /2 clips/);
+  });
+
+  it("rounds the saved runtime and counts shots rather than clips (#707)", () => {
+    const html = renderCut(editedStoryTimelineState());
+    assert.match(html, /14s · 1 of 2 shots covered · saved timeline/);
+    assert.match(html, /1 of 2 shots placed/);
+    assert.match(html, /fy-prodrail__label">Cut<\/span><span class="fy-prodrail__count">14s/);
+    assert.doesNotMatch(html, /13\.958333333333/);
+    assert.doesNotMatch(html, /2 of 3 shots/);
   });
 
   it("marks the sound half of a split, and lays no picture for it", () => {

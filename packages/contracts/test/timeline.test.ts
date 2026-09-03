@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyTimelineCommands,
   FrameRateSchema,
   ClientMessageSchema,
   ProductionSchema,
@@ -384,6 +385,16 @@ describe("Picture timeline resolution", () => {
     }
     assert.equal(resolved.entries[0]!.media?.path, `productions/bell-watch/takes/${TAKE}/clip.mp4`);
     assert.equal(resolved.gaps, 2);
+  });
+
+  it("counts a repeated clip as one covered shot", () => {
+    const value = production();
+    const timeline = applyTimelineCommands(seedStoryPictureTimeline(value), [
+      { kind: "duplicate", clipId: "cl_sh-1", newClipId: "cl_again" },
+    ]);
+    const resolved = resolvePictureTimeline(value, { status: "ready", timeline });
+    assert.equal(resolved.entries.filter((entry) => entry.shot.id === "sh_1").length, 2, "both clips remain in the cut");
+    assert.equal(resolved.covered, 1, "coverage follows the shot identity, not its clip count");
   });
 
   it("resolves a cited shot through duplicate story ids and turns a genuine ambiguity into a gap (#718)", () => {
