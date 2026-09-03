@@ -643,10 +643,18 @@ function BoardBand({
           <button
             type="button"
             disabled={locked || board.reason === "clip limit" || board.reason === "panel limit"}
-            title={board.reason === "clip limit" || board.reason === "panel limit" ? `Cannot merge across the ${board.reason}` : "Merge this board into the one above"}
+            title={
+              board.reason === "clip limit" || board.reason === "panel limit"
+                ? `Cannot merge across the ${board.reason}`
+                : board.reason === "by hand"
+                  ? "Remove this hand split"
+                  : "Merge this board into the one above"
+            }
             onClick={() =>
               onCommand(
-                { kind: "set-board-override", shotId: startId, override: "merge" },
+                board.reason === "by hand"
+                  ? { kind: "clear-board-override", shotId: startId, override: "split" }
+                  : { kind: "set-board-override", shotId: startId, override: "merge" },
               )
             }
           >
