@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ClientMessageSchema,
   ShotSchema,
   ShotStagingSchema,
   stageShot,
@@ -136,6 +137,27 @@ describe("the Stage's arithmetic", () => {
   it("keeps the schema a read path: a staging with one key or no keys still parses", () => {
     assert.ok(ShotStagingSchema.safeParse({ version: 1, cast: [], sets: [], keys: [] }).success);
     assert.ok(ShotStagingSchema.safeParse({ version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1, 2], l: [0, 1, 0] }], playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 2 } }).success);
+    assert.ok(ShotStagingSchema.safeParse({ version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1, 2], l: [0, 1, 0] }], playblast: { artifactId: "ar_01J8G0000000000000000000A1", openingFrameArtifactId: "ar_01J8G0000000000000000000A2", version: 3 } }).success);
     assert.equal(ShotStagingSchema.safeParse({ version: 0, cast: [], sets: [], keys: [] }).success, false);
+  });
+
+  it("requires both files in a Stage export", () => {
+    const message = {
+      kind: "stage-playblast",
+      worldId: "01J8G0000000000000000000W1",
+      productionId: "saltlight",
+      sceneFile: "04-the-verse-rises",
+      sceneId: "sc_04",
+      baseVersion: 2,
+      shotId: "sh_12",
+      stagingVersion: 1,
+      durationSec: 4,
+      aspect: "16:9",
+      sourcePath: "C:/spool/playblast.webm",
+      openingFrameSourcePath: "C:/spool/opening-frame.png",
+    };
+    assert.deepEqual(ClientMessageSchema.parse(message), message);
+    const { openingFrameSourcePath: _openingFrameSourcePath, ...withoutFrame } = message;
+    assert.equal(ClientMessageSchema.safeParse(withoutFrame).success, false);
   });
 });

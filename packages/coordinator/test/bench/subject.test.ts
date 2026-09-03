@@ -822,7 +822,7 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
 });
 
 describe("the Stage's handoff to the bench", () => {
-  it("opens a staged shot in video mode with the playblast riding and the move written as beats", async () => {
+  it("opens a staged shot in video mode with its opening frame riding and its move written as beats", async () => {
     const { store } = await openWorld();
     const world = store.getBundle();
     const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
@@ -839,6 +839,31 @@ describe("the Stage's handoff to the bench", () => {
       mediaInfo: { durationSec: 4, hasAudio: false },
       created: CLOCK(),
     });
+    world.artifacts.push({
+      id: "ar_01J8G0000000000000000000A2",
+      kind: "image",
+      file: "stage-opening.png",
+      hash: "sha256:fedcba9876543210",
+      origin: { by: "user" },
+      links: ["sh_12"],
+      production: "saltlight",
+      created: CLOCK(),
+    });
+    world.artifacts.push({
+      id: "ar_01J8G0000000000000000000A3",
+      kind: "image",
+      file: "storyboard-frame.png",
+      hash: "sha256:abcdefabcdefabcd",
+      origin: { by: "user" },
+      links: ["sh_12"],
+      production: "saltlight",
+      created: CLOCK(),
+    });
+    production.selections[shot.id] = {
+      ...production.selections[shot.id],
+      startFrameArtifactId: "ar_01J8G0000000000000000000A3",
+      trimInSec: production.selections[shot.id]?.trimInSec ?? 0,
+    };
     shot.staging = {
       version: 2,
       cast: [{ sheetId: "maren-kest", x: 0, z: 0 }],
@@ -847,7 +872,11 @@ describe("the Stage's handoff to the bench", () => {
         { t: 0, p: [0, 1.55, 3], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
         { t: 4, p: [0, 1.55, 1.8], l: [0, 1.25, 0], anchor: "maren-kest", track: "maren-kest" },
       ],
-      playblast: { artifactId: "ar_01J8G0000000000000000000A1", version: 2 },
+      playblast: {
+        artifactId: "ar_01J8G0000000000000000000A1",
+        openingFrameArtifactId: "ar_01J8G0000000000000000000A2",
+        version: 2,
+      },
     };
 
     const video = await prepareBenchSubject(world, {
@@ -870,11 +899,32 @@ describe("the Stage's handoff to the bench", () => {
     assert.equal(playblast?.durationSec, 4);
     assert.equal(playblast?.ride, "when-supported");
     assert.deepEqual(playblast?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A1", hash: "sha256:0123456789abcdef" });
+    const openingFrame = video.prefill.references.find((reference) => reference.label === "Staging · opening frame v2");
+    assert.equal(openingFrame?.kind, "image");
+    assert.equal(openingFrame?.subjectRole, "board-frame");
+    assert.deepEqual(openingFrame?.source, { source: "artifact", artifactId: "ar_01J8G0000000000000000000A2", hash: "sha256:fedcba9876543210" });
+    assert.ok(video.prefill.composer.activeTokens.includes(openingFrame!.token), "the Stage frame rides on an image-reference route");
+    assert.equal(video.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), false, "the Stage opening replaces the storyboard frame for this handoff");
     assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
     // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
     assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
     // No route maps a video reference yet, so the tile shows and says it is not riding.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
+
+    shot.staging.playblast = { ...shot.staging.playblast!, version: 1 };
+    const stale = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(stale.ok);
+    if (!stale.ok) return;
+    assert.equal(stale.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
+    assert.match(stale.prefill.references.find((reference) => reference.kind === "video")?.detail ?? "", /stale/);
 
     // The ordinary handoff is a still, and a still has no move to describe.
     const image = await prepareBenchSubject(world, {
@@ -889,6 +939,8 @@ describe("the Stage's handoff to the bench", () => {
     if (!image.ok) return;
     assert.equal(image.prefill.composer.mode, "image");
     assert.equal(image.prefill.references.some((reference) => reference.kind === "video"), false);
+    assert.equal(image.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
+    assert.equal(image.prefill.references.some((reference) => reference.source.source === "artifact" && reference.source.artifactId === "ar_01J8G0000000000000000000A3"), true);
     assert.doesNotMatch(image.prefill.composer.brief, /Camera move/);
   });
 

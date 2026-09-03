@@ -2117,10 +2117,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
-   * File a playblast the Stage rendered onto its shot. The bytes arrive the way a pasted
-   * picture does — spooled by the host, which appends `sourcePath` — and the artifact is then
-   * pinned on the shot's staging through the ordinary versioned scene write, so a stale scene
-   * refuses it by name rather than pinning a move onto keys that have since changed.
+   * File the playblast and opening frame the Stage rendered onto its shot. The bytes arrive the
+   * way a pasted picture does — spooled by the host, which appends their paths — and both
+   * artifacts are pinned through one versioned scene write, so a stale scene refuses them by
+   * name rather than pinning a move onto keys that have since changed.
    */
   z
     .object({
@@ -2138,6 +2138,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       aspect: z.string().min(1).max(20),
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
+      openingFrameSourcePath: z.string().min(1),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */

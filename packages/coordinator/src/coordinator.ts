@@ -7292,6 +7292,7 @@ export class Coordinator {
           shotId: msg.shotId,
           stagingVersion: msg.stagingVersion,
           sourcePath: msg.sourcePath,
+          openingFrameSourcePath: msg.openingFrameSourcePath,
           durationSec: msg.durationSec,
           aspect: msg.aspect,
           ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
@@ -7303,15 +7304,17 @@ export class Coordinator {
           refuse(outcome.reason);
           return;
         }
-        this.emit({
-          at: new Date().toISOString(),
-          type: "artifact.attached",
-          worldId: msg.worldId,
-          artifactId: outcome.artifact.id,
-          file: outcome.artifact.file,
-          kind: outcome.artifact.kind,
-          deduplicated: false,
-        });
+        for (const artifact of outcome.artifacts) {
+          this.emit({
+            at: new Date().toISOString(),
+            type: "artifact.attached",
+            worldId: msg.worldId,
+            artifactId: artifact.id,
+            file: artifact.file,
+            kind: artifact.kind,
+            deduplicated: false,
+          });
+        }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

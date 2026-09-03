@@ -1186,45 +1186,63 @@ export class StageViewport {
   }
 
   /**
-   * The playblast: the shot played through the lens, in real time, into a WebM. A second
-   * renderer draws the same scene off screen at the production aspect so the file is the
-   * lens and nothing else — no gizmo, no path, no labels — while the on-screen view plays
-   * along so the person can see what is being written.
+   * The playblast and its exact opening frame. A second renderer draws the same scene off screen
+   * at the production aspect so both files are the lens and nothing else — no gizmo, no path,
+   * no labels — while the on-screen view plays along so the person can see what is being written.
    */
-  async record(onProgress: (fraction: number) => void): Promise<Blob> {
+  async record(onProgress: (fraction: number) => void): Promise<{ playblast: Blob; openingFrame: Blob }> {
     if (typeof MediaRecorder === "undefined") throw new Error("this browser cannot record video");
     const width = 1280;
     const height = Math.round(width / this.data.aspect);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
-    const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false });
+    const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false, preserveDrawingBuffer: true });
     renderer.setPixelRatio(1);
     renderer.setSize(width, height, false);
     renderer.setClearColor(0xe6e3dd, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = PCFSoftShadowMap;
-    const stream = canvas.captureStream(30);
-    const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((candidate) => MediaRecorder.isTypeSupported(candidate));
-    const recorder = new MediaRecorder(stream, type === undefined ? {} : { mimeType: type, videoBitsPerSecond: 6_000_000 });
-    const chunks: BlobPart[] = [];
-    recorder.addEventListener("dataavailable", (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    });
-    // Exactly the shot's length — the pin says the take is the shot, so the take must not
-    // run past it; one frame is the floor a recorder can make anything of.
-    const duration = Math.max(1 / 30, this.data.durationSec);
-    const finished = new Promise<Blob>((resolve, reject) => {
-      recorder.addEventListener("stop", () => resolve(new Blob(chunks, { type: type ?? "video/webm" })));
-      recorder.addEventListener("error", () => reject(new Error("the recording failed")));
-    });
-    // Elapsed from a start timestamp, never accumulated per tick (SPEC-036 R-29).
-    const started = Date.now();
-    // The gizmo comes off for the take, so a drag cannot reshape what is being written.
-    this.transform.detach();
-    this.transformHelper.visible = false;
-    recorder.start(250);
+    let stream: MediaStream | null = null;
+    let recorder: MediaRecorder | null = null;
+    let gizmoDetached = false;
     try {
+      this.recordingAt = 0;
+      this.refresh(0);
+      this.hideStaging(true);
+      try {
+        renderer.render(this.scene, this.shot);
+      } finally {
+        this.hideStaging(this.data.mode === "camera");
+      }
+      const openingFrame = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob === null) reject(new Error("the opening frame could not be captured"));
+          else resolve(blob);
+        }, "image/png");
+      });
+      stream = canvas.captureStream(30);
+      const type = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"].find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const currentRecorder = new MediaRecorder(stream, type === undefined ? {} : { mimeType: type, videoBitsPerSecond: 6_000_000 });
+      recorder = currentRecorder;
+      const chunks: BlobPart[] = [];
+      currentRecorder.addEventListener("dataavailable", (event) => {
+        if (event.data.size > 0) chunks.push(event.data);
+      });
+      // Exactly the shot's length — the pin says the take is the shot, so the take must not
+      // run past it; one frame is the floor a recorder can make anything of.
+      const duration = Math.max(1 / 30, this.data.durationSec);
+      const finished = new Promise<Blob>((resolve, reject) => {
+        currentRecorder.addEventListener("stop", () => resolve(new Blob(chunks, { type: type ?? "video/webm" })));
+        currentRecorder.addEventListener("error", () => reject(new Error("the recording failed")));
+      });
+      // The gizmo comes off for the take, so a drag cannot reshape what is being written.
+      this.transform.detach();
+      this.transformHelper.visible = false;
+      gizmoDetached = true;
+      currentRecorder.start(250);
+      // Elapsed from a start timestamp, never accumulated per tick (SPEC-036 R-29).
+      const started = Date.now();
       await new Promise<void>((resolve) => {
         const step = () => {
           const at = Math.min(duration, (Date.now() - started) / 1000);
@@ -1242,14 +1260,15 @@ export class StageViewport {
         };
         requestAnimationFrame(step);
       });
+      currentRecorder.stop();
+      const blob = await finished;
+      return { playblast: blob, openingFrame };
     } finally {
       this.recordingAt = null;
-      recorder.stop();
-      for (const track of stream.getTracks()) track.stop();
-      this.attachGizmo();
+      if (recorder !== null && recorder.state !== "inactive") recorder.stop();
+      for (const track of stream?.getTracks() ?? []) track.stop();
+      if (gizmoDetached) this.attachGizmo();
+      renderer.dispose();
     }
-    const blob = await finished;
-    renderer.dispose();
-    return blob;
   }
 }

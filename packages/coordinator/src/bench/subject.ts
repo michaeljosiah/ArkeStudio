@@ -259,6 +259,33 @@ function playblastToken(
   };
 }
 
+function stageOpeningFrameToken(
+  staging: ShotStaging,
+  world: WorldBundle,
+  shown: { durationSec: number; aspect: string; lens: string | undefined },
+  index: number,
+): BenchReferenceToken | null {
+  const pinned = staging.playblast;
+  if (pinned?.openingFrameArtifactId === undefined) return null;
+  const moved =
+    pinned.version !== staging.version ||
+    (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
+    (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
+    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+  if (moved) return null;
+  const artifact = world.artifacts.find((candidate) => candidate.id === pinned.openingFrameArtifactId);
+  if (artifact === undefined || artifact.kind !== "image") return null;
+  return {
+    token: benchTokenFor("image", index),
+    kind: "image",
+    source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
+    label: `Staging · opening frame v${pinned.version}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, staging.cast)}`,
+    ride: "when-supported",
+    subjectRole: "board-frame",
+  };
+}
+
 function admittedTokens(references: readonly BenchReferenceToken[], model: ManifestModel | null): string[] {
   if (model === null) return [];
   const mapped = new Set(mappedReferenceKinds(model.provider));
@@ -406,12 +433,23 @@ export async function prepareBenchSubject(
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
     const references = await sheetTokens([shot], world, production, scene, input.sources);
+    const staging = mode === "video" ? shot.staging : undefined;
+    const shown = {
+      durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
+      aspect,
+      lens: effectiveFraming(scene, shot).lens,
+    };
+    const openingFrame = staging === undefined
+      ? null
+      : stageOpeningFrameToken(staging, world, shown, references.length + 1);
     const selection = production.selections[shot.id];
     const frameArtifactId = selection?.startFrameArtifactId;
     const frameArtifact = frameArtifactId === undefined || frameArtifactId === null
       ? undefined
       : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
-    if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
+    if (openingFrame !== null) {
+      references.push(openingFrame);
+    } else if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
       references.push({
         token: benchTokenFor("image", references.length + 1),
         kind: "image",
@@ -422,16 +460,11 @@ export async function prepareBenchSubject(
         subjectRole: "board-frame",
       });
     }
-    // The clip is where the move matters: the playblast rides where a route can carry video,
-    // and the beats ride in the words everywhere. A still has no move to describe.
-    const staging = mode === "video" ? shot.staging : undefined;
+    // The clip is where the move matters: its exact opening view can ride every image-capable
+    // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
     const playblast = staging === undefined
       ? null
-      : playblastToken(staging, world, {
-          durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
-          aspect,
-          lens: effectiveFraming(scene, shot).lens,
-        });
+      : playblastToken(staging, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
     const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;

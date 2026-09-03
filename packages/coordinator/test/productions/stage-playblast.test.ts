@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, stageShot, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { tempDir } from "../tmp.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
@@ -19,6 +20,14 @@ async function playblastFile(bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 
   const dir = await tempDir("stage-playblast-");
   await mkdir(dir, { recursive: true });
   const path = join(dir, "playblast.webm");
+  await writeFile(path, bytes);
+  return path;
+}
+
+async function openingFrameFile(bytes = encodePng(solidImage(16, 9, [20, 40, 60, 255]))): Promise<string> {
+  const dir = await tempDir("stage-opening-frame-");
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, "opening-frame.png");
   await writeFile(path, bytes);
   return path;
 }
@@ -87,11 +96,12 @@ describe("filing a playblast from the Stage", () => {
         aspect: "16:9",
         stagingVersion: 1,
         sourcePath: await playblastFile(),
+        openingFrameSourcePath: await openingFrameFile(),
       });
 
       assert.deepEqual(refusals(), []);
-      const attached = events.find((event) => event.type === "artifact.attached");
-      assert.ok(attached, "the filing is announced like any other");
+      const attached = events.filter((event) => event.type === "artifact.attached");
+      assert.equal(attached.length, 2, "both files are announced like any other artifact");
       const after = shot();
       const pinned = after.shot.staging?.playblast;
       assert.ok(pinned, "the staging names its playblast");
@@ -103,6 +113,12 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(artifact.production, PRODUCTION, "owned by the production, not the world");
       assert.ok(artifact.links.includes(SHOT), "linked to the shot it was rendered for");
       assert.ok((await readFile(join(worldDir, "artifacts", artifact.file))).byteLength > 0);
+      const openingFrame = bundle().artifacts.find((candidate) => candidate.id === pinned.openingFrameArtifactId);
+      assert.ok(openingFrame, "the pinned opening frame resolves on the shelf");
+      assert.equal(openingFrame.kind, "image");
+      assert.equal(openingFrame.production, PRODUCTION);
+      assert.ok(openingFrame.links.includes(SHOT));
+      assert.ok((await readFile(join(worldDir, "artifacts", openingFrame.file))).byteLength > 0);
     } finally {
       await provider.close();
     }
@@ -124,6 +140,7 @@ describe("filing a playblast from the Stage", () => {
         aspect: "16:9",
         stagingVersion: 1,
         sourcePath: await playblastFile(),
+        openingFrameSourcePath: await openingFrameFile(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /stage the shot before/);
       assert.equal(bundle().artifacts.length, shelfBefore, "nothing landed on the shelf");
@@ -141,6 +158,7 @@ describe("filing a playblast from the Stage", () => {
         aspect: "16:9",
         stagingVersion: 7,
         sourcePath: await playblastFile(),
+        openingFrameSourcePath: await openingFrameFile(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /moved to v1 .* export it again/);
       assert.equal(bundle().artifacts.length, shelfBefore);
@@ -160,8 +178,27 @@ describe("filing a playblast from the Stage", () => {
         aspect: "16:9",
         stagingVersion: 1,
         sourcePath: empty,
+        openingFrameSourcePath: await openingFrameFile(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /came back empty/);
+      assert.equal(bundle().artifacts.length, shelfBefore);
+      assert.equal(shot().shot.staging?.playblast, undefined);
+
+      await send({
+        kind: "stage-playblast",
+        worldId: WORLD_ID,
+        productionId: PRODUCTION,
+        sceneFile: SCENE_FILE,
+        sceneId: SCENE,
+        baseVersion: shot().scene.version,
+        shotId: SHOT,
+        durationSec: 4,
+        aspect: "16:9",
+        stagingVersion: 1,
+        sourcePath: await playblastFile(),
+        openingFrameSourcePath: await openingFrameFile(new Uint8Array([1, 2, 3])),
+      });
+      assert.match(refusals().at(-1)?.reason ?? "", /opening frame is not a valid PNG/);
       assert.equal(bundle().artifacts.length, shelfBefore);
       assert.equal(shot().shot.staging?.playblast, undefined);
     } finally {
