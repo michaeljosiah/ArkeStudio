@@ -971,7 +971,7 @@ describe("the Stage's handoff to the bench", () => {
 });
 
 describe("subject Accept filing (SPEC-036 R-24)", () => {
-  it("copies a still into production, selects its frame artifact, and retries without duplication", async () => {
+  it("files the original still when PNG conversion produces no output", async () => {
     const { dir, store } = await openWorld();
     const takeId = newId("tk") as BenchTake["id"];
     const productionTakeId = newId("tk");
@@ -1017,7 +1017,7 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
           frameArtifactId: artifactId,
         },
       },
-      media: "take.png",
+      media: "take.jpg",
       cost: { estimatedMicroUsd: 60_000, actualMicroUsd: 58_000, actualSource: "provider-reported" },
     });
     const referencedTake = {
@@ -1041,7 +1041,9 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
     await writeFile(source, "still bytes");
     await writeFile(referenceSource, "reference bytes");
 
-    const first = await fileBenchSubjectTake(store, session, take);
+    const first = await fileBenchSubjectTake(store, session, take, {
+      toPng: { write: async () => ({ ok: true }) },
+    });
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
     assert.equal(first.artifactId, artifactId);
     assert.equal(production.selections["sh_13"]?.startFrameArtifactId, artifactId);
@@ -1051,7 +1053,11 @@ describe("subject Accept filing (SPEC-036 R-24)", () => {
     assert.equal(filedTake.provenance.recipeVersion, 3);
     assert.equal(filedTake.references.some((reference) => reference.startsWith(".sessions/")), false);
     assert.equal(await readFile(join(dir, filedTake.references[0]!), "utf8"), "reference bytes");
-    assert.equal(store.getBundle().artifacts.find((candidate) => candidate.id === artifactId)?.production, "saltlight");
+    const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
+    assert.ok(artifact);
+    assert.equal(artifact.production, "saltlight");
+    assert.match(artifact.file, /\.jpg$/);
+    assert.equal(await readFile(join(dir, "artifacts", artifact.file), "utf8"), "still bytes");
     assert.equal(await readFile(source, "utf8"), "still bytes", "Accept copies; the Bench source survives");
 
     const retried = await fileBenchSubjectTake(store, session, take);
