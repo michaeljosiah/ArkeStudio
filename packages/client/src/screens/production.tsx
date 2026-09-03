@@ -45,7 +45,6 @@ import {
   type ProductionBundle,
   type ProductionTimeline,
   type ResolvedPictureCut,
-  type ResolvedPictureEntry,
   type Scene,
   type TimelineClip,
   type TimelineChangeHistoryEntry,
@@ -342,6 +341,10 @@ function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
   return "warn";
 }
 
+function storyShotCount(production: ProductionBundle | null | undefined): number {
+  return production?.scenes.reduce((count, scene) => count + orderedShots(scene).length, 0) ?? 0;
+}
+
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
@@ -482,10 +485,10 @@ export function ProductionLayout() {
    * button write it: a 0.4s film is real and exportable, and rounding it to `0s` would make it
    * look exactly like the empty production the export refuses.
    */
-  const railFigure = mediaOnly ? runtimeSeconds(filmSec) : seconds(cut?.totalSec ?? 0);
+  const railFigure = runtimeSeconds(mediaOnly ? filmSec : cut?.totalSec ?? 0);
   const cutFigure = mediaOnly
     ? runtimeSeconds(filmSec)
-    : seconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
+    : runtimeSeconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
@@ -4523,7 +4526,7 @@ function CutInspector({
         <InspectorRow label="Source">
           {spineCut ? "accepted takes · master track" : cut && isMediaOnly(cut) && (production?.scenes.length ?? 0) === 0 ? "placed clips" : "accepted takes"}
         </InspectorRow>
-        <InspectorRow label="Coverage">{cut ? `${cut.covered} of ${cut.entries.filter((entry) => (entry as ResolvedPictureEntry).hole !== true).length} shots` : "not loaded"}</InspectorRow>
+        <InspectorRow label="Coverage">{cut ? `${cut.covered} of ${storyShotCount(production)} shots` : "not loaded"}</InspectorRow>
       </div>
       {cut !== null && spineCut === null && (() => {
         // The target's `Needs a decision`: every shot on the timeline that still plays as a gap.
@@ -4656,7 +4659,7 @@ function ExportSheet({
   const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
   const gaps = cut?.gaps ?? 0;
   const covered = cut === null ? 0 : cut.covered;
-  const shotCount = cut === null ? 0 : cut.entries.length;
+  const shotCount = storyShotCount(production);
   const subtitleTracks = ready ? subtitleTracksOf(timelineState.timeline) : [];
   const chosenSubtitleTrack = subtitleTracks.find((track) => track.id === subtitleTrack) ?? subtitleTracks[0] ?? null;
   const subtitleChoice =
@@ -4678,7 +4681,7 @@ function ExportSheet({
   const meta =
     cut === null || nothingPlaced
       ? blockedBy ?? ""
-      : `${seconds(runtimeSec ?? cut.totalSec)} · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
+      : `${runtimeSeconds(runtimeSec ?? cut.totalSec)} · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
   return (
     <EditorDialog open={open} title="Export film" subtitle={meta} onClose={onClose} width={430} labelledBy="export-sheet-title">
       <div className="fy-exsheet" data-testid="export-sheet">
@@ -5304,11 +5307,11 @@ export function CutScreen() {
     ...(editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? []),
   ]);
   const cutMeta = spineCut
-    ? `${seconds(spineCut.trackDurationSec)} · ${seconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${seconds(spineCut.trackDurationSec)} covered · cut to the track`
+    ? `${runtimeSeconds(spineCut.trackDurationSec)} · ${runtimeSeconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${runtimeSeconds(spineCut.trackDurationSec)} covered · cut to the track`
     : mediaOnly
       ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
       : cut
-        ? `${seconds(cut.totalSec)} · ${cut.covered} of ${views.length || cut.entries.length} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
+        ? `${runtimeSeconds(cut.totalSec)} · ${cut.covered} of ${storyShotCount(production)} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
         : "";
   const selectedPictureClip =
     activeSelection?.kind === "picture"
@@ -6140,7 +6143,7 @@ export function CutScreen() {
                 : mediaOnly
                   ? ""
                   : cut
-                    ? `${cut.covered} of ${views.length || cut.entries.length} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
+                    ? `${cut.covered} of ${storyShotCount(production)} shots placed · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"}`
                     : ""}
             </span>
             <span className="fy-h1row__push" />
@@ -6166,7 +6169,7 @@ export function CutScreen() {
               : cut && cut.gaps > 0 && (
                   <span className="fy-warnchip">
                     <span className="fy-dot fy-dot--warn" />
-                    {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} · {seconds(cut.uncoveredSec)} uncovered
+                    {cut.gaps} gap{cut.gaps === 1 ? "" : "s"} · {runtimeSeconds(cut.uncoveredSec)} uncovered
                   </span>
                 )}
           </div>

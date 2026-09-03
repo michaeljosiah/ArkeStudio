@@ -142,6 +142,21 @@ function savedState(): ClientState {
   return state;
 }
 
+function editedRuntimeState(): ClientState {
+  const state = savedState();
+  const production = state.world!.productions[0]!;
+  const saved = production.timeline;
+  assert.ok(saved && saved.status === "ready");
+  production.timeline = {
+    status: "ready",
+    timeline: applyTimelineCommands(saved.timeline, [
+      { kind: "trim", clipId: "cl_sh-13", edge: "end", deltaFrames: -1 },
+      { kind: "duplicate", clipId: "cl_sh-12", newClipId: "cl_again" },
+    ]),
+  };
+  return state;
+}
+
 afterEach(() => {
   __setBridgeForTest(null);
   document.body.replaceChildren();
@@ -284,6 +299,19 @@ describe("keys the toolbar promises (R-17)", () => {
 });
 
 describe("the export sheet (R-24, T-5)", () => {
+  it("shows a rounded runtime and shot coverage for an edited timeline (#707)", async () => {
+    const screen = await mount(editedRuntimeState());
+    try {
+      await act(async () => button(screen, "Export film").click());
+      const dialog = screen.container.querySelector<HTMLElement>(".fy-editordialog");
+      assert.ok(dialog);
+      assert.match(dialog.textContent ?? "", /14s · 1 of 2 shots/);
+      assert.doesNotMatch(dialog.textContent ?? "", /13\.958333333333/);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("opens from the header, carries the chips, and sends the export it describes", async () => {
     const screen = await mount(savedState());
     try {

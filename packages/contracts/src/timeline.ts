@@ -1917,6 +1917,8 @@ export function resolvePictureTimeline(
   const clips = base === null ? [] : orderedTrackClips(base);
 
   const derived = deriveCut(production);
+  const shotKey = (entry: CutEntry) => `${entry.sceneNumber}:${entry.shot.number}:${entry.shot.id}`;
+  const storyShots = new Set(derived.entries.map(shotKey));
   const byShotId = new Map<string, CutEntry[]>();
   for (const entry of derived.entries) {
     const candidates = byShotId.get(entry.shot.id) ?? [];
@@ -2014,7 +2016,8 @@ export function resolvePictureTimeline(
   const gaps = entries.filter((entry) => entry.takeId === null && entry.hole !== true);
   return {
     entries,
-    covered: entries.filter((entry) => entry.takeId !== null).length,
+    // Split and duplicate make more clips, not more covered shots.
+    covered: new Set(entries.filter((entry) => entry.takeId !== null && storyShots.has(shotKey(entry))).map(shotKey)).size,
     gaps: gaps.length,
     totalSec: entries.reduce((total, entry) => total + entry.durationSec, 0),
     uncoveredSec: gaps.reduce((total, entry) => total + entry.durationSec, 0),
