@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { ulid, type LedgerEntry, type ModelManifest } from "@arke-studio/contracts";
 import { makeTempRoot } from "../world/helpers.js";
 import { startLedgerCoordinator } from "../spend/seeded-ledger.js";
+import { untilAsync } from "../wait.js";
 
 /**
  * The spend status states the fate of the read behind it (SPEC-008 R-19; SPEC-032 R-21,
@@ -200,7 +201,15 @@ describe("spend over an unreadable ledger states the failed read (SPEC-008 R-19,
       await coordinator.recordLedger(entry({ actualMicroUsd: 10_000 }));
       assert.equal(coordinator.getState().app.spend?.alerted, true, "still over, as it never stopped being");
 
-      const log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
+      let log = "";
+      await untilAsync(
+        async () => {
+          log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
+          return log.includes(`"spend.alert"`);
+        },
+        "the spend alert to land in the app log",
+        60_000,
+      );
       const alerts = log.split("\n").filter((l) => l.includes(`"spend.alert"`));
       assert.equal(alerts.length, 1, "one crossing is one alert — the outage did not reset the latch");
     } finally {

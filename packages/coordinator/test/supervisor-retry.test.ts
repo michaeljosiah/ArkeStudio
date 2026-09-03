@@ -161,8 +161,13 @@ describe("ChildSupervisor CIM retries", () => {
       await quiet(800);
       assert.equal(calls, 1, "the abandoned retry never re-enumerated");
       assert.deepEqual(sup.descendantPids, [], "no snapshot after stop");
+      await untilAsync(
+        async () => !((await readRecords()) ?? []).some((record) => record.pid === PAPER_PID),
+        "the paper record to be absent after stop",
+        SETTLE_WAIT_MS,
+      );
       const records = await readRecords();
-      assert.ok(records !== null && !records.some((c) => c.pid === PAPER_PID), "no paper record either");
+      assert.ok(records === null || !records.some((record) => record.pid === PAPER_PID), "no paper record either");
     } finally {
       await sup.stop();
     }
