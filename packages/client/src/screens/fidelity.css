@@ -6404,6 +6404,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    Layer one on the Generate workspace is the takes themselves. The bench that used to be here —
    composer, parameters, model picker — is behind Advanced, which is where layer three lives. */
 .fy-takes { gap: 14px; }
+.fy-takes__head { position: sticky; top: 0; z-index: 3; flex: none; display: flex; flex-direction: column; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); background: var(--background); }
+.fy-takes__filters { display: flex; flex-direction: column; gap: 7px; }
+.fy-takes__filter { min-width: 0; display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 10px; }
+.fy-takes__filter-label { font: 500 10px var(--font-mono); letter-spacing: .08em; color: var(--neutral-400); }
+.fy-takes__filter .fy-takechips { min-width: 0; flex-wrap: nowrap; overflow-x: auto; padding: 1px; }
+.fy-takes__filter .fy-takechip { flex: none; }
 .fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .fy-take {
   box-sizing: border-box;
@@ -6450,6 +6456,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-takechip:hover { background: var(--accent); }
 .fy-takechip--on { border: 1.5px solid var(--foreground); padding: 4.5px 9.5px; }
+.fy-takechip--scene { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dark .fy-take__frame { background: var(--neutral-800); }
 .fy-takes__foot {
   margin-top: auto;
