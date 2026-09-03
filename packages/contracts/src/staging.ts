@@ -15,6 +15,7 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+export const MAX_STAGE_WALK_SPEED_MPS = 2.2;
 
 export type EffectiveStageBlocking = {
   cast: StagingFigure[];
@@ -216,7 +217,9 @@ function bearing(ox: number, oz: number, rise: number, facing: readonly [number,
 export function stagingBeats(
   staging: ResolvedShotStaging,
   nameOf: (sheetId: string) => string,
+  durationSec: number,
 ): string[] {
+  const keys = stagingRetimed(staging, durationSec).keys;
   const facings = new Map<string, readonly [number, number]>();
   for (const figure of staging.cast) {
     if (figure.to === undefined) {
@@ -228,14 +231,19 @@ export function stagingBeats(
     const length = Math.hypot(dx, dz);
     facings.set(figure.sheetId, length < 0.05 ? [0, 1] : [dx / length, dz / length]);
   }
-  const lastT = staging.keys.at(-1)?.t ?? 0;
-  return staging.keys.map((k) => {
+  const warnings = durationSec <= 0 ? [] : staging.cast.flatMap((figure) => {
+    const speed = stageWalkSpeed(figure, durationSec);
+    if (speed === null || speed <= MAX_STAGE_WALK_SPEED_MPS) return [];
+    const shownSpeed = Math.ceil(speed * 100) / 100;
+    return [`Blocking warning — ${nameOf(figure.sheetId)} · ${(speed * durationSec).toFixed(1)}m in ${durationSec.toFixed(1)}s · ${shownSpeed.toFixed(2)}m/s · too fast for a walk`];
+  });
+  const camera = keys.map((k) => {
     const subject = k.anchor ?? k.track ?? null;
     // Measured from what the camera is actually on: an anchored key is already an offset from
     // its figure; a key that only TRACKS one is in world space, so the figure is read where it
     // stands at that key's time, not at the aim point the track has overridden.
     const tracked = k.anchor === undefined && k.track !== undefined ? staging.cast.find((figure) => figure.sheetId === k.track) : undefined;
-    const standing = tracked === undefined ? null : figureAt(tracked, lastT <= 0 ? 0 : k.t / lastT);
+    const standing = tracked === undefined ? null : figureAt(tracked, durationSec <= 0 ? 0 : k.t / durationSec);
     const [tx, tz] = k.anchor !== undefined ? [0, 0] : standing ?? [k.l[0], k.l[2]];
     const ox = k.p[0] - tx;
     const oz = k.p[2] - tz;
@@ -246,6 +254,15 @@ export function stagingBeats(
     const aim = k.track === undefined ? "" : `, aimed at ${nameOf(k.track)}`;
     return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}`;
   });
+  return [...warnings, ...camera];
+}
+
+/** Metres per second implied by a figure's blocked path, or null when it holds. */
+export function stageWalkSpeed(figure: StagingFigure, durationSec: number): number | null {
+  if (figure.to === undefined) return null;
+  const distance = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
+  if (durationSec <= 0) return distance === 0 ? 0 : Number.POSITIVE_INFINITY;
+  return distance / durationSec;
 }
 
 /** Where a figure stands a fraction `u` of the way through the shot: on its walk, or where it was put. */
@@ -287,11 +304,21 @@ export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotS
 }
 
 /** The playblast's own line for a session brief: what it is, and the beats beneath it. */
-export function stagingPromptClause(staging: ResolvedShotStaging, nameOf: (sheetId: string) => string): string {
-  const walkers = staging.cast.filter((figure) => figure.to !== undefined).map((figure) => nameOf(figure.sheetId));
+export function stagingPromptClause(
+  staging: ResolvedShotStaging,
+  nameOf: (sheetId: string) => string,
+  durationSec: number,
+): string {
+  const keys = stagingRetimed(staging, durationSec).keys;
+  const walkers = staging.cast
+    .filter((figure) => {
+      const speed = stageWalkSpeed(figure, durationSec);
+      return speed !== null && speed <= MAX_STAGE_WALK_SPEED_MPS;
+    })
+    .map((figure) => nameOf(figure.sheetId));
   const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
   return [
-    `Camera move, ${stagingMoveWord(staging.keys, staging.cast)}, blocked out on the stage (${staging.keys.length} keys).${walk}`,
-    ...stagingBeats(staging, nameOf),
+    `Camera move, ${stagingMoveWord(keys, staging.cast)}, blocked out on the stage (${keys.length} keys).${walk}`,
+    ...stagingBeats(staging, nameOf, durationSec),
   ].join("\n");
 }

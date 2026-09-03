@@ -911,6 +911,23 @@ describe("the Stage's handoff to the bench", () => {
     // No route maps a video reference yet, so the tile shows and says it is not riding.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
 
+    const stagedFigure = shot.staging.cast?.[0];
+    assert.ok(stagedFigure);
+    stagedFigure.to = [20, 0];
+    const implausible = await prepareBenchSubject(world, {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest: MANIFEST,
+      sources: sourceReader,
+    });
+    assert.ok(implausible.ok);
+    if (!implausible.ok) return;
+    assert.match(implausible.prefill.composer.brief, /20\.0m in 4\.0s · 5\.00m\/s · too fast for a walk/);
+    assert.doesNotMatch(implausible.prefill.composer.brief, /Maren Kest walks through the shot/);
+
     shot.staging.playblast = { ...shot.staging.playblast!, version: 1 };
     const stale = await prepareBenchSubject(world, {
       productionId: "saltlight",
