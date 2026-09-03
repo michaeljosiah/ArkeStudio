@@ -3,12 +3,14 @@ import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
+import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
  * a query over world, queue and provider state (R-3, D1). A take leaves because a decision now
- * exists; a proposal leaves because it resolved. Correct by construction, not by maintenance.
+ * exists; a proposal leaves because it resolved or an attended surface owns it. Correct by
+ * construction, not by maintenance.
  */
 
 // ---------------------------------------------------------------------------
@@ -197,7 +199,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       });
     }
     // Class 5 — work in progress, waiting but costing nothing.
-    for (const staged of world.proposals) {
+    for (const staged of unattendedProposalsOf(world.proposals, world.conversations)) {
       entries.push({
         urgency: 5,
         kind: "open-proposal",

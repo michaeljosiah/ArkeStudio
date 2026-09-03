@@ -14,7 +14,6 @@ import {
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
-  proposalDecisionOf,
   productionFrameRate,
   resolvePictureTimeline,
   libraryItemKey,
@@ -970,7 +969,7 @@ export function ProductionCastScreen() {
   // Guests under review are kept off the world's surfaces, so they have to be visible here or a
   // staged guest is nowhere at all until it is accepted (SPEC-020 R-8, R-9).
   const pendingGuests = (["character", "location", "faction"] as const).flatMap((kind) =>
-    pendingGuestsOf(pendingSheets(world.proposals, kind), production.meta.id),
+    pendingGuestsOf(pendingSheets(world.proposals, kind, world.conversations), production.meta.id),
   );
   // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
   const owned = world.artifacts.filter((a) => a.production === production.meta.id);
@@ -1111,10 +1110,10 @@ export function ProductionCastScreen() {
               key={p.proposalId}
               className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet"
               onClick={() => {
-                const staged = world.proposals.find((proposal) => proposal.proposal.id === p.proposalId);
-                const decision = staged ? proposalDecisionOf(staged.proposal, world.conversations) : { mode: "unattended" as const };
-                if (decision.mode === "attended" && decision.owner.kind === "surface") {
+                if (p.decision.mode === "attended" && p.decision.owner.kind === "surface") {
                   setPendingDecision(p.proposalId);
+                } else if (p.decision.mode === "attended" && p.decision.owner.kind === "world-chat") {
+                  navigate(`/w/${worldId}/chat/${p.decision.owner.conversationId}`);
                 } else {
                   navigate(`/w/${worldId}/proposals`);
                 }

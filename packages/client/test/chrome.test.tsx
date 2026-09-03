@@ -35,6 +35,13 @@ function count(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+function proposalControl(html: string): string {
+  const label = html.indexOf('aria-label="Proposals"');
+  const start = html.lastIndexOf("<button", label);
+  const end = html.indexOf("</button>", label);
+  return html.slice(start, end);
+}
+
 /**
  * Startup is the single exception, and it is written down here rather than merely being true:
  * nothing is configured yet and the only thing that has happened is the download the screen is
@@ -138,10 +145,39 @@ describe("app chrome", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}`);
     __setStateForTest(FIXTURE_STATE);
     assert.ok(html.includes("Proposals — nothing waiting"), "the icon stays, the claim changes");
-    assert.ok(
-      !html.includes("fy-iconbtn__dot"),
-      "an unlit dot is worse than none: it teaches you to ignore the lit one",
-    );
+    assert.ok(!proposalControl(html).includes("fy-iconbtn__dot"), "the proposal control itself is unlit");
+  });
+
+  it("does not dot an attended draft, but dots the same draft when its conversation closes", () => {
+    const conversation = {
+      id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      title: "Held here",
+      status: "open" as const,
+      updatedAt: "2026-09-03T12:00:00.000Z",
+      pointCount: 1,
+      openProposalCount: 1,
+      notCarried: [],
+    };
+    const staged = FIXTURE_STATE.world!.proposals[0]!;
+    const proposal = {
+      ...staged,
+      proposal: {
+        ...staged.proposal,
+        decision: { mode: "attended" as const, owner: { kind: "world-chat" as const, conversationId: conversation.id } },
+      },
+    };
+    __setStateForTest({ ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, proposals: [proposal], conversations: [conversation] } });
+    const attended = renderAt(`/w/${FIXTURE_WORLD_ID}`);
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      world: { ...FIXTURE_STATE.world!, proposals: [proposal], conversations: [{ ...conversation, status: "closed" }] },
+    });
+    const orphaned = renderAt(`/w/${FIXTURE_WORLD_ID}`);
+    __setStateForTest(FIXTURE_STATE);
+    assert.ok(proposalControl(attended).includes("Proposals — nothing waiting"));
+    assert.ok(!proposalControl(attended).includes("fy-iconbtn__dot"));
+    assert.ok(proposalControl(orphaned).includes("Proposals — 1 awaiting a decision"));
+    assert.ok(proposalControl(orphaned).includes("fy-iconbtn__dot"));
   });
 
   it("centres the wordmark on the window, not on the row", () => {

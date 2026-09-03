@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   canDeleteJob,
@@ -220,6 +221,61 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
     assert.ok(open.some((e) => e.kind === "open-proposal"));
     const closed = computeNeedsYou(baseState({}, worldWithTake(true)));
     assert.ok(!closed.some((e) => e.kind === "open-proposal"));
+  });
+
+  it("queues unanswered choices immediately and conflicts only when their attended owner is gone", () => {
+    const conversation = {
+      id: "cv_01J8H0000000000000000000A1",
+      title: "Held decisions",
+      status: "open" as const,
+      updatedAt: "2026-09-03T12:00:00Z",
+      pointCount: 1,
+      openProposalCount: 2,
+      notCarried: [],
+    };
+    const base = worldWithTake(true)!;
+    const choice = {
+      proposal: {
+        id: "pr_01J8H0000000000000000000A1",
+        kind: "new-canon",
+        summary: "Answer this",
+        created: "2026-09-03T12:00:00Z",
+        decision: { mode: "attended", owner: { kind: "world-chat", conversationId: conversation.id } },
+        openChoices: [{
+          choiceId: "choice-1",
+          kind: "duplicate-or-amend",
+          question: "New or amend?",
+          options: [{ optionId: "new", label: "New" }, { optionId: "amend", label: "Amend" }],
+        }],
+      },
+      ripple: null,
+    };
+    const conflict = {
+      proposal: {
+        id: "pr_01J8H0000000000000000000A2",
+        kind: "sheet-edit",
+        summary: "Resolve this",
+        created: "2026-09-03T12:01:00Z",
+        decision: { mode: "attended", owner: { kind: "world-chat", conversationId: conversation.id } },
+        conflicts: [{ path: "characters/maren.md", field: "Role", base: "A", mine: "B", theirs: "C" }],
+      },
+      ripple: null,
+    };
+    const held = {
+      ...base,
+      proposals: [choice, conflict],
+      conversations: [conversation],
+    } as unknown as NonNullable<ClientState["world"]>;
+    assert.deepEqual(
+      computeNeedsYou(baseState({}, held)).filter((entry) => entry.kind === "open-proposal").map((entry) => entry.ref),
+      [choice.proposal.id],
+    );
+
+    const orphaned = { ...held, conversations: [{ ...conversation, status: "closed" as const }] };
+    assert.deepEqual(
+      computeNeedsYou(baseState({}, orphaned)).filter((entry) => entry.kind === "open-proposal").map((entry) => entry.ref).sort(),
+      [choice.proposal.id, conflict.proposal.id],
+    );
   });
 
   it("ordering: a reconciliation outranks forty unreviewed takes; recency within class (R-5, D2, D3)", () => {
@@ -513,6 +569,29 @@ describe("registry attention counts (R-7, T-5, T-6)", () => {
     assert.ok(summary.attention, "attention recorded when the bundle passed through");
     assert.ok(summary.attention!.unreviewedTakes >= 1, "the fixture has takes without decisions");
     assert.ok(summary.attention!.asOf.length > 0, "always as-of labelled — honest even after a crash");
+  });
+
+  it("persists only unattended proposals in the compatible openProposals field", async () => {
+    const { root, worldDir } = await makeTempRoot();
+    const attendedPath = join(worldDir, ".proposals", "pr_01J8H0000000000000000000P1", "proposal.json");
+    const orphanedPath = join(worldDir, ".proposals", "pr_01J8H0000000000000000000P6", "proposal.json");
+    const attended = JSON.parse(await readFile(attendedPath, "utf8"));
+    const orphaned = JSON.parse(await readFile(orphanedPath, "utf8"));
+    attended.decision = {
+      mode: "attended",
+      owner: { kind: "world-chat", conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC" },
+    };
+    orphaned.decision = { mode: "attended", owner: { kind: "world-chat", conversationId: "cv_missing" } };
+    await writeFile(attendedPath, `${JSON.stringify(attended, null, 2)}\n`, "utf8");
+    await writeFile(orphanedPath, `${JSON.stringify(orphaned, null, 2)}\n`, "utf8");
+
+    const provider = new FsWorldProvider(root, {});
+    await provider.ensureAppRoot();
+    const target = (await provider.listWorlds()).find((world) => world.slug === "the-undersong")!;
+    await provider.loadWorld(target.worldId);
+    await provider.close();
+    const summary = (await provider.listWorlds()).find((world) => world.slug === "the-undersong")!;
+    assert.equal(summary.attention?.openProposals, 1);
   });
 });
 

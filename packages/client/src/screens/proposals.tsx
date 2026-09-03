@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router";
-import { proposalOriginOf, type StagedProposal } from "@arke-studio/contracts";
+import { proposalOriginOf, unattendedProposalsOf, type StagedProposal } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -62,7 +62,7 @@ export function ProposalsScreen() {
 
   if (!world) return null;
 
-  const proposals = world.proposals;
+  const proposals = unattendedProposalsOf(world.proposals, world.conversations);
   const selected = proposals.find((p) => p.proposal.id === selectedId) ?? proposals[0] ?? null;
   const changes = proposals.reduce((total, p) => total + changeCount(p), 0);
   const entities = new Set(proposals.flatMap((p) => p.proposal.targets.map((t) => t.path))).size;
@@ -103,8 +103,8 @@ export function ProposalsScreen() {
     <div data-screen="proposals">
       {proposals.length === 0 ? (
         <EmptyState
-          title="Nothing is waiting"
-          hint="A conversation writes what you save from its own rail, so most changes never come through here. What lands on this screen is a change that could not be decided by a press — one asking a question only you can answer — and anything written by hand."
+          title="No exceptions are waiting"
+          hint="Approvals holds orphaned drafts, unanswered choices, unattended rebase reviews or conflicts, and changes reconciled from outside the app. Future unattended actors will wait here too; ordinary decisions stay where the work happened."
         />
       ) : (
         <div className="fy-proposals">

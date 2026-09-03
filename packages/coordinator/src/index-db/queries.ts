@@ -1,4 +1,4 @@
-import type { Job, RippleItem, WorldBundle } from "@arke-studio/contracts";
+import { unattendedProposalsOf, type Job, type RippleItem, type WorldBundle } from "@arke-studio/contracts";
 import type { Database } from "./sqlite.js";
 
 /**
@@ -389,11 +389,12 @@ export interface NeedsYouItem {
 export function needsYou(bundle: WorldBundle | null, jobs: Job[]): NeedsYouItem[] {
   const items: NeedsYouItem[] = [];
   if (bundle) {
-    if (bundle.proposals.length > 0) {
+    const proposals = unattendedProposalsOf(bundle.proposals, bundle.conversations);
+    if (proposals.length > 0) {
       items.push({
         kind: "proposal",
-        summary: `${bundle.proposals.length} proposal${bundle.proposals.length === 1 ? "" : "s"} awaiting a decision`,
-        count: bundle.proposals.length,
+        summary: `${proposals.length} proposal${proposals.length === 1 ? "" : "s"} awaiting a decision`,
+        count: proposals.length,
       });
     }
     let pendingReviews = 0;

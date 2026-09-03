@@ -125,6 +125,33 @@ describe("the world hub hero (design 63a)", () => {
     assert.ok(hero, "the hero still precedes the fan");
     assert.doesNotMatch(hero[1]!, /<button/, "a hub is a way in, not a workbench");
   });
+
+  it("counts an attended proposal only after its World Chat conversation closes", () => {
+    const conversation = {
+      id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      title: "Held here",
+      status: "open" as const,
+      updatedAt: "2026-09-03T12:00:00.000Z",
+      pointCount: 1,
+      openProposalCount: 1,
+      notCarried: [],
+    };
+    const staged = WORLD.proposals[0]!;
+    const proposal = {
+      ...staged,
+      proposal: {
+        ...staged.proposal,
+        decision: { mode: "attended" as const, owner: { kind: "world-chat" as const, conversationId: conversation.id } },
+      },
+    };
+    const attended = renderHub({ proposals: [proposal], conversations: [conversation] });
+    const orphaned = renderHub({
+      proposals: [proposal],
+      conversations: [{ ...conversation, status: "closed" }],
+    });
+    assert.doesNotMatch(attended, /canon v\d+ · 1 awaiting you/);
+    assert.match(orphaned, /canon v\d+ · 1 awaiting you/);
+  });
 });
 
 /**
@@ -160,6 +187,32 @@ describe("the world at a glance (design 63b)", () => {
       /class="fy-glance__n">(\d+)<\/div><div class="fy-glance__label">Character/.exec(html)?.[1] ?? "";
     assert.notEqual(figure(own), "", "the characters figure is findable");
     assert.equal(figure(withGuest), figure(own), "a guest changes nothing on the world's own count");
+  });
+
+  it("derives canon and cast captions from accepted entities and live threads, not proposal kinds", () => {
+    const settled = WORLD.canon.map((entry) => ({ ...entry, status: "settled" as const }));
+    const staged = WORLD.proposals[0]!;
+    const proposals = [{
+      ...staged,
+      proposal: {
+        ...staged.proposal,
+        kind: "new-canon" as const,
+        targets: [{ path: "characters/not-live-yet.md", baseVersion: null, baseHash: null }],
+      },
+      review: {
+        targets: [{
+          path: "characters/not-live-yet.md",
+          label: "Not Live Yet",
+          kind: "new sheet",
+          action: "create" as const,
+          fields: [],
+        }],
+      },
+    }];
+    const html = renderHub({ canon: settled, proposals });
+    const subs = [...html.matchAll(/class="fy-glance__sub">([^<]*)</g)].map((match) => match[1]);
+    assert.equal(subs[0], "nothing unsettled");
+    assert.doesNotMatch(subs[1]!, /waiting|proposal/);
   });
 });
 

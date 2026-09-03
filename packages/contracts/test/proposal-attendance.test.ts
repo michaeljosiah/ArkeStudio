@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProposalSchema, proposalDecisionOf, proposalOriginOf } from "../src/index.js";
+import { ProposalSchema, proposalDecisionOf, proposalOriginOf, unattendedProposalsOf } from "../src/index.js";
 
 const legacy = ProposalSchema.parse({
   id: "pr_01J8H0000000000000000000Z9",
@@ -54,5 +54,52 @@ describe("proposal origin and attended ownership (SPEC-040)", () => {
     });
     assert.deepEqual(proposalDecisionOf(recorded, []), { mode: "unattended" });
     assert.deepEqual(proposalDecisionOf(recorded, [{ id: "cv_missing", status: "closed" }]), { mode: "unattended" });
+  });
+
+  it("filters by effective ownership, including old records and orphaned conversations", () => {
+    const attended = {
+      proposal: ProposalSchema.parse({
+        ...legacy,
+        decision: {
+          mode: "attended",
+          owner: { kind: "world-chat", conversationId: "cv_01J8H0000000000000000000Z8" },
+        },
+      }),
+    };
+    const orphaned = {
+      proposal: ProposalSchema.parse({
+        ...legacy,
+        id: "pr_01J8H0000000000000000000Y1",
+        decision: { mode: "attended", owner: { kind: "world-chat", conversationId: "cv_missing" } },
+      }),
+    };
+    assert.deepEqual(
+      unattendedProposalsOf(
+        [attended, orphaned],
+        [{ id: "cv_01J8H0000000000000000000Z8", status: "open" }],
+      ),
+      [orphaned],
+    );
+    assert.deepEqual(unattendedProposalsOf([{ proposal: legacy }]), [{ proposal: legacy }]);
+  });
+
+  it("routes a question only the person can answer to the unattended exception queue", () => {
+    const asking = ProposalSchema.parse({
+      ...legacy,
+      decision: {
+        mode: "attended",
+        owner: { kind: "world-chat", conversationId: "cv_01J8H0000000000000000000Z8" },
+      },
+      openChoices: [{
+        choiceId: "choice-1",
+        kind: "duplicate-or-amend",
+        question: "Is this new or an amendment?",
+        options: [{ optionId: "new", label: "New" }, { optionId: "amend", label: "Amend" }],
+      }],
+    });
+    assert.deepEqual(
+      proposalDecisionOf(asking, [{ id: "cv_01J8H0000000000000000000Z8", status: "open" }]),
+      { mode: "unattended" },
+    );
   });
 });

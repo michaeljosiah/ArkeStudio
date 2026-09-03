@@ -3502,7 +3502,7 @@ export function ActivityScreen() {
                         <Button onClick={() => navigate(entry.reviewPath ?? `/w/${entry.worldId}/productions`)}>Review</Button>
                       )}
                       {entry.actions.includes("open-proposal") && entry.worldId && (
-                        <Button onClick={() => navigate(`/w/${entry.worldId}`)}>Open</Button>
+                        <Button onClick={() => navigate(`/w/${entry.worldId}/proposals`)}>Review</Button>
                       )}
                       {entry.actions.includes("open-world") && entry.worldId && (
                         <Button

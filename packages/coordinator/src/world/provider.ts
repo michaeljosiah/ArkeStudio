@@ -4,6 +4,7 @@ import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
   ulid,
+  unattendedProposalsOf,
   worldSheets,
   type ArtDirectionRecord,
   type WorldBundle,
@@ -375,6 +376,7 @@ export class FsWorldProvider implements WorldProvider {
       const decided = new Set(production.reviews.map((r) => r.takeId));
       unreviewedTakes += production.takes.filter((t) => !decided.has(t.id)).length;
     }
+    const openProposals = unattendedProposalsOf(bundle.proposals, bundle.conversations).length;
     this.appIndex?.upsertWorld({
       worldId: bundle.meta.worldId,
       slug: bundle.meta.slug,
@@ -395,7 +397,7 @@ export class FsWorldProvider implements WorldProvider {
       },
       attention: {
         unreviewedTakes,
-        openProposals: bundle.proposals.length,
+        openProposals,
         asOf: new Date().toISOString(),
       },
       updated: bundle.meta.updated,

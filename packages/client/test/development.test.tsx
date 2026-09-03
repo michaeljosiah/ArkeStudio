@@ -315,6 +315,10 @@ function stagedAgainst(path: string, fields: Array<[string, string]>, summary: s
       baseCanonRevision: 42,
       reservedCanonIds: [],
       source: "form",
+      decision: {
+        mode: "attended",
+        owner: { kind: "proposal-conversation", surface: "development", targetPath: path },
+      },
       created: "2026-08-20T18:00:00Z",
       draftRevision: 1,
     },
@@ -426,14 +430,12 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       "The season, as it stands",
     );
     const html = chat(withProposal(withMicrodrama([ONE]), staged));
-    // Turn 101: the governance vocabulary comes off the screen and the things stay.
-    assert.doesNotMatch(html, /Ready to accept|Accept Proposal/, "no machinery on the surface");
-    assert.match(html, /Apply changes/);
-    assert.match(html, /Keep discussing/, "and a way on that is not destroy it");
-    // Additive: the thing itself, named, rather than its fields with a before and an after
-    // (turn 101). The field text is what the destructive case shows, tested below.
+    // The attended surface owns the same complete gate card as every other proposal destination.
+    assert.doesNotMatch(html, /Ready to accept|Accept Proposal/);
+    assert.match(html, />Accept</);
+    assert.match(html, />Discard</);
     assert.match(html, /The season, as it stands/, "the thing the gate would make");
-    assert.match(html, /NEW/, "and what it would do to it");
+    assert.match(html, /Who is ringing the drowned bell\?/);
     assert.match(html, /the gate writes season\.json · nothing else moves/);
     // The rail has two states and never both at once (turns 89, 91).
     assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
@@ -649,7 +651,8 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
       <StoryScreen />,
       "/w/:worldId/p/:prodId/season",
     );
-    assert.match(html, /Apply changes/, "the yes is in the panel");
+    assert.match(html, />Accept</, "the yes is in the panel");
+    assert.match(html, />Discard</, "the ordinary gate actions stay together");
     assert.match(html, /nothing else changes/, "and says what it does not touch");
     assert.match(html, /Who is ringing the drowned bell\?/);
     // The two rail states are still never up together (turn 91): a point is not a proposal.
@@ -700,7 +703,7 @@ describe("the diff is the exception, not the default (design turn 101)", () => {
     assert.doesNotMatch(html, /Now: /, "and there is no before to show");
   });
 
-  it("a change that overwrites what somebody wrote shows what it replaces", () => {
+  it("a change that overwrites what somebody wrote shows both values", () => {
     const html = render(
       withProposal(withMicrodrama([ONE]), amending()),
       SEASON(PROD),
@@ -709,6 +712,7 @@ describe("the diff is the exception, not the default (design turn 101)", () => {
     );
     assert.match(html, /She rings to be found\./, "the words it would put there");
     assert.match(html, /She rings to be answered\./, "and the words it would take away");
-    assert.match(html, /replaces/, "said on the field itself");
+    assert.match(html, /dom-review__was/, "the old value is identified on the field itself");
+    assert.match(html, /dom-review__now/, "the proposed value is identified on the field itself");
   });
 });

@@ -91,7 +91,7 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
       <LocationsScreen />,
     );
     assert.equal(html.includes("drafted"), false, "nothing is asserted about where the run got to");
-    assert.ok(html.includes("in Proposals"), "it says where to look instead");
+    assert.ok(html.includes("in Approvals"), "it says where to look instead");
   });
 
   it("keeps the empty state when there is genuinely nothing", () => {
@@ -160,14 +160,14 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     assert.ok(pendingAt < existingAt, "and the pending one comes first");
   });
 
-  it("sends the pending card to Proposals, where the yes it waits for is given", () => {
+  it("sends an unattended pending card to Approvals, where the yes it waits for is given", () => {
     const html = render(
       emptyWorldWith([draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction")]),
       `${W}/locations`,
       <LocationsScreen />,
     );
     // The label is what a screen reader is handed, and it says both the state and the way out.
-    assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Open Proposals\./);
+    assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Open Approvals\./);
   });
 
   it("keeps an attended sentence draft's decision on its destination surface", () => {
@@ -178,7 +178,43 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     );
     assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Review here\./);
     assert.ok(html.includes("decision here"));
-    assert.equal(html.includes("ready in Proposals"), false);
+    assert.equal(html.includes("ready in Approvals"), false);
+  });
+
+  it("routes a creation held by Open World Chat back to that conversation", () => {
+    const proposal = draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction");
+    proposal.proposal.decision = {
+      mode: "attended",
+      owner: { kind: "world-chat", conversationId: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC" },
+    };
+    const state = emptyWorldWith([proposal]);
+    state.world!.conversations = [{
+      id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      title: "A place",
+      status: "open",
+      updatedAt: "2026-08-09T12:00:00.000Z",
+      pointCount: 1,
+      openProposalCount: 1,
+      notCarried: [],
+    }];
+    const html = render(state, `${W}/locations`, <LocationsScreen />);
+    assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Open conversation\./);
+    assert.ok(html.includes("in conversation"));
+    assert.equal(html.includes("Open Approvals"), false);
+  });
+
+  it("stops projecting a creation draft after its live sheet arrives", () => {
+    const pending = render(
+      emptyWorldWith([draftingProposal("characters/timi-j.md", "Timi J")]),
+      `${W}/cast`,
+      <CastScreen />,
+    );
+    const liveState = emptyWorldWith([]);
+    liveState.world!.sheets = [{ ...FIXTURE_STATE.world!.sheets[0]!, id: "timi-j", name: "Timi J" }];
+    const live = render(liveState, `${W}/cast`, <CastScreen />);
+    assert.ok(pending.includes("fy-row--pending"));
+    assert.equal(live.includes("fy-row--pending"), false);
+    assert.ok(live.includes("Timi J"));
   });
 
   it("leaves a world that has sheets showing them, drafting ones alongside", () => {

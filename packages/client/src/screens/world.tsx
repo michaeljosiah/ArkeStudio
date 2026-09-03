@@ -10,6 +10,7 @@ import {
   pendingSheets,
   pendingWorldSheets,
   proposalDecisionOf,
+  unattendedProposalsOf,
   productionShape,
   worldSheets,
   type CanonEntry,
@@ -334,12 +335,12 @@ export function WorldOverviewScreen() {
   // The fan is where "1 awaiting you" and "No one lives here yet" used to sit on screen at the
   // same time, saying opposite things about the same world (issue 228). The one awaiting is a
   // character being drafted, so it takes a card in the fan like any other.
-  const pendingCast = pendingWorldSheets(pendingSheets(world.proposals, "character")).slice(
+  const pendingCast = pendingWorldSheets(pendingSheets(world.proposals, "character", world.conversations)).slice(
     0,
     Math.max(0, 5 - characters.length),
   );
   const threads = world.canon.filter((c) => c.status === "open");
-  const proposals = world.proposals;
+  const proposals = unattendedProposalsOf(world.proposals, world.conversations);
   const production = world.productions[0];
   const cut = production ? deriveCut(production) : null;
   // The prototype's fan: per-slot offset, rotation and drift, centre card forward.
@@ -447,10 +448,8 @@ export function WorldOverviewScreen() {
         })}
         {pendingCast.map((sheet, i) => {
           const slot = FAN[characters.length + i] ?? FAN[2]!;
-          const staged = world.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
-          const decision = staged ? proposalDecisionOf(staged.proposal, world.conversations) : { mode: "unattended" as const };
-          const attended = decision.mode === "attended" && decision.owner.kind === "surface";
-          const state = pendingSheetState(authoring[sheet.proposalId], attended);
+          const destination = pendingSheetDestination(sheet);
+          const state = pendingSheetState(authoring[sheet.proposalId], destination);
           return (
             <div
               key={sheet.proposalId}
@@ -464,7 +463,7 @@ export function WorldOverviewScreen() {
                 <div
                   className="fy-polaroid fy-polaroid--pending"
                   style={{ transform: `rotate(${slot.rotate}deg)` }}
-                  onClick={() => navigate(attended ? `/w/${worldId}/cast` : `/w/${worldId}/proposals`)}
+                  onClick={() => navigate(pendingSheetRoute(worldId, sheet) ?? `/w/${worldId}/cast`)}
                 >
                   <div className="fy-polaroid__frame fy-polaroid__frame--pending">
                     {state.tone === "live" && <Loading size={28} />}
@@ -569,13 +568,6 @@ function WorldGlance({ world }: { world: WorldBundle }) {
   const places = owned.filter((s) => s.type === "location");
   const truths = world.canon.filter((c) => c.status === "settled" && c.retired !== true);
   const threads = world.canon.filter((c) => c.status === "open").length;
-  const canonProposals = world.proposals.filter(
-    (p) =>
-      p.proposal.kind === "new-canon" ||
-      p.proposal.kind === "canon-edit" ||
-      p.proposal.kind === "canon-settle",
-  ).length;
-  const waitingCast = pendingWorldSheets(pendingSheets(world.proposals, "character")).length;
   const sketchPlaces = places.filter((s) => s.status === "sketch").length;
   // Accepted reference material: the identity anchors, the model sheets that ride along with a
   // dispatch, and a location's accepted angles. Candidates and superseded views are not assets —
@@ -594,22 +586,15 @@ function WorldGlance({ world }: { world: WorldBundle }) {
     {
       n: truths.length,
       label: `Canon truth${truths.length === 1 ? "" : "s"}`,
-      sub:
-        canonProposals > 0
-          ? `${canonProposals} proposed change${canonProposals === 1 ? "" : "s"}`
-          : threads > 0
-            ? `${threads} open thread${threads === 1 ? "" : "s"}`
-            : "nothing unsettled",
+      sub: threads > 0 ? `${threads} open thread${threads === 1 ? "" : "s"}` : "nothing unsettled",
     },
     {
       n: characters.length,
       label: `Character${characters.length === 1 ? "" : "s"}`,
       sub:
-        waitingCast > 0
-          ? `${waitingCast} waiting for approval`
-          : characters.length === 0
-            ? "no one lives here yet"
-            : `${characters.filter((s) => s.status === "locked").length} locked to canon`,
+        characters.length === 0
+          ? "no one lives here yet"
+          : `${characters.filter((s) => s.status === "locked").length} locked to canon`,
     },
     {
       n: places.length,
@@ -763,7 +748,7 @@ const PROPOSAL_WHY: Record<string, string> = {
 function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
   const navigate = useNavigate();
   const items = [
-    ...world.proposals.map((p) => ({
+    ...unattendedProposalsOf(world.proposals, world.conversations).map((p) => ({
       key: p.proposal.id,
       name: p.proposal.summary,
       why: PROPOSAL_WHY[p.proposal.kind] ?? p.proposal.kind.replace(/-/g, " "),
@@ -854,25 +839,46 @@ function SheetKindNav({ active }: { active: Sheet["type"] }) {
  * (Whether the studio is still on a proposal is genuinely absent from the snapshot rather than
  * merely unread here — see the follow-up filed from this PR.)
  */
-function pendingSheetState(activity: AuthoringActivity | undefined, attended: boolean): {
+type PendingSheetDestination = "here" | "conversation" | "approvals";
+
+function pendingSheetDestination(sheet: PendingSheet): PendingSheetDestination {
+  if (sheet.decision.mode === "unattended") return "approvals";
+  return sheet.decision.owner.kind === "world-chat" ? "conversation" : "here";
+}
+
+function pendingSheetRoute(worldId: string | undefined, sheet: PendingSheet): string | null {
+  if (sheet.decision.mode === "unattended") return `/w/${worldId}/proposals`;
+  if (sheet.decision.owner.kind === "world-chat") {
+    return `/w/${worldId}/chat/${sheet.decision.owner.conversationId}`;
+  }
+  return null;
+}
+
+function pendingSheetState(activity: AuthoringActivity | undefined, destination: PendingSheetDestination): {
   foot: string;
   body: string;
   tone: "live" | "sketch" | "warn";
 } {
   if (activity === undefined) {
-    return attended
+    return destination === "here"
       ? { foot: "decision here", body: "open this draft to see where it got to", tone: "sketch" }
-      : { foot: "in Proposals", body: "open it to see where it got to", tone: "sketch" };
+      : destination === "conversation"
+        ? { foot: "in conversation", body: "open its conversation to see where it got to", tone: "sketch" }
+        : { foot: "in Approvals", body: "open it to see where it got to", tone: "sketch" };
   }
   if (activity.status === "running") {
     return { foot: "drafting", body: "the studio is writing this from your sentence", tone: "live" };
   }
   if (activity.status === "completed") {
-    return { foot: "drafted · awaiting your yes", body: attended ? "ready here" : "ready in Proposals", tone: "sketch" };
+    return {
+      foot: "drafted · awaiting your yes",
+      body: destination === "here" ? "ready here" : destination === "conversation" ? "ready in conversation" : "ready in Approvals",
+      tone: "sketch",
+    };
   }
   return {
     foot: `drafting ${activity.status}`,
-    body: activity.detail ?? (attended ? "open this draft to see what happened" : "open Proposals to see what happened"),
+    body: activity.detail ?? (destination === "here" ? "open this draft to see what happened" : destination === "conversation" ? "open its conversation to see what happened" : "open Approvals to see what happened"),
     tone: "warn",
   };
 }
@@ -902,17 +908,19 @@ function PendingSheetCards({
   return (
     <>
       {pending.map((sheet) => {
-        const staged = world?.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
-        const decision = staged ? proposalDecisionOf(staged.proposal, world?.conversations ?? []) : { mode: "unattended" as const };
-        const attended = decision.mode === "attended" && decision.owner.kind === "surface";
-        const state = pendingSheetState(authoring[sheet.proposalId], attended);
+        const destination = pendingSheetDestination(sheet);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination);
         return (
           <button
             key={sheet.proposalId}
             type="button"
             className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--pending"
-            onClick={() => attended ? setSelected(sheet.proposalId) : navigate(`/w/${worldId}/proposals`)}
-            aria-label={`${sheet.name} — ${state.foot}. ${attended ? "Review here" : "Open Proposals"}.`}
+            onClick={() => {
+              const route = pendingSheetRoute(worldId, sheet);
+              if (route) navigate(route);
+              else setSelected(sheet.proposalId);
+            }}
+            aria-label={`${sheet.name} — ${state.foot}. ${destination === "here" ? "Review here" : destination === "conversation" ? "Open conversation" : "Open Approvals"}.`}
           >
             <div className="fy-gridcard__frame fy-gridcard__frame--pending" style={{ height: frameHeight }}>
               {state.tone === "live" ? (
@@ -963,17 +971,19 @@ function PendingSheetRows({
   return (
     <>
       {pending.map((sheet) => {
-        const staged = world?.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
-        const decision = staged ? proposalDecisionOf(staged.proposal, world?.conversations ?? []) : { mode: "unattended" as const };
-        const attended = decision.mode === "attended" && decision.owner.kind === "surface";
-        const state = pendingSheetState(authoring[sheet.proposalId], attended);
+        const destination = pendingSheetDestination(sheet);
+        const state = pendingSheetState(authoring[sheet.proposalId], destination);
         return (
           <button
             key={sheet.proposalId}
             type="button"
             className="fy-row fy-row--pending"
-            aria-label={`${sheet.name}, ${state.foot}. ${attended ? "Review here" : "Open Proposals"}.`}
-            onClick={() => attended ? setSelected(sheet.proposalId) : navigate(`/w/${worldId}/proposals`)}
+            aria-label={`${sheet.name}, ${state.foot}. ${destination === "here" ? "Review here" : destination === "conversation" ? "Open conversation" : "Open Approvals"}.`}
+            onClick={() => {
+              const route = pendingSheetRoute(worldId, sheet);
+              if (route) navigate(route);
+              else setSelected(sheet.proposalId);
+            }}
           >
             <div className="fy-row__thumb fy-row__thumb--pending">
               {state.tone === "live" && <Loading size={18} />}
@@ -1047,7 +1057,7 @@ function SheetGrid({
   const sheets = worldOwned.filter((s) => s.type === kind && s.retired !== true);
   // A pending guest is not the world's business either — filtering only accepted guests would
   // let every new one sit on this ledger for exactly as long as it took to review (R-8).
-  const pending = pendingWorldSheets(pendingSheets(world?.proposals ?? [], kind));
+  const pending = pendingWorldSheets(pendingSheets(world?.proposals ?? [], kind, world?.conversations ?? []));
   const retired = worldOwned.filter((s) => s.type === kind && s.retired === true).length;
   const locked = sheets.filter((s) => s.status === "locked").length;
   const sketches = sheets.filter((s) => s.status === "sketch").length;
@@ -1258,7 +1268,7 @@ export function LocationsScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const places = (world?.sheets ?? []).filter((s) => s.type === "location" && !s.retired);
-  const pending = pendingSheets(world?.proposals ?? [], "location");
+  const pending = pendingSheets(world?.proposals ?? [], "location", world?.conversations ?? []);
   return (
     <div data-screen="locations">
       <div className="fy-corner">
@@ -1333,7 +1343,7 @@ export function FactionsScreen() {
   const world = useOpenWorldGuard(worldId);
   const navigate = useNavigate();
   const factions = (world?.sheets ?? []).filter((s) => s.type === "faction" && !s.retired);
-  const pending = pendingSheets(world?.proposals ?? [], "faction");
+  const pending = pendingSheets(world?.proposals ?? [], "faction", world?.conversations ?? []);
   const facet = (s: (typeof factions)[number], heading: string) =>
     s.sections.find((x) => x.heading.toLowerCase().includes(heading))?.body ?? null;
   return (
@@ -1641,9 +1651,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     );
   }
   const rules = world.canon.filter((c) => sheet.canonRules.includes(c.id));
-  const staged = world.proposals.filter((p) =>
-    p.proposal.targets.some((t) => t.path.endsWith(`/${sheet.id}.md`)),
-  );
   const kit = world.referenceKits.find((k) => k.sheetId === sheet.id);
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
@@ -1927,9 +1934,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         }
         onUndo={lifecycle.undo}
       />
-      {staged.map((p) => (
-        <ConnectedProposalPanel key={p.proposal.id} staged={p} />
-      ))}
       <div
         className="fy-sheet__grid"
         style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
