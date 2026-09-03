@@ -150,6 +150,25 @@ describe("typed tracks on the editor (issue 681)", () => {
     }
   });
 
+  it("keeps every lane on the picture ruler when audio outlives the film (#705)", async () => {
+    const { state, timeline } = migratedState();
+    const picture = timeline.tracks.find((track) => track.kind === "picture")!;
+    const pictureFrames = Math.max(...picture.clips.map((clip) => clip.startFrame + clip.durationFrames));
+    const sound = timeline.tracks.find((track) => track.kind === "ambience")!;
+    sound.clips[0]!.startFrame = 0;
+    sound.clips[0]!.durationFrames = pictureFrames * 10;
+    const screen = await mountCut(state);
+    try {
+      const firstPicture = screen.container.querySelector<HTMLElement>(`[data-clip='${picture.clips[0]!.id}']`);
+      const longAudio = screen.container.querySelector<HTMLElement>(`[data-clip='${sound.clips[0]!.id}']`);
+      assert.ok(firstPicture && longAudio);
+      assert.equal(firstPicture.style.width, `${(picture.clips[0]!.durationFrames / pictureFrames) * 100}%`);
+      assert.equal(longAudio.style.width, "1000%", "the clip overflows the picture canvas instead of rescaling it");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("places from the Library without a drag, adding the track it needs, at the playhead", async () => {
     const { state } = migratedState();
     const screen = await mountCut(state);

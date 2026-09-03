@@ -5820,7 +5820,9 @@ export function CutScreen() {
   const totalFrames = Math.max(
     secondsToFrames(totalSec, frameRate),
     views.reduce((end, view) => Math.max(end, view.clip.startFrame + view.clip.durationFrames), 0),
-    ...(shownTimeline?.tracks.flatMap((track) => track.clips.map((clip) => clip.startFrame + clip.durationFrames)) ?? []),
+    ...(shownTimeline?.tracks
+      .filter((track) => track.kind === "picture")
+      .flatMap((track) => track.clips.map((clip) => clip.startFrame + clip.durationFrames)) ?? []),
   );
 
   return (
