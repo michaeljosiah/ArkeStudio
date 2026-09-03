@@ -257,7 +257,7 @@ export function takeMediaPath(
 /** The first accepted picture in an episode, derived from its authored scene order. */
 export function episodeThumbnailPath(
   production: ProductionBundle,
-  episode: ProductionBundle["episodes"][number],
+  episode: Pick<ProductionBundle["episodes"][number], "scenes">,
 ): string | null {
   for (const sceneId of episode.scenes) {
     const scene = production.scenes.find((candidate) => candidate.id === sceneId);
@@ -1991,15 +1991,18 @@ export function SceneDetailScreen() {
 // ---- Generate workspace (11b) ----------------------------------------------
 
 type TakeEpisode = ProductionBundle["episodes"][number];
+type TakeEpisodeOption = Pick<TakeEpisode, "id" | "title" | "scenes"> & { order: number | null };
 
-const episodeLabel = (episode: TakeEpisode): string =>
-  `${String(episode.order).padStart(2, "0")} · ${episode.title}`;
+const episodeLabel = (episode: TakeEpisodeOption): string =>
+  episode.order === null ? episode.title : `${String(episode.order).padStart(2, "0")} · ${episode.title}`;
 
-export function filterTakeEpisodes(episodes: readonly TakeEpisode[], query: string): TakeEpisode[] {
+export function filterTakeEpisodes(episodes: readonly TakeEpisodeOption[], query: string): TakeEpisodeOption[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (terms.length === 0) return [...episodes];
   return episodes.filter((episode) => {
-    const searchable = `${episode.order} ${String(episode.order).padStart(2, "0")} ${episode.title}`.toLowerCase();
+    const searchable = episode.order === null
+      ? episode.title.toLowerCase()
+      : `${episode.order} ${String(episode.order).padStart(2, "0")} ${episode.title}`.toLowerCase();
     return terms.every((term) => searchable.includes(term));
   });
 }
@@ -2012,12 +2015,12 @@ function EpisodePicker({
   disabled,
   onSelect,
 }: {
-  episodes: readonly TakeEpisode[];
-  selected: TakeEpisode;
+  episodes: readonly TakeEpisodeOption[];
+  selected: TakeEpisodeOption;
   production: ProductionBundle;
   worldSlug: string | undefined;
   disabled: boolean;
-  onSelect: (episode: TakeEpisode) => void;
+  onSelect: (episode: TakeEpisodeOption) => void;
 }) {
   const listId = useId();
   const list = useRef<HTMLUListElement>(null);
@@ -2038,7 +2041,7 @@ function EpisodePicker({
     setActive(Math.max(0, episodes.findIndex((episode) => episode.id === selected.id)));
     setOpen(true);
   };
-  const choose = (episode: TakeEpisode) => {
+  const choose = (episode: TakeEpisodeOption) => {
     setQuery("");
     setOpen(false);
     if (episode.id !== selected.id) onSelect(episode);
@@ -2119,7 +2122,7 @@ function EpisodePicker({
                 >
                   <span className="fy-takes__episode-thumb" aria-hidden>
                     {image === null ? (
-                      <span>{String(episode.order).padStart(2, "0")}</span>
+                      <span>{episode.order === null ? "UN" : String(episode.order).padStart(2, "0")}</span>
                     ) : (
                       <Portrait worldSlug={worldSlug} path={image} label="" radius={0} loading="lazy" />
                     )}
@@ -2177,13 +2180,23 @@ function TakesView({
   const sceneById = new Map(production?.scenes.map((candidate) => [candidate.id, candidate]) ?? []);
   const episodic = production ? productionShape(production.meta).isEpisodic : false;
   const episodes = episodic ? [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order) : [];
+  const assignedSceneIds = new Set(episodes.flatMap((episode) => episode.scenes));
+  const unassignedScenes = episodic
+    ? (production?.scenes ?? []).filter((scene) => !assignedSceneIds.has(scene.id))
+    : [];
+  const episodeOptions: TakeEpisodeOption[] = [
+    ...episodes,
+    ...(unassignedScenes.length === 0
+      ? []
+      : [{ id: "__takes_unassigned__", order: null, title: "Unassigned", scenes: unassignedScenes.map((scene) => scene.id) }]),
+  ];
   const askedScene =
     askedFor === null
       ? undefined
       : production?.scenes.find((candidate) => orderedShots(candidate).some((shot) => shot.id === askedFor));
-  const askedEpisode = episodes.find((episode) => askedScene !== undefined && episode.scenes.includes(askedScene.id));
+  const askedEpisode = episodeOptions.find((episode) => askedScene !== undefined && episode.scenes.includes(askedScene.id));
   const selectedEpisode =
-    episodes.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodes[0] ?? null;
+    episodeOptions.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodeOptions[0] ?? null;
   const scenes = selectedEpisode === null
     ? production?.scenes ?? []
     : selectedEpisode.scenes.flatMap((id) => {
@@ -2249,7 +2262,7 @@ function TakesView({
       </div>
     );
   }
-  const selectEpisode = (episode: TakeEpisode) => {
+  const selectEpisode = (episode: TakeEpisodeOption) => {
     const nextScene = episode.scenes
       .map((id) => sceneById.get(id))
       .find((candidate) => candidate !== undefined && orderedShots(candidate).length > 0);
@@ -2262,7 +2275,7 @@ function TakesView({
     <div className="fy-takes__filter fy-takes__filter--episode">
       <span className="fy-takes__filter-label">EPISODE</span>
       <EpisodePicker
-        episodes={episodes}
+        episodes={episodeOptions}
         selected={selectedEpisode}
         production={production}
         worldSlug={world?.meta.slug}
@@ -2280,9 +2293,11 @@ function TakesView({
           </header>
           <EmptyState
             title="Nothing to review yet"
-            hint={selectedEpisode === null
-              ? "Generate a scene and its takes arrive here."
-              : "Choose another episode or generate its first shot."}
+            hint={selectedEpisode !== null && selectedEpisode.scenes.length === 0 && unassignedScenes.length > 0
+              ? `${unassignedScenes.length} unassigned scene${unassignedScenes.length === 1 ? " is" : "s are"} available in the episode picker.`
+              : selectedEpisode === null
+                ? "Generate a scene and its takes arrive here."
+                : "Choose another episode or generate its first shot."}
           />
         </div>
       </div>
