@@ -14,6 +14,7 @@ import {
   guestsOf,
   pendingGuestsOf,
   pendingSheets,
+  proposalDecisionOf,
   productionFrameRate,
   resolvePictureTimeline,
   libraryItemKey,
@@ -120,6 +121,7 @@ import { AppChrome } from "../components/chrome.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { ConnectedProposalPanel } from "../domain/connected.js";
 import { productionModel } from "../components/dispatch-bar.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
@@ -954,6 +956,7 @@ export function ProductionCastScreen() {
     name: string;
     sentence: string;
   } | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<string | null>(null);
 
   if (!world || !production) {
     return (
@@ -1103,9 +1106,19 @@ export function ProductionCastScreen() {
       ) : (
         <div className="fy-cardgrid" style={columns(guests.length + pendingGuests.length)}>
           {pendingGuests.map((p) => (
-            <div
+            <button
+              type="button"
               key={p.proposalId}
               className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--quiet"
+              onClick={() => {
+                const staged = world.proposals.find((proposal) => proposal.proposal.id === p.proposalId);
+                const decision = staged ? proposalDecisionOf(staged.proposal, world.conversations) : { mode: "unattended" as const };
+                if (decision.mode === "attended" && decision.owner.kind === "surface") {
+                  setPendingDecision(p.proposalId);
+                } else {
+                  navigate(`/w/${worldId}/proposals`);
+                }
+              }}
             >
               <div className="fy-gridcard__frame" style={{ height: 210 }} />
               <div className="fy-gridcard__pad">
@@ -1117,11 +1130,23 @@ export function ProductionCastScreen() {
                   guest · not yet accepted
                 </div>
               </div>
-            </div>
+            </button>
           ))}
           {guests.map((sheet) => card(sheet, true))}
         </div>
       )}
+      {(() => {
+        const staged = world.proposals.find((proposal) => proposal.proposal.id === pendingDecision);
+        return staged ? (
+          <div style={{ padding: "0 90px 24px" }}>
+            <ConnectedProposalPanel
+              key={staged.proposal.id}
+              staged={staged}
+              conversationPath={staged.proposal.targets[0]!.path}
+            />
+          </div>
+        ) : null;
+      })()}
 
       <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
         FROM {world.meta.name.toUpperCase()} · SHARED · {fromWorld.length}
@@ -1804,7 +1829,7 @@ function OverviewStoryScreen() {
                 {field.before !== null && <div className="fy-draftcard__was">Accepted: “{field.before}”</div>}
               </div>
             ))}
-            <div className="fy-mono">the conversation staged it · the gate writes it, in Proposals</div>
+            <div className="fy-mono">return to Production Chat to accept, revise, or discard it</div>
           </div>
         ) : (
           <div className="fy-emptycard">

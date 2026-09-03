@@ -7,6 +7,7 @@ import { MemoryRouter } from "react-router";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import type { ClientMessage, ClientState, StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { ConnectedProposalPanel } from "../src/domain/connected.js";
 import {
   __handleFrameForTest,
   __setBridgeForTest,
@@ -40,6 +41,11 @@ function staged(path: string, kind: "sheet-edit" | "canon-edit"): StagedProposal
       baseCanonRevision: 42,
       reservedCanonIds: [],
       source: "chat:studio",
+      origin: { source: "chat:studio", surface: kind === "sheet-edit" ? "sheet-studio" : "canon-thread", gesture: "start-draft" },
+      decision: {
+        mode: "attended",
+        owner: { kind: "proposal-conversation", surface: kind === "sheet-edit" ? "sheet-studio" : "canon-thread", targetPath: path },
+      },
       created: "2026-09-03T12:00:00Z",
       draftRevision: 2,
     },
@@ -178,6 +184,38 @@ describe("Studio decisions stay in their conversation", () => {
       );
     } finally {
       await unmount(mounted.root, mounted.container);
+    }
+  });
+
+  it("observes acceptance completion instead of assuming it on click", async () => {
+    const proposal = staged(SHEET_PATH, "sheet-edit");
+    __setStateForTest(stateWith([proposal]));
+    const messages: ClientMessage[] = [];
+    __setBridgeForTest(bridge(messages));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    let completed = 0;
+    try {
+      await act(async () => root.render(<ConnectedProposalPanel staged={proposal} onAccepted={() => completed += 1} />));
+      await act(async () => button(container, "Accept").click());
+      assert.equal(completed, 0, "sending an accept is not evidence that it landed");
+      await act(async () => {
+        __handleFrameForTest({
+          kind: "event",
+          seq: 20,
+          event: {
+            at: "2026-09-03T12:05:00Z",
+            type: "proposal.resolved",
+            worldId: WORLD_ID,
+            proposalId: PROPOSAL_ID,
+            outcome: "accepted",
+          },
+        });
+      });
+      assert.equal(completed, 1);
+    } finally {
+      await unmount(root, container);
     }
   });
 

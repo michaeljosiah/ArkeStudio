@@ -473,9 +473,19 @@ export function subscribeSheetEditResults(listener: (result: SheetEditResult) =>
 
 export type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
 const singleActResultListeners = new Set<(result: SingleActResult) => void>();
+const proposalResolutionListeners = new Set<
+  (result: Extract<DomainEvent, { type: "proposal.resolved" }>) => void
+>();
 export function subscribeSingleActResults(listener: (result: SingleActResult) => void): () => void {
   singleActResultListeners.add(listener);
   return () => singleActResultListeners.delete(listener);
+}
+
+export function subscribeProposalResolutions(
+  listener: (result: Extract<DomainEvent, { type: "proposal.resolved" }>) => void,
+): () => void {
+  proposalResolutionListeners.add(listener);
+  return () => proposalResolutionListeners.delete(listener);
 }
 
 export type CanonContradictions = Extract<DomainEvent, { type: "canon.contradictions" }>;
@@ -985,6 +995,7 @@ function handleFrame(json: string): void {
         },
       };
     } else if (event.type === "proposal.resolved") {
+      for (const listener of proposalResolutionListeners) listener(event);
       gateNotices = { ...gateNotices };
       delete gateNotices[event.proposalId];
       authoring = { ...authoring };

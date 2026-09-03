@@ -327,6 +327,15 @@ async function buildAndStage(input: {
           : (DEVELOPMENT_PROPOSAL_KIND[lead.candidate.classification] ?? "worldbuilding"),
         summary: bucket.items.length === 1 ? lead.candidate.title : `${lead.candidate.title} (+${bucket.items.length - 1})`,
         source: `world-chat:${input.conversationId}`,
+        origin: {
+          surface: "world-chat",
+          gesture: "save-conversation-point",
+          conversationId: input.conversationId,
+        },
+        decision: {
+          mode: "attended",
+          owner: { kind: "world-chat", conversationId: input.conversationId },
+        },
         targets: bucket.items.flatMap((item) => item.targets),
         preReservedCanonIds: bucket.items.flatMap((item) => item.reservedCanonIds),
         worldChatOrigins: bucket.items.map((item) => ({

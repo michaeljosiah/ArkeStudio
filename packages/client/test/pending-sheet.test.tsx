@@ -21,7 +21,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 const PROPOSAL = "pr_01J8E0000000000000000000P1";
 
-function draftingProposal(path: string, label: string, id = PROPOSAL): StagedProposal {
+function draftingProposal(path: string, label: string, id = PROPOSAL, attended = false): StagedProposal {
   return {
     proposal: {
       id,
@@ -31,6 +31,12 @@ function draftingProposal(path: string, label: string, id = PROPOSAL): StagedPro
       baseCanonRevision: 42,
       reservedCanonIds: [],
       source: "chat:studio",
+      ...(attended
+        ? {
+            origin: { source: "chat:studio", surface: "sheet-list", gesture: "create-sheet-from-sentence" },
+            decision: { mode: "attended" as const, owner: { kind: "surface" as const, surface: "sheet-list", targetPath: path } },
+          }
+        : {}),
       created: "2026-08-09T12:00:00.000Z",
       draftRevision: 1,
     },
@@ -71,7 +77,7 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     );
     assert.ok(html.includes("Ojuelegba Junction"), "the place the user just asked for is on the screen");
     assert.equal(html.includes("No locations yet"), false, "an empty state never means 'something is on its way'");
-    assert.ok(html.includes("1 in Proposals"), "and the heading says one is on the way");
+    assert.ok(html.includes("1 awaiting a decision"), "and the heading says one is on the way");
   });
 
   it("does not claim a sheet is drafted when it has not seen the run", () => {
@@ -131,7 +137,7 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
       <LocationsScreen />,
     );
     assert.ok(html.includes("0 place"), "nothing has landed yet");
-    assert.ok(html.includes("1 in Proposals"), "and one is waiting there");
+    assert.ok(html.includes("1 awaiting a decision"), "and one is waiting there");
     // Never "drafting": a duplicated sheet is staged whole and a World Chat candidate is
     // materialised before staging, so neither ever runs an agent. A heading calling them
     // drafting would say so forever, and disagree with the card beneath it.
@@ -162,6 +168,17 @@ describe("an entity being drafted shows as pending, not as nothing (issue 228)",
     );
     // The label is what a screen reader is handed, and it says both the state and the way out.
     assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Open Proposals\./);
+  });
+
+  it("keeps an attended sentence draft's decision on its destination surface", () => {
+    const html = render(
+      emptyWorldWith([draftingProposal("locations/ojuelegba-junction.md", "Ojuelegba Junction", PROPOSAL, true)]),
+      `${W}/locations`,
+      <LocationsScreen />,
+    );
+    assert.match(html, /aria-label="Ojuelegba Junction — [^"]*Review here\./);
+    assert.ok(html.includes("decision here"));
+    assert.equal(html.includes("ready in Proposals"), false);
   });
 
   it("leaves a world that has sheets showing them, drafting ones alongside", () => {

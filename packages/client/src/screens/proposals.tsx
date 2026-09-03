@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams } from "react-router";
-import type { StagedProposal } from "@arke-studio/contracts";
+import { proposalOriginOf, type StagedProposal } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, cx } from "../components/ui.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
@@ -27,8 +27,10 @@ import { explainNotCarried } from "../lib/not-carried.js";
 
 /** Where a draft came from, in words. `source` is free text like "chat:studio" or "form". */
 function originOf(proposal: StagedProposal["proposal"]): string {
-  const source = proposal.source;
-  if (source.startsWith("chat:")) return "From the studio";
+  const origin = proposalOriginOf(proposal);
+  const source = origin.source;
+  if (origin.surface === "sheet-studio" || origin.surface === "canon-thread") return "From the studio";
+  if (origin.surface === "world-chat") return "From a conversation";
   if (source.startsWith("import")) return "Imported";
   switch (source) {
     case "form":

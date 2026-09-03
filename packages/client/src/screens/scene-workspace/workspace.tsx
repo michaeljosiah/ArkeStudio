@@ -641,7 +641,6 @@ export function SceneWorkspace({
                         subject={`scene ${scene.number}`}
                         staged={staged}
                         writes="Updates this scene and its board boundaries."
-                        applyLabel="Apply to shots"
                         items={[
                           ...workingShots
                             .filter((shot) => stagedShotIds.has(shot.id))

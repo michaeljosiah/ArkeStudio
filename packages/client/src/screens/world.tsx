@@ -9,6 +9,7 @@ import {
   mainPhotoFor,
   pendingSheets,
   pendingWorldSheets,
+  proposalDecisionOf,
   productionShape,
   worldSheets,
   type CanonEntry,
@@ -446,7 +447,10 @@ export function WorldOverviewScreen() {
         })}
         {pendingCast.map((sheet, i) => {
           const slot = FAN[characters.length + i] ?? FAN[2]!;
-          const state = pendingSheetState(authoring[sheet.proposalId]);
+          const staged = world.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
+          const decision = staged ? proposalDecisionOf(staged.proposal, world.conversations) : { mode: "unattended" as const };
+          const attended = decision.mode === "attended" && decision.owner.kind === "surface";
+          const state = pendingSheetState(authoring[sheet.proposalId], attended);
           return (
             <div
               key={sheet.proposalId}
@@ -460,7 +464,7 @@ export function WorldOverviewScreen() {
                 <div
                   className="fy-polaroid fy-polaroid--pending"
                   style={{ transform: `rotate(${slot.rotate}deg)` }}
-                  onClick={() => navigate(`/w/${worldId}/proposals`)}
+                  onClick={() => navigate(attended ? `/w/${worldId}/cast` : `/w/${worldId}/proposals`)}
                 >
                   <div className="fy-polaroid__frame fy-polaroid__frame--pending">
                     {state.tone === "live" && <Loading size={28} />}
@@ -850,23 +854,25 @@ function SheetKindNav({ active }: { active: Sheet["type"] }) {
  * (Whether the studio is still on a proposal is genuinely absent from the snapshot rather than
  * merely unread here — see the follow-up filed from this PR.)
  */
-function pendingSheetState(activity: AuthoringActivity | undefined): {
+function pendingSheetState(activity: AuthoringActivity | undefined, attended: boolean): {
   foot: string;
   body: string;
   tone: "live" | "sketch" | "warn";
 } {
   if (activity === undefined) {
-    return { foot: "in Proposals", body: "open it to see where it got to", tone: "sketch" };
+    return attended
+      ? { foot: "decision here", body: "open this draft to see where it got to", tone: "sketch" }
+      : { foot: "in Proposals", body: "open it to see where it got to", tone: "sketch" };
   }
   if (activity.status === "running") {
     return { foot: "drafting", body: "the studio is writing this from your sentence", tone: "live" };
   }
   if (activity.status === "completed") {
-    return { foot: "drafted · awaiting your yes", body: "ready in Proposals", tone: "sketch" };
+    return { foot: "drafted · awaiting your yes", body: attended ? "ready here" : "ready in Proposals", tone: "sketch" };
   }
   return {
     foot: `drafting ${activity.status}`,
-    body: activity.detail ?? "open Proposals to see what happened",
+    body: activity.detail ?? (attended ? "open this draft to see what happened" : "open Proposals to see what happened"),
     tone: "warn",
   };
 }
@@ -877,8 +883,7 @@ function pendingSheetState(activity: AuthoringActivity | undefined): {
  * Drafting takes seconds to minutes, and for all of it the sheet lives in `.proposals/` rather
  * than in `world.sheets` — so this list showed its empty state, and a submitted action looked
  * like a failed one. The card is the whole fix: it sits in the grid where the sheet will be,
- * says which of the three things is true, and opens Proposals, because that is where the yes
- * it is waiting for gets given.
+ * says which of the three things is true, and keeps an attended decision on this destination.
  */
 function PendingSheetCards({
   worldId,
@@ -890,18 +895,24 @@ function PendingSheetCards({
   frameHeight: number;
 }) {
   const authoring = useAuthoring();
+  const world = useWorld();
   const navigate = useNavigate();
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectedProposal = world?.proposals.find((proposal) => proposal.proposal.id === selected);
   return (
     <>
       {pending.map((sheet) => {
-        const state = pendingSheetState(authoring[sheet.proposalId]);
+        const staged = world?.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
+        const decision = staged ? proposalDecisionOf(staged.proposal, world?.conversations ?? []) : { mode: "unattended" as const };
+        const attended = decision.mode === "attended" && decision.owner.kind === "surface";
+        const state = pendingSheetState(authoring[sheet.proposalId], attended);
         return (
           <button
             key={sheet.proposalId}
             type="button"
             className="fy-gridcard fy-gridcard--media fy-gridcard--fixed fy-gridcard--pending"
-            onClick={() => navigate(`/w/${worldId}/proposals`)}
-            aria-label={`${sheet.name} — ${state.foot}. Open Proposals.`}
+            onClick={() => attended ? setSelected(sheet.proposalId) : navigate(`/w/${worldId}/proposals`)}
+            aria-label={`${sheet.name} — ${state.foot}. ${attended ? "Review here" : "Open Proposals"}.`}
           >
             <div className="fy-gridcard__frame fy-gridcard__frame--pending" style={{ height: frameHeight }}>
               {state.tone === "live" ? (
@@ -925,6 +936,13 @@ function PendingSheetCards({
           </button>
         );
       })}
+      {selectedProposal && (
+        <ConnectedProposalPanel
+          key={selectedProposal.proposal.id}
+          staged={selectedProposal}
+          conversationPath={selectedProposal.proposal.targets[0]?.path}
+        />
+      )}
     </>
   );
 }
@@ -938,18 +956,24 @@ function PendingSheetRows({
   pending: readonly PendingSheet[];
 }) {
   const authoring = useAuthoring();
+  const world = useWorld();
   const navigate = useNavigate();
+  const [selected, setSelected] = useState<string | null>(null);
+  const selectedProposal = world?.proposals.find((proposal) => proposal.proposal.id === selected);
   return (
     <>
       {pending.map((sheet) => {
-        const state = pendingSheetState(authoring[sheet.proposalId]);
+        const staged = world?.proposals.find((proposal) => proposal.proposal.id === sheet.proposalId);
+        const decision = staged ? proposalDecisionOf(staged.proposal, world?.conversations ?? []) : { mode: "unattended" as const };
+        const attended = decision.mode === "attended" && decision.owner.kind === "surface";
+        const state = pendingSheetState(authoring[sheet.proposalId], attended);
         return (
           <button
             key={sheet.proposalId}
             type="button"
             className="fy-row fy-row--pending"
-            aria-label={`${sheet.name}, ${state.foot}. Open Proposals.`}
-            onClick={() => navigate(`/w/${worldId}/proposals`)}
+            aria-label={`${sheet.name}, ${state.foot}. ${attended ? "Review here" : "Open Proposals"}.`}
+            onClick={() => attended ? setSelected(sheet.proposalId) : navigate(`/w/${worldId}/proposals`)}
           >
             <div className="fy-row__thumb fy-row__thumb--pending">
               {state.tone === "live" && <Loading size={18} />}
@@ -972,12 +996,19 @@ function PendingSheetRows({
           </button>
         );
       })}
+      {selectedProposal && (
+        <ConnectedProposalPanel
+          key={selectedProposal.proposal.id}
+          staged={selectedProposal}
+          conversationPath={selectedProposal.proposal.targets[0]?.path}
+        />
+      )}
     </>
   );
 }
 
 /**
- * " · 2 in Proposals", or nothing at all.
+ * " · 2 awaiting a decision", or nothing at all.
  *
  * Not "drafting", which would be a claim about work that in several cases never happens: a
  * duplicated sheet is staged whole and synchronously, and a World Chat candidate is
@@ -987,7 +1018,7 @@ function PendingSheetRows({
  * every pending sheet, so that is what the count says.
  */
 function pendingSuffix(pending: readonly PendingSheet[]): string {
-  return pending.length > 0 ? ` · ${pending.length} in Proposals` : "";
+  return pending.length > 0 ? ` · ${pending.length} awaiting a decision` : "";
 }
 
 function SheetGrid({
@@ -2127,7 +2158,12 @@ export function CharacterEditScreen() {
     chatPath === null
       ? null
       : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
-  const chatProposal = targetProposal?.proposal.source.startsWith("chat:") ? targetProposal : null;
+  const targetDecision = targetProposal
+    ? proposalDecisionOf(targetProposal.proposal, world?.conversations ?? [])
+    : null;
+  const chatProposal = targetDecision?.mode === "attended" && targetDecision.owner.kind === "proposal-conversation"
+    ? targetProposal
+    : null;
   const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
   const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
   const chatRunning = chatActivity?.status === "running";
@@ -3940,7 +3976,12 @@ export function CanonThreadScreen() {
     chatPath === null
       ? null
       : (world?.proposals.find((p) => p.proposal.targets.some((t) => t.path === chatPath)) ?? null);
-  const chatProposal = targetProposal?.proposal.source.startsWith("chat:") ? targetProposal : null;
+  const targetDecision = targetProposal
+    ? proposalDecisionOf(targetProposal.proposal, world?.conversations ?? [])
+    : null;
+  const chatProposal = targetDecision?.mode === "attended" && targetDecision.owner.kind === "proposal-conversation"
+    ? targetProposal
+    : null;
   const transcript = useTranscripts()[chatProposal?.proposal.id ?? ""] ?? [];
   const chatActivity = useAuthoring()[chatProposal?.proposal.id ?? ""];
   const chatRunning = chatActivity?.status === "running";
