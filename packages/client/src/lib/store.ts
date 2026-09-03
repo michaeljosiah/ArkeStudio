@@ -2930,6 +2930,18 @@ export function proposeSeason(
   return send({ kind: "propose-season", worldId, requestId, productionId, ...season }) ? requestId : null;
 }
 
+/**
+ * Make an episode, live (issue 728) — as `New scene` already does. No proposal, so no press
+ * that waits on an approvals screen the person never went to.
+ */
+export function createEpisode(
+  worldId: string,
+  productionId: string,
+  episode: { title?: string; order?: number } = {},
+): void {
+  send({ kind: "create-episode", worldId, productionId, ...episode });
+}
+
 /** Stage one episode — a create mints identity from the title; an amend names its id (issue 397). */
 export function proposeEpisode(
   worldId: string,

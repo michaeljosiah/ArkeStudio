@@ -348,7 +348,27 @@ export async function proposeEpisode(
     });
     return { proposalId: proposal.id, path };
   }
-  const title = input.episode.title;
+  const { title, path, content } = newEpisodeRecord(production, input.productionId, input.episode);
+  const proposal = await gate.stage({
+    kind: "episode-edit",
+    summary: `New episode · ${title}`,
+    source: input.source,
+    targets: [{ path, content }],
+  });
+  return { proposalId: proposal.id, path };
+}
+
+/**
+ * Mint a new episode's identity and its v1 record. Shared by the live create below and the
+ * staged one above so a press and a proposal cannot disagree about how an episode is named,
+ * numbered or filed.
+ */
+function newEpisodeRecord(
+  production: { episodes: Episode[]; episodeFiles: Record<string, string> },
+  productionId: string,
+  episode: Partial<Omit<Episode, "id" | "version">> & { title?: string },
+): { id: string; title: string; path: string; content: string } {
+  const title = episode.title;
   if (title === undefined) throw new Error("a new episode needs a title");
   const slug = slugify(title).slice(0, 60) || "episode";
   const takenIds = new Set(production.episodes.map((e) => e.id));
@@ -359,29 +379,51 @@ export async function proposeEpisode(
     id = `ep_${slug}-${n}`;
     stem = `${slug}-${n}`;
   }
-  const path = `productions/${input.productionId}/episodes/${stem}.json`;
   const content =
     JSON.stringify(
       EpisodeSchema.parse({
         id,
         version: 1,
-        order: input.episode.order ?? production.episodes.length + 1,
+        order: episode.order ?? production.episodes.length + 1,
         title,
-        ...(input.episode.promise !== undefined ? { promise: input.episode.promise } : {}),
-        scenes: input.episode.scenes ?? [],
-        ...(input.episode.linked !== undefined ? { linked: input.episode.linked } : {}),
-        ...(input.episode.release !== undefined ? { release: input.episode.release } : {}),
+        ...(episode.promise !== undefined ? { promise: episode.promise } : {}),
+        scenes: episode.scenes ?? [],
+        ...(episode.linked !== undefined ? { linked: episode.linked } : {}),
+        ...(episode.release !== undefined ? { release: episode.release } : {}),
       }),
       null,
       2,
     ) + "\n";
-  const proposal = await gate.stage({
-    kind: "episode-edit",
-    summary: `New episode · ${title}`,
-    source: input.source,
-    targets: [{ path, content }],
+  return { id, title, path: `productions/${productionId}/episodes/${stem}.json`, content };
+}
+
+/**
+ * Make an episode live (issue #728) — the same rule `createScene` follows under SPEC-036 R-37,
+ * and the worked example SPEC-040 names: pressing a button labelled `New episode` *is* the
+ * consent, so staging a proposal only collects it again on a screen the person has to find.
+ * Before this, an unaccepted episode proposal left the rail's press disabled indefinitely.
+ *
+ * Minted and committed inside one serialised region, as `createScene` is: two presses reading
+ * the same snapshot would otherwise both choose `ep_episode-01`, and the second would collide.
+ */
+export async function createEpisode(
+  store: WorldStore,
+  input: { productionId: string; title?: string; order?: number },
+): Promise<{ episodeId: string; path: string }> {
+  return store.gateOp(async () => {
+    const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
+    if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+    const { id, path, content } = newEpisodeRecord(production, input.productionId, {
+      title: input.title?.trim() || `Episode ${String(production.episodes.length + 1).padStart(2, "0")}`,
+      ...(input.order !== undefined ? { order: input.order } : {}),
+    });
+    await store.commitUnserialised({
+      kind: "episode-create",
+      source: "editor",
+      files: [{ path, action: "create", content, baseHash: null }],
+    });
+    return { episodeId: id, path };
   });
-  return { proposalId: proposal.id, path };
 }
 
 /** Merge only submitted episode fields over an already-present draft. */

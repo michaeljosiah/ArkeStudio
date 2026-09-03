@@ -120,6 +120,7 @@ import {
   compileBoard,
   composeDispatches,
   createChapter,
+  createEpisode,
   createProduction,
   createScene,
   draftSceneSkeleton,
@@ -6455,6 +6456,19 @@ export class Coordinator {
           },
           undo: (proposal) => ({ kind: "restore-version", path, version: proposal.targets[0]!.baseVersion! }),
         });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "create-episode": {
+        // Live, like `create-scene` (issue #728): the person pressed a button that says what it
+        // does, and there is nothing on the approvals screen for them to decide a second time.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await createEpisode(store, {
+          productionId: msg.productionId,
+          ...(msg.title !== undefined ? { title: msg.title } : {}),
+          ...(msg.order !== undefined ? { order: msg.order } : {}),
+        }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

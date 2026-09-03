@@ -1552,6 +1552,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .optional(),
     })
     .strict(),
+  /**
+   * Make an episode, live (issue #728). No proposal: the press is the decision, the same way
+   * `create-scene` is, and an episode staged for review left the rail's press disabled until
+   * someone found the approvals screen.
+   */
+  z
+    .object({
+      kind: z.literal("create-episode"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      /** The name it is born with; absent, its number. Whitespace is not a name. */
+      title: z.string().trim().min(1).max(200).optional(),
+      order: z.number().int().min(1).optional(),
+    })
+    .strict(),
   /** issue #397: one episode — a create mints identity from the title; an amend names its id. */
   z
     .object({

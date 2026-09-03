@@ -15,7 +15,7 @@ import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
-import { proposeEpisode, reorderEpisodes } from "../lib/store.js";
+import { createEpisode, proposeEpisode, reorderEpisodes } from "../lib/store.js";
 import { useBlockDigests } from "./storyboard.js";
 import { sceneIsComplete } from "./scene-workspace/completion.js";
 
@@ -329,7 +329,8 @@ function EpisodesBoard() {
         {/*
           Making an episode happens in the grid, where the others already are (turn 87): no screen
           asks for a title before there is anything to title, so opening a blank tile stages the
-          episode under its number and the conversation is what names it.
+          episode under its number and the conversation is what names it. The tile writes it live
+          (issue 728): the press is the decision, and a proposal here waited on a screen elsewhere.
         */}
         {blanks.map((order) => (
           <button
@@ -339,7 +340,7 @@ function EpisodesBoard() {
             style={{ display: "grid", gap: 8, textAlign: "left", cursor: "pointer", minHeight: 118 }}
             onClick={() => {
               if (!worldId || !prodId) return;
-              proposeEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
+              createEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
               setStarting((prev) => new Set(prev).add(order));
             }}
           >
