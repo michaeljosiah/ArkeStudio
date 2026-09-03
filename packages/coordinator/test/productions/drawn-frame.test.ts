@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { hasOwnFrame, orderedShots, type Job, type Selections, type Take } from "@arke-studio/contracts";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
@@ -400,6 +400,50 @@ describe("a non-PNG still normalises to PNG at filing", () => {
     assert.ok(sidecar!.file.endsWith(".jpg"), "the original format stands");
     const bytes = await readFile(join(store.dir, "artifacts", sidecar!.file));
     assert.equal(bytes.toString(), "jpeg-ish-bytes");
+  });
+
+  it("restores an already-normalised frame without reading or converting its take again", async () => {
+    const store = await open();
+    const take = await jpegStill(store, "tk_jpg_restore", "sh_13");
+    const converted = encodePng(solidImage(4, 4, [9, 9, 9, 255]));
+    const toPng: BoundaryFrameMaker = {
+      write: async (_input, output) => {
+        await writeFile(output, converted);
+        return { ok: true };
+      },
+    };
+    const original = filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take,
+        shotId: "sh_13",
+        producedBy: "frame-run:jpg-restore",
+        toPng,
+      }),
+    );
+    filedOk(
+      await fileDrawnFrame(store, production(store), {
+        take: await still(store, "tk_jpg_other", "sh_13"),
+        shotId: "sh_13",
+        producedBy: "frame-run:other",
+      }),
+    );
+    await rm(join(store.dir, "productions", "saltlight", "takes", take.id), { recursive: true, force: true });
+    let convertedAgain = false;
+    const fresh = { ...production(store), takes: [take, ...production(store).takes.filter((candidate) => candidate.id !== take.id)] };
+
+    const { outcome } = await acceptStill(store, fresh, {
+      takeId: take.id,
+      shotId: "sh_13",
+      by: "user",
+      requirePng: true,
+      toPng: { write: async () => {
+        convertedAgain = true;
+        return { ok: false, reason: "process-failed" };
+      } },
+    });
+
+    assert.equal(filedOk(outcome).artifactId, original.artifactId);
+    assert.equal(convertedAgain, false, "the durable artifact is sufficient to restore the frame");
   });
 
   it("does not recreate a selection when its shot disappears during conversion", async () => {

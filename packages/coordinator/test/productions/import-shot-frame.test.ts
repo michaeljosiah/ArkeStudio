@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
@@ -48,15 +48,23 @@ async function harness(
       return picked();
     },
   });
+  const handle = (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage.bind(coordinator);
   const send = (requestId: string) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage({
+    handle({
       kind: "import-shot-frame",
       worldId: WORLD_ID,
       productionId: PRODUCTION,
       shotId: SHOT,
       requestId,
     });
-  return { coordinator, provider, root, worldDir, events, asked, send };
+  const accept = (takeId: string) => handle({
+    kind: "accept-take",
+    worldId: WORLD_ID,
+    productionId: PRODUCTION,
+    takeId,
+    shotId: SHOT,
+  });
+  return { coordinator, provider, root, worldDir, events, asked, send, accept };
 }
 
 function result(events: DomainEvent[], requestId?: string) {
@@ -121,6 +129,44 @@ describe("importing a shot frame", () => {
       assert.deepEqual(result(events)?.failures, []);
       assert.ok(events.some((event) => event.type === "review.recorded" && event.review.takeId === take.id));
       assert.ok(events.some((event) => event.type === "selection.changed" && event.shotId === SHOT));
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("restores a Variant by selecting its existing artifact instead of copying it (#670)", async () => {
+    const firstBytes = encodePng(solidImage(4, 4, [20, 30, 40, 255]));
+    const secondBytes = encodePng(solidImage(4, 4, [80, 90, 100, 255]));
+    const firstSource = await sourceFile("first-frame.png", firstBytes);
+    const secondSource = await sourceFile("second-frame.png", secondBytes);
+    let picks = 0;
+    const { provider, worldDir, send, accept } = await harness(() => [picks++ === 0 ? firstSource : secondSource]);
+    try {
+      await send("01J8E1000000000000000000W1");
+      const firstBundle = provider.openStore()!.getBundle();
+      const firstProduction = firstBundle.productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      const firstTake = firstProduction.takes.find(
+        (candidate) => candidate.provider === "user" && candidate.model === "upload" && candidate.coversShots.includes(SHOT),
+      )!;
+      const firstArtifactId = firstProduction.selections[SHOT]!.startFrameArtifactId!;
+      const firstArtifact = firstBundle.artifacts.find((candidate) => candidate.id === firstArtifactId)!;
+
+      await send("01J8E1000000000000000000W2");
+      const before = provider.openStore()!.getBundle();
+      const beforeProduction = before.productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      assert.notEqual(beforeProduction.selections[SHOT]?.startFrameArtifactId, firstArtifactId, "the second image holds the slot");
+      const artifactFilesBefore = (await readdir(join(worldDir, "artifacts"))).sort();
+
+      await accept(firstTake.id);
+
+      const after = provider.openStore()!.getBundle();
+      const afterProduction = after.productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+      assert.equal(afterProduction.selections[SHOT]?.startFrameArtifactId, firstArtifactId, "restore moves the pointer back");
+      assert.equal(after.artifacts.length, before.artifacts.length, "restore creates no artifact sidecar");
+      assert.deepEqual((await readdir(join(worldDir, "artifacts"))).sort(), artifactFilesBefore, "restore writes no artifact bytes");
+      assert.deepEqual(new Uint8Array(await readFile(join(worldDir, "artifacts", firstArtifact.file))), new Uint8Array(firstBytes));
+      assert.equal(afterProduction.reviews.at(-1)?.takeId, firstTake.id, "the new acceptance remains durable");
+      assert.equal(afterProduction.reviews.at(-1)?.decision, "accept");
     } finally {
       await provider.close();
     }

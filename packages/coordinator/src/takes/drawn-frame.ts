@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import {
   orderedShots,
@@ -40,6 +40,39 @@ import type { WorldStore } from "../world/store.js";
 
 /** Image media a still can arrive as. Anything else is not a picture and is refused by name. */
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp"]);
+
+async function reusableDrawnFrameArtifact(
+  store: WorldStore,
+  productionId: string,
+  shotId: string,
+  takeId: string,
+  artifactId?: string,
+): Promise<ArtifactSidecar | undefined> {
+  const artifacts = store.getBundle().artifacts;
+  const superseded = new Set(artifacts.flatMap((artifact) => artifact.supersedes ?? []));
+  const candidates = artifacts
+    .filter(
+      (artifact) =>
+        (artifactId === undefined || artifact.id === artifactId) &&
+        artifact.kind === "image" &&
+        artifact.production === productionId &&
+        artifact.origin.by === "system" &&
+        artifact.boundaryExtraction === undefined &&
+        !superseded.has(artifact.id) &&
+        artifact.links.includes(productionId) &&
+        artifact.links.includes(shotId) &&
+        artifact.links.includes(takeId),
+    )
+    .sort((left, right) => left.created.localeCompare(right.created) || left.id.localeCompare(right.id));
+  for (const candidate of candidates) {
+    try {
+      if ((await stat(toExtendedLength(join(store.dir, "artifacts", candidate.file)))).isFile()) return candidate;
+    } catch {
+      // A sidecar without bytes cannot safely occupy the frame slot; the immutable take may still be filed.
+    }
+  }
+  return undefined;
+}
 
 /**
  * The per-shot authorization snapshot a frame-run job carries (SPEC-036 §2.7, R-22).
@@ -131,9 +164,9 @@ export async function recordUploadedShotFrameTake(
 }
 
 /**
- * File a take's still as this shot's frame, and point the selection at it — the artifact and the
- * selection in one commit, so a crash between them cannot leave a selection naming bytes that
- * were never filed.
+ * File a take's still as this shot's frame, or restore its existing artifact, and point the
+ * selection at it. The artifact and selection land in one commit, so a crash between them cannot
+ * leave a selection naming bytes that were never filed.
  */
 export async function fileDrawnFrame(
   store: WorldStore,
@@ -182,87 +215,92 @@ export async function fileDrawnFrame(
     toPng?: BoundaryFrameMaker;
     /** Refuse selection unless the filed bytes are a PNG the board compiler can decode. */
     requirePng?: boolean;
+    /** An already-filed artifact for this take; restoring it moves the selection pointer only. */
+    reuseArtifactId?: string;
   },
 ): Promise<DrawnFrameOutcome> {
   const { take, shotId } = input;
   if (take.kind !== "frame" && take.kind !== "still") {
     return { ok: false, reason: `take ${take.id} is ${take.kind}, not a still` };
   }
-  const media = take.media;
-  if (media === undefined) return { ok: false, reason: `take ${take.id} has no media to file` };
-  let extension = extname(media).toLowerCase();
-  if (!IMAGE_EXTENSIONS.has(extension)) {
-    return { ok: false, reason: `take ${take.id}'s media is not an image` };
-  }
-
-  const mediaPath = join(store.dir, "productions", production.meta.id, "takes", take.id, media);
   let bytes: Buffer | null = null;
-  if (extension !== ".png") {
-    if (input.toPng !== undefined) {
-      // Frame zero of a still image IS that image, so the boundary cutter converts it.
-      const staging = join(store.dir, ".cache", "frames", `${ulid()}.png`);
-      try {
-        await mkdir(toExtendedLength(join(store.dir, ".cache", "frames")), { recursive: true });
-        const converted = await input.toPng.write(mediaPath, staging, 0);
-        if (converted.ok) {
-          const png = await readFile(toExtendedLength(staging));
-          if (png.byteLength > 0) {
-            decodePng(png);
-            bytes = png;
-            extension = ".png";
+  let sidecar: ArtifactSidecar | null = null;
+  if (input.reuseArtifactId === undefined) {
+    const media = take.media;
+    if (media === undefined) return { ok: false, reason: `take ${take.id} has no media to file` };
+    let extension = extname(media).toLowerCase();
+    if (!IMAGE_EXTENSIONS.has(extension)) {
+      return { ok: false, reason: `take ${take.id}'s media is not an image` };
+    }
+
+    const mediaPath = join(store.dir, "productions", production.meta.id, "takes", take.id, media);
+    if (extension !== ".png") {
+      if (input.toPng !== undefined) {
+        // Frame zero of a still image IS that image, so the boundary cutter converts it.
+        const staging = join(store.dir, ".cache", "frames", `${ulid()}.png`);
+        try {
+          await mkdir(toExtendedLength(join(store.dir, ".cache", "frames")), { recursive: true });
+          const converted = await input.toPng.write(mediaPath, staging, 0);
+          if (converted.ok) {
+            const png = await readFile(toExtendedLength(staging));
+            if (png.byteLength > 0) {
+              decodePng(png);
+              bytes = png;
+              extension = ".png";
+            }
           }
+        } catch {
+          // A generated frame still falls back to its immutable source. Upload acceptance opts
+          // into the stricter branch below because compiled boards can consume PNG only.
+        } finally {
+          await rm(toExtendedLength(staging), { force: true }).catch(() => {});
         }
-      } catch {
-        // A generated frame still falls back to its immutable source. Upload acceptance opts
-        // into the stricter branch below because compiled boards can consume PNG only.
-      } finally {
-        await rm(toExtendedLength(staging), { force: true }).catch(() => {});
+      }
+      if (bytes === null && input.requirePng === true) {
+        return { ok: false, reason: "the image could not be converted to a board-compatible PNG" };
       }
     }
-    if (bytes === null && input.requirePng === true) {
-      return { ok: false, reason: "the image could not be converted to a board-compatible PNG" };
+    if (bytes === null) {
+      try {
+        bytes = await readFile(toExtendedLength(mediaPath));
+      } catch (error) {
+        return { ok: false, reason: `take ${take.id}'s media could not be read: ${String(error)}` };
+      }
     }
-  }
-  if (bytes === null) {
-    try {
-      bytes = await readFile(toExtendedLength(mediaPath));
-    } catch (error) {
-      return { ok: false, reason: `take ${take.id}'s media could not be read: ${String(error)}` };
+    if (bytes.byteLength === 0) return { ok: false, reason: `take ${take.id}'s media is empty` };
+    if (input.requirePng === true) {
+      try {
+        decodePng(bytes);
+      } catch {
+        return { ok: false, reason: "the image is not a board-compatible PNG" };
+      }
     }
-  }
-  if (bytes.byteLength === 0) return { ok: false, reason: `take ${take.id}'s media is empty` };
-  if (input.requirePng === true) {
-    try {
-      decodePng(bytes);
-    } catch {
-      return { ok: false, reason: "the image is not a board-compatible PNG" };
-    }
-  }
 
-  /*
-   * `ar_`, which is what `ArtifactIdSchema` accepts. Worth stating because getting it wrong
-   * fails silently in the worst way: the sidecar writes, the bytes land, and `scanWorld` then
-   * drops the record because it will not parse — so the artifact exists on disk and does not
-   * exist to the app, and every consumer reads a frame slot pointing at nothing.
-   */
-  const artifactId = `ar_${ulid()}`;
-  const file = `frame-${shotId}-${artifactId.slice(-8).toLowerCase()}${extension}`;
-  const sidecar: ArtifactSidecar = {
-    id: artifactId,
-    kind: "image",
-    file,
-    // The same truncated digest shape the boundary sidecar files, so both frames audit alike.
-    hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`,
-    origin: { by: "system", producedBy: input.producedBy },
-    links: [production.meta.id, shotId, take.id],
-    production: production.meta.id,
     /*
-     * Deliberately no `boundaryExtraction`. Its absence is what marks this as a frame the shot
-     * was given rather than one chained onto it, and `hasOwnFrame` reads exactly that — so
-     * adding one here would quietly make every drawn frame overwritable by the next accept.
+     * `ar_`, which is what `ArtifactIdSchema` accepts. Worth stating because getting it wrong
+     * fails silently in the worst way: the sidecar writes, the bytes land, and `scanWorld` then
+     * drops the record because it will not parse — so the artifact exists on disk and does not
+     * exist to the app, and every consumer reads a frame slot pointing at nothing.
      */
-    created: store.now(),
-  };
+    const artifactId = `ar_${ulid()}`;
+    const file = `frame-${shotId}-${artifactId.slice(-8).toLowerCase()}${extension}`;
+    sidecar = {
+      id: artifactId,
+      kind: "image",
+      file,
+      // The same truncated digest shape the boundary sidecar files, so both frames audit alike.
+      hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`,
+      origin: { by: "system", producedBy: input.producedBy },
+      links: [production.meta.id, shotId, take.id],
+      production: production.meta.id,
+      /*
+       * Deliberately no `boundaryExtraction`. Its absence is what marks this as a frame the shot
+       * was given rather than one chained onto it, and `hasOwnFrame` reads exactly that — so
+       * adding one here would quietly make every drawn frame overwritable by the next accept.
+       */
+      created: store.now(),
+    };
+  }
 
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
   try {
@@ -274,6 +312,13 @@ export async function fileDrawnFrame(
       if (!currentProduction.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === shotId))) {
         return { ok: false as const, reason: `no shot ${shotId} in production ${production.meta.id}` };
       }
+      const reused = input.reuseArtifactId === undefined
+        ? undefined
+        : await reusableDrawnFrameArtifact(store, production.meta.id, shotId, take.id, input.reuseArtifactId);
+      if (input.reuseArtifactId !== undefined && reused === undefined) {
+        return { ok: false as const, reason: `artifact ${input.reuseArtifactId} is no longer available to restore` };
+      }
+      const artifactId = reused?.id ?? sidecar!.id;
 
       let raw: string;
       let existed = true;
@@ -320,8 +365,10 @@ export async function fileDrawnFrame(
       // Review append hashes are read under this same gate. Preparing them before enqueue lets
       // two accepts carry the same base hash, so the second fails after its image bytes were filed.
       const alsoCommit = input.alsoCommit === undefined ? [] : await input.alsoCommit();
-      await mkdir(join(store.dir, "artifacts"), { recursive: true });
-      await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
+      if (sidecar !== null && bytes !== null) {
+        await mkdir(join(store.dir, "artifacts"), { recursive: true });
+        await atomicWriteFile(join(store.dir, "artifacts", sidecar.file), bytes);
+      }
       selections[shotId] = {
         trimInSec: 0,
         ...selections[shotId],
@@ -341,12 +388,14 @@ export async function fileDrawnFrame(
           // The accept's review append rides here, so a still's decision and its frame are one
           // commit and cannot diverge across a crash (SPEC-013 R-9, D6).
           ...alsoCommit,
-          {
-            path: `artifacts/${file}.json`,
-            action: "create",
-            content: JSON.stringify(sidecar, null, 2) + "\n",
-            baseHash: null,
-          },
+          ...(sidecar === null
+            ? []
+            : [{
+                path: `artifacts/${sidecar.file}.json`,
+                action: "create" as const,
+                content: JSON.stringify(sidecar, null, 2) + "\n",
+                baseHash: null,
+              }]),
           {
             path: selectionsPath,
             action: existed ? "replace" : "create",
@@ -435,6 +484,8 @@ export async function acceptStill(
     by: input.by,
   };
 
+  const reusable = await reusableDrawnFrameArtifact(store, production.meta.id, input.shotId, take.id);
+
   const outcome = await fileDrawnFrame(store, production, {
     take,
     shotId: input.shotId,
@@ -443,6 +494,7 @@ export async function acceptStill(
     ...(input.expectedTakeId !== undefined ? { expectedTakeId: input.expectedTakeId } : {}),
     toPng: input.toPng,
     requirePng: input.requirePng === true || (take.provider === "user" && take.model === "upload"),
+    ...(reusable === undefined ? {} : { reuseArtifactId: reusable.id }),
     alsoCommit: async () => [await reviewAppendFor(store, production.meta.id, decision)],
   });
   return { decision, outcome };
