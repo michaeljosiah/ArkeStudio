@@ -21,6 +21,7 @@ import {
   resolveCast,
   stagingMoveWord,
   stagingPromptClause,
+  supportsMode,
   type AppSettings,
   type BenchComposer,
   type BenchReferenceToken,
@@ -283,6 +284,14 @@ export function subjectReferenceRouting(
   if (model === null) return { activeTokens: [], keyframeTokens: [] };
   const frames = references.filter((reference) => reference.subjectRole === "board-frame");
   const ordinary = references.filter((reference) => reference.subjectRole !== "board-frame");
+  if (
+    subject.kind === "shot" &&
+    model.capability === "video" &&
+    frames.length === 1 &&
+    supportsMode(model, "first-frame")
+  ) {
+    return { activeTokens: [], keyframeTokens: [frames[0]!.token] };
+  }
   // A complete frame sequence is structural guidance, not a bag of optional references. Keep it
   // intact in the keyframe lane even when this model cannot carry it, so dispatch refuses by name
   // instead of silently truncating it or spending on a less faithful ordinary-reference route.
@@ -397,6 +406,22 @@ export async function prepareBenchSubject(
     const mode = input.mode ?? "image";
     const model = subjectModelFor(production, mode, input.settings, input.manifest);
     const references = await sheetTokens([shot], world, production, scene, input.sources);
+    const selection = production.selections[shot.id];
+    const frameArtifactId = selection?.startFrameArtifactId;
+    const frameArtifact = frameArtifactId === undefined || frameArtifactId === null
+      ? undefined
+      : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
+    if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
+      references.push({
+        token: benchTokenFor("image", references.length + 1),
+        kind: "image",
+        source: { source: "artifact", artifactId: frameArtifact.id, hash: frameArtifact.hash },
+        label: `Shot ${shot.number} · storyboard frame`,
+        detail: "the storyboard frame for this shot",
+        ride: "when-supported",
+        subjectRole: "board-frame",
+      });
+    }
     // The clip is where the move matters: the playblast rides where a route can carry video,
     // and the beats ride in the words everywhere. A still has no move to describe.
     const staging = mode === "video" ? shot.staging : undefined;
