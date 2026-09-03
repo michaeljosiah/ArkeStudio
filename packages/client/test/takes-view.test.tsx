@@ -95,6 +95,8 @@ describe("the takes, watched (turn 102c)", () => {
     const html = render(two, GENERATE);
     assert.ok(html.includes('aria-label="Scene"'), "more than one scene, so the scene chips appear");
     assert.ok(html.includes("4 · The verse rises") && html.includes("5 · The lamps hold"), "scene names say what each filter contains");
+    assert.ok(html.includes('title="4 · The verse rises"'), "the full clipped label is recoverable on hover");
+    assert.ok(html.includes('class="fy-takechip__scene-label"'), "ellipsis belongs to the label inside the flex chip");
     assert.ok(!html.includes("Shot 20"), "the shot chips stay scene-local — no flattened duplicates");
 
     const one = render(FIXTURE_STATE, GENERATE);

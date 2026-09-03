@@ -2146,13 +2146,16 @@ function TakesView({
                         "fy-takechip--scene",
                         !showAllScenes && candidate.id === scene.id && "fy-takechip--on",
                       )}
+                      title={`${candidate.number} · ${candidate.title}`}
                       onClick={() => {
                         setShowAllScenes(false);
                         setSelectedShotId(orderedShots(candidate)[0]?.id ?? null);
                         setPickedId(null);
                       }}
                     >
-                      {candidate.number} · {candidate.title}
+                      <span className="fy-takechip__scene-label">
+                        {candidate.number} · {candidate.title}
+                      </span>
                     </button>
                   ))}
                 </div>
