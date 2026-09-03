@@ -6456,7 +6456,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-takechip:hover { background: var(--accent); }
 .fy-takechip--on { border: 1.5px solid var(--foreground); padding: 4.5px 9.5px; }
-.fy-takechip--scene { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fy-takechip--scene { max-width: 260px; }
+.fy-takechip__scene-label { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dark .fy-take__frame { background: var(--neutral-800); }
 .fy-takes__foot {
   margin-top: auto;
