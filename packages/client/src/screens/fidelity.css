@@ -6410,6 +6410,65 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-takes__filter-label { font: 500 10px var(--font-mono); letter-spacing: .08em; color: var(--neutral-400); }
 .fy-takes__filter .fy-takechips { min-width: 0; flex-wrap: nowrap; overflow-x: auto; padding: 1px; }
 .fy-takes__filter .fy-takechip { flex: none; }
+.fy-takes__filter--episode-scenes .fy-takechip--scene { flex: 0 1 auto; max-width: none; }
+.fy-takes__episode-picker { position: relative; width: min(420px, 100%); }
+.fy-takes__episode-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 32px;
+  padding: 0 32px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--background);
+  color: inherit;
+  font: 500 11.5px var(--font-sans);
+  text-overflow: ellipsis;
+}
+.fy-takes__episode-search { position: absolute; top: 9px; right: 10px; color: var(--muted-foreground); pointer-events: none; }
+.fy-takes__episode-menu {
+  position: absolute;
+  z-index: 8;
+  top: calc(100% + 5px);
+  left: 0;
+  box-sizing: border-box;
+  width: 100%;
+  max-height: 320px;
+  margin: 0;
+  padding: 5px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--popover);
+  box-shadow: var(--shadow-md);
+  list-style: none;
+}
+.fy-takes__episode-option {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 6px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.fy-takes__episode-option--active { background: var(--accent); }
+.fy-takes__episode-thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: 500 9px var(--font-mono);
+}
+.fy-takes__episode-thumb .fy-portrait { width: 100%; height: 100%; object-fit: cover; }
+.fy-takes__episode-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fy-takes__episode-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11.5px var(--font-sans); }
+.fy-takes__episode-copy > span { color: var(--muted-foreground); font: 400 9.5px var(--font-mono); }
+.fy-takes__episode-empty { padding: 12px; color: var(--muted-foreground); font: 400 10.5px var(--font-sans); }
 .fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .fy-take {
   box-sizing: border-box;

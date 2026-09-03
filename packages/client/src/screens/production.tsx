@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   deriveCut,
@@ -252,6 +252,24 @@ export function takeMediaPath(
   const mediaTake = mediaTakeFor(production, take);
   if (mediaTake === null) return null;
   return `productions/${production.meta.id}/takes/${mediaTake.id}/${posterNameFor(mediaTake.media)}`;
+}
+
+/** The first accepted picture in an episode, derived from its authored scene order. */
+export function episodeThumbnailPath(
+  production: ProductionBundle,
+  episode: ProductionBundle["episodes"][number],
+): string | null {
+  for (const sceneId of episode.scenes) {
+    const scene = production.scenes.find((candidate) => candidate.id === sceneId);
+    if (scene === undefined) continue;
+    for (const shot of orderedShots(scene)) {
+      const takeId = acceptedTakeId(production, shot.id);
+      const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
+      const path = take === undefined ? null : takeMediaPath(production, take);
+      if (path !== null) return path;
+    }
+  }
+  return null;
 }
 
 /**
@@ -1972,6 +1990,154 @@ export function SceneDetailScreen() {
 
 // ---- Generate workspace (11b) ----------------------------------------------
 
+type TakeEpisode = ProductionBundle["episodes"][number];
+
+const episodeLabel = (episode: TakeEpisode): string =>
+  `${String(episode.order).padStart(2, "0")} · ${episode.title}`;
+
+export function filterTakeEpisodes(episodes: readonly TakeEpisode[], query: string): TakeEpisode[] {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [...episodes];
+  return episodes.filter((episode) => {
+    const searchable = `${episode.order} ${String(episode.order).padStart(2, "0")} ${episode.title}`.toLowerCase();
+    return terms.every((term) => searchable.includes(term));
+  });
+}
+
+function EpisodePicker({
+  episodes,
+  selected,
+  production,
+  worldSlug,
+  disabled,
+  onSelect,
+}: {
+  episodes: readonly TakeEpisode[];
+  selected: TakeEpisode;
+  production: ProductionBundle;
+  worldSlug: string | undefined;
+  disabled: boolean;
+  onSelect: (episode: TakeEpisode) => void;
+}) {
+  const listId = useId();
+  const list = useRef<HTMLUListElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [active, setActive] = useState(0);
+  const matches = filterTakeEpisodes(episodes, query);
+  const highlighted = Math.min(active, Math.max(0, matches.length - 1));
+
+  useEffect(() => {
+    const row = list.current?.children[highlighted] as HTMLElement | undefined;
+    row?.scrollIntoView({ block: "nearest" });
+  }, [highlighted]);
+
+  const show = () => {
+    if (open) return;
+    setQuery("");
+    setActive(Math.max(0, episodes.findIndex((episode) => episode.id === selected.id)));
+    setOpen(true);
+  };
+  const choose = (episode: TakeEpisode) => {
+    setQuery("");
+    setOpen(false);
+    if (episode.id !== selected.id) onSelect(episode);
+  };
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+      event.preventDefault();
+      show();
+      return;
+    }
+    if (!open) return;
+    if (event.key === "ArrowDown" && matches.length > 0) {
+      event.preventDefault();
+      setActive((index) => (index + 1) % matches.length);
+    } else if (event.key === "ArrowUp" && matches.length > 0) {
+      event.preventDefault();
+      setActive((index) => (index - 1 + matches.length) % matches.length);
+    } else if ((event.key === "Enter" || event.key === "Tab") && matches[highlighted] !== undefined) {
+      event.preventDefault();
+      choose(matches[highlighted]!);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setQuery("");
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div className="fy-takes__episode-picker">
+      <input
+        type="text"
+        role="combobox"
+        aria-label="Episode"
+        aria-expanded={open}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        {...(open && matches[highlighted] !== undefined
+          ? { "aria-activedescendant": `${listId}-${matches[highlighted]!.id}` }
+          : {})}
+        className="fy-takes__episode-input"
+        value={open ? query : episodeLabel(selected)}
+        title={episodeLabel(selected)}
+        disabled={disabled}
+        onFocus={show}
+        onClick={show}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setActive(0);
+          setOpen(true);
+        }}
+        onKeyDown={onKeyDown}
+        onBlur={() => {
+          setQuery("");
+          setOpen(false);
+        }}
+      />
+      <span className="fy-takes__episode-search" aria-hidden><Search size={13} /></span>
+      {open && (
+        <ul ref={list} id={listId} role="listbox" aria-label="Episodes" className="fy-takes__episode-menu">
+          {matches.length === 0 ? (
+            <li className="fy-takes__episode-empty">No matching episodes</li>
+          ) : (
+            matches.map((episode, index) => {
+              const image = episodeThumbnailPath(production, episode);
+              return (
+                <li
+                  key={episode.id}
+                  id={`${listId}-${episode.id}`}
+                  role="option"
+                  aria-selected={episode.id === selected.id}
+                  className={cx("fy-takes__episode-option", index === highlighted && "fy-takes__episode-option--active")}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseEnter={() => setActive(index)}
+                  onClick={() => choose(episode)}
+                >
+                  <span className="fy-takes__episode-thumb" aria-hidden>
+                    {image === null ? (
+                      <span>{String(episode.order).padStart(2, "0")}</span>
+                    ) : (
+                      <Portrait worldSlug={worldSlug} path={image} label="" radius={0} loading="lazy" />
+                    )}
+                  </span>
+                  <span className="fy-takes__episode-copy">
+                    <strong>{episodeLabel(episode)}</strong>
+                    <span>{episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}</span>
+                  </span>
+                </li>
+              );
+            })
+          )}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /**
  * The takes, watched (design turn 102, frame 102c).
  *
@@ -2009,8 +2175,15 @@ function TakesView({
   const [selectedEpisodeId, setSelectedEpisodeId] = useState<string | null>(null);
   const [showAllScenes, setShowAllScenes] = useState(false);
   const sceneById = new Map(production?.scenes.map((candidate) => [candidate.id, candidate]) ?? []);
-  const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
-  const selectedEpisode = episodes.find((episode) => episode.id === selectedEpisodeId) ?? null;
+  const episodic = production ? productionShape(production.meta).isEpisodic : false;
+  const episodes = episodic ? [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order) : [];
+  const askedScene =
+    askedFor === null
+      ? undefined
+      : production?.scenes.find((candidate) => orderedShots(candidate).some((shot) => shot.id === askedFor));
+  const askedEpisode = episodes.find((episode) => askedScene !== undefined && episode.scenes.includes(askedScene.id));
+  const selectedEpisode =
+    episodes.find((episode) => episode.id === selectedEpisodeId) ?? askedEpisode ?? episodes[0] ?? null;
   const scenes = selectedEpisode === null
     ? production?.scenes ?? []
     : selectedEpisode.scenes.flatMap((id) => {
@@ -2024,7 +2197,10 @@ function TakesView({
    * shot). A chip pressed here still wins — the address is where you arrived, not a lock.
    */
   const asked = askedFor !== null && all.some((s) => s.id === askedFor) ? askedFor : null;
-  const shotId = selectedShotId ?? asked ?? all[0]?.id ?? null;
+  const selected = selectedShotId !== null && all.some((candidate) => candidate.id === selectedShotId)
+    ? selectedShotId
+    : null;
+  const shotId = selected ?? asked ?? all[0]?.id ?? null;
   const shot = all.find((s) => s.id === shotId) ?? null;
   const found = production?.scenes.find((s) => orderedShots(s).some((x) => x.id === shotId)) ?? null;
   const scene = found === null ? null : legacySceneView(found);
@@ -2066,10 +2242,49 @@ function TakesView({
     for (const t of production?.takes ?? []) for (const sid of t.coversShots) ids.add(sid);
     return ids;
   }, [production?.takes]);
-  if (!production || !scene || !shot) {
+  if (!production) {
     return (
       <div className="fy-prodmain" data-screen="generate-workspace">
         <EmptyState title="Nothing to review yet" hint="Generate a scene and its takes arrive here." />
+      </div>
+    );
+  }
+  const selectEpisode = (episode: TakeEpisode) => {
+    const nextScene = episode.scenes
+      .map((id) => sceneById.get(id))
+      .find((candidate) => candidate !== undefined && orderedShots(candidate).length > 0);
+    setSelectedEpisodeId(episode.id);
+    setShowAllScenes(false);
+    setSelectedShotId(nextScene === undefined ? null : orderedShots(nextScene)[0]?.id ?? null);
+    setPickedId(null);
+  };
+  const episodeFilter = selectedEpisode === null ? null : (
+    <div className="fy-takes__filter fy-takes__filter--episode">
+      <span className="fy-takes__filter-label">EPISODE</span>
+      <EpisodePicker
+        episodes={episodes}
+        selected={selectedEpisode}
+        production={production}
+        worldSlug={world?.meta.slug}
+        disabled={generating}
+        onSelect={selectEpisode}
+      />
+    </div>
+  );
+  if (!scene || !shot) {
+    return (
+      <div className="fy-arkewrap">
+        <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
+          <header className="fy-takes__head">
+            <nav className="fy-takes__filters" aria-label="Take filters">{episodeFilter}</nav>
+          </header>
+          <EmptyState
+            title="Nothing to review yet"
+            hint={selectedEpisode === null
+              ? "Generate a scene and its takes arrive here."
+              : "Choose another episode or generate its first shot."}
+          />
+        </div>
       </div>
     );
   }
@@ -2078,49 +2293,9 @@ function TakesView({
       <div className="fy-prodmain fy-takes" data-screen="generate-workspace">
         <header className="fy-takes__head">
           <nav className="fy-takes__filters" aria-label="Take filters">
-            {episodes.length > 0 && (
-              <div className="fy-takes__filter fy-takes__filter--episode">
-                <span className="fy-takes__filter-label">EPISODE</span>
-                <div className="fy-takechips" role="group" aria-label="Episode">
-                  <button
-                    type="button"
-                    disabled={generating}
-                    aria-pressed={selectedEpisodeId === null}
-                    className={cx("fy-takechip", selectedEpisodeId === null && "fy-takechip--on")}
-                    onClick={() => {
-                      setSelectedEpisodeId(null);
-                      setShowAllScenes(false);
-                      setPickedId(null);
-                    }}
-                  >
-                    All
-                  </button>
-                  {episodes.map((episode) => (
-                    <button
-                      key={episode.id}
-                      type="button"
-                      disabled={generating}
-                      aria-pressed={episode.id === selectedEpisodeId}
-                      className={cx("fy-takechip", episode.id === selectedEpisodeId && "fy-takechip--on")}
-                      title={episode.title}
-                      onClick={() => {
-                        const nextScene = episode.scenes
-                          .map((id) => sceneById.get(id))
-                          .find((candidate) => candidate !== undefined && orderedShots(candidate).length > 0);
-                        setSelectedEpisodeId(episode.id);
-                        setShowAllScenes(false);
-                        setSelectedShotId(nextScene === undefined ? null : orderedShots(nextScene)[0]?.id ?? null);
-                        setPickedId(null);
-                      }}
-                    >
-                      {String(episode.order).padStart(2, "0")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
+            {episodeFilter}
             {scenes.length > 1 && (
-              <div className="fy-takes__filter">
+              <div className={cx("fy-takes__filter", selectedEpisode !== null && "fy-takes__filter--episode-scenes")}>
                 <span className="fy-takes__filter-label">SCENE</span>
                 <div className="fy-takechips" role="group" aria-label="Scene">
                   <button

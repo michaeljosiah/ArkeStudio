@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
-import { GenerateScreen } from "../src/screens/production.js";
+import { episodeThumbnailPath, filterTakeEpisodes, GenerateScreen } from "../src/screens/production.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -35,6 +38,58 @@ function render(state: ClientState, path: string): string {
   }
 }
 
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), {
+  pause() {},
+  play: () => Promise.resolve(),
+});
+Object.assign(dom.HTMLElement.prototype, { scrollIntoView() {} });
+Object.assign(globalThis, {
+  window: dom.window,
+  document: dom.document,
+  HTMLElement: dom.HTMLElement,
+  Node: dom.Node,
+  Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(0), 0),
+});
+
+interface Mounted {
+  container: HTMLElement;
+  root: Root;
+}
+
+const open: Mounted[] = [];
+
+async function mount(state: ClientState, path = GENERATE): Promise<Mounted> {
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    __setStateForTest(state);
+    root.render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path={ROUTE} element={<GenerateScreen />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+  });
+  const mounted = { container, root };
+  open.push(mounted);
+  return mounted;
+}
+
+afterEach(async () => {
+  for (const mounted of open.splice(0)) {
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+  }
+  dom.document.body.replaceChildren();
+  __setStateForTest(FIXTURE_STATE);
+});
+
 type Production = NonNullable<ClientState["world"]>["productions"][number];
 
 function withSaltlight(mutate: (p: Production) => Production): ClientState {
@@ -65,6 +120,28 @@ function withSecondScene(p: Production): Production {
       },
     ],
   };
+}
+
+function episodicState(count = 2): ClientState {
+  return withSaltlight((production) => {
+    const withScenes = withSecondScene(production);
+    const episodes = Array.from({ length: count }, (_, index) => {
+      const order = index + 1;
+      return {
+        id: `ep_${String(order).padStart(3, "0")}`,
+        version: 1,
+        order,
+        title: order === 1 ? "First" : order === 2 ? "Second" : order === 80 ? "Finale Run" : `Chapter ${order}`,
+        scenes: order === 1 ? ["sc_04"] : order === 2 ? ["sc_05"] : [],
+      };
+    });
+    return {
+      ...withScenes,
+      meta: { ...withScenes.meta, kind: "series" },
+      episodes,
+      episodeFiles: Object.fromEntries(episodes.map((episode) => [episode.id, `${episode.order}-${episode.title}`])),
+    };
+  });
 }
 
 describe("the takes, watched (turn 102c)", () => {
@@ -104,21 +181,63 @@ describe("the takes, watched (turn 102c)", () => {
   });
 
   it("puts narrowing filters before the current shot and adds episodes only to a series (#734)", () => {
-    const episodic = withSaltlight((p) => ({
-      ...withSecondScene(p),
-      episodes: [
-        { id: "ep_first", version: 1, order: 1, title: "First", scenes: ["sc_04"] },
-        { id: "ep_second", version: 1, order: 2, title: "Second", scenes: ["sc_05"] },
-      ],
-      episodeFiles: { ep_first: "01-first", ep_second: "02-second" },
-    }));
+    const episodic = episodicState();
     const html = render(episodic, GENERATE);
     const filters = html.indexOf('aria-label="Take filters"');
     const heading = html.indexOf('<h1 class="fy-h1">');
     const grid = html.indexOf('class="fy-takegrid"');
     assert.ok(filters >= 0 && filters < heading && heading < grid, "filters, then current shot, then takes");
-    assert.ok(html.includes('aria-label="Episode"') && html.includes(">01</button>") && html.includes(">02</button>"));
+    assert.ok(html.includes('role="combobox"') && html.includes('aria-label="Episode"'));
+    assert.ok(html.includes('value="01 · First"'), "one episode is always selected");
+    assert.ok(!html.includes(">All</button>"), "there is no season-wide episode state");
+    assert.ok(!html.includes("The lamps hold"), "scenes outside the selected episode are not rendered");
     assert.ok(!render(FIXTURE_STATE, GENERATE).includes('fy-takes__filter--episode'), "a film has no empty episode row");
+  });
+
+  it("searches a hundred-episode season by number or title without rendering a hundred chips", () => {
+    const state = episodicState(100);
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    assert.deepEqual(filterTakeEpisodes(production.episodes, "80 finale").map((episode) => episode.id), ["ep_080"]);
+    assert.deepEqual(filterTakeEpisodes(production.episodes, "chapter 37").map((episode) => episode.id), ["ep_037"]);
+
+    const html = render(state, GENERATE);
+    assert.ok(html.includes('value="01 · First"'));
+    assert.equal((html.match(/fy-takes__episode-option/g) ?? []).length, 0, "the closed picker keeps the large list out of the page");
+  });
+
+  it("derives a deep-linked shot's episode and an episode image from accepted take media", () => {
+    const state = episodicState();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    assert.equal(
+      episodeThumbnailPath(production, production.episodes[0]!),
+      "productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png",
+    );
+
+    const html = render(state, `${GENERATE}?shot=sh_20`);
+    assert.ok(html.includes('value="02 · Second"'), "the address selects the shot's parent episode");
+    assert.ok(html.includes("Shot 20"));
+    assert.ok(!html.includes("Shot 12"), "shots remain inside the selected episode");
+  });
+
+  it("resets scene and shot scope when another episode is selected", async () => {
+    const mounted = await mount(episodicState(3));
+    let input = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Episode"]')!;
+    await act(async () => input.click());
+    const second = [...mounted.container.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes("02 · Second"))!;
+    await act(async () => second.click());
+
+    assert.equal(input.value, "02 · Second");
+    assert.ok(mounted.container.textContent?.includes("Shot 20"), "the first shot in the new episode is selected");
+    assert.ok(!mounted.container.textContent?.includes("Shot 12"), "the old episode's shots leave the scope");
+
+    await act(async () => input.click());
+    const empty = [...mounted.container.querySelectorAll<HTMLElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes("03 · Chapter 3"))!;
+    await act(async () => empty.click());
+    input = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Episode"]')!;
+    assert.equal(input.value, "03 · Chapter 3", "an unfinished episode keeps the navigator available");
+    assert.ok(mounted.container.textContent?.includes("Nothing to review yet"));
   });
 
   it("never guesses the mark (review 2026-08-22): an acceptance on a hidden record marks nothing", () => {

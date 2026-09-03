@@ -12,6 +12,7 @@ export function Portrait({
   path,
   label,
   radius = 7,
+  loading = "eager",
   download = false,
   downloadName,
   onAvailabilityChange,
@@ -21,6 +22,7 @@ export function Portrait({
   path: string;
   label: string;
   radius?: number;
+  loading?: "eager" | "lazy";
   /**
    * Offer to save this picture (issue 478). Opt-in, because most pictures on these screens are
    * an avatar, a card frame or a chip standing in for something else — user media is the subset
@@ -101,6 +103,7 @@ export function Portrait({
       style={{ borderRadius: radius }}
       src={src}
       alt={label}
+      loading={loading}
       draggable={false}
       onLoad={() => {
         setLoadedSubject(subject);
