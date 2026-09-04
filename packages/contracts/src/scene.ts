@@ -91,6 +91,10 @@ export const StagingKeySchema = z
     anchor: SlugSchema.optional(),
     /** The cast sheet the aim follows live. */
     track: SlugSchema.optional(),
+    /** Fraction of the incoming leg spent decelerating into this mark. */
+    easeIn: z.number().min(0).max(1).optional(),
+    /** Fraction of the outgoing leg spent accelerating away from this mark. */
+    easeOut: z.number().min(0).max(1).optional(),
   })
   .strict();
 export type StagingKey = z.infer<typeof StagingKeySchema>;

@@ -8,14 +8,29 @@ import { parseAspect } from "./manifest.js";
  * panel readouts) and the coordinator (the bench prefill), so the numbers a person reads on
  * the panel are the numbers the generator is told.
  *
- * Everything is linear between keys. Ease is a word for the prompt, not a curve the previs
- * draws (the Stage guide, part 4).
+ * Camera positions curve through keys; key ease maps time onto distance along each leg.
  */
 
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
 export const MAX_STAGE_WALK_SPEED_MPS = 2.2;
+
+/** Distance fraction along one leg after its two mark-owned ease regions are applied. */
+export function stagingEase(from: Pick<StagingKey, "easeOut">, to: Pick<StagingKey, "easeIn">, linear: number): number {
+  const k = Math.max(0, Math.min(1, linear));
+  let a = from.easeOut ?? 0;
+  let b = to.easeIn ?? 0;
+  const overlap = a + b;
+  if (overlap > 1) {
+    a /= overlap;
+    b /= overlap;
+  }
+  const velocity = 1 / (1 - a / 2 - b / 2);
+  if (a > 0 && k < a) return velocity * k * k / (2 * a);
+  if (b > 0 && k > 1 - b) return 1 - velocity * (1 - k) * (1 - k) / (2 * b);
+  return velocity * (k - a / 2);
+}
 
 export type EffectiveStageBlocking = {
   cast: StagingFigure[];
@@ -182,6 +197,10 @@ export function stageShot(
             : /pan|truck|track|follow|lateral/.test(move)
               ? [key(0, [-distance * 0.35, height, distance], aim, subject), key(dur, [distance * 0.35, height, distance], aim, subject)]
               : [key(0, [0, height, distance], aim, subject), key(dur, [0, height, distance], aim, subject)];
+  if (/slow|gentle|soft|smooth/.test(move) && keys.length > 1) {
+    keys[0] = { ...keys[0]!, easeOut: 0.25 };
+    keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
+  }
   return { version: 1, cast, sets, keys };
 }
 
@@ -276,7 +295,11 @@ export function stagingBeats(
     const where = bearing(ox, oz, k.p[1] - k.l[1], facings.get(subject ?? "") ?? [0, 1]);
     const who = subject === null ? "the aim point" : nameOf(subject);
     const aim = k.track === undefined ? "" : `, aimed at ${nameOf(k.track)}`;
-    return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}`;
+    const ease = [
+      k.easeIn === undefined ? "" : `ease in ${Math.round(k.easeIn * 100)}%`,
+      k.easeOut === undefined ? "" : `ease out ${Math.round(k.easeOut * 100)}%`,
+    ].filter(Boolean).join(", ");
+    return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}${ease === "" ? "" : `, ${ease}`}`;
   });
   return [...warnings, ...camera];
 }

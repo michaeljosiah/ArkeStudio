@@ -18,6 +18,7 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { SceneFlow } from "../src/screens/scene-workspace/flow.js";
 import { fitPreviewStage, scenePreviewSpans } from "../src/screens/scene-workspace/preview.js";
+import { stagePathPoint } from "../src/screens/scene-workspace/stage-viewport.js";
 
 /**
  * The scene workspace (SPEC-029 R-21..R-29; T-18, T-19, T-20).
@@ -123,6 +124,13 @@ const apply = async (event: Parameters<typeof __applyEventForTest>[0]): Promise<
 };
 
 describe("scene detail owns the workspace", () => {
+  it("curves the camera through three marks instead of joining straight chords", () => {
+    const points = [[0, 0, 0], [1, 0, 0], [1, 0, 1]] as const;
+    assert.deepEqual(stagePathPoint(points, 0, 0), [0, 0, 0]);
+    assert.deepEqual(stagePathPoint(points, 1, 1), [1, 0, 1]);
+    assert.notEqual(stagePathPoint(points, 0, 0.5)[2], 0);
+  });
+
   it("mounts the workspace and compact production rail by default", async () => {
     const mounted = await mount();
     assert.ok(q(mounted, '[data-testid="scene-workspace"]'));

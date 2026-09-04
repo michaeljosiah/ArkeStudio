@@ -9,6 +9,7 @@ import {
   STAGE_FRAME_RATE,
   stageShot,
   stageWalkSpeed,
+  stagingEase,
   stageFrameCount,
   stagePlayblastIsStale,
   stagingBeats,
@@ -42,9 +43,23 @@ describe("the Stage's arithmetic", () => {
     assert.equal(first.keys[0]?.anchor, "maren-kest");
     assert.equal(first.keys[0]?.track, "maren-kest");
     assert.equal(first.keys[1]?.t, 4);
+    assert.equal(first.keys[0]?.easeOut, 0.25);
+    assert.equal(first.keys[1]?.easeIn, 0.25);
+    assert.match(stagingPromptClause(first, () => "Maren", 4), /ease out 25%[\s\S]*ease in 25%/);
     assert.ok(first.keys[1]!.p[2] < first.keys[0]!.p[2], "a push-in ends closer");
     assert.ok(ShotStagingSchema.safeParse(first).success, "what staging writes is what the schema reads");
     assert.ok(ShotSchema.safeParse({ ...shot({}), staging: first }).success);
+  });
+
+  it("eases distance along a camera leg without changing its endpoints", () => {
+    const from = { easeOut: 0.25 };
+    const to = { easeIn: 0.25 };
+    assert.equal(stagingEase(from, to, 0), 0);
+    assert.ok(stagingEase(from, to, 0.1) < 0.1);
+    assert.equal(stagingEase(from, to, 0.5), 0.5);
+    assert.ok(stagingEase(from, to, 0.9) > 0.9);
+    assert.equal(stagingEase(from, to, 1), 1);
+    assert.ok(Number.isFinite(stagingEase({ easeOut: 1 }, { easeIn: 1 }, 0.5)), "overlapping ease is clamped");
   });
 
   it("blocks explicit cast performance from the shot text", () => {
