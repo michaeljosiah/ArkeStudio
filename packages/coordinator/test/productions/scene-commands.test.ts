@@ -791,6 +791,21 @@ describe("scene blocking and shot cameras share one Stage command (issue 754)", 
       sceneFile: SCENE,
       sceneId: SCENE_ID,
       baseVersion: moved.version,
+      command: {
+        kind: "edit-stage",
+        shotId: first.id,
+        staging: { keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1.2, 0], easeOut: 0.25 }] },
+      },
+    });
+    const eased = await sceneOnDisk(store);
+    assert.equal(orderedShots(eased)[0]?.staging?.keys[0]?.easeOut, 0.25);
+    assert.equal(store.getBundle().meta.schemaVersion, 8, "camera easing raises its strict-reader boundary");
+
+    await applySceneCommand(store, {
+      productionId: PRODUCTION,
+      sceneFile: SCENE,
+      sceneId: SCENE_ID,
+      baseVersion: eased.version,
       command: { kind: "edit-stage", shotId: first.id, blocking: null, staging: null },
     });
     const cleared = await sceneOnDisk(store);

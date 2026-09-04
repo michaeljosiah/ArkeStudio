@@ -37,10 +37,11 @@ import {
   Vector3,
   WebGLRenderer,
   Box3,
+  CatmullRomCurve3,
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stagingEase, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -112,6 +113,33 @@ export interface StageEvents {
 const PALETTE = [0x7a2e43, 0xb08c2e, 0x5f6b7a, 0x3f4a5a, 0x8a6a4f];
 export function figureColour(index: number): number {
   return PALETTE[index % PALETTE.length]!;
+}
+
+/** One arc-length-mapped point on a centripetal spline leg. */
+export function stagePathPoint(
+  points: readonly (readonly [number, number, number])[],
+  leg: number,
+  along: number,
+): [number, number, number] {
+  const vectors = points.map(v3);
+  const start = vectors[Math.max(0, Math.min(vectors.length - 1, leg))];
+  const end = vectors[Math.max(0, Math.min(vectors.length - 1, leg + 1))];
+  if (start === undefined || end === undefined) return [0, 0, 0];
+  if (vectors.length < 3) {
+    const point = start.clone().lerp(end, Math.max(0, Math.min(1, along)));
+    return [point.x, point.y, point.z];
+  }
+  const curve = new CatmullRomCurve3(vectors, false, "centripetal");
+  const samplesPerLeg = 32;
+  const divisions = (vectors.length - 1) * samplesPerLeg;
+  curve.arcLengthDivisions = divisions;
+  const lengths = curve.getLengths(divisions);
+  const first = lengths[Math.max(0, Math.min(lengths.length - 1, leg * samplesPerLeg))]!;
+  const last = lengths[Math.max(0, Math.min(lengths.length - 1, (leg + 1) * samplesPerLeg))]!;
+  const distance = first + (last - first) * Math.max(0, Math.min(1, along));
+  const total = lengths.at(-1) ?? 0;
+  const point = curve.getPointAt(total === 0 ? 0 : distance / total);
+  return [point.x, point.y, point.z];
 }
 
 const INK = 0x0a0a0a;
@@ -1018,26 +1046,33 @@ export class StageViewport {
   }
 
   /** The pair of keys around `at` and the mix between them, by time, never by index. */
-  private span(at: number): { a: StagingKey; b: StagingKey; k: number } {
+  private span(at: number): { a: StagingKey; b: StagingKey; index: number; k: number } {
     const keys = this.data.keys;
-    if (keys.length === 1) return { a: keys[0]!, b: keys[0]!, k: 0 };
+    if (keys.length === 1) return { a: keys[0]!, b: keys[0]!, index: 0, k: 0 };
     let index = 0;
     while (index < keys.length - 2 && keys[index + 1]!.t <= at) index += 1;
     const a = keys[index]!;
     const b = keys[index + 1]!;
     const k = b.t === a.t ? 0 : Math.max(0, Math.min(1, (at - a.t) / (b.t - a.t)));
-    return { a, b, k };
+    return { a, b, index, k };
   }
 
   /** Camera position at path time `s`, with anchored subjects evaluated at `clock`. */
   private sampleCam(s: number, clock: number): Vector3 {
-    const { a, b, k } = this.span(s);
-    return this.keyWorld(a, clock).lerp(this.keyWorld(b, clock), k);
+    const { a, b, index, k } = this.span(s);
+    const along = stagingEase(a, b, k);
+    const points = this.data.keys.map((key) => {
+      const point = this.keyWorld(key, clock);
+      return [point.x, point.y, point.z] as [number, number, number];
+    });
+    return v3(stagePathPoint(points, index, along));
   }
 
   private sampleAim(s: number, clock: number): Vector3 {
     const { a, b, k } = this.span(s);
-    return this.keyLook(a, clock).lerp(this.keyLook(b, clock), k);
+    const along = stagingEase(a, b, k);
+    const smooth = along * along * (3 - 2 * along);
+    return this.keyLook(a, clock).lerp(this.keyLook(b, clock), smooth);
   }
 
   private subjectAt(sheetId: string, at: number): Vector3 | null {
