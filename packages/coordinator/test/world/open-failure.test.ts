@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, WorldBundle } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { WorldLockedError } from "../../src/world/lock.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -72,6 +73,35 @@ async function breakWorldOpen(root: string, worldDir: string): Promise<void> {
 }
 
 describe("a refused world open (issue 571)", () => {
+  it("joins overlapping requests for the same world (#796)", async () => {
+    const { root } = await makeTempRoot();
+    const h = await harness(root);
+    const loadWorld = h.provider.loadWorld.bind(h.provider);
+    let loads = 0;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.provider.loadWorld = async (worldId) => {
+      loads += 1;
+      if (loads > 1) throw new WorldLockedError(process.pid);
+      await held;
+      return loadWorld(worldId);
+    };
+
+    const first = h.send({ kind: "open-world", worldId: WORLD_ID });
+    const second = h.send({ kind: "open-world", worldId: WORLD_ID });
+    release();
+    await Promise.all([first, second]);
+
+    assert.equal(loads, 1, "both guards join one provider load");
+    assert.equal(h.events.filter((event) => event.type === "world.opened").length, 1);
+    assert.equal(h.failures().length, 0);
+    const log = await readFile(join(root, "logs", "app.jsonl"), "utf8").catch(() => "");
+    assert.equal(log.includes("world.open-failed"), false);
+    assert.equal(log.includes("world.open-recovered"), false);
+  });
+
   it("states the reason instead of leaving the screen on the loader", async () => {
     const { root, worldDir } = await makeTempRoot();
     await breakWorldOpen(root, worldDir);
