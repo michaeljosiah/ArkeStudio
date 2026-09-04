@@ -339,6 +339,42 @@ describe("rejecting a turn", () => {
     if (!outcome.ok) assert.ok(outcome.problems.some((p) => p.code === "foreign-receipt"));
   });
 
+  it("stores only cited final-page target receipts as whole-target evidence", async () => {
+    const input = await baseInput();
+    const complete: WorldChatCheckReceipt = {
+      id: newId("check"),
+      runId: newId("run"),
+      tool: "target-read",
+      status: "complete",
+      consulted: [],
+      target: { requirement: "scenes", id: "saltlight:sc_04:script" },
+      observedRevisionOrDigest: `v1:sha256:${"a".repeat(64)}`,
+      complete: true,
+      nextCursor: null,
+      at: AT,
+    };
+    const partial: WorldChatCheckReceipt = {
+      ...complete,
+      id: newId("check"),
+      complete: false,
+      nextCursor: "more-pages",
+    };
+    const draft = canonCreateDraft(input.message);
+    draft.checkReceiptIds = [partial.id, complete.id];
+    const outcome = validateTurnResult({
+      ...input,
+      receiptsThisRun: [partial, complete],
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }] }),
+    });
+
+    assert.ok(outcome.ok);
+    assert.deepEqual(outcome.turn.candidates[0]!.checks.targetReads, [{
+      checkId: complete.id,
+      target: complete.target,
+      observedRevisionOrDigest: complete.observedRevisionOrDigest,
+    }]);
+  });
+
   it("refuses an operation based on an out-of-date proposition", async () => {
     const input = await baseInput();
     const created = validateTurnResult({

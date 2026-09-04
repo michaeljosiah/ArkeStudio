@@ -10,6 +10,14 @@ import {
 } from "@arke-studio/contracts";
 import { lookHasMoved } from "./look.js";
 import { developmentAmendment } from "./materialise.js";
+import {
+  artDirectionFence,
+  episodesFence,
+  sceneScriptFence,
+  sceneScriptTargetId,
+  seasonFence,
+  storyFence,
+} from "./target-reads.js";
 
 /**
  * What a proposition may become, decided once (#70 §6.2).
@@ -33,7 +41,8 @@ export type NotCarriedReason =
   | "look-already-proposed"
   | "role-too-long"
   | "unknown-section"
-  | "changes-nothing";
+  | "changes-nothing"
+  | "incomplete-read";
 
 export interface NotCarried {
   candidateId: string;
@@ -319,6 +328,53 @@ function checksAllow(candidate: WorldChangeCandidate): boolean {
   return candidate.checks.state !== "partial" || candidate.checks.userOverride !== undefined;
 }
 
+/** Whole replacements need the final page of the exact authority they are about to overwrite. */
+function wholeTargetReadHolds(candidate: WorldChangeCandidate, bundle: WorldBundle): boolean {
+  // Candidates written before target receipts existed have no field. They remain writable under
+  // the checks they were durably created with; every new candidate carries the field, even empty.
+  if (candidate.checks.targetReads === undefined) return true;
+  const reads = candidate.checks.targetReads;
+  if (candidate.classification === "art-direction.change") {
+    return reads.some((read) =>
+      read.target.requirement === "art-direction" &&
+      read.target.id === "art-direction" &&
+      read.observedRevisionOrDigest === artDirectionFence(bundle));
+  }
+  if (candidate.classification === "development.scene-script") {
+    const production = bundle.productions.find((entry) => entry.meta.id === candidate.target.productionId);
+    return reads.some((read) =>
+      read.target.requirement === "scenes" &&
+      read.target.id === sceneScriptTargetId(candidate.target.productionId, candidate.target.sceneId) &&
+      read.observedRevisionOrDigest === sceneScriptFence(production, candidate.target.sceneId));
+  }
+  if (candidate.classification === "development.overview" && candidate.draft.acts !== undefined) {
+    const production = bundle.productions.find((entry) => entry.meta.id === candidate.target.productionId);
+    return reads.some((read) =>
+      read.target.requirement === "story" &&
+      read.target.id === candidate.target.productionId &&
+      read.observedRevisionOrDigest === storyFence(production));
+  }
+  if (candidate.classification === "development.season" && candidate.draft.arcs !== undefined) {
+    const production = bundle.productions.find((entry) => entry.meta.id === candidate.target.productionId);
+    return reads.some((read) =>
+      read.target.requirement === "seasons" &&
+      read.target.id === candidate.target.productionId &&
+      read.observedRevisionOrDigest === seasonFence(production));
+  }
+  if (
+    candidate.classification === "development.episode" &&
+    candidate.target.episodeId !== undefined &&
+    candidate.draft.scenes !== undefined
+  ) {
+    const production = bundle.productions.find((entry) => entry.meta.id === candidate.target.productionId);
+    return reads.some((read) =>
+      read.target.requirement === "episodes" &&
+      read.target.id === candidate.target.productionId &&
+      read.observedRevisionOrDigest === episodesFence(production));
+  }
+  return true;
+}
+
 export function evaluateReadiness(
   candidates: readonly WorldChangeCandidate[],
   bundle: WorldBundle,
@@ -375,6 +431,10 @@ export function evaluateReadiness(
     }
     if (!hasIntentEvidence(candidate) || !checksAllow(candidate)) {
       fail("invalid");
+      continue;
+    }
+    if (!wholeTargetReadHolds(candidate, bundle)) {
+      fail("incomplete-read");
       continue;
     }
     if (!settlednessHolds(candidate)) {
@@ -475,5 +535,7 @@ export function explainNotCarried(reason: NotCarriedReason): string {
       return "it writes under a heading this kind of sheet does not have, so none of it would reach the page";
     case "changes-nothing":
       return "everything in it is already what the world says";
+    case "incomplete-read":
+      return "the complete current record was not read at the revision this replacement would overwrite";
   }
 }

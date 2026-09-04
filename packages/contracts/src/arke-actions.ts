@@ -86,6 +86,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "voices",
   "production-metadata",
   "series",
+  "story",
   "seasons",
   "episodes",
   "chapters",
@@ -190,6 +191,8 @@ export const ArkeReadObservationSchema = z
     target: ConversationActionSemanticIdSchema,
     revisionOrDigest: z.string().min(1).max(200),
     complete: z.boolean(),
+    /** Coordinator-issued receipt proving this target page was served; absent on legacy intents. */
+    receiptId: z.string().regex(/^check_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
   })
   .strict();
 export type ArkeReadObservation = z.infer<typeof ArkeReadObservationSchema>;

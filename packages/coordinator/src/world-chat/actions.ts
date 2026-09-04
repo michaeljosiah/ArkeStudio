@@ -19,6 +19,7 @@ import {
   type TurnId,
   type WorldChangeCandidate,
   type WorldChatContext,
+  type WorldChatCheckReceipt,
   type WorldChatPreparedAction,
 } from "@arke-studio/contracts";
 import type {
@@ -44,6 +45,7 @@ import { foldConversation } from "./fold.js";
 import { evaluateReadiness } from "./readiness.js";
 import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
+import { bibleFence, timelineFence } from "./target-reads.js";
 
 export interface PreparedWorldChatAction {
   readonly intent: ConversationActionPrepareIntent;
@@ -63,7 +65,35 @@ export interface WorldChatActionTurn {
   readonly sceneEdits: readonly ModelSceneEdit[];
   readonly sceneBaseVersion: number | null;
   readonly editorRequests: readonly ModelEditorRequest[];
+  /** Present on live runs; absent only on callers created before complete target receipts. */
+  readonly receipts?: readonly WorldChatCheckReceipt[];
   readonly at: string;
+}
+
+function completeObservation(
+  receipts: readonly WorldChatCheckReceipt[],
+  requirement: "bible" | "timeline",
+  target: string,
+  expectedFence?: string,
+) {
+  const receipt = receipts.findLast((entry) =>
+    entry.tool === "target-read" &&
+    (entry.status === "complete" || entry.status === "empty") &&
+    entry.complete === true &&
+    entry.nextCursor === null &&
+    entry.target?.requirement === requirement &&
+    entry.target.id === target &&
+    entry.observedRevisionOrDigest !== undefined &&
+    (expectedFence === undefined || entry.observedRevisionOrDigest === expectedFence));
+  return receipt
+    ? {
+        requirement,
+        target,
+        revisionOrDigest: receipt.observedRevisionOrDigest!,
+        complete: true as const,
+        receiptId: receipt.id,
+      }
+    : null;
 }
 
 /** Build strict, digest-bound intents. This is pure and runs before `turn.completed` is appended. */
@@ -108,13 +138,29 @@ export function prepareWorldChatActions(
         actionKind: payload.kind,
         targets: members.map((member) => ({ kind: "world-change", id: member.id, label: member.title })),
         payload,
-        baseObservations: [],
+        baseObservations: [...new Map(
+          members.flatMap((member) => (member.checks.targetReads ?? []).map((read) => [
+            read.checkId,
+            {
+              requirement: read.target.requirement,
+              target: read.target.id,
+              revisionOrDigest: read.observedRevisionOrDigest,
+              complete: true as const,
+              receiptId: read.checkId,
+            },
+          ] as const)),
+        ).values()],
         createdAt: turn.at,
       }),
     });
   }
 
   if (turn.bibleEdits.length > 0) {
+    const replacesWholeBible = turn.bibleEdits.some((edit) => edit.op === "replace-document");
+    const read = completeObservation(turn.receipts ?? [], "bible", "bible", bibleFence(store.getBundle()));
+    if (turn.receipts !== undefined && replacesWholeBible && read === null) {
+      throw new Error("A whole Bible replacement requires a complete current Bible read.");
+    }
     const payload = {
       kind: "world-chat-bible-edit" as const,
       worldId: store.worldId,
@@ -130,7 +176,9 @@ export function prepareWorldChatActions(
         actionKind: payload.kind,
         targets: [{ kind: "bible", id: "bible", label: "Bible" }],
         payload,
-        baseObservations: [{ requirement: "bible", target: "bible", revisionOrDigest: `v${turn.bibleBaseVersion}`, complete: true }],
+        baseObservations: read
+          ? [read]
+          : [{ requirement: "bible", target: "bible", revisionOrDigest: `v${turn.bibleBaseVersion}`, complete: true }],
         createdAt: turn.at,
       }),
     });
@@ -167,9 +215,10 @@ export function prepareWorldChatActions(
   const productionId = productionOfContext(turn.entryContext);
   if (productionId) {
     const production = store.getBundle().productions.find((one) => one.meta.id === productionId);
-    const revision = production?.timeline?.status === "ready"
-      ? `v${production.timeline.timeline.revision}`
-      : "unmaterialised";
+    const read = completeObservation(turn.receipts ?? [], "timeline", productionId, timelineFence(production));
+    if (turn.receipts !== undefined && turn.editorRequests.length > 0 && read === null) {
+      throw new Error("A timeline request requires a complete current timeline read.");
+    }
     for (const request of turn.editorRequests) {
       const payload = {
         kind: "world-chat-editor-request" as const,
@@ -187,7 +236,9 @@ export function prepareWorldChatActions(
           actionKind: payload.kind,
           targets: [{ kind: "timeline", id: productionId, label: "Timeline" }],
           payload,
-          baseObservations: [{ requirement: "timeline", target: productionId, revisionOrDigest: revision, complete: true }],
+          baseObservations: read
+            ? [read]
+            : [{ requirement: "timeline", target: productionId, revisionOrDigest: timelineFence(production), complete: true }],
           createdAt: turn.at,
         }),
       });

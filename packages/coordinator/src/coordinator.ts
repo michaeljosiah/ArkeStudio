@@ -287,9 +287,13 @@ import { atomicWriteFile } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError } from "./world/commit.js";
+import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
+import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
+
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -409,7 +413,7 @@ import { QueryLeaseRegistry } from "./world-chat/lease.js";
 import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
   AttachmentError,
-  CHAT_DOCUMENT_EXTENSIONS,
+  CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
   MAX_TEXT_PER_RUN_CHARS,
@@ -444,6 +448,29 @@ import type { WorldProvider } from "./world-provider.js";
 import type { WorldStore } from "./world/store.js";
 
 type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
+type ExportProgressEvent = Extract<DomainEvent, { type: "export.progress" }>;
+
+function safeExportOutput(output: string | null): string | null {
+  if (output === null) return null;
+  const normalized = output.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[0] === "exports" && parts.length > 1 && parts.every((part) => part !== "" && part !== "." && part !== "..")
+    ? normalized
+    : null;
+}
+
+function exportReadRecord(event: ExportProgressEvent): ArkeExportReadRecord {
+  return {
+    id: event.exportId,
+    worldId: event.worldId,
+    productionId: event.productionId,
+    ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
+    status: event.status,
+    percent: event.percent,
+    output: safeExportOutput(event.output),
+    error: event.error === null ? null : "export failed",
+  };
+}
 
 function blockedReason(outcome: AcceptOutcome): Extract<DomainEvent, { type: "proposal.blocked" }>["reason"] {
   switch (outcome.status) {
@@ -1316,6 +1343,8 @@ export class Coordinator {
   private readonly voiceService: VoiceService | null;
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** Safe read projections for the target-read surface; output paths remain world-relative. */
+  private readonly exportReads = new Map<string, ArkeExportReadRecord>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
@@ -1963,6 +1992,9 @@ export class Coordinator {
   /** Validate, fold, log, broadcast — the one path every event takes (R-3). */
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
+    if (parsed.type === "export.progress") {
+      this.exportReads.set(parsed.exportId, exportReadRecord(parsed));
+    }
     this.readModel.apply(parsed);
     if (
       parsed.type !== "health.changed" &&
@@ -2001,6 +2033,22 @@ export class Coordinator {
     } catch {
       /* host observers cannot interrupt domain event delivery */
     }
+  }
+
+  private async durableExportReads(worldId: string): Promise<readonly ArkeExportReadRecord[]> {
+    const records = new Map<string, ArkeExportReadRecord>();
+    for (const record of await this.changeLog.readAll()) {
+      const parsed = DomainEventSchema.safeParse(record["event"]);
+      if (!parsed.success || parsed.data.type !== "export.progress" || parsed.data.worldId !== worldId) continue;
+      const projection = exportReadRecord(parsed.data);
+      records.set(projection.id, projection.status === "running"
+        ? { ...projection, status: "failed", error: "export interrupted" }
+        : projection);
+    }
+    for (const projection of this.exportReads.values()) {
+      if (projection.worldId === worldId) records.set(projection.id, projection);
+    }
+    return [...records.values()];
   }
 
   /**
@@ -4266,6 +4314,17 @@ export class Coordinator {
         const service = new WorldChatService(store.dir);
         const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
         if (!(await log.readMeta())) return;
+        const currentConversation = await service.load(msg.conversationId);
+        const entryContext = currentConversation?.entryContext ?? { kind: "world" as const };
+        const contextExists = entryContext.kind === "attachment"
+          ? currentConversation?.attachments.some((attachment) => attachment.id === entryContext.attachmentId) === true
+          : worldChatContextExists(store.getBundle(), entryContext);
+        if (
+          !currentConversation ||
+          !contextExists ||
+          msg.subject !== undefined &&
+          !worldChatSubjectExists(store.getBundle(), entryContext, msg.subject)
+        ) return;
 
         /**
          * A conversation is named by the first thing said in it.
@@ -4684,6 +4743,7 @@ export class Coordinator {
       case "world-chat-create": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        if (msg.entryContext !== undefined && !worldChatContextExists(store.getBundle(), msg.entryContext)) return;
         // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
         // builds must refuse this world rather than export `.conversations` they do not know
         // to exclude. The raise is durable before the conversation directory exists.
@@ -4765,9 +4825,9 @@ export class Coordinator {
           });
           return;
         }
-        // Only what a conversation can actually read is offered (§13.2). Cancelling the dialog
-        // is an answer: nothing is said and nothing happens.
-        const paths = await pick({ accept: CHAT_DOCUMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
+        // Known media is retained with an explicit unreadable capability rather than disappearing.
+        // Cancelling the dialog is an answer: nothing is said and nothing happens.
+        const paths = await pick({ accept: CHAT_ATTACHMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
         for (const sourcePath of paths) {
           await this.attachToWorldChat(store, msg.conversationId, sourcePath);
         }
@@ -12324,6 +12384,20 @@ export class Coordinator {
         Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(this.opts.adapter?.knownInputTokenLimit?.() ?? undefined)),
       getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
       getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
+      getPlans: (productionId) => listPlans(store, productionId),
+      getJobs: () => this.jobQueue?.listJobs() ?? [],
+      getExports: () => this.durableExportReads(store.worldId),
+      getChapterBody: async (productionId, chapterFile) => {
+        try {
+          const raw = await readFile(
+            toExtendedLength(join(store.dir, "productions", productionId, "chapters", `${chapterFile}.md`)),
+            "utf8",
+          );
+          return MarkdownFile.parse(raw).body;
+        } catch {
+          return null;
+        }
+      },
       attachments,
       findAttachment: async (lease, id) => {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);

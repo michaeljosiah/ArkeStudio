@@ -615,7 +615,6 @@ function fresh(
   // Keeping both would put the model's account of its searching next to the real one, where the
   // difference between them is exactly what must not be blurred (§8.3.1).
   const { title, rationale, settledness, evidence, checkReceiptIds, ...payload } = draft;
-  void checkReceiptIds;
   // Intent travels with the proposition, not with the turn that last touched it: the original ask
   // is still why this exists, and wrap-up refuses anything that cannot show one. A revision that
   // states its own intent keeps it; only a revision that does not inherits.
@@ -634,7 +633,20 @@ function fresh(
     rationale,
     sourceMessageIds: [...new Set(reasons.filter((e) => e.kind === "message").map((e) => e.messageId))],
     evidence: reasons,
-    checks: input.checksFor(draft),
+    checks: {
+      ...input.checksFor(draft),
+      targetReads: checkReceiptIds.flatMap((id) => {
+        const receipt = input.receiptsThisRun.find((entry) => entry.id === id);
+        return receipt?.tool === "target-read" &&
+          (receipt.status === "complete" || receipt.status === "empty") &&
+          receipt.complete === true &&
+          receipt.nextCursor === null &&
+          receipt.target !== undefined &&
+          receipt.observedRevisionOrDigest !== undefined
+          ? [{ checkId: receipt.id, target: receipt.target, observedRevisionOrDigest: receipt.observedRevisionOrDigest }]
+          : [];
+      }),
+    },
     createdAt: at,
     updatedAt: at,
   } as WorldChangeCandidate;

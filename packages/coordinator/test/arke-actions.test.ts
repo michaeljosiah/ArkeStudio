@@ -107,7 +107,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     const spine = ARKE_BLOCKED_AUTHORITY_SEAMS["audio-spine-command"];
     assert.equal(spine.authority, "audio-spine");
     assert.equal(spine.support.preparation.state, "blocked");
-    assert.equal(spine.support.reads.state, "blocked");
+    assert.equal(spine.support.reads.state, "available", "the typed spine reader now covers this authority");
     assert.match(modelActionCatalogueText(), /audio-spine-command.*typed-audio-spine-command/);
   });
 });

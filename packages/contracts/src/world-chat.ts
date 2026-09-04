@@ -43,6 +43,7 @@ import {
   ConversationActionStatusSchema,
   ConversationActionUndoLinkSchema,
 } from "./arke-actions.js";
+import { ArkeReadTargetSchema } from "./arke-reads.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -334,6 +335,8 @@ export const CheckToolSchema = z.enum([
    * the shape and blind to the direction. Widening the enum keeps every stored receipt readable.
    */
   "get-production",
+  /** A typed complete-target read; `target` below identifies the concrete authority. */
+  "target-read",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */
@@ -355,9 +358,43 @@ export const WorldChatCheckReceiptSchema = z
         .strict(),
     ),
     searchedCount: z.number().int().min(0).optional(),
+    /** Present together on target reads; optional so every stored search receipt remains readable. */
+    target: ArkeReadTargetSchema.optional(),
+    observedRevisionOrDigest: z.string().min(1).max(200).optional(),
+    complete: z.boolean().optional(),
+    nextCursor: z.string().min(1).max(2_000).nullable().optional(),
     at: IsoDateTimeSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((receipt, context) => {
+    const targetFields = [
+      receipt.target,
+      receipt.observedRevisionOrDigest,
+      receipt.complete,
+      receipt.nextCursor,
+    ];
+    const present = targetFields.filter((field) => field !== undefined).length;
+    if (
+      receipt.tool === "target-read" &&
+      (receipt.status === "complete" || receipt.status === "empty") &&
+      present !== targetFields.length
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "a target-read receipt must carry its target, fence, completeness and next cursor" });
+    }
+    if (receipt.tool === "target-read" && present !== 0 && present !== targetFields.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "target read fields must be present together" });
+    }
+    if (
+      receipt.tool === "target-read" &&
+      present === targetFields.length &&
+      receipt.complete !== (receipt.nextCursor === null)
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "a target read is complete exactly when it has no next cursor" });
+    }
+    if (receipt.tool !== "target-read" && present !== 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "target read fields belong only to target-read receipts" });
+    }
+  });
 export type WorldChatCheckReceipt = z.infer<typeof WorldChatCheckReceiptSchema>;
 
 export const CheckCategorySchema = z.enum(["canon-search", "sheet-search", "target-read", "related-read"]);
@@ -403,6 +440,18 @@ export const CandidateChecksSchema = z
         })
         .strict(),
     ),
+    /** Final-page target receipts cited by the model and verified by the coordinator for this turn. */
+    targetReads: z
+      .array(
+        z
+          .object({
+            checkId: CheckReceiptIdSchema,
+            target: ArkeReadTargetSchema,
+            observedRevisionOrDigest: z.string().min(1).max(200),
+          })
+          .strict(),
+      )
+      .optional(),
     likelyDuplicates: z.array(WorldChatEntityRefSchema),
     possibleAmendments: z.array(WorldChatEntityRefSchema),
     contradictionCandidates: z.array(WorldChatEntityRefSchema),
@@ -972,6 +1021,7 @@ export const WorldChatNotCarriedSchema = z
       "role-too-long",
       "unknown-section",
       "changes-nothing",
+      "incomplete-read",
     ]),
   })
   .strict();
@@ -2357,22 +2407,22 @@ ${sheetSectionRule()}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}
 - ${draftPayloadLine("art-direction.change")}
-  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one.
+  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one. First call get_art_direction through arke-world and put its final complete checkReceiptId in checkReceiptIds; without that complete fenced read this whole replacement is refused.
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   Use this for media the person could generate. medium is image or video. Use concept-image for a free image, concept-video for a free video, and shot-video when the target is a shot. The Studio proposes the brief; it never claims the media already exists.
   fields: ${draftFieldCatalogue("media.image-opportunity")}
 - ${draftPayloadLine("development.overview")}
-  The production's structured overview as it should now read. Only in a production, episode or scene conversation.
+  The production's structured overview as it should now read. Only in a production, episode or scene conversation. acts replaces the whole ordered act list; before carrying acts, page get_story to complete=true and cite the final checkReceiptId.
   fields: ${draftFieldCatalogue("development.overview")}
 - ${draftPayloadLine("development.season")}
-  The season's question, ending, direction and arcs. The episode envelope's defaults are a form's to change, never a conversation's.
+  The season's question, ending, direction and arcs. arcs replaces the whole arc list; before carrying arcs, page get_season to complete=true and cite the final checkReceiptId. The episode envelope's defaults are a form's to change, never a conversation's.
   fields: ${draftFieldCatalogue("development.season")}
 - ${draftPayloadLine("development.episode")}
-  target.episodeId absent creates a new episode; present amends the one named. scenes is the whole ordered membership when carried.
+  target.episodeId absent creates a new episode; present amends the one named. scenes is the whole ordered membership when carried. Before replacing an existing episode's scenes, page list_episodes to complete=true and cite the final checkReceiptId.
   fields: ${draftFieldCatalogue("development.episode")}
 - ${draftPayloadLine("development.scene-script")}
-  blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes.
+  blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes. First page get_scene_script through arke-world to complete=true and put the final checkReceiptId in checkReceiptIds. Never replace a script from a partial page.
   fields: ${draftFieldCatalogue("development.scene-script")}
 - ${draftPayloadLine("development.shot")}
   One shot inside a scene. target.shotId present amends that shot; absent adds a shot at the end of the scene. Carry only the fields that change — an amendment is not a rewrite, and a field you omit is left exactly as it is. The shot's id and its number are not yours to set: identity is minted once and the storyboard's drag is what reorders. Write description with @mentions for every character and location it shows, camera as a complete value naming a fixture the location supports and what the camera faces before the size and movement, and audio as an object, never a sentence.
@@ -2414,6 +2464,7 @@ op is one of set-section | append-to-section | remove-section | replace-document
 - append-to-section adds to the end of a section that already exists: ${JSON.stringify(exampleBibleEdits["append-to-section"])}
 - remove-section takes one out: ${JSON.stringify(exampleBibleEdits["remove-section"])}
 - replace-document rewrites the whole thing: {"op": "replace-document", "text": "..."}
+  Before replace-document, page get_bible through arke-world to complete=true; a partial Bible read cannot authorize a whole replacement.
 
 heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
 

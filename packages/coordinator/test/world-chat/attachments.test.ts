@@ -9,7 +9,7 @@ import {
   attachmentFileName,
   AttachmentError,
   blockedFromRemoval,
-  CHAT_DOCUMENT_EXTENSIONS,
+  CHAT_ATTACHMENT_EXTENSIONS,
   detectReadability,
   MAX_TEXT_READ_CHARS,
   refuseUnreadable,
@@ -77,9 +77,8 @@ describe("attachment file names", () => {
 /**
  * What World Chat will take, this round (§13.2, §23.2).
  *
- * The gate is deliberately narrower than the artifact path's: a conversation may only be handed
- * what it can honestly read. A chip that looks attached while the reply cannot see the file is
- * worse than a refusal, because the person carries on talking as though it had been read.
+ * Media the model cannot inspect remains visible with that capability stated explicitly. Unknown
+ * formats and documents falsely presented as text are still refused before anything is written.
  */
 describe("refusing what a conversation could not read", () => {
   it("takes markdown and plain text", () => {
@@ -87,12 +86,10 @@ describe("refusing what a conversation could not read", () => {
     assert.equal(refuseUnreadable("notes.txt", bytes("the bells again")), null);
   });
 
-  it("names the kind it is refusing, rather than saying no", () => {
-    const image = refuseUnreadable("maren.png", bytes("not really a png"));
-    assert.match(image!, /image/, "so the person knows it is the kind and not the file");
-    assert.match(image!, /maren\.png/, "and which file it was");
-    assert.match(refuseUnreadable("take.wav", bytes("x"))!, /audio/);
-    assert.match(refuseUnreadable("archive.zip", bytes("x"))!, /not a document/);
+  it("retains known media but refuses an unknown format", () => {
+    assert.equal(refuseUnreadable("maren.png", bytes("not really a png")), null);
+    assert.equal(refuseUnreadable("take.wav", bytes("x")), null);
+    assert.match(refuseUnreadable("archive.zip", bytes("x"))!, /not a supported attachment type/);
   });
 
   /**
@@ -104,15 +101,18 @@ describe("refusing what a conversation could not read", () => {
     assert.equal(refuseUnreadable("brief.pdf", new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x00, 0x01])), null);
     assert.equal(refuseUnreadable("treatment.docx", new Uint8Array([0x50, 0x4b, 0x03, 0x04])), null);
     // Not a blanket exemption for anything binary: a .doc is a format this does not read.
-    assert.match(refuseUnreadable("treatment.doc", new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]))!, /not a document/);
+    assert.match(refuseUnreadable("treatment.doc", new Uint8Array([0xd0, 0xcf, 0x11, 0xe0]))!, /not a supported attachment type/);
   });
 
   it("refuses a text file that is secretly binary", () => {
     assert.ok(refuseUnreadable("notes.txt", new Uint8Array([0x00, 0x01, 0x02])));
   });
 
-  it("offers only what it can read in the picker", () => {
-    assert.deepEqual([...CHAT_DOCUMENT_EXTENSIONS].sort(), ["docx", "md", "pdf", "txt"]);
+  it("offers all known attachment kinds in the picker", () => {
+    assert.deepEqual([...CHAT_ATTACHMENT_EXTENSIONS].sort(), [
+      "docx", "flac", "gif", "jpeg", "jpg", "m4a", "md", "mkv", "mov", "mp3", "mp4",
+      "ogg", "pdf", "png", "txt", "wav", "webm", "webp",
+    ]);
   });
 });
 

@@ -97,10 +97,7 @@ const ARTIFACT_SOURCE = blocked(
   ["typed-artifact-source"],
   "The client command carries a host path; Arke requires a picker-mediated or already-filed artifact id seam.",
 );
-const COMPLETE_TIMELINE_READ = blocked(
-  ["complete-timeline-read"],
-  "Complete paged timeline reads are required before Arke can safely prepare this command.",
-);
+const COMPLETE_TIMELINE_READ = AVAILABLE;
 
 /**
  * The explicit parity fixture. Every ClientMessage discriminator appears once, even when the
@@ -464,7 +461,7 @@ export const ARKE_BLOCKED_AUTHORITY_SEAMS = {
         ["typed-audio-spine-command"],
         "The spine needs typed semantic commands for creation, track assignment, markers, anchors, audio policy, and deletion.",
       ),
-      reads: blocked(["complete-spine-read"], "The complete production spine is not available through paged Arke reads."),
+      reads: AVAILABLE,
       execution: blocked(
         ["typed-audio-spine-command"],
         "The audio spine has no safe semantic command seam for an action adapter.",

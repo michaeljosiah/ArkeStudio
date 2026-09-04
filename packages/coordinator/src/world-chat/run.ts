@@ -778,7 +778,10 @@ export class WorldChatRunner {
 
     const revalidated = outcome.turn.candidates.map((candidate) => ({
       ...candidate,
-      checks: checksByDraft.get(candidate as unknown as ModelCandidateDraft) ?? candidate.checks,
+      checks: {
+        ...(checksByDraft.get(candidate as unknown as ModelCandidateDraft) ?? candidate.checks),
+        ...(candidate.checks.targetReads !== undefined ? { targetReads: candidate.checks.targetReads } : {}),
+      },
     }));
 
     /*
@@ -901,6 +904,7 @@ export class WorldChatRunner {
         sceneEdits,
         sceneBaseVersion,
         editorRequests: requests,
+        receipts: this.deps.receiptsFor(runId),
         at,
       }) ?? [];
     } catch {

@@ -11,6 +11,7 @@ import {
   type MessageId,
   type WorldChangeCandidate,
   type WorldChatContext,
+  type WorldChatCheckReceipt,
 } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
@@ -24,6 +25,7 @@ import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { assembleStory } from "../productions/assemble.js";
+import { bibleFence, timelineFence } from "../../src/world-chat/target-reads.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 const NOW = () => AT;
@@ -182,6 +184,69 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  it("requires a coordinator-issued complete timeline receipt when a live run prepares an editor request", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const timeline = await assembleStory(w.store, PRODUCTION);
+    const clips = orderedTrackClips(timeline.tracks[0]!);
+    const request = { summary: "Move the second shot earlier", commands: [{ kind: "move-adjacent" as const, clipId: clips[1]!.id, direction: "earlier" as const }] };
+    const withoutRead = turn(w.conversationId, context, { editorRequests: [request], receipts: [] });
+    assert.throws(
+      () => prepareWorldChatActions(w.store, w.lifecycle, withoutRead),
+      /complete current timeline read/,
+    );
+
+    const production = w.store.getBundle().productions.find((entry) => entry.meta.id === PRODUCTION)!;
+    const receipt: WorldChatCheckReceipt = {
+      id: newId("check"),
+      runId: newId("run"),
+      tool: "target-read",
+      status: "complete",
+      consulted: [],
+      target: { requirement: "timeline", id: PRODUCTION },
+      observedRevisionOrDigest: timelineFence(production),
+      complete: true,
+      nextCursor: null,
+      at: AT,
+    };
+    const [prepared] = prepareWorldChatActions(w.store, w.lifecycle, { ...withoutRead, receipts: [receipt] });
+    assert.equal(prepared!.intent.baseObservations[0]!.receiptId, receipt.id);
+  });
+
+  it("requires the exact current Bible receipt for a whole-document replacement", async () => {
+    const w = await setup();
+    const liveTurn = turn(w.conversationId, w.entryContext, {
+      bibleBaseVersion: w.store.getBundle().bible.version,
+      bibleEdits: [{ op: "replace-document", text: "# Rewritten Bible" }],
+      receipts: [],
+    });
+    assert.throws(
+      () => prepareWorldChatActions(w.store, w.lifecycle, liveTurn),
+      /complete current Bible read/,
+    );
+
+    const receipt: WorldChatCheckReceipt = {
+      id: newId("check"),
+      runId: newId("run"),
+      tool: "target-read",
+      status: "complete",
+      consulted: [],
+      target: { requirement: "bible", id: "bible" },
+      observedRevisionOrDigest: `v${w.store.getBundle().bible.version}:sha256:${"0".repeat(64)}`,
+      complete: true,
+      nextCursor: null,
+      at: AT,
+    };
+    assert.throws(
+      () => prepareWorldChatActions(w.store, w.lifecycle, { ...liveTurn, receipts: [receipt] }),
+      /complete current Bible read/,
+    );
+
+    receipt.observedRevisionOrDigest = bibleFence(w.store.getBundle());
+    const [prepared] = prepareWorldChatActions(w.store, w.lifecycle, { ...liveTurn, receipts: [receipt] });
+    assert.equal(prepared!.intent.baseObservations[0]!.receiptId, receipt.id);
+  });
+
   it("recovers an existing proposal authority without staging a duplicate", async () => {
     const w = await setup();
     const point = candidate(w.conversationId, "The western bell rings under water");
