@@ -68,6 +68,7 @@ function stateWithConversation(): ClientState {
       retrievalUnavailable: false,
       attachments: [],
       seq: 4,
+      actions: [],
       messages: [
         {
           id: "msg_01J8F3K2QW9VZX4N7M0RTYB6HC" as never,

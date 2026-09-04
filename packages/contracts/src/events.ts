@@ -52,6 +52,7 @@ import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
+import { ConversationActionDecisionResultSchema } from "./arke-actions.js";
 
 /**
  * The normalised domain-event union (SPEC-001 R-2, R-3). Everything the coordinator pushes to
@@ -124,6 +125,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       medium: MediaOpportunityMediumSchema,
       sessionId: SessionIdSchema.nullable(),
       reason: z.string().max(500).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("conversation-action.decision-result"),
+      ...ConversationActionDecisionResultSchema.shape,
     })
     .strict(),
 

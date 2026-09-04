@@ -550,7 +550,9 @@ describe("what a turn was refused", () => {
   it("records it against the reply that was written anyway", async () => {
     const { outcome, view } = await landing(["Bash"]);
     assert.equal(outcome.status, "completed", "a refused tool does not fail the turn");
+    const user = view.messages.find((m) => m.role === "user")!;
     const reply = view.messages.find((m) => m.role === "studio")!;
+    assert.equal(reply.turnId, user.turnId, "the reply and cards produced with it share the originating turn");
     assert.deepEqual(view.refusals[reply.id], ["Bash"], "keyed by the message it sits under");
   });
 

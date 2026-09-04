@@ -406,6 +406,7 @@ export class ReadModel {
       case "world.opened":
       case "world.closed":
       case "world.open-failed":
+      case "conversation-action.decision-result":
       case "proposal.staged":
       case "proposal.resolved":
       case "proposal.blocked":

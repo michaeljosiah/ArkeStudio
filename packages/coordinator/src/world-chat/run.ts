@@ -917,18 +917,19 @@ export class WorldChatRunner {
       }
     }
 
+    const completedRun = runFrom(events, runId);
     await store.append(
       {
         type: "turn.completed",
         message: {
           id: newId("msg") as MessageId,
-          turnId: newId("turn") as TurnId,
+          turnId: completedRun.turnId,
           role: "studio",
           text: outcome.turn.reply,
           attachmentIds: [],
           createdAt: this.deps.now(),
         },
-        run: { ...runFrom(events, runId), status: "completed", endedAt: this.deps.now() },
+        run: { ...completedRun, status: "completed", endedAt: this.deps.now() },
         receipts: [...this.deps.receiptsFor(runId)],
         // Written only when there were refusals, and capped at the schema's bound rather than
         // left to reject the whole turn: an answer that survived validation must not be lost

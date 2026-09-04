@@ -416,6 +416,11 @@ import {
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
+import {
+  ConversationActionLifecycle,
+  recoverConversationActions,
+  type ConversationActionAuthorityAdapter,
+} from "./arke-actions/lifecycle.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
@@ -570,6 +575,8 @@ export interface CoordinatorOptions {
   provider: WorldProvider;
   observeEvent?: (event: DomainEvent) => void;
   adapter: HarnessAdapter | null;
+  /** Existing domain authorities exposed through the shared SPEC-041 decision lifecycle. */
+  conversationActionAdapters?: readonly ConversationActionAuthorityAdapter[];
   changeLogPath: string;
   appVersion: string;
   /** Optional NDJSON seeds so fixtures light the Activity screens (jobs.jsonl / ledger.jsonl). */
@@ -1602,6 +1609,24 @@ export class Coordinator {
         }
         return replayed;
       },
+      beforeInitialSnapshot: async () => {
+        const store = this.opts.provider.openStore?.();
+        if (!store || this.stopping) return;
+        await recoverConversationActions({
+          worldPath: store.dir,
+          worldId: store.worldId,
+          adapters: this.opts.conversationActionAdapters ?? [],
+          now: () => this.nowIso(),
+          isWorldOpen: () => !this.stopping && this.stillOpen(store),
+        });
+        if (!this.stillOpen(store)) return;
+        // Recovery may find nothing to append while the durable card log is still newer than the
+        // process projection (for example, after a crash between binding and broadcast).
+        await this.refreshConversations(store);
+        if (!this.stillOpen(store)) return;
+        const conversationId = this.readModel.getState().worldChat?.conversationId;
+        if (conversationId) await this.openWorldChat(store, conversationId, conversationId);
+      },
       onMessage: (msg) => {
         if (this.stopping) return;
         const updateCommand =
@@ -1946,6 +1971,8 @@ export class Coordinator {
       // A correlated form receipt: proposal and commit events remain the durable account.
       parsed.type !== "sheet.edit-result" &&
       parsed.type !== "single-act.result" &&
+      // The conversation log is the durable action audit; this is only its correlated UI receipt.
+      parsed.type !== "conversation-action.decision-result" &&
       // A form preflight response is recomputed from the live index and has no domain lifecycle.
       parsed.type !== "canon.contradictions" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
@@ -2490,7 +2517,20 @@ export class Coordinator {
       const outcome = await recoverConversations(store.dir, now);
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
-      if (outcome.repaired.length > 0 || outcome.sweptTombstones.length > 0 || wrapUps.repaired.length > 0) {
+      const actions = await recoverConversationActions({
+        worldPath: store.dir,
+        worldId: store.worldId,
+        adapters: this.opts.conversationActionAdapters ?? [],
+        now,
+      });
+      if (
+        outcome.repaired.length > 0 ||
+        outcome.sweptTombstones.length > 0 ||
+        wrapUps.repaired.length > 0 ||
+        actions.prepared > 0 ||
+        actions.reconciled > 0 ||
+        actions.failed > 0
+      ) {
         // Counts only. Conversation identities are operational state and do not enter the log
         // (R-45, §18.2) — what a reader needs from this line is that repair happened at all.
         void this.appLog?.append({
@@ -2499,6 +2539,9 @@ export class Coordinator {
           runs: outcome.repaired.length,
           tombstones: outcome.sweptTombstones.length,
           wrapUps: wrapUps.repaired.length,
+          actionPreparations: actions.prepared,
+          actionReconciliations: actions.reconciled,
+          actionFailures: actions.failed,
         });
       }
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
@@ -4183,6 +4226,41 @@ export class Coordinator {
           return;
         }
         await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "conversation-action-decide": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) {
+          this.emit({
+            at: this.nowIso(),
+            type: "conversation-action.decision-result",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            actionId: msg.actionId,
+            requestId: msg.requestId,
+            disposition: "refused",
+            reason: "wrong-world",
+            detail: "No matching world is open.",
+            deduplicated: false,
+          });
+          return;
+        }
+        const result = await new ConversationActionLifecycle({
+          worldPath: store.dir,
+          worldId: store.worldId,
+          adapters: this.opts.conversationActionAdapters ?? [],
+          now: () => this.nowIso(),
+          isWorldOpen: () => !this.stopping && this.stillOpen(store),
+        }).decide(msg);
+        if (!this.stillOpen(store)) return;
+        this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
+        await this.refreshConversations(store);
+        if (!this.stillOpen(store)) return;
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          await this.openWorldChat(store, msg.conversationId);
+        } else {
+          this.transport.broadcastSnapshot();
+        }
         return;
       }
       case "world-chat-send": {
@@ -12421,6 +12499,7 @@ export class Coordinator {
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
     const { summaries } = await discoverConversations(store.dir);
+    if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
   }
 
@@ -12493,9 +12572,17 @@ export class Coordinator {
    * sheet renamed since the conversation happened should read under its current name — the panel
    * describes what the studio understands about the world as it is now, not as it was.
    */
-  private async openWorldChat(store: WorldStore, conversationId: ConversationId): Promise<void> {
+  private async openWorldChat(
+    store: WorldStore,
+    conversationId: ConversationId,
+    onlyIfStillSelected?: ConversationId,
+  ): Promise<void> {
     const service = new WorldChatService(store.dir);
     const loaded = await service.load(conversationId);
+    if (
+      !this.stillOpen(store) ||
+      (onlyIfStillSelected !== undefined && this.readModel.getState().worldChat?.conversationId !== onlyIfStillSelected)
+    ) return;
     if (!loaded) {
       this.readModel.setWorldChat(null);
       this.transport.broadcastSnapshot();

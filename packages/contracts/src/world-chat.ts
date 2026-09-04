@@ -8,6 +8,7 @@ import {
   ChatEventIdSchema,
   CheckReceiptIdSchema,
   ConversationIdSchema,
+  ConversationActionIdSchema,
   EpisodeIdSchema,
   FrameRunIdSchema,
   IsoDateTimeSchema,
@@ -33,6 +34,15 @@ import {
 } from "./editor-request.js";
 import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
+import {
+  ConversationActionBindingSchema,
+  ConversationActionCardSchema,
+  ConversationActionDecisionSchema,
+  ConversationActionPrepareIntentSchema,
+  ConversationActionReceiptSchema,
+  ConversationActionStatusSchema,
+  ConversationActionUndoLinkSchema,
+} from "./arke-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -87,6 +97,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "active-run",
   "wrap-up-in-flight",
   "unresolved-proposals",
+  "pending-actions",
 ]);
 export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema>;
 
@@ -1061,6 +1072,8 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       candidates: z.array(WorldChangeCandidateSchema),
       groups: z.array(CandidateGroupSchema),
       tombstones: z.array(CandidateTombstoneSchema),
+      /** Defaults keep every turn written before SPEC-041 readable. */
+      actionPrepareIntents: z.array(ConversationActionPrepareIntentSchema).optional(),
       /**
        * The Bible edit this turn landed, if it made one (master §4.5).
        *
@@ -1221,6 +1234,47 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("deletion.intent-recorded"), requestId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal("action.prepare-intent"), intent: ConversationActionPrepareIntentSchema }).strict(),
+  z.object({ type: z.literal("action.prepared"), binding: ConversationActionBindingSchema }).strict(),
+  z
+    .object({
+      type: z.literal("action.prepare-failed"),
+      actionId: ConversationActionIdSchema,
+      detail: z.string().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.decision-recorded"),
+      actionId: ConversationActionIdSchema,
+      decision: ConversationActionDecisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.status-changed"),
+      actionId: ConversationActionIdSchema,
+      expectedStatus: ConversationActionStatusSchema,
+      status: ConversationActionStatusSchema,
+      detail: z.string().min(1).max(1_000).optional(),
+      receipt: ConversationActionReceiptSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.superseded"),
+      actionId: ConversationActionIdSchema,
+      supersededBy: ConversationActionIdSchema,
+      detail: z.string().min(1).max(1_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.undo-linked"),
+      actionId: ConversationActionIdSchema,
+      undo: ConversationActionUndoLinkSchema,
+    })
+    .strict(),
 ]);
 export type WorldChatStoredEvent = z.infer<typeof WorldChatStoredEventSchema>;
 
@@ -1261,6 +1315,8 @@ export const WorldChatSummarySchema = z
     pointCount: z.number().int().min(0),
     /** Proposals from its wrap-up that are still awaiting a decision. */
     openProposalCount: z.number().int().min(0),
+    /** Cards still requiring attention or execution. Absent in pre-SPEC-041 snapshots. */
+    pendingActionCount: z.number().int().min(0).optional(),
     reopened: z.boolean().optional(),
     /** What its wrap-up could not carry, so the approvals screen can say so. */
     notCarried: z.array(WorldChatNotCarriedSchema).default([]),
@@ -1307,6 +1363,7 @@ export const WorldChatLoadedSchema = z
     /** True when older messages exist before `messages[0]`. */
     hasMore: z.boolean(),
     candidates: z.array(WorldChangeCandidateSchema),
+    actions: z.array(ConversationActionCardSchema).default([]),
     /** Bench sessions prepared from media candidates, keyed by candidate id. */
     mediaHandoffs: z.record(CandidateIdSchema, WorldChatMediaHandoffSchema).default({}),
     groups: z.array(CandidateGroupSchema),
@@ -1595,6 +1652,8 @@ export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
 export const WorldChatTranscriptMessageSchema = z
   .object({
     id: MessageIdSchema,
+    /** Present on current projections so a durable card can remain beside the turn that made it. */
+    turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
@@ -1638,6 +1697,7 @@ export const WorldChatWorkspaceSchema = z
     /** True when older messages exist before the first one here. */
     hasMore: z.boolean().default(false),
     points: z.array(WorldChatPointSchema),
+    actions: z.array(ConversationActionCardSchema).default([]),
     /**
      * How many events this conversation has, so wrap-up can be refused when it has moved on.
      *

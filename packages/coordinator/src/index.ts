@@ -17,6 +17,24 @@ export {
   type ModelActionField,
   type RegisteredClientAction,
 } from "./arke-actions/registry.js";
+export {
+  ConversationActionLifecycle,
+  ConversationActionPreparationError,
+  conversationActionDigest,
+  recoverConversationActions,
+  type ConversationActionAuthorityAdapter,
+  type ConversationActionExecutionOutcome,
+  type ConversationActionLifecycleOptions,
+  type ConversationActionRecoveryOutcome,
+  type ConversationActionValidation,
+  type PrepareConversationActionInput,
+  type PreparedConversationActionAuthority,
+} from "./arke-actions/lifecycle.js";
+export {
+  appendConversationActionTombstones,
+  preserveConversationActionTombstones,
+  readConversationActionTombstones,
+} from "./arke-actions/tombstones.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export {
   assembleHarness,
