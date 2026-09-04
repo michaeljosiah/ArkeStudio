@@ -21,6 +21,7 @@ import {
   dismissWorldChatRipples,
   openWorldChat,
   openWorldChatMedia,
+  promoteWorldChatAttachment,
   sendWorldChat,
   unarchiveWorldChat,
   useStore,
@@ -684,6 +685,7 @@ export function WorldChatScreen() {
       id: a.id,
       file: attachmentChipLabel(a),
       kind: a.kind,
+      promoted: a.promoted,
     }));
 
   return (
@@ -818,6 +820,12 @@ export function WorldChatScreen() {
                   }
                 : {})}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
+              {...(worldId && conversationId
+                ? {
+                    onPromoteAttachment: (attachmentId: string) =>
+                      promoteWorldChatAttachment(worldId, conversationId, attachmentId),
+                  }
+                : {})}
               /*
                * Nothing may be said to a conversation that is being turned into proposals.
                *

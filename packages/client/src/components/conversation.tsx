@@ -30,6 +30,7 @@ import {
   useWorldChatProgress,
   useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
+  promoteWorldChatAttachment,
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { Working } from "./working.js";
@@ -520,10 +521,13 @@ export function failureLine(failure: { status: string; detail?: string }): strin
  * file says "text only": the words came through and the pictures, tables and layout did not,
  * which somebody who attached a deck for its images needs to know before they ask about one.
  */
-export function attachmentChipLabel(attachment: { fileName: string; readability: string }): string {
-  if (attachment.readability === "not-readable") return `${attachment.fileName} · not readable in chat`;
-  if (attachment.readability === "extracted-text-available") return `${attachment.fileName} · text only`;
-  return attachment.fileName;
+export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean }): string {
+  const state = [
+    ...(attachment.readability === "not-readable" ? ["not readable in chat"] : []),
+    ...(attachment.readability === "extracted-text-available" ? ["text only"] : []),
+    ...(attachment.promoted === true ? ["filed in world"] : []),
+  ];
+  return state.length > 0 ? `${attachment.fileName} · ${state.join(" · ")}` : attachment.fileName;
 }
 
 /**
@@ -816,11 +820,15 @@ export function ProductionConversation({
     id: a.id,
     file: attachmentChipLabel(a),
     kind: a.kind,
+    promoted: a.promoted,
   }));
   const attachProps = {
     attachments: attachChips,
     ...(worldId && conversationId
       ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+      : {}),
+    ...(worldId && conversationId
+      ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }
       : {}),
   };
   const transcript = (

@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   ART_DIRECTION_PATH,
   newId,
+  type CandidateGroup,
   type CandidateId,
   type ConversationId,
   type MessageId,
@@ -94,6 +95,7 @@ async function world() {
 async function withCandidates(
   log: WorldChatStore,
   candidates: WorldChangeCandidate[],
+  groups: CandidateGroup[] = [],
 ): Promise<number> {
   const turnId = newId("turn");
   await log.append(
@@ -120,7 +122,7 @@ async function withCandidates(
       },
       receipts: [],
       candidates,
-      groups: [],
+      groups,
       tombstones: [],
     },
     { at: AT },
@@ -185,6 +187,91 @@ describe("what a conversation carries", () => {
       "req-1",
       "the proposal records which conversation and request produced it",
     );
+    await w.store.close();
+  });
+
+  it("composes a relationship onto a sheet created in the same atomic group", async () => {
+    const w = await world();
+    const groupId = newId("grp");
+    const created = candidate({
+      conversationId: w.conversationId,
+      groupId,
+      classification: "sheet.create",
+      title: "Maren Kest",
+      checks: {
+        state: "complete",
+        basedOnCanonRevision: 42,
+        required: ["sheet-search", "canon-search"],
+        completed: ["sheet-search", "canon-search"],
+        consulted: [],
+        likelyDuplicates: [],
+        possibleAmendments: [],
+        contradictionCandidates: [],
+        explanation: "No overlap was found.",
+      },
+      draft: {
+        type: "character",
+        name: "Maren Kest",
+        canonRules: [],
+        links: [],
+        sections: [{ heading: "Essence", body: "A keeper of drowned bells." }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const relationship = candidate({
+      conversationId: w.conversationId,
+      groupId,
+      classification: "relationship.change",
+      title: "Maren trusts Bray",
+      checks: {
+        state: "complete",
+        basedOnCanonRevision: 42,
+        required: ["target-read", "related-read"],
+        completed: ["target-read", "related-read"],
+        consulted: [],
+        likelyDuplicates: [],
+        possibleAmendments: [],
+        contradictionCandidates: [],
+        explanation: "Both ends were checked.",
+      },
+      draft: {
+        from: { kind: "pending-entity", ref: { candidateId: created.id, revision: created.revision } },
+        to: { kind: "sheet", sheetId: "bray-half-hitch" },
+        linkAction: "add",
+        proseEdits: [{
+          sheet: { kind: "pending-entity", ref: { candidateId: created.id, revision: created.revision } },
+          sectionHeading: "Relationships",
+          body: "Maren trusts Bray with the western bell.",
+          reason: "The relationship was settled in conversation.",
+        }],
+      },
+    } as Partial<WorldChangeCandidate>);
+    const group: CandidateGroup = {
+      id: groupId,
+      conversationId: w.conversationId,
+      revision: 1,
+      title: "Maren and Bray",
+      rationale: "The relationship depends on Maren existing.",
+      members: [created, relationship].map((item) => ({ candidateId: item.id, revision: item.revision })),
+      atomic: true,
+      status: "live",
+    };
+    const seq = await withCandidates(w.log, [relationship, created], [group]);
+
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-related-create",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+
+    assert.equal(result.proposalIds.length, 1);
+    const proposal = await w.gate.readManifest(result.proposalIds[0]!);
+    assert.equal(proposal.targets.length, 1, "the composed sheet is one atomic target");
+    const content = await readFile(join(w.dir, ".proposals", proposal.id, proposal.targets[0]!.path), "utf8");
+    assert.match(content, /bray-half-hitch/);
+    assert.match(content, /Maren trusts Bray with the western bell\./);
     await w.store.close();
   });
 

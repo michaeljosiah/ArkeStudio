@@ -105,6 +105,14 @@ describe("the shape guide's examples satisfy the schemas they teach", () => {
     assert.ok(group.success, `group operation example: ${group.success ? "" : group.error.message}`);
   });
 
+  it("accepts a temporary same-turn link on a Canon amendment", () => {
+    const example = structuredClone(WORLD_CHAT_SHAPE_EXAMPLES.drafts["canon.amend"]) as unknown as {
+      draft: { links: unknown[] };
+    };
+    example.draft.links = [{ kind: "pending-entity", ref: { temporaryId: "t1" } }];
+    assert.doesNotThrow(() => ModelCandidateDraftSchema.parse(example));
+  });
+
   it("the complete result example parses", () => {
     const parsed = WorldChatTurnResultSchema.safeParse(WORLD_CHAT_SHAPE_EXAMPLES.turnResult);
     assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
@@ -131,6 +139,13 @@ describe("the rendered guide", () => {
     assert.match(guide, /no markdown fences/, "fenced JSON fails JSON.parse before anything else runs");
     assert.match(guide, /\[msg_\.\.\.\]/, "message ids are cited from the conversation, never invented");
     assert.match(guide, /end exclusive/, "offsets are the exact slice the verifier takes");
+  });
+
+  it("says Bible, scene and timeline changes wait for permission", () => {
+    assert.match(guide, /Each edit is shown on a permission card/);
+    assert.match(guide, /scene edit proposes a rename on a permission card/);
+    assert.match(guide, /editor request prepares exact timeline commands for a permission card/);
+    assert.doesNotMatch(guide, /lands at once|land immediately|no accept step/);
   });
 
   /**

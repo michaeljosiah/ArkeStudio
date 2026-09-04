@@ -53,6 +53,7 @@ import {
 } from "./draft-journal.js";
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
+import { projectReview, type ReviewProjection } from "./review.js";
 
 /**
  * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
@@ -1626,6 +1627,55 @@ export class ProposalManager {
   async readManifest(proposalId: string): Promise<Proposal> {
     const raw = await readFile(toExtendedLength(join(this.proposalDir(proposalId), "proposal.json")), "utf8");
     return ProposalSchema.parse(JSON.parse(raw));
+  }
+
+  /** The authority-owned preview used by conversation cards; no staged payload crosses with it. */
+  async project(proposalId: string): Promise<{ proposal: Proposal; review: ReviewProjection; ripple: RipplePreview | null }> {
+    const proposal = await this.readManifest(proposalId);
+    const proposed = new Map<string, string | null>();
+    const base = new Map<string, string | null>();
+    for (const target of proposal.targets) {
+      proposed.set(target.path, await this.readProposalFile(proposalId, target.path));
+      base.set(target.path, await this.readProposalFile(proposalId, `_base/${target.path}`));
+    }
+    return {
+      proposal,
+      review: projectReview({
+        proposal,
+        proposed: (path) => proposed.get(path) ?? null,
+        base: (path) => base.get(path) ?? null,
+      }),
+      ripple: await this.readPreview(proposalId),
+    };
+  }
+
+  /** Read-only preflight. `accept` repeats these fences under the gate immediately before write. */
+  async validatePending(proposalId: string, expectedDraftRevision: number): Promise<{ ok: true } | { ok: false; stale: boolean; detail: string }> {
+    const proposal = await this.readManifest(proposalId);
+    if (proposal.draftRevision !== expectedDraftRevision) {
+      return { ok: false, stale: true, detail: "The proposal changed after this card was prepared." };
+    }
+    if ((proposal.openChoices ?? []).length > 0) {
+      return { ok: false, stale: false, detail: "This proposal still has an open choice." };
+    }
+    if (proposal.pendingReview) {
+      return { ok: false, stale: false, detail: "This proposal must be reviewed again after its rebase." };
+    }
+    if ((proposal.conflicts ?? []).some((conflict) => conflict.resolution === undefined)) {
+      return { ok: false, stale: false, detail: "This proposal still has an unresolved conflict." };
+    }
+    for (const target of proposal.targets) {
+      const live = await this.readLive(target.path);
+      if (live !== null && isRetired(target.path, live)) {
+        return { ok: false, stale: true, detail: "A target of this proposal has been retired." };
+      }
+      const found = live === null ? null : sha256(live);
+      if (target.baseHash === null ? live === null : found === target.baseHash) continue;
+      const proposed = await this.readProposalFile(proposalId, target.path);
+      if (proposed !== null && live !== null && !changesAnything(target.path, live, proposed)) continue;
+      return { ok: false, stale: true, detail: "The world changed after this proposal was prepared." };
+    }
+    return { ok: true };
   }
 
   private async writePreview(proposalId: string, preview: RipplePreview): Promise<void> {

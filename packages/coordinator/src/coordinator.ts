@@ -89,6 +89,7 @@ import {
   COMFYUI_WEIGHTS_COMPONENT_PREFIX,
   isComfyUiWeightsComponent,
   orderedShots,
+  applyBibleEdits,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -283,7 +284,7 @@ import {
   wavSeconds,
 } from "./voice/library.js";
 import { atomicWriteFile } from "./world/atomic.js";
-import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
+import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError } from "./world/commit.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
@@ -421,6 +422,8 @@ import {
   recoverConversationActions,
   type ConversationActionAuthorityAdapter,
 } from "./arke-actions/lifecycle.js";
+import { prepareWorldChatActions, worldChatActionAdapters } from "./world-chat/actions.js";
+import { makeConversationSummariser } from "./world-chat/summarisation.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
@@ -1615,7 +1618,7 @@ export class Coordinator {
         await recoverConversationActions({
           worldPath: store.dir,
           worldId: store.worldId,
-          adapters: this.opts.conversationActionAdapters ?? [],
+          adapters: this.conversationActionAdapters(store),
           now: () => this.nowIso(),
           isWorldOpen: () => !this.stopping && this.stillOpen(store),
         });
@@ -2520,7 +2523,7 @@ export class Coordinator {
       const actions = await recoverConversationActions({
         worldPath: store.dir,
         worldId: store.worldId,
-        adapters: this.opts.conversationActionAdapters ?? [],
+        adapters: this.conversationActionAdapters(store),
         now,
       });
       if (
@@ -4245,13 +4248,7 @@ export class Coordinator {
           });
           return;
         }
-        const result = await new ConversationActionLifecycle({
-          worldPath: store.dir,
-          worldId: store.worldId,
-          adapters: this.opts.conversationActionAdapters ?? [],
-          now: () => this.nowIso(),
-          isWorldOpen: () => !this.stopping && this.stillOpen(store),
-        }).decide(msg);
+        const result = await this.conversationActionLifecycle(store).decide(msg);
         if (!this.stillOpen(store)) return;
         this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
         await this.refreshConversations(store);
@@ -4774,6 +4771,37 @@ export class Coordinator {
         for (const sourcePath of paths) {
           await this.attachToWorldChat(store, msg.conversationId, sourcePath);
         }
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-promote-attachment": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
+        const attachment = loaded?.attachments.find((one) => one.id === msg.attachmentId);
+        if (!attachment) return;
+        const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
+        try {
+          await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
+            const outcome = await fileArtifact(store, {
+              sourcePath,
+              importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") return outcome.artifact.id;
+            throw new Error(outcome.reason);
+          });
+        } catch {
+          this.emit({
+            at: this.nowIso(),
+            type: "world-chat.attachment-refused",
+            conversationId: msg.conversationId,
+            name: attachment.fileName,
+            reason: "this could not be filed in the world",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
@@ -12245,6 +12273,26 @@ export class Coordinator {
    * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
    * fresh for a cancel would have no record of the turn it was asked to stop.
    */
+  private conversationActionAdapters(store: WorldStore): readonly ConversationActionAuthorityAdapter[] {
+    const supplied = this.opts.conversationActionAdapters ?? [];
+    const suppliedKinds = new Set(supplied.map((adapter) => adapter.actionKind));
+    return [
+      ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso())
+        .filter((adapter) => !suppliedKinds.has(adapter.actionKind)),
+      ...supplied,
+    ];
+  }
+
+  private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
+    return new ConversationActionLifecycle({
+      worldPath: store.dir,
+      worldId: store.worldId,
+      adapters: this.conversationActionAdapters(store),
+      now: () => this.nowIso(),
+      isWorldOpen: () => !this.stopping && this.stillOpen(store),
+    });
+  }
+
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
     /*
      * Cached per world, but only while it is the same open store.
@@ -12297,6 +12345,14 @@ export class Coordinator {
       },
     });
 
+    const actionLifecycle = this.conversationActionLifecycle(store);
+    const summarise = this.opts.adapter?.readiness().ready
+      ? makeConversationSummariser(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
+        )
+      : undefined;
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
       /*
@@ -12329,16 +12385,26 @@ export class Coordinator {
         const current = await readBible(store.dir);
         return { version: current.version, text: current.text };
       },
-      applyBibleEdits: ({ edits, baseVersion }) =>
-        applyTurnBibleEdits(store, edits, { source: "world-chat", baseVersion }),
-      // Validated and written by the coordinator, never by the model (SPEC-039 R-27..R-29).
-      stageEditorRequests: async ({ conversationId, entryContext, requests, dryRun }) => {
-        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), ...(dryRun === true ? { dryRun: true } : {}) });
+      validateBibleEdits: async ({ edits, baseVersion }) => {
+        const current = await readBible(store.dir);
+        if (current.version !== baseVersion) throw new BibleStaleError(baseVersion, current.version);
+        applyBibleEdits(current.text, edits);
       },
-      // A rename lands through the header's own fenced write, straight in (SPEC-036 R-38).
+      validateEditorRequests: async ({ conversationId, entryContext, requests }) => {
+        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), dryRun: true });
+      },
       sceneVersion: (context) => sceneVersionFor(store, context),
-      applySceneEdits: ({ entryContext, edits, baseVersion, dryRun }) =>
-        applySceneEdits(store, { entryContext, edits, baseVersion, ...(dryRun === true ? { dryRun: true } : {}) }),
+      validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
+        applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
+      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn),
+      bindActions: async (actions) => {
+        // Every binding appends to the same conversation, and proposal staging is also guarded per
+        // conversation. Run them in turn; any failed intent remains durable for startup recovery.
+        for (const action of actions) {
+          await actionLifecycle.bindIntent(action.intent, action.payload).catch(() => {});
+        }
+      },
+      ...(summarise ? { summarise } : {}),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,

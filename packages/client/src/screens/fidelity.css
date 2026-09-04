@@ -2327,6 +2327,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-overflow: ellipsis;
 }
 .fy-cx__chipkind { font: 400 9.5px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
+.fy-cx__chipaction {
+  border: none;
+  background: transparent;
+  color: var(--accent-foreground);
+  cursor: pointer;
+  font: 500 10px var(--font-sans);
+  padding: 0;
+  white-space: nowrap;
+}
+.fy-cx__chipaction:hover { text-decoration: underline; }
 .fy-cx__chipx {
   border: none;
   background: transparent;

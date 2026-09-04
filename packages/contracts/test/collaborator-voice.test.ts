@@ -37,6 +37,11 @@ describe("the reply is the collaboration, not a receipt", () => {
     assert.match(worldBuilder.brief, /Never pad/);
   });
 
+  it("names same-turn references by the temporary id the model actually controls", () => {
+    assert.match(worldBuilder.brief, /"temporaryId":"t1"/);
+    assert.match(worldBuilder.brief, /same atomic group/);
+  });
+
   it("the reply still never narrates the interface (turn 69)", () => {
     const brief = worldBuilder.brief;
     // The brief is hard-wrapped, so every phrase is matched across whatever newline fell in it.

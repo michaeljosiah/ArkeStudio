@@ -3967,6 +3967,17 @@ export function worldChatAttachFiles(worldId: string, conversationId: string): v
   send({ kind: "world-chat-attach-files", worldId, conversationId });
 }
 
+/** Explicitly file one private conversation attachment into the world's artifact shelf. */
+export function promoteWorldChatAttachment(worldId: string, conversationId: string, attachmentId: string): void {
+  send({
+    kind: "world-chat-promote-attachment",
+    worldId,
+    conversationId,
+    attachmentId,
+    requestId: crypto.randomUUID(),
+  });
+}
+
 /**
  * Where a dropped or pasted file goes: this conversation, not the world.
  *

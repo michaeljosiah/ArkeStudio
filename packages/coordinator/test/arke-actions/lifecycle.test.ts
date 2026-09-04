@@ -363,7 +363,7 @@ describe("conversation action folding and decisions", () => {
         type: "action.status-changed",
         actionId: action.actionId,
         expectedStatus: "pending",
-        status: "completed",
+        status: "running",
       },
       { at: AT },
     );
@@ -457,6 +457,34 @@ describe("conversation action folding and decisions", () => {
 
     assert.equal(result.status, "denied");
     assert.equal(state.executions, 0);
+  });
+
+  it("records denial before cleanup and retries interrupted cleanup on restart", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    let attempts = 0;
+    const authority: ConversationActionAuthorityAdapter = {
+      ...adapter({ executions: 0 }),
+      deny: async () => {
+        attempts++;
+        assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "denied");
+        if (attempts === 1) throw new Error("interrupted cleanup");
+      },
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW });
+    const action = await prepare(lifecycle, conversationId);
+
+    const result = await lifecycle.decide(
+      decision(action, (await loaded(worldPath, conversationId)).seq, { decision: "deny" }),
+    );
+    assert.equal(result.disposition, "recorded");
+    assert.equal(result.status, "denied");
+    assert.equal(attempts, 1);
+
+    await new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW })
+      .recoverConversation(conversationId);
+    assert.equal(attempts, 2);
+    assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "denied");
   });
 
   it("refuses wrong world, conversation, sequence, and status", async () => {

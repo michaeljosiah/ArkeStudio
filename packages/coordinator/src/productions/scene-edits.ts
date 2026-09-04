@@ -44,6 +44,7 @@ export async function applySceneEdits(
     baseVersion: number | null;
     /** Check the thread, the scene and the fence, and write nothing: the pass before anything durable lands. */
     dryRun?: boolean;
+    requestId?: string;
   },
 ): Promise<void> {
   if (input.edits.length === 0) return;
@@ -71,6 +72,7 @@ export async function applySceneEdits(
         sceneId: about.sceneId,
         baseVersion: input.baseVersion,
         command: { kind: "edit-scene", title: edit.title },
+        ...(input.requestId ? { requestId: input.requestId } : {}),
       });
     } catch (error) {
       if (error instanceof SceneVersionMoved) throw new SceneEditRefused(MOVED);

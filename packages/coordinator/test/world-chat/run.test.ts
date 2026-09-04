@@ -575,18 +575,17 @@ describe("what a turn was refused", () => {
   });
 });
 
-describe("a rename lands straight in, fenced by the version the prompt showed (SPEC-036 R-38)", () => {
+describe("a rename becomes a fenced action without writing during the turn (SPEC-041 R-59)", () => {
   /** A scene thread, with the two deps the rename needs handed in by the test. */
   async function sceneSetup(
     adapter: HarnessAdapter,
     deps: {
       sceneVersion?: () => number | null;
-      applySceneEdits?: (input: {
+      validateSceneEdits?: (input: {
         edits: readonly { kind: "rename"; title: string }[];
         baseVersion: number | null;
-        dryRun?: boolean;
       }) => Promise<void>;
-      applyBibleEdits?: () => Promise<null>;
+      validateBibleEdits?: () => Promise<void>;
     },
   ) {
     const worldPath = await tempDir("arke-run-scene-");
@@ -614,6 +613,8 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
         attachments: [],
         attachmentText: new Map(),
       }),
+      prepareActions: () => [],
+      bindActions: async () => {},
       now: NOW,
       ...deps,
     });
@@ -627,22 +628,19 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     JSON.stringify({ reply: `Called it ${title}.`, candidateOperations: [], groupOperations: [], sceneEdits: [{ kind: "rename", title }] });
   const plain = JSON.stringify({ reply: "Left the name as it was.", candidateOperations: [], groupOperations: [] });
 
-  it("checks the rename first and writes it last, both fenced by the version the prompt was built from", async () => {
-    const applied: Array<{ baseVersion: number | null; titles: string[]; dryRun: boolean }> = [];
+  it("checks the rename once against the version the prompt was built from and makes no target write", async () => {
+    const validated: Array<{ baseVersion: number | null; titles: string[] }> = [];
     const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("The tide answers")]), {
       sceneVersion: () => 3,
-      applySceneEdits: async ({ edits, baseVersion, dryRun }) => {
-        applied.push({ baseVersion, titles: edits.map((edit) => edit.title), dryRun: dryRun === true });
+      validateSceneEdits: async ({ edits, baseVersion }) => {
+        validated.push({ baseVersion, titles: edits.map((edit) => edit.title) });
       },
     });
     await runner.send(store, conversationId, "Call this one The tide answers");
     assert.deepEqual(
-      applied,
-      [
-        { baseVersion: 3, titles: ["The tide answers"], dryRun: true },
-        { baseVersion: 3, titles: ["The tide answers"], dryRun: false },
-      ],
-      "a check before anything durable, one write after everything else, both against what the model saw",
+      validated,
+      [{ baseVersion: 3, titles: ["The tide answers"] }],
+      "turn completion only validates; the authority write waits for approval",
     );
     const folded = await view();
     assert.match(folded.messages.at(-1)?.text ?? "", /Called it/, "and the reply that landed with it stands");
@@ -650,7 +648,7 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
 
   it("a rename never lands under a turn the bible then refuses (codex, PR 716)", async () => {
     const prompts: string[] = [];
-    const writes: boolean[] = [];
+    let sceneValidations = 0;
     const withBible = JSON.stringify({
       reply: "Named it and noted it.",
       candidateOperations: [],
@@ -660,15 +658,15 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     });
     const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([withBible, plain], { prompts }), {
       sceneVersion: () => 2,
-      applySceneEdits: async ({ dryRun }) => {
-        writes.push(dryRun !== true);
+      validateSceneEdits: async () => {
+        sceneValidations += 1;
       },
-      applyBibleEdits: async () => {
+      validateBibleEdits: async () => {
         throw new Error("no such heading");
       },
     });
     await runner.send(store, conversationId, "Name it and note it");
-    assert.deepEqual(writes, [false], "the rename was checked, and never written: the bible refused first");
+    assert.equal(sceneValidations, 1, "the rename was checked, and never written: the bible refused first");
     assert.ok(prompts.some((prompt) => /bible could not be edited/.test(prompt)), "the bible's refusal is what the retry answers");
     const folded = await view();
     assert.match(folded.messages.at(-1)?.text ?? "", /Left the name as it was/);
@@ -679,7 +677,7 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     let attempts = 0;
     const { runner, store, conversationId, view } = await sceneSetup(fakeAdapter([renaming("From the model"), plain], { prompts }), {
       sceneVersion: () => 2,
-      applySceneEdits: async () => {
+      validateSceneEdits: async () => {
         attempts += 1;
         throw new SceneEditRefused("The scene changed while you were answering, so it was left alone. Answer without renaming it this turn.");
       },
@@ -695,7 +693,7 @@ describe("a rename lands straight in, fenced by the version the prompt showed (S
     const prompts: string[] = [];
     const { runner, store, conversationId } = await sceneSetup(fakeAdapter([renaming("Anything"), plain], { prompts }), {
       sceneVersion: () => 2,
-      applySceneEdits: async () => {
+      validateSceneEdits: async () => {
         throw new Error("ENOENT: no such file, open '/Users/private/worlds/the-undersong/productions/saltlight/scenes/x.json'");
       },
     });

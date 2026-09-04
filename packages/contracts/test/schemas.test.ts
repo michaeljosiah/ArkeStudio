@@ -1383,6 +1383,16 @@ describe("domain events and frames", () => {
       }),
     );
     assert.throws(() => ClientMessageSchema.parse({ kind: "open-world", worldId: "the-undersong" }));
+    const promotion = {
+      kind: "world-chat-promote-attachment",
+      worldId: WORLD_ID,
+      conversationId: `cv_${"0".repeat(26)}`,
+      attachmentId: `wca_${"0".repeat(26)}`,
+      requestId: WORLD_ID,
+    };
+    assert.doesNotThrow(() => ClientMessageSchema.parse(promotion));
+    assert.throws(() => ClientMessageSchema.parse({ ...promotion, attachmentId: "../private.txt" }));
+    assert.throws(() => ClientMessageSchema.parse({ ...promotion, requestId: "" }));
   });
 
   it("validates retained update states and install commands", () => {

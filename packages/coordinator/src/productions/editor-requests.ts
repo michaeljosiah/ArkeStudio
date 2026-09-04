@@ -117,6 +117,7 @@ export async function stageEditorRequests(
   store: WorldStore,
   input: {
     conversationId: EditorRequest["conversationId"];
+    actionId?: EditorRequest["actionId"];
     entryContext: WorldChatContext | undefined;
     requests: readonly ModelEditorRequest[];
     now: string;
@@ -186,6 +187,7 @@ export async function stageEditorRequests(
         id: `req_${ulid()}`,
         productionId,
         conversationId: input.conversationId,
+        ...(input.actionId ? { actionId: input.actionId } : {}),
         baseRevision: base.baseRevision,
         sourceFingerprint: base.sourceFingerprint,
         commands: [...request.commands],
@@ -208,6 +210,42 @@ export async function stageEditorRequests(
     });
     return staged;
   });
+}
+
+export async function readEditorRequest(
+  store: WorldStore,
+  productionId: string,
+  requestId: string,
+): Promise<EditorRequest | null> {
+  const { file } = await readRequests(store, productionId);
+  return file.requests.find((request) => request.id === requestId) ?? null;
+}
+
+export async function readEditorRequestByAction(
+  store: WorldStore,
+  productionId: string,
+  actionId: string,
+): Promise<EditorRequest | null> {
+  const { file } = await readRequests(store, productionId);
+  return file.requests.find((request) => request.actionId === actionId) ?? null;
+}
+
+export async function validateEditorRequest(
+  store: WorldStore,
+  productionId: string,
+  requestId: string,
+): Promise<{ ok: true; request: EditorRequest } | { ok: false; stale: boolean; detail: string }> {
+  const request = await readEditorRequest(store, productionId, requestId);
+  if (!request) return { ok: false, stale: true, detail: "The editor request is no longer available." };
+  if (request.status !== "pending") {
+    return { ok: false, stale: true, detail: `The editor request is already ${request.status}.` };
+  }
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) return { ok: false, stale: true, detail: "The production is no longer available." };
+  const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
+  return stale === null
+    ? { ok: true, request }
+    : { ok: false, stale: true, detail: `The timeline changed after this request was prepared: ${stale}`.slice(0, 1_000) };
 }
 
 async function writeStatus(

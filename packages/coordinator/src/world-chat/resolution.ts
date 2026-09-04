@@ -75,7 +75,7 @@ export async function recordResolution(
         outcome,
         candidateIds: origin.candidateIds,
       },
-      { at: now() },
+      { at: now(), requestId: `proposal-resolution:${proposal.id}:${outcome}` },
     )
     .catch(() => {
       /* the world has already changed; the conversation's account of it is not worth failing on */

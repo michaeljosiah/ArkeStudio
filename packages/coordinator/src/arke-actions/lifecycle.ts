@@ -24,7 +24,7 @@ import {
   type TurnId,
   type WorldChatEventEnvelope,
 } from "@arke-studio/contracts";
-import { findArkeClientCommand } from "./registry.js";
+import { findArkeAction } from "./registry.js";
 import { conversationActionDigest, stableJson } from "./digest.js";
 import { readConversationActionTombstones } from "./tombstones.js";
 import { foldConversation } from "../world-chat/fold.js";
@@ -70,6 +70,8 @@ export interface ConversationActionAuthorityAdapter {
   abandonPreparation?(intent: ConversationActionPrepareIntent): Promise<void>;
   validate(action: ConversationActionCard): Promise<ConversationActionValidation>;
   execute(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
+  /** Idempotently settle authority-owned preparation after the local actor's denial is durable. */
+  deny?(action: ConversationActionCard): Promise<void>;
   /** Null means the authority still has exactly the projected status. */
   reconcile?(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null>;
 }
@@ -105,7 +107,7 @@ function boundedDetail(detail: string, fallback: string): string {
 
 function transitionAllowed(from: ConversationActionStatus, to: ConversationActionStatus): boolean {
   const transitions: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
-    pending: ["stale"],
+    pending: ["completed", "failed", "cancelled", "stale"],
     approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled", "stale"],
     "awaiting-host": ["completed", "failed", "cancelled"],
     queued: ["running", "completed", "failed", "cancelled"],
@@ -211,7 +213,7 @@ export class ConversationActionLifecycle {
     if (input.worldId !== this.options.worldId) {
       throw new ConversationActionPreparationError("The action belongs to a different world.");
     }
-    const descriptor = findArkeClientCommand(input.actionKind);
+    const descriptor = findArkeAction(input.actionKind);
     if (!descriptor || descriptor.classification !== "supported-by-arke") {
       throw new ConversationActionPreparationError("That action kind is not available to Arke.");
     }
@@ -347,7 +349,7 @@ export class ConversationActionLifecycle {
       }
       await this.assertActionIdAvailable(durableIntent);
       this.validateRegisteredIntent(durableIntent);
-      const descriptor = findArkeClientCommand(intent.actionKind);
+      const descriptor = findArkeAction(intent.actionKind);
       if (!descriptor || descriptor.classification !== "supported-by-arke") {
         throw new ConversationActionPreparationError("The durable intent no longer matches its registered action.");
       }
@@ -453,6 +455,7 @@ export class ConversationActionLifecycle {
         const adapter = this.adapters.get(existing.actionKind);
         if (adapter) await this.continueApproved(existing, adapter, true);
       }
+      if (existing?.status === "denied") await this.settleDenied(existing);
       const current = await this.loadAction(input.conversationId, input.actionId);
       return {
         ...base,
@@ -488,7 +491,14 @@ export class ConversationActionLifecycle {
     }
 
     if (input.decision === "deny") {
-      return this.recordDecision(store, input, loaded.seq);
+      // The person's decision is the source of truth. Cleanup follows it so a crash cannot remove
+      // the authority while leaving an approvable card; duplicate requests and restart retry it.
+      const denied = await this.recordDecision(store, input, (await this.loadConversation(input.conversationId)).seq);
+      const durable = await this.loadAction(input.conversationId, input.actionId);
+      if (denied.disposition === "recorded" && durable?.status === "denied") {
+        await this.settleDenied(durable);
+      }
+      return denied;
     }
     if (action.status === "stale") {
       return refuse("stale", "That action is stale. Prepare it again before approving.", action.status);
@@ -503,7 +513,7 @@ export class ConversationActionLifecycle {
       return refuse("adapter-unavailable", action.approvalBlockedReason, action.status);
     }
 
-    const descriptor = findArkeClientCommand(action.actionKind);
+    const descriptor = findArkeAction(action.actionKind);
     const adapter = this.adapters.get(action.actionKind);
     if (
       !descriptor ||
@@ -740,6 +750,10 @@ export class ConversationActionLifecycle {
     events = (await store.read()).events;
     const actions = foldConversation(meta.id, meta.createdAt, events).view.actions;
     for (const action of actions) {
+      if (action.status === "denied") {
+        await this.settleDenied(action);
+        continue;
+      }
       if (terminal(action.status)) continue;
       const adapter = this.adapters.get(action.actionKind);
       if (!adapter) continue;
@@ -769,6 +783,17 @@ export class ConversationActionLifecycle {
     return `${process.platform === "win32" ? worldPath.toLowerCase() : worldPath}:${actionId}`;
   }
 
+  private async settleDenied(action: ConversationActionCard): Promise<void> {
+    const adapter = this.adapters.get(action.actionKind);
+    if (!adapter?.deny) return;
+    await serialise(executions, this.operationKey(action.actionId), async () => {
+      const current = await this.loadAction(action.conversationId, action.actionId);
+      if (current?.status === "denied") await adapter.deny!(current);
+    }).catch(() => {
+      /* the durable denial remains authoritative; startup or a duplicate request retries cleanup */
+    });
+  }
+
   private async assertActionIdAvailable(intent: ConversationActionPrepareIntent): Promise<void> {
     const owner = await this.findActionConversation(intent.actionId);
     if (owner && owner !== intent.conversationId) {
@@ -782,7 +807,7 @@ export class ConversationActionLifecycle {
   }
 
   private validateRegisteredIntent(intent: ConversationActionPrepareIntent): void {
-    const descriptor = findArkeClientCommand(intent.actionKind);
+    const descriptor = findArkeAction(intent.actionKind);
     if (
       intent.worldId !== this.options.worldId ||
       intent.actorId !== LOCAL_ACTOR_ID ||
@@ -860,7 +885,7 @@ export class ConversationActionLifecycle {
     prepared: PreparedConversationActionAuthority,
     beforeAppend?: () => void,
   ): Promise<ConversationActionCard> {
-    const descriptor = findArkeClientCommand(intent.actionKind);
+    const descriptor = findArkeAction(intent.actionKind);
     if (!descriptor || descriptor.classification !== "supported-by-arke") {
       throw new ConversationActionPreparationError("The registered action kind is no longer available.");
     }

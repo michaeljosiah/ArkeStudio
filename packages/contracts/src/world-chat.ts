@@ -1075,7 +1075,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       /** Defaults keep every turn written before SPEC-041 readable. */
       actionPrepareIntents: z.array(ConversationActionPrepareIntentSchema).optional(),
       /**
-       * The Bible edit this turn landed, if it made one (master §4.5).
+       * Legacy pointer for Bible edits written before model-originated changes moved behind cards.
        *
        * Recorded with the reply for the same reason the propositions are: the reply says "I've
        * written that down", and a crash that kept the sentence but lost the record of which
@@ -1455,13 +1455,53 @@ export const ModelCandidateCommonSchema = z.object({
   checkReceiptIds: z.array(CheckReceiptIdSchema),
 });
 
+/** A temporary id is only meaningful inside the turn result that created it. */
+const TemporaryIdSchema = z.string().min(1).max(64);
+
+/** Model output may point at another create in this result before either has a durable id. */
+export const ModelWorldChatLinkRefSchema = z.union([
+  WorldChatLinkRefSchema,
+  z.object({ kind: z.literal("pending-entity"), ref: z.object({ temporaryId: TemporaryIdSchema }).strict() }).strict(),
+]);
+export type ModelWorldChatLinkRef = z.infer<typeof ModelWorldChatLinkRefSchema>;
+
 export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", [
-  ModelCandidateCommonSchema.extend(CanonCreatePayload).strict(),
-  ModelCandidateCommonSchema.extend(CanonAmendPayload).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...CanonCreatePayload,
+    draft: CanonCreatePayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema) }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    classification: z.literal("canon.amend"),
+    target: CanonAmendPayload.target,
+    draft: z
+      .object({
+        type: CanonEntryTypeSchema.optional(),
+        title: z.string().min(1).max(160).optional(),
+        statement: z.string().min(1).optional(),
+        links: z.array(ModelWorldChatLinkRefSchema).optional(),
+      })
+      .strict()
+      .refine((draft) => Object.keys(draft).length > 0, "an amendment must change at least one field"),
+  }).strict(),
   ModelCandidateCommonSchema.extend(CanonThreadPayload).strict(),
-  ModelCandidateCommonSchema.extend(SheetCreatePayload).strict(),
-  ModelCandidateCommonSchema.extend(SheetEditPayload).strict(),
-  ModelCandidateCommonSchema.extend(RelationshipChangePayload).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...SheetCreatePayload,
+    draft: SheetCreatePayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema) }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...SheetEditPayload,
+    draft: SheetEditPayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema).optional() }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...RelationshipChangePayload,
+    draft: RelationshipChangePayload.draft.extend({
+      from: ModelWorldChatLinkRefSchema,
+      to: ModelWorldChatLinkRefSchema,
+      proseEdits: z.array(
+        RelationshipChangePayload.draft.shape.proseEdits.element.extend({ sheet: ModelWorldChatLinkRefSchema }).strict(),
+      ),
+    }).strict(),
+  }).strict(),
   ModelCandidateCommonSchema.extend(ArtDirectionChangePayload).strict(),
   ModelCandidateCommonSchema.extend(ImageOpportunityPayload).strict(),
   ModelCandidateCommonSchema.extend(DevelopmentOverviewPayload).strict(),
@@ -1473,9 +1513,6 @@ export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", 
   ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
 ]);
 export type ModelCandidateDraft = z.infer<typeof ModelCandidateDraftSchema>;
-
-/** A temporary id is only meaningful inside the turn result that created it. */
-const TemporaryIdSchema = z.string().min(1).max(64);
 
 export const ModelCandidateRefSchema = z.union([
   z.object({ candidateId: CandidateIdSchema, revision: z.number().int().min(1) }).strict(),
@@ -1566,27 +1603,26 @@ export const WorldChatTurnResultSchema = z
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
     /**
-     * Edits to the author's Bible, applied by the coordinator when the turn lands (master §4.5).
+     * Edits to the author's Bible, prepared by the coordinator for a permission card.
      *
      * Here rather than on the retrieval tool surface, which is read-only by contract (#70 §9.2)
      * and confines the harness to its scratch directory (§18.3). Both stay true: the model
-     * describes the edit, the coordinator performs it, and the one path that writes the file is
-     * also the path that versions and snapshots it.
+     * describes the edit, the coordinator validates and prepares it, and approval uses the one
+     * path that writes, versions and snapshots the file.
      *
      * Defaulted rather than required, so a turn that touches nothing may omit it entirely.
      */
     bibleEdits: z.array(BibleEditSchema).max(BIBLE_EDIT_BOUNDS.edits).default([]),
     /**
-     * Editor requests this turn stages (SPEC-039 R-27, issue 684): exact timeline commands the
-     * coordinator validates against the live base and writes as pending records. The reply is
-     * prose about them; the record is what a person accepts or rejects. Defaulted like the bible
-     * edits, so a turn that asks for nothing omits it.
+     * Editor requests this turn proposes (SPEC-039 R-27, issue 684): exact timeline commands the
+     * coordinator validates against the live base and stages only after the completed turn and
+     * its preparation intent are durable. Defaulted like the Bible edits.
      */
     editorRequests: z.array(ModelEditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.perTurn).default([]),
     /**
-     * Scene edits this turn makes (SPEC-036 R-38): a rename the coordinator lands at once
-     * through the header's own version-fenced write, with no card — a title is a label, and the
-     * person is looking at it. Only in a scene thread. Defaulted like the others.
+     * Scene edits this turn proposes: a rename prepared against the version shown to the model,
+     * then landed through the header's own fenced write only after approval. Only in a scene
+     * thread. Defaulted like the others.
      */
     sceneEdits: z.array(ModelSceneEditSchema).max(SCENE_EDIT_BOUNDS.perTurn).default([]),
   })
@@ -2370,7 +2406,7 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, grounded answers do not come from it, and a candidate may never cite it as evidence. Other generation paths may use it only as non-binding creative intent.
 
-You may edit it, and edits land immediately — there is no accept step. Every edit cuts a version and can be undone, which is why it needs no permission; it is not a licence to tidy. Edit it when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
+You may propose edits to it. Each edit is shown on a permission card and writes only after the person's Approve; approval cuts a version and can be undone. This is not a licence to tidy. Propose an edit when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
 
 op is one of set-section | append-to-section | remove-section | replace-document.
 
@@ -2385,7 +2421,7 @@ Where the bible and Canon disagree, Canon is what the world has decided. Say so 
 
 ### Editor requests
 
-Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request stages exact timeline commands for them to accept or reject on a card beside the timeline. Nothing you write in reply changes the timeline. Only their Accept does, and it applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
+Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request prepares exact timeline commands for a permission card. Nothing you write in reply changes or stages anything on the timeline. Only the person's Approve applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
 
 ${JSON.stringify(exampleEditorRequest)}
 
@@ -2393,7 +2429,7 @@ summary says what moves, what goes and what comes, in their terms — never "imp
 
 ### Scene edits
 
-Only in a scene thread, and only that scene: a scene edit renames it, and it lands at once — no card, no accept step — because a title is a label the person is looking at. Rename when they ask for a name, or when the scene is still called Untitled and what they have said makes its name plain; otherwise leave the name alone. The title reads in the header as \`Scene 7 · The tide answers\`, so give the name only, short and in their register. A rename against a scene that changed while you were answering is refused, and a refusal rejects the whole turn.
+Only in a scene thread, and only that scene: a scene edit proposes a rename on a permission card, and the title changes only after the person's Approve. Rename when they ask for a name, or when the scene is still called Untitled and what they have said makes its name plain; otherwise leave the name alone. The title reads in the header as \`Scene 7 · The tide answers\`, so give the name only, short and in their register. A rename against a scene that changed while you were answering is refused, and a refusal rejects the whole turn.
 
 ${JSON.stringify(exampleSceneEdit)}
 

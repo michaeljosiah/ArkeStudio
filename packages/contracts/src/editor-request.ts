@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationIdSchema, SlugSchema } from "./ids.js";
+import { ConversationActionIdSchema, ConversationIdSchema, SlugSchema } from "./ids.js";
 import {
   PICTURE_TRACK_ID,
   TimelineClipIdSchema,
@@ -30,7 +30,7 @@ import {
  */
 
 export const EDITOR_REQUEST_BOUNDS = {
-  /** Requests one turn may stage; a conversation that wants more says so over more turns. */
+  /** Requests one turn may prepare; a conversation that wants more says so over more turns. */
   perTurn: 2,
   commands: 50,
   summary: 500,
@@ -49,11 +49,9 @@ export type EditorRequestStatus = z.infer<typeof EditorRequestStatusSchema>;
 /**
  * Arke's scene edits (SPEC-036 R-38).
  *
- * Unlike an editor request, a scene edit is not carded: a title is a label, not a change anyone
- * needs to review, and the person is looking at it. The model describes the edit in a typed field,
- * the coordinator lands it through the same version-fenced `edit-scene` write the header uses, and
- * a scene that moved between the prompt and the answer refuses back to the model as a corrective
- * problem — the bible-edit discipline, one record over. Only in a scene thread, only that scene.
+ * The model describes the edit in a typed field and the coordinator prepares a permission card
+ * against the exact scene version the model saw. Approval lands it through the same version-fenced
+ * `edit-scene` write the header uses. Only in a scene thread, only that scene.
  */
 export const SCENE_EDIT_BOUNDS = {
   /** Edits one turn may carry; a rename is one, and nothing else is offered yet. */
@@ -87,6 +85,8 @@ export const EditorRequestSchema = z
     id: EditorRequestIdSchema,
     productionId: SlugSchema,
     conversationId: ConversationIdSchema,
+    /** Conversation permission action that prepared this record; absent on older records. */
+    actionId: ConversationActionIdSchema.optional(),
     /** The revision the commands were prepared against; null when they would materialise the first assembly. */
     baseRevision: z.number().int().min(0).nullable(),
     sourceFingerprint: TimelineSourceFingerprintSchema,

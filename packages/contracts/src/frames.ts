@@ -13,7 +13,7 @@ import {
 import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema } from "./scene.js";
 
 /**
@@ -611,6 +611,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("world-chat-attach-files"),
       worldId: UlidSchema,
       conversationId: ConversationIdSchema,
+    })
+    .strict(),
+  /** #70 §13.1: explicitly copy private conversation evidence into the world's artifact shelf. */
+  z
+    .object({
+      kind: z.literal("world-chat-promote-attachment"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      attachmentId: ChatAttachmentIdSchema,
+      requestId: z.string().min(1),
     })
     .strict(),
   /** SPEC-005: stage a proposal and run an authoring agent inside it. */

@@ -136,6 +136,18 @@ export function attachmentDir(
   return join(attachmentsDir(worldPath, conversationId), attachmentId);
 }
 
+function attachmentPath(worldPath: string, attachment: WorldChatAttachment): string {
+  const dir = resolve(attachmentDir(worldPath, attachment.conversationId, attachment.id));
+  if (attachmentFileName(attachment.fileName) !== attachment.fileName) {
+    throw new AttachmentError("escapes-conversation", "That attachment name is no longer safe.");
+  }
+  const path = resolve(dir, attachment.fileName);
+  if (path !== dir && !path.startsWith(dir + sep)) {
+    throw new AttachmentError("escapes-conversation", "That attachment escapes its conversation.");
+  }
+  return path;
+}
+
 /**
  * A name safe to write.
  *
@@ -464,12 +476,8 @@ ${text}`),
   }
 
   async readBytes(attachment: WorldChatAttachment): Promise<Uint8Array> {
-    const path = join(
-      attachmentDir(this.worldPath, attachment.conversationId, attachment.id),
-      attachment.fileName,
-    );
     try {
-      return await readFile(toExtendedLength(path));
+      return await readFile(toExtendedLength(attachmentPath(this.worldPath, attachment)));
     } catch {
       throw new AttachmentError("not-found", "That attachment is no longer on disk.");
     }
@@ -554,14 +562,22 @@ ${text}`),
   async promote(
     conversationId: ConversationId,
     attachment: WorldChatAttachment,
-    fileIntoWorld: (input: { fileName: string; bytes: Uint8Array }) => Promise<string>,
+    requestId: string,
+    fileIntoWorld: (input: { fileName: string; bytes: Uint8Array; sourcePath: string }) => Promise<string>,
   ): Promise<string> {
+    if (attachment.conversationId !== conversationId) {
+      throw new AttachmentError("escapes-conversation", "That attachment belongs to a different conversation.");
+    }
     if (attachment.promotedArtifactId !== undefined) return attachment.promotedArtifactId;
+    const sourcePath = attachmentPath(this.worldPath, attachment);
     const bytes = await this.readBytes(attachment);
-    const artifactId = await fileIntoWorld({ fileName: attachment.fileName, bytes });
+    if (bytes.byteLength !== attachment.byteLength || digest(bytes) !== attachment.contentHash) {
+      throw new AttachmentError("not-found", "That attachment changed after it was added to the conversation.");
+    }
+    const artifactId = await fileIntoWorld({ fileName: attachment.fileName, bytes, sourcePath });
     await this.store(conversationId).append(
       { type: "attachment.promoted", attachmentId: attachment.id, artifactId },
-      { at: this.now() },
+      { at: this.now(), requestId },
     );
     return artifactId;
   }

@@ -45,9 +45,11 @@ export interface ComposerProps {
   onAttachFiles?: (files: readonly File[]) => Promise<readonly Trouble[]>;
   /** Present → a paste too long to be a message becomes an attachment instead. */
   onAttachText?: (text: string) => Promise<readonly Trouble[]>;
-  /** What has been attached to this conversation, already filed into the world. */
+  /** What has been attached to this conversation, including private evidence not yet filed. */
   attachments?: readonly Attachment[];
   onRemoveAttachment?: (id: string) => void;
+  /** Present for private conversation attachments that may be explicitly filed into the world. */
+  onPromoteAttachment?: (id: string) => void;
   /** Things the world would not take, from anywhere — shown greyed among the chips. */
   refusals?: readonly Trouble[];
   onDismissRefusal?: (name: string) => void;
@@ -71,6 +73,7 @@ export interface Attachment {
   id: string;
   file: string;
   kind: "audio" | "image" | "video" | "document" | "board" | "other";
+  promoted?: boolean;
 }
 
 /** Its kind in one word, so a chip says what it is without needing an icon set per format. */
@@ -114,6 +117,7 @@ export function Composer(props: ComposerProps) {
     onAttachText,
     attachments = [],
     onRemoveAttachment,
+    onPromoteAttachment,
     refusals = [],
     onDismissRefusal,
   } = props;
@@ -223,6 +227,15 @@ export function Composer(props: ComposerProps) {
             <span key={a.id} className="fy-cx__chip" title={a.file}>
               <span className="fy-cx__chipname">{a.file}</span>
               <span className="fy-cx__chipkind">{kindLabel(a.kind)}</span>
+              {onPromoteAttachment && a.promoted === false && (
+                <button
+                  type="button"
+                  className="fy-cx__chipaction"
+                  onClick={() => onPromoteAttachment(a.id)}
+                >
+                  File in world
+                </button>
+              )}
               {onRemoveAttachment && (
                 <button
                   type="button"

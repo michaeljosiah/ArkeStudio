@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdir, readFile, rm } from "node:fs/promises";
+import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type ChatAttachmentId, type ConversationId, type MessageId } from "@arke-studio/contracts";
@@ -352,8 +352,9 @@ describe("promotion into the world", () => {
     const attachment = await store.ingestText(conversationId, "a map of the lower town");
 
     const filed: string[] = [];
-    const artifactId = await store.promote(conversationId, attachment, async (input) => {
+    const artifactId = await store.promote(conversationId, attachment, "promote-1", async (input) => {
       filed.push(input.fileName);
+      assert.equal(input.sourcePath, join(attachmentDir(worldPath, conversationId, attachment.id), attachment.fileName));
       return "art_001";
     });
 
@@ -366,11 +367,11 @@ describe("promotion into the world", () => {
   it("does not file a second copy when the button is pressed twice", async () => {
     const { store, worldPath, conversationId } = await setup();
     const attachment = await store.ingestText(conversationId, "once");
-    await store.promote(conversationId, attachment, async () => "art_001");
+    await store.promote(conversationId, attachment, "promote-1", async () => "art_001");
 
     const again = (await load(worldPath, conversationId)).attachments[0]!;
     let called = 0;
-    const artifactId = await store.promote(conversationId, again, async () => {
+    const artifactId = await store.promote(conversationId, again, "promote-2", async () => {
       called += 1;
       return "art_002";
     });
@@ -379,10 +380,34 @@ describe("promotion into the world", () => {
     assert.equal(artifactId, "art_001", "and the answer is the artifact that already exists");
   });
 
+  it("refuses another conversation and bytes that changed after ingestion", async () => {
+    const { store, worldPath, conversationId } = await setup();
+    const attachment = await store.ingestText(conversationId, "immutable evidence");
+    let called = 0;
+    const file = async () => {
+      called++;
+      return "art_001";
+    };
+
+    await assert.rejects(
+      store.promote(newId("cv") as ConversationId, attachment, "promote-foreign", file),
+      (error) => error instanceof AttachmentError && error.reason === "escapes-conversation",
+    );
+    await writeFile(
+      join(attachmentDir(worldPath, conversationId, attachment.id), attachment.fileName),
+      "different evidence",
+    );
+    await assert.rejects(
+      store.promote(conversationId, attachment, "promote-changed", file),
+      (error) => error instanceof AttachmentError && error.reason === "not-found",
+    );
+    assert.equal(called, 0);
+  });
+
   it("keeps the private copy, because the conversation's evidence quotes it", async () => {
     const { store, worldPath, conversationId } = await setup();
     const attachment = await store.ingestText(conversationId, "quoted later");
-    await store.promote(conversationId, attachment, async () => "art_001");
+    await store.promote(conversationId, attachment, "promote-1", async () => "art_001");
     const stillThere = await readFile(
       join(attachmentDir(worldPath, conversationId, attachment.id), "pasted-text.txt"),
       "utf8",

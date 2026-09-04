@@ -1,5 +1,9 @@
 import {
   ClientMessageSchema,
+  WorldChatBibleActionSchema,
+  WorldChatEditorRequestActionSchema,
+  WorldChatProposalActionSchema,
+  WorldChatSceneActionSchema,
   type ArkeActionAuthority,
   type ArkeActionScope,
   type ArkeActionSupport,
@@ -149,6 +153,7 @@ const CLIENT_COMMAND_METADATA = {
   "world-chat-unarchive": humanOnly(HUMAN_DECISION),
   "world-chat-attach": humanOnly("Attaching private host material to a conversation is a human evidence-control gesture."),
   "world-chat-attach-files": humanOnly("Opening the private conversation attachment picker is a human evidence-control gesture."),
+  "world-chat-promote-attachment": humanOnly("Only the person may file private conversation evidence into the world."),
   "draft-with-studio": humanOnly(RECURSIVE_AGENT),
   "authoring-cancel": humanOnly(HUMAN_DECISION),
   "setup-skip": globalOnly(GLOBAL_OPERATION),
@@ -411,6 +416,30 @@ function buildClientRegistry(): ArkeClientCommandRegistry {
 
 export const ARKE_CLIENT_COMMAND_REGISTRY = buildClientRegistry();
 
+/** Internal preparation shapes, kept out of client-command parity and the model catalogue. */
+const WORLD_CHAT_ACTION_REGISTRY = {
+  "world-chat-proposal": {
+    kind: "world-chat-proposal",
+    schema: WorldChatProposalActionSchema,
+    ...action("world", "authored-diff", "proposal-manager", "authored-change", []),
+  },
+  "world-chat-bible-edit": {
+    kind: "world-chat-bible-edit",
+    schema: WorldChatBibleActionSchema,
+    ...action("world", "authored-diff", "bible", "authored-change", ["bible"]),
+  },
+  "world-chat-scene-edit": {
+    kind: "world-chat-scene-edit",
+    schema: WorldChatSceneActionSchema,
+    ...action("production", "authored-diff", "scene-store", "authored-change", ["scenes"]),
+  },
+  "world-chat-editor-request": {
+    kind: "world-chat-editor-request",
+    schema: WorldChatEditorRequestActionSchema,
+    ...action("production", "command", "timeline", "authored-change", ["timeline"]),
+  },
+} as const;
+
 export interface ArkeBlockedAuthoritySeam {
   readonly kind: string;
   readonly scope: ArkeActionScope;
@@ -621,6 +650,14 @@ export function arkeClientCommand<K extends ClientMessageKind>(
 export function findArkeClientCommand(kind: string): ArkeClientCommandDescriptor | undefined {
   return Object.prototype.hasOwnProperty.call(ARKE_CLIENT_COMMAND_REGISTRY, kind)
     ? ARKE_CLIENT_COMMAND_REGISTRY[kind as ClientMessageKind]
+    : undefined;
+}
+
+export function findArkeAction(kind: string) {
+  const client = findArkeClientCommand(kind);
+  if (client) return client;
+  return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, kind)
+    ? WORLD_CHAT_ACTION_REGISTRY[kind as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
     : undefined;
 }
 
