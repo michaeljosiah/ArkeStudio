@@ -39,6 +39,7 @@ import {
  */
 export const GRAPH_SCENE_SCHEMA_VERSION = 3;
 export const STAGE_BLOCKING_SCHEMA_VERSION = 6;
+export const STAGE_PERFORMANCE_SCHEMA_VERSION = 7;
 
 /**
  * A write refused because the graph it would land is not one path (R-59, R-61).
@@ -236,6 +237,38 @@ export function carriesStageBlocking(raw: string): boolean {
       const playblast = (staging as Record<string, unknown>)["playblast"];
       const pinsBlocking = typeof playblast === "object" && playblast !== null && "blocking" in playblast;
       return pinsBlocking || !("cast" in staging) || !("sets" in staging);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Do these scene bytes carry the static figure posture introduced after shared blocking? */
+export function carriesStagePerformance(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const object = value as Record<string, unknown>;
+    const direct = Array.isArray(object["shots"]) ? object["shots"] : [];
+    const flow = object["flow"];
+    const nodes = typeof flow === "object" && flow !== null && Array.isArray((flow as Record<string, unknown>)["nodes"])
+      ? (flow as Record<string, unknown>)["nodes"] as unknown[]
+      : [];
+    const shots = [
+      ...direct,
+      ...nodes.flatMap((node) =>
+        typeof node === "object" && node !== null && (node as Record<string, unknown>)["kind"] === "shot"
+          ? [(node as Record<string, unknown>)["shot"]]
+          : []),
+    ];
+    const blocks = [
+      object["blocking"],
+      ...shots.map((shot) => typeof shot === "object" && shot !== null ? (shot as Record<string, unknown>)["staging"] : undefined),
+    ];
+    return blocks.some((block) => {
+      if (typeof block !== "object" || block === null) return false;
+      const cast = (block as Record<string, unknown>)["cast"];
+      return Array.isArray(cast) && cast.some((figure) => typeof figure === "object" && figure !== null && "pose" in figure);
     });
   } catch {
     return false;

@@ -776,12 +776,14 @@ describe("scene blocking and shot cameras share one Stage command (issue 754)", 
       command: {
         kind: "edit-stage",
         shotId: second.id,
-        blocking: { cast: [{ sheetId: "maren-kest", x: 2, z: 0 }], sets: [] },
+        blocking: { cast: [{ sheetId: "maren-kest", x: 2, z: 0, pose: "sit" }], sets: [] },
       },
     });
     const moved = await sceneOnDisk(store);
     assert.equal(moved.blocking?.version, 2);
     assert.equal(moved.blocking?.cast[0]?.x, 2);
+    assert.equal(moved.blocking?.cast[0]?.pose, "sit");
+    assert.equal(store.getBundle().meta.schemaVersion, 7, "figure posture raises its strict-reader boundary");
     assert.deepEqual(orderedShots(moved)[0]?.staging, orderedShots(staged)[0]?.staging, "camera state does not fan out");
 
     await applySceneCommand(store, {

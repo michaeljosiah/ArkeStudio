@@ -327,6 +327,7 @@ export function SceneStage({
           colour: figureColour(position),
           x: figure.x,
           z: figure.z,
+          pose: figure.pose ?? null,
           to: figure.to ?? null,
           ghost: before === undefined ? null : (before.to ?? [before.x, before.z]),
         };
@@ -552,7 +553,22 @@ export function SceneStage({
           const { to: _to, ...holds } = figure;
           return holds;
         }
-        return { ...figure, to: [round(figure.x + 0.4), round(figure.z - 3.4)] };
+        const { pose: _pose, ...standing } = figure;
+        return { ...standing, to: [round(figure.x + 0.4), round(figure.z - 3.4)] };
+      }),
+    }));
+  const cyclePose = (sheetId: string) =>
+    patchBlocking((current) => ({
+      ...current,
+      cast: current.cast.map((figure) => {
+        if (figure.sheetId !== sheetId) return figure;
+        if (figure.pose === "sit") return { ...figure, pose: "lie" };
+        if (figure.pose === "lie") {
+          const { pose: _pose, ...standing } = figure;
+          return standing;
+        }
+        const { to: _to, ...holding } = figure;
+        return { ...holding, pose: "sit" };
       }),
     }));
   const exportPlayblast = async () => {
@@ -786,6 +802,19 @@ export function SceneStage({
                       </button>
                     );
                   })}
+                </div>
+              )}
+
+              {working.cast.length === 0 ? null : (
+                <div className="fy-swstage__block">
+                  <div className="fy-swstage__eyebrow"><span>Pose</span></div>
+                  {working.cast.map((figure, position) => (
+                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen} onClick={() => cyclePose(figure.sheetId)}>
+                      <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
+                      <span>{nameOf(figure.sheetId)}</span>
+                      <span>{figure.pose === "sit" ? "sits" : figure.pose === "lie" ? "lies" : "stands"}</span>
+                    </button>
+                  ))}
                 </div>
               )}
 

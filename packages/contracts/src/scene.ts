@@ -100,10 +100,17 @@ export const StagingFigureSchema = z
     sheetId: SlugSchema,
     x: z.number(),
     z: z.number(),
+    /** Static greybox posture; absent is standing. */
+    pose: z.enum(["sit", "lie"]).optional(),
     /** Where the figure ends the shot; absent holds still. */
     to: z.tuple([z.number(), z.number()]).optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((figure, context) => {
+    if (figure.pose !== undefined && figure.to !== undefined) {
+      context.addIssue({ code: "custom", message: "a seated or lying figure cannot also walk" });
+    }
+  });
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
 /** Set massing: a translucent box, named so the label reads on the floor. */

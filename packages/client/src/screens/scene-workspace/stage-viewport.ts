@@ -62,6 +62,7 @@ export interface StageFigureData {
   colour: number;
   x: number;
   z: number;
+  pose: "sit" | "lie" | null;
   to: readonly [number, number] | null;
   /** The previous shot's continuity ghost, drawn translucent and untouchable. */
   ghost: readonly [number, number] | null;
@@ -148,8 +149,10 @@ function lineBetween(a: Vector3, b: Vector3, material: LineBasicMaterial): Line 
 }
 
 /** A neutral capsule figure: head, torso, arms, legs. Greybox, never a render. */
-function figure(colour: number, ghost: boolean): Group {
+function figure(colour: number, ghost: boolean, pose: "sit" | "lie" | null): Group {
   const group = new Group();
+  const body = new Group();
+  group.add(body);
   const skin = new MeshStandardMaterial({ color: 0x8c837a, roughness: 0.85, metalness: 0 });
   const cloth = new MeshStandardMaterial({ color: colour, roughness: 0.78, metalness: 0 });
   if (ghost) {
@@ -160,17 +163,28 @@ function figure(colour: number, ghost: boolean): Group {
   }
   const head = new Mesh(new SphereGeometry(0.14, 24, 18), skin);
   head.position.y = 1.62;
-  group.add(head);
+  body.add(head);
   const torso = new Mesh(new CapsuleGeometry(0.17, 0.46, 6, 18), cloth);
   torso.position.y = 1.16;
-  group.add(torso);
+  body.add(torso);
   for (const side of [-1, 1]) {
     const arm = new Mesh(new CapsuleGeometry(0.052, 0.48, 4, 12), skin);
-    arm.position.set(side * 0.235, 1.14, 0);
-    group.add(arm);
+    arm.position.set(side * 0.235, pose === "sit" ? 0.84 : 1.14, 0);
+    body.add(arm);
     const leg = new Mesh(new CapsuleGeometry(0.075, 0.56, 4, 12), cloth);
     leg.position.set(side * 0.095, 0.44, 0);
-    group.add(leg);
+    if (pose === "sit") {
+      leg.rotation.x = Math.PI / 2;
+      leg.position.set(side * 0.095, 0.42, 0.3);
+    }
+    body.add(leg);
+  }
+  if (pose === "sit") {
+    head.position.y = 1.28;
+    torso.position.y = 0.85;
+  } else if (pose === "lie") {
+    body.rotation.x = Math.PI / 2;
+    body.position.set(0, 0.18, -0.8);
   }
   group.traverse((object) => {
     if ((object as Mesh).isMesh) {
@@ -520,7 +534,7 @@ export class StageViewport {
     for (const member of data.cast) {
       const from = new Vector3(member.x, 0, member.z);
       const to = member.to === null ? null : new Vector3(member.to[0], 0, member.to[1]);
-      const walker = figure(member.colour, false);
+      const walker = figure(member.colour, false, member.pose);
       walker.position.copy(from);
       walker.userData = { pick: "cast", sheetId: member.sheetId, name: member.name, from: from.clone(), to: to?.clone() ?? null } satisfies PickTag & Record<string, unknown>;
       this.castGroup.add(walker);
@@ -533,7 +547,7 @@ export class StageViewport {
         this.aids.push(ring);
       }
       if (to !== null) {
-        const end = figure(member.colour, true);
+        const end = figure(member.colour, true, member.pose);
         end.position.copy(to);
         end.userData = { pick: "walkend", sheetId: member.sheetId } satisfies PickTag;
         this.castGroup.add(end);
@@ -566,7 +580,7 @@ export class StageViewport {
           this.aids.push(walk);
         }
       } else if (member.ghost !== null) {
-        const ghost = figure(member.colour, true);
+        const ghost = figure(member.colour, true, member.pose);
         ghost.position.set(member.ghost[0], 0, member.ghost[1]);
         ghost.traverse((object) => {
           object.raycast = noPick;

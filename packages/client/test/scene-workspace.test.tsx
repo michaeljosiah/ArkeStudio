@@ -558,6 +558,31 @@ describe("scene detail owns the workspace", () => {
     assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /Maren Kestwalks · too fast/);
   });
 
+  it("shows and edits a figure's greybox pose", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.staging = {
+      version: 1,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0, pose: "sit" }],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 3], l: [0, 1, 0] }],
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    const pose = all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("sits"))!;
+    await click(pose);
+    assert.match(pose.textContent ?? "", /lies/);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.staging?.cast?.[0]?.pose, "lie");
+  });
+
   it("plays a staging kept before the shot was retimed to its end pose, and repairs it on Keep", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

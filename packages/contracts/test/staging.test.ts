@@ -47,6 +47,23 @@ describe("the Stage's arithmetic", () => {
     assert.ok(ShotSchema.safeParse({ ...shot({}), staging: first }).success);
   });
 
+  it("blocks explicit cast performance from the shot text", () => {
+    const staged = stageShot(shot({
+      description: "@maren-kest sits at the counter while @ivo-rell walks across the hall.",
+    }), { cast: ["maren-kest", "ivo-rell"], sets: ["Hall"], durationSec: 4 });
+    assert.equal(staged.cast[0]?.pose, "sit");
+    assert.equal(staged.cast[0]?.to, undefined);
+    assert.equal(staged.cast[1]?.pose, undefined);
+    assert.ok(staged.cast[1]?.to);
+    assert.ok((stageWalkSpeed(staged.cast[1]!, 4) ?? Infinity) <= MAX_STAGE_WALK_SPEED_MPS);
+    assert.ok(ShotStagingSchema.safeParse(staged).success);
+    assert.equal(ShotStagingSchema.safeParse({
+      ...staged,
+      cast: [{ sheetId: "maren-kest", x: 0, z: 0, pose: "sit", to: [1, 0] }],
+    }).success, false, "a static posture cannot also claim a walk");
+    assert.match(stagingPromptClause(staged, (id) => id === "maren-kest" ? "Maren" : "Ivo", 4), /Ivo walks through the shot\. Maren is seated\./);
+  });
+
   it("reads the move off the framing: static holds, orbit sweeps, crane rises, and a castless shot stays in the world", () => {
     const still = stageShot(shot({ framing: { size: "Wide", movement: "Static" } }), { cast: [], sets: [], durationSec: 6 });
     assert.equal(still.keys[0]?.anchor, undefined);
