@@ -1,4 +1,4 @@
-import type { Shot, ShotStaging, StagingFigure, StagingKey, StagingSet } from "./scene.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -15,6 +15,65 @@ const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
 export const MAX_STAGE_WALK_SPEED_MPS = 2.2;
+export const STAGE_RIGS: readonly StageRig[] = ["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"];
+
+const RIG_PROFILE: Record<StageRig, { pos: number; rot: number; frequency: number; octaves: number }> = {
+  sticks: { pos: 0, rot: 0, frequency: 0, octaves: 1 },
+  dolly: { pos: 0.005, rot: 0.0005, frequency: 0.4, octaves: 1 },
+  steadicam: { pos: 0.03, rot: 0.004, frequency: 0.5, octaves: 2 },
+  handheld: { pos: 0.045, rot: 0.018, frequency: 1.8, octaves: 3 },
+  crane: { pos: 0.01, rot: 0.001, frequency: 0.3, octaves: 1 },
+  drone: { pos: 0.05, rot: 0.002, frequency: 0.25, octaves: 2 },
+  "car-mount": { pos: 0.02, rot: 0.006, frequency: 2.5, octaves: 3 },
+};
+
+/** Stable unsigned seed for a shot id; no wall clock enters a Stage rig. */
+export function stageRigSeed(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619);
+  return hash >>> 0;
+}
+
+function random(seed: number, channel: number, cell: number): number {
+  let value = seed ^ Math.imul(channel + 1, 0x9e3779b1) ^ Math.imul(cell, 0x85ebca6b);
+  value = Math.imul(value ^ (value >>> 16), 0x7feb352d);
+  value = Math.imul(value ^ (value >>> 15), 0x846ca68b);
+  return ((value ^ (value >>> 16)) >>> 0) / 0xffffffff * 2 - 1;
+}
+
+function rigNoise(seed: number, channel: number, at: number, frequency: number, octaves: number): number {
+  let total = 0;
+  let weight = 0;
+  for (let octave = 0; octave < octaves; octave += 1) {
+    const scale = 2 ** octave;
+    const phase = at * frequency * scale;
+    const cell = Math.floor(phase);
+    const f = phase - cell;
+    const smooth = f * f * (3 - 2 * f);
+    const amplitude = 1 / scale;
+    total += (random(seed, channel + octave * 7, cell) * (1 - smooth) + random(seed, channel + octave * 7, cell + 1) * smooth) * amplitude;
+    weight += amplitude;
+  }
+  return weight === 0 ? 0 : total / weight;
+}
+
+export function stageRigOffset(
+  rig: StageRig | undefined,
+  seed: number | undefined,
+  intensity: number | undefined,
+  at: number,
+): { position: [number, number, number]; rotation: [number, number, number] } {
+  const profile = RIG_PROFILE[rig ?? "sticks"];
+  const amount = intensity ?? 1;
+  if (amount === 0 || (profile.pos === 0 && profile.rot === 0)) {
+    return { position: [0, 0, 0], rotation: [0, 0, 0] };
+  }
+  const noise = (channel: number) => rigNoise(seed ?? 0, channel, at, profile.frequency, profile.octaves);
+  return {
+    position: [noise(0) * profile.pos * amount, noise(1) * profile.pos * 0.7 * amount, noise(2) * profile.pos * amount],
+    rotation: [noise(3) * profile.rot * amount, noise(4) * profile.rot * amount, noise(5) * profile.rot * 0.35 * amount],
+  };
+}
 
 /** Distance fraction along one leg after its two mark-owned ease regions are applied. */
 export function stagingEase(from: Pick<StagingKey, "easeOut">, to: Pick<StagingKey, "easeIn">, linear: number): number {
@@ -77,7 +136,10 @@ export function stagePlayblastIsStale(
   return pinned.version !== staging.version || blockingMoved ||
     (pinned.durationSec !== undefined && pinned.durationSec !== shown.durationSec) ||
     (pinned.aspect !== undefined && pinned.aspect !== shown.aspect) ||
-    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? ""));
+    (pinned.lens !== undefined && pinned.lens !== (shown.lens ?? "")) ||
+    (pinned.rig !== undefined && pinned.rig !== staging.rig) ||
+    (pinned.seed !== undefined && pinned.seed !== staging.seed) ||
+    (pinned.rigIntensity !== undefined && pinned.rigIntensity !== staging.rigIntensity);
 }
 
 /** Fixed-rate export is half-open: frame i samples i/fps, never an extra frame at the end. */
@@ -201,28 +263,42 @@ export function stageShot(
     keys[0] = { ...keys[0]!, easeOut: 0.25 };
     keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
   }
-  return { version: 1, cast, sets, keys };
+  const rig: StageRig = /handheld|hand-held|shoulder/.test(move)
+    ? "handheld"
+    : /steadicam|gimbal/.test(move)
+      ? "steadicam"
+      : /crane|boom/.test(move)
+        ? "crane"
+        : /drone|aerial/.test(move)
+          ? "drone"
+          : /car mount|vehicle mount/.test(move)
+            ? "car-mount"
+            : /push|pull|dolly|track|truck/.test(move)
+              ? "dolly"
+              : "sticks";
+  return { version: 1, cast, sets, keys, rig, seed: stageRigSeed(shot.id), rigIntensity: 1 };
 }
 
 /** The move in one word, read off what the keys actually do. */
-export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly StagingFigure[] = []): string {
-  if (keys.length < 2) return "static";
+export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly StagingFigure[] = [], rig?: StageRig): string {
+  const withRig = (move: string) => rig === undefined || rig === "sticks" || rig === move ? move : `${rig.replace("-", " ")} ${move}`;
+  if (keys.length < 2) return withRig("static");
   const first = keys[0]!;
   const last = keys[keys.length - 1]!;
   const dx = Math.abs(last.p[0] - first.p[0]);
   const dy = Math.abs(last.p[1] - first.p[1]);
   const dz = Math.abs(last.p[2] - first.p[2]);
   if (dx < 0.15 && dy < 0.15 && dz < 0.15) {
-    if (keys.length > 2 && sweep(keys) > 50) return "orbit";
+    if (keys.length > 2 && sweep(keys) > 50) return withRig("orbit");
     // The same offset from a figure who walks is a camera that walks with them: it holds its
     // frame and crosses the set, which is a tracking shot and not a static one.
     const rides = keys.every((key) => key.anchor !== undefined && cast.find((figure) => figure.sheetId === key.anchor)?.to !== undefined);
-    return rides ? "tracking" : "static";
+    return withRig(rides ? "tracking" : "static");
   }
-  if (sweep(keys) > 50) return "orbit";
-  if (dy >= dx && dy >= dz) return "crane";
-  if (dx > dz) return "truck";
-  return "dolly";
+  if (sweep(keys) > 50) return withRig("orbit");
+  if (dy >= dx && dy >= dz) return withRig("crane");
+  if (dx > dz) return withRig("truck");
+  return withRig("dolly");
 }
 
 /** Degrees the camera swings around its aim between the first and last key. */
@@ -373,7 +449,7 @@ export function stagingPromptClause(
   );
   const posture = poses.length === 0 ? "" : ` ${poses.join("; ")}.`;
   return [
-    `Camera move, ${stagingMoveWord(keys, staging.cast)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
+    `Camera move, ${stagingMoveWord(keys, staging.cast, staging.rig)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...stagingBeats(staging, nameOf, durationSec),
   ].join("\n");
 }

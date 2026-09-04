@@ -252,7 +252,7 @@ function playblastToken(
     kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast)}${stale}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}${stale}`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
@@ -277,7 +277,7 @@ function stageOpeningFrameToken(
     kind: "image",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · opening frame v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolvedShotStaging(scene, staging).cast)}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolvedShotStaging(scene, staging).cast, staging.rig)}`,
     ride: "when-supported",
     subjectRole: "board-frame",
   };

@@ -41,7 +41,7 @@ import {
 } from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { STAGE_FRAME_RATE, stageFrameCount, stagingEase, type StagingKey, type StagingSet } from "@arke-studio/contracts";
+import { STAGE_FRAME_RATE, stageFrameCount, stageRigOffset, stagingEase, type StageRig, type StagingKey, type StagingSet } from "@arke-studio/contracts";
 
 /**
  * The Stage viewport: one canvas, one renderer, two cameras, and the greybox previs of a shot
@@ -83,6 +83,9 @@ export interface StageData {
   fov: number;
   aspect: number;
   lensLabel: string;
+  rig: StageRig | undefined;
+  seed: number | undefined;
+  rigIntensity: number | undefined;
 }
 
 export type StageSelection =
@@ -622,9 +625,14 @@ export class StageViewport {
     if (data.keys.length > 0) {
       const position = this.sampleCam(at, at);
       const look = this.sampleAim(at, at);
+      const motion = stageRigOffset(data.rig, data.seed, data.rigIntensity, at);
+      position.add(v3(motion.position));
       const body = rig(data.fov, data.aspect);
       body.position.copy(position);
       aimAt(body, look);
+      body.rotateX(motion.rotation[0]);
+      body.rotateY(motion.rotation[1]);
+      body.rotateZ(motion.rotation[2]);
       body.userData = { pick: "rig" } satisfies PickTag;
       // The lens IS the rig: a child at local origin, identity rotation, so they cannot diverge.
       body.add(this.shot);
@@ -1133,8 +1141,13 @@ export class StageViewport {
     if (this.cam !== null && this.data.keys.length > 0) {
       const position = this.sampleCam(at, at);
       const look = this.sampleAim(at, at);
+      const motion = stageRigOffset(this.data.rig, this.data.seed, this.data.rigIntensity, at);
+      position.add(v3(motion.position));
       this.cam.rig.position.copy(position);
       aimAt(this.cam.rig, look);
+      this.cam.rig.rotateX(motion.rotation[0]);
+      this.cam.rig.rotateY(motion.rotation[1]);
+      this.cam.rig.rotateZ(motion.rotation[2]);
       segment(this.cam.stem, new Vector3(position.x, 0, position.z), position);
       this.cam.foot.position.set(position.x, 0.01, position.z);
       this.cam.ring?.position.set(position.x, 0.015, position.z);

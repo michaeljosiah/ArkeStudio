@@ -19,11 +19,13 @@ import {
   carriesStageBlocking,
   carriesStageEasing,
   carriesStagePerformance,
+  carriesStageRig,
   upgradeLegacySceneCandidate,
   GRAPH_SCENE_SCHEMA_VERSION,
   STAGE_BLOCKING_SCHEMA_VERSION,
   STAGE_EASING_SCHEMA_VERSION,
   STAGE_PERFORMANCE_SCHEMA_VERSION,
+  STAGE_RIG_SCHEMA_VERSION,
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { appendChanges, readChanges } from "./change-writer.js";
@@ -602,12 +604,16 @@ export class Committer {
     const landsStageEasing = files.some(
       (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStageEasing(f.newContent),
     );
+    const landsStageRig = files.some(
+      (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStageRig(f.newContent),
+    );
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
+      landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

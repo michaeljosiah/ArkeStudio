@@ -4,6 +4,7 @@ import {
   effectiveStageBlocking,
   effectiveFraming,
   MAX_STAGE_WALK_SPEED_MPS,
+  STAGE_RIGS,
   orderedShots,
   resolveCast,
   resolvedShotStaging,
@@ -40,6 +41,11 @@ function moveOf(staging: ResolvedShotStaging | null): string {
   if (staging === null) return "";
   const { version: _version, playblast: _playblast, ...move } = staging;
   return JSON.stringify(move);
+}
+
+function cameraOf(staging: ResolvedShotStaging | null): string {
+  if (staging === null) return "";
+  return JSON.stringify({ keys: staging.keys, rig: staging.rig, seed: staging.seed, rigIntensity: staging.rigIntensity });
 }
 
 const round = (value: number): number => Math.round(value * 100) / 100;
@@ -199,7 +205,7 @@ export function SceneStage({
     const base = draft ?? resolvedPersisted;
     return base === null ? null : stagingRetimed(base, durationSec);
   }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
-  const cameraChanged = draft !== null && JSON.stringify(draft.keys) !== JSON.stringify(resolvedPersisted?.keys ?? []);
+  const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
   const currentBlocking = effectiveStageBlocking(scene, persisted ?? undefined);
   const desiredBlocking = draft === null ? null : { cast: draft.cast, sets: draft.sets };
   const overrideChanged = draft !== null && (
@@ -341,6 +347,9 @@ export function SceneStage({
       fov: stagingFov(framing.lens, aspect),
       aspect: aspectNumber(aspect),
       lensLabel: framing.lens ?? "lens unset",
+      rig: working.rig,
+      seed: working.seed,
+      rigIntensity: working.rigIntensity,
     };
   }, [working, shot, ghost, previous, durationSec, active, mode, at, framing.lens, aspect, sheets]);
 
@@ -428,6 +437,9 @@ export function SceneStage({
     if (cameraChanged || overrideChanged) {
       command.staging = {
         keys: working.keys,
+        ...(working.rig === undefined ? {} : { rig: working.rig }),
+        ...(working.seed === undefined ? {} : { seed: working.seed }),
+        ...(working.rigIntensity === undefined ? {} : { rigIntensity: working.rigIntensity }),
         ...(scope === "shot" ? { cast: working.cast, sets: working.sets } : {}),
       };
     }
@@ -571,6 +583,14 @@ export function SceneStage({
         return { ...holding, pose: "sit" };
       }),
     }));
+  const cycleRig = () => patchCamera((current) => {
+    const index = STAGE_RIGS.indexOf(current.rig ?? "sticks");
+    return { ...current, rig: STAGE_RIGS[(index + 1) % STAGE_RIGS.length]! };
+  });
+  const nudgeRig = (delta: number) => patchCamera((current) => ({
+    ...current,
+    rigIntensity: Math.max(0, Math.min(2, round((current.rigIntensity ?? 1) + delta))),
+  }));
   const exportPlayblast = async () => {
     const view = viewport.current;
     if (view === null || persisted === null || sceneFile === undefined || exporting !== null) return;
@@ -660,7 +680,7 @@ export function SceneStage({
         <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
         {working === null ? null : (
           <span className="fy-swstage__version">
-            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMoveWord(keys, working.cast)}
+            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMoveWord(keys, working.cast, working.rig)}
           </span>
         )}
       </div>
@@ -823,6 +843,18 @@ export function SceneStage({
                 <div className="fy-swstage__row"><span>size</span><span>{framing.size?.toLowerCase() ?? "—"}</span></div>
                 <div className="fy-swstage__row"><span>lens</span><span>{framing.lens ?? "—"}</span></div>
                 <div className="fy-swstage__row"><span>movement</span><span>{framing.movement?.toLowerCase() ?? "—"}</span></div>
+                <div className="fy-swstage__row">
+                  <span>rig</span>
+                  <button type="button" disabled={frozen} onClick={cycleRig}>{(working.rig ?? "sticks").replace("-", " ")}</button>
+                </div>
+                <div className="fy-swstage__row">
+                  <span>rig intensity</span>
+                  <span>{(working.rigIntensity ?? 1).toFixed(2)}</span>
+                  <span className="fy-swstage__nudge">
+                    <button type="button" aria-label="Less rig motion" disabled={frozen} onClick={() => nudgeRig(-0.25)}><Minus size={10} /></button>
+                    <button type="button" aria-label="More rig motion" disabled={frozen} onClick={() => nudgeRig(0.25)}><Plus size={10} /></button>
+                  </span>
+                </div>
                 {/* A shot written before the structured camera keeps its one line, and it still staged from it. */}
                 {shot.camera === undefined || framing.size !== undefined || framing.movement !== undefined ? null : (
                   <div className="fy-swstage__row"><span>camera</span><span>{shot.camera}</span></div>
