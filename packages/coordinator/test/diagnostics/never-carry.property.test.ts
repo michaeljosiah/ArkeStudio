@@ -87,6 +87,7 @@ function generatedSources(random: () => number): DiagnosticsSources {
           displayName: "Property weights",
           purpose: "test",
           sizeMb: 1000,
+          installLocation: "D:\\ComfyUI\\models",
           state: "blocked",
           bytesDone: 0,
           bytesTotal: 0,

@@ -158,6 +158,9 @@ describe("fetching the local runtimes at setup", () => {
       status.components.map((c) => `${c.id}:${c.state}`),
       ["runtime:ready", "model:ready", "weights:ready"],
     );
+    assert.equal(status.components.find((c) => c.id === "weights")!.installLocation, join(appRoot, "models", "whisper"));
+    assert.notEqual(status.components.find((c) => c.id === "runtime")!.installLocation, join(appRoot, "models"));
+    assert.notEqual(status.components.find((c) => c.id === "model")!.installLocation, join(appRoot, "models"));
     assert.equal(status.running, false);
 
     // The weights landed under the app root, whole — never a .partial.

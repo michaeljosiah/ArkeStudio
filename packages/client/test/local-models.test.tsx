@@ -94,6 +94,7 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     displayName: patch.id,
     purpose: "test",
     sizeMb: 400,
+    installLocation: "C:\\ArkeStudio\\models",
     state: "present",
     bytesDone: 0,
     bytesTotal: 0,
