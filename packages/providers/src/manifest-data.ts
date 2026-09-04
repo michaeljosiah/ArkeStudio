@@ -123,6 +123,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     {
       id: "llama3.3-70b",
+      providerModelId: "llama3.3:70b",
       provider: "ollama",
       capability: "llm",
       displayName: "Llama 3.3 70B",
@@ -133,6 +134,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     {
       id: "llama3.1-8b",
+      providerModelId: "llama3.1:8b",
       provider: "ollama",
       capability: "llm",
       displayName: "Llama 3.1 8B",
@@ -143,6 +145,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     {
       id: "gemma4-e2b-it-qat",
+      providerModelId: "gemma4:e2b-it-qat",
       provider: "ollama",
       capability: "llm",
       displayName: "Gemma 4 E2B (quantised)",
@@ -153,6 +156,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     {
       id: "gemma4-12b",
+      providerModelId: "gemma4:12b",
       provider: "ollama",
       capability: "llm",
       displayName: "Gemma 4 12B",
@@ -163,6 +167,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     {
       id: "gemma4-26b",
+      providerModelId: "gemma4:26b",
       provider: "ollama",
       capability: "llm",
       displayName: "Gemma 4 26B",

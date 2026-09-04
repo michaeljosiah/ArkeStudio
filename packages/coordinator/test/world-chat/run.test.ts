@@ -8,7 +8,7 @@ import {
   type WorldBundle,
   type WorldChatMessage,
 } from "@arke-studio/contracts";
-import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { WorldChatRunner, type RunDeps } from "../../src/world-chat/run.js";
 import { SceneEditRefused } from "../../src/productions/scene-edits.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -74,7 +74,14 @@ function fakeAdapter(
   } as unknown as HarnessAdapter;
 }
 
-async function setup(adapter: HarnessAdapter, options: { timeoutMs?: number } = {}) {
+async function setup(
+  adapter: HarnessAdapter,
+  options: {
+    timeoutMs?: number;
+    resolveLanguageModel?: RunDeps["resolveLanguageModel"];
+    createdModels?: Array<string | undefined>;
+  } = {},
+) {
   const worldPath = await tempDir("arke-run-");
   const conversationId = newId("cv") as ConversationId;
   const store = new WorldChatStore(conversationDir(worldPath, conversationId));
@@ -88,6 +95,15 @@ async function setup(adapter: HarnessAdapter, options: { timeoutMs?: number } = 
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
+    ...(options.createdModels
+      ? {
+          createSession: async ({ model }: { model?: string }) => {
+            options.createdModels!.push(model);
+            return { sessionId: "s1" };
+          },
+        }
+      : {}),
     prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
     release: async ({ runId }) => void released.push(runId),
     receiptsFor: () => [],
@@ -199,6 +215,44 @@ describe("taking a turn", () => {
     const { runner, store, conversationId, released } = await setup(fakeAdapter(["bad", "bad"]));
     await runner.send(store, conversationId, "anything");
     assert.equal(released.length, 1, "a failed turn still gives back its lease");
+  });
+
+  it("pins the resolved production model, records it, and refuses without substitution", async () => {
+    const createdModels: Array<string | undefined> = [];
+    const chosen: Array<string | undefined> = [];
+    const resolved = await setup(fakeAdapter(["bad", "bad", "bad", "bad"]), {
+      createdModels,
+      resolveLanguageModel: async ({ modelId }) => {
+        chosen.push(modelId);
+        return {
+          modelId: modelId ?? "gemma4-12b",
+          sessionModel: "ollama/gemma4:12b",
+          inputTokenLimit: 256_000,
+        };
+      },
+    });
+    await resolved.runner.send(resolved.store, resolved.conversationId, "anything", [], undefined, "gemma4-12b");
+    assert.deepEqual(createdModels, ["ollama/gemma4:12b"]);
+    const started = (await resolved.store.read()).events.find((entry) => entry.event.type === "turn.started");
+    assert.equal(started && "run" in started.event ? started.event.run.model : undefined, "gemma4-12b");
+    assert.ok(started && "run" in started.event);
+    await resolved.runner.retry(resolved.store, resolved.conversationId, started.event.run.turnId);
+    assert.deepEqual(chosen, ["gemma4-12b", "gemma4-12b"]);
+    assert.deepEqual(createdModels, ["ollama/gemma4:12b", "ollama/gemma4:12b"]);
+
+    const refused = await setup(fakeAdapter([]), {
+      resolveLanguageModel: async () => ({
+        modelId: "retired-model",
+        reason: "This production still names retired-model, which is no longer available.",
+      }),
+    });
+    const outcome = await refused.runner.send(refused.store, refused.conversationId, "anything");
+    assert.equal(outcome.status, "failed");
+    assert.match(outcome.status === "failed" ? outcome.reason : "", /retired-model/);
+    assert.equal(
+      (await refused.view()).lastFailedRun?.safeDetail,
+      "rejected: This production still names retired-model, which is no longer available.",
+    );
   });
 });
 

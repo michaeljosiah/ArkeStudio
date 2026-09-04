@@ -422,6 +422,32 @@ describe("the session lifecycle", () => {
  * recorded the document it was supposed to have been drafted under.
  */
 describe("the skill a Claude session drafts under", () => {
+  it("pins an Anthropic dispatch model and refuses another provider", async () => {
+    const fake = fakeQuery([result()]);
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
+    adapter.prepareSession?.({ preparationId: "prep_model", model: "anthropic/claude-sonnet-5" });
+    const { sessionId } = await adapter.createSession({
+      purpose: "world-chat",
+      cwd: CWD,
+      agent: "world-builder",
+      preparationId: "prep_model",
+    });
+    await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
+    assert.equal(fake.options()["model"], "claude-sonnet-5");
+
+    adapter.prepareSession?.({ preparationId: "prep_wrong", model: "ollama/gemma4" });
+    await assert.rejects(
+      adapter.createSession({
+        purpose: "world-chat",
+        cwd: CWD,
+        agent: "world-builder",
+        preparationId: "prep_wrong",
+      }),
+      /not available through Claude Code/,
+    );
+    await adapter.dispose();
+  });
+
   it("comes from prepareSession, which is the only place the coordinator says it", async () => {
     const fake = fakeQuery([result()]);
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.

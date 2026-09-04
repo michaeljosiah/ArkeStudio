@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
   FrameRunState,
+  ManifestModel,
   StagedProposal,
   WorldChatContext,
   WorldChatPoint,
@@ -9,12 +10,13 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { proposalDecisionOf } from "@arke-studio/contracts";
+import { modelEligible, proposalDecisionOf, providerModelId, PROVIDERS } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
   createWorldChat,
   frameRunCommand,
+  listHarnessModels,
   rejectWorldChatPoint,
   restoreBible,
   saveWorldChatPoint,
@@ -22,6 +24,7 @@ import {
   openWorldChatMedia,
   retryWorldChatTurn,
   sendWorldChat,
+  setProductionModel,
   subscribeWorldChatMediaOpened,
   useStore,
   useWorldChatProgress,
@@ -29,6 +32,7 @@ import {
   worldChatAttachFiles,
   wrapUpWorldChat,
 } from "../lib/store.js";
+import { eligibilityInputs, productionModel } from "./dispatch-bar.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
@@ -356,6 +360,35 @@ export function conversationTitle(text: string): string {
   return (space > 120 ? cut.slice(0, space) : cut) + "…";
 }
 
+/** Why a production language choice cannot run, without choosing another model in its place. */
+export function languageChoiceReason(
+  state: ReturnType<typeof useStore>["state"],
+  modelId: string | undefined,
+  model?: ManifestModel,
+): string | undefined {
+  if (modelId === undefined) return undefined;
+  if (model === undefined) return `This production still names ${modelId}, which is no longer available.`;
+  if ((state?.app.models.disabled ?? []).includes(model.id)) {
+    return `${model.displayName} is turned off in Providers and has not been replaced.`;
+  }
+  if (PROVIDERS[model.provider].local && !modelEligible(model, eligibilityInputs(state))) {
+    return `${model.displayName} is unavailable and has not been replaced.`;
+  }
+  if (state?.app.harnessInfo?.generation === "claude" && model.provider !== "anthropic") {
+    return `${model.displayName} is not available through Claude Code.`;
+  }
+  const harnessModels = state?.app.harnessModels ?? [];
+  if (
+    harnessModels.length > 0 &&
+    !harnessModels.some(
+      (candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model),
+    )
+  ) {
+    return `${model.displayName} is not available through the current harness.`;
+  }
+  return undefined;
+}
+
 /**
  * The production's own thread — Production Chat, and its episode and scene kin (turns 86, 89).
  *
@@ -451,6 +484,7 @@ export function ProductionConversation({
   const { state } = useStore();
   const navigate = useNavigate();
   const [message, setMessage] = useState("");
+  const [languageModelId, setLanguageModelId] = useState<string | undefined>();
   /*
    * Wrap-up state lives here rather than inside WrapUp (review 2026-08-22): retry is a way of
    * saying something again, so it is held back while a wrap-up commits — a condition the
@@ -469,7 +503,12 @@ export function ProductionConversation({
    */
   const [wrappingKeys, setWrappingKeys] = useState<ReadonlySet<string>>(() => new Set());
   /** An opening message waiting for the conversation it opened to arrive. */
-  const [opening, setOpening] = useState<{ text: string; was: string | null; subject?: WorldChatSubject } | null>(null);
+  const [opening, setOpening] = useState<{
+    text: string;
+    was: string | null;
+    subject?: WorldChatSubject;
+    modelId?: string;
+  } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
@@ -491,11 +530,22 @@ export function ProductionConversation({
    */
   useEffect(() => {
     setMessage("");
+    setLanguageModelId(undefined);
     setOpening(null);
     setBusyMedia(null);
     setMediaRefusal(null);
     mediaRequest.current = null;
   }, [contextKey]);
+  useEffect(() => {
+    if (state?.app.health.harness.status === "healthy" && state.app.harnessInfo?.generation !== "claude") {
+      listHarnessModels();
+    }
+  }, [state?.app.health.harness.status, state?.app.harnessInfo?.generation]);
+  const rememberedLanguageModel = productionModel(state, productionId, "llm");
+  const effectiveLanguageModelId = languageModelId ?? rememberedLanguageModel;
+  const languageModels = state?.app.manifest?.models.filter((model) => model.capability === "llm") ?? [];
+  const languageModel = languageModels.find((model) => model.id === effectiveLanguageModelId);
+  const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId, languageModel);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
@@ -547,7 +597,7 @@ export function ProductionConversation({
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was) return;
-    sendWorldChat(worldId, opened, opening.text, [], opening.subject);
+    sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
@@ -575,10 +625,14 @@ export function ProductionConversation({
     }
     handedOver.current = true;
     if (conversationId) {
-      sendWorldChat(worldId, conversationId, openWith);
+      sendWorldChat(worldId, conversationId, openWith, [], undefined, effectiveLanguageModelId);
       return;
     }
-    setOpening({ text: openWith, was: workspace?.conversationId ?? null });
+    setOpening({
+      text: openWith,
+      was: workspace?.conversationId ?? null,
+      ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+    });
     createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
     // context is derived from route params and rebuilt each render; the latch above is what
     // makes this safe to leave out of the dependency list.
@@ -598,11 +652,18 @@ export function ProductionConversation({
      */
     if (!conversationId) {
       // The subject goes with it: the first thing said is the likeliest "move this earlier".
-      setOpening({ text, was: workspace?.conversationId ?? null, ...(subject !== undefined ? { subject } : {}) });
+      setOpening({
+        text,
+        was: workspace?.conversationId ?? null,
+        ...(subject !== undefined ? { subject } : {}),
+        ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+      });
+      setLanguageModelId(undefined);
       createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
-    sendWorldChat(worldId, conversationId, text, [], subject);
+    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId);
+    setLanguageModelId(undefined);
   };
   const submit = () => {
     const text = message.trim();
@@ -633,6 +694,45 @@ export function ProductionConversation({
       ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
       : {}),
   };
+  const languageControl = productionId ? (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+      <select
+        className="fy-set__pill"
+        aria-label="Language model"
+        value={effectiveLanguageModelId ?? ""}
+        onChange={(event) => setLanguageModelId(event.target.value || undefined)}
+      >
+        {rememberedLanguageModel === undefined && <option value="">whatever the harness is set to</option>}
+        {effectiveLanguageModelId !== undefined && languageModel === undefined && (
+          <option value={effectiveLanguageModelId}>{effectiveLanguageModelId} · unavailable</option>
+        )}
+        {languageModels.map((model) => (
+          <option key={`${model.provider}/${model.id}`} value={model.id}>
+            {model.displayName}
+          </option>
+        ))}
+      </select>
+      <span className="fy-mono">
+        {languageModelId !== undefined
+          ? "THIS TURN"
+          : rememberedLanguageModel !== undefined
+            ? "THIS PRODUCTION"
+            : "HARNESS DEFAULT"}
+      </span>
+      {languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && (
+        <button
+          type="button"
+          className="fy-set__link"
+          onClick={() => {
+            setProductionModel(worldId, productionId, "llm", languageModelId);
+            setLanguageModelId(undefined);
+          }}
+        >
+          Remember for this production
+        </button>
+      )}
+    </div>
+  ) : null;
   const transcript = (
     <ConversationTranscript
       workspace={loaded}
@@ -747,10 +847,11 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
+          {languageControl}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
               {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running} onClick={() => say(prompt)}>
+                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(prompt)}>
                   {prompt}
                 </button>
               ))}
@@ -764,6 +865,7 @@ export function ProductionConversation({
             {...(dock.conversationFirst ? {} : { agentLabel: "story author" })}
             busy={running || opening !== null}
             busyLabel={opening !== null ? openingNote ?? "opening…" : "reading the world…"}
+            disabledReason={languageUnavailableReason}
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
@@ -785,6 +887,7 @@ export function ProductionConversation({
         {transcript}
       </div>
       <div style={{ flex: "none", padding: "14px 36px 22px" }}>
+        {languageControl}
         <Composer
           value={message}
           onChange={setMessage}
@@ -793,6 +896,7 @@ export function ProductionConversation({
           agentLabel="story author"
           busy={running}
           busyLabel="reading the world…"
+          disabledReason={languageUnavailableReason}
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
           {...attachProps}
         />

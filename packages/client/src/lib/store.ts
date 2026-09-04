@@ -2677,6 +2677,7 @@ export function requestVoiceLine(input: {
   worldId: string;
   productionId: string;
   shotId: string;
+  modelId?: string;
   delivery?: Delivery;
   voiceUploadConfirmedFor?: string;
 }): string {
@@ -2687,6 +2688,7 @@ export function requestVoiceLine(input: {
     worldId: input.worldId,
     productionId: input.productionId,
     shotId: input.shotId,
+    ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
     ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined
       ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor }
@@ -3753,6 +3755,7 @@ export function sendWorldChat(
   text: string,
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
+  modelId?: string,
 ): void {
   send({
     kind: "world-chat-send",
@@ -3761,6 +3764,7 @@ export function sendWorldChat(
     conversationId,
     text,
     attachmentIds,
+    ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
   });
 }

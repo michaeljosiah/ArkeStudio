@@ -47,6 +47,7 @@ import {
   comfyUiRecoveryDecision,
   estimateMicroUsd,
   modelEligible,
+  providerModelId,
   modelForCapability,
   gateLocalRuntimes,
   type EngineLocalities,
@@ -55,6 +56,7 @@ import {
   previewLineFor,
   type ConversationId,
   type WorldChatCheckReceipt,
+  type WorldChatContext,
   type Job,
   type FrameRunQuote,
   type FrameRunState,
@@ -1247,6 +1249,61 @@ export class Coordinator {
     const settings = this.appSettings ? await this.appSettings.load() : null;
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family, model?.id);
+  }
+
+  /** Resolve a production's language choice exactly; absence preserves the harness default. */
+  private async languageModelFor(
+    context: WorldChatContext | undefined,
+    requestedId?: string,
+  ): Promise<{ modelId?: string; sessionModel?: string; reason?: string }> {
+    const productionId = context && "productionId" in context ? context.productionId : undefined;
+    if (productionId === undefined) {
+      return requestedId === undefined
+        ? {}
+        : { modelId: requestedId, reason: "A language model can only be chosen inside a production." };
+    }
+    const production = this.opts.provider
+      .openStore?.()
+      ?.getBundle()
+      .productions.find((candidate) => candidate.meta.id === productionId);
+    const modelId = requestedId ?? production?.meta.models?.llm;
+    if (modelId === undefined) return {};
+    const model = this.opts.manifest?.models.find(
+      (candidate) => candidate.id === modelId && candidate.capability === "llm",
+    );
+    if (model === undefined) {
+      return { modelId, reason: `This production still names ${modelId}, which is no longer available.` };
+    }
+    const app = this.readModel.getState().app;
+    const local = PROVIDERS[model.provider].local === true;
+    if (
+      app.models.disabled.includes(model.id) ||
+      (local &&
+        !modelEligible(model, {
+          providers: app.providers,
+          disabled: app.models.disabled,
+          recipes: app.comfyui?.recipes ?? [],
+          comfyUiLocality: app.comfyui?.engine.locality,
+          gated: app.runtime?.models ?? [],
+        }))
+    ) {
+      return { modelId, reason: `${model.displayName} is unavailable and has not been replaced.` };
+    }
+    const adapter = this.opts.adapter;
+    if (adapter?.id === "claude" && model.provider !== "anthropic") {
+      return { modelId, reason: `${model.displayName} is not available through Claude Code.` };
+    }
+    if (adapter?.capabilities().has("models") && adapter.listModels) {
+      const available = await adapter.listModels().catch(() => []);
+      if (!available.some((candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model))) {
+        return { modelId, reason: `${model.displayName} is not available through the current harness.` };
+      }
+    }
+    return {
+      modelId,
+      sessionModel: `${model.provider}/${providerModelId(model)}`,
+      ...(model.limits.maxContextTokens !== undefined ? { inputTokenLimit: model.limits.maxContextTokens } : {}),
+    };
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
@@ -4223,7 +4280,14 @@ export class Coordinator {
         const runner = this.worldChatRunner(store, msg.conversationId);
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
-        const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds, msg.subject);
+        const inFlight = runner.send(
+          log,
+          msg.conversationId,
+          msg.text,
+          msg.attachmentIds,
+          msg.subject,
+          msg.modelId,
+        );
         // Started after the turn it names, so the person's own turn has first claim on the
         // harness, and awaited last, so naming a row never delays the reply.
         const naming =
@@ -9663,16 +9727,47 @@ export class Coordinator {
           );
           return;
         }
-        const resolvedModel =
-          voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, bundle.clonedVoices) ?? undefined;
+        const resolvedModel = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, bundle.clonedVoices);
+        if (resolvedModel === null) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `${sheet.name}'s assigned voice model is no longer available.`);
+          return;
+        }
+        const productionModelId = production?.meta.models?.["voice-tts"];
+        const selectedModelId = msg.modelId ?? productionModelId ?? resolvedModel;
+        if (selectedModelId !== resolvedModel) {
+          const selected = this.opts.manifest?.models.find(
+            (candidate) => candidate.id === selectedModelId && candidate.capability === "voice-tts",
+          );
+          if (selected === undefined) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              `This production still names ${selectedModelId}, which is no longer available.`,
+            );
+          } else {
+            const assigned = this.opts.manifest?.models.find(
+              (candidate) => candidate.id === resolvedModel && candidate.capability === "voice-tts",
+            );
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              `This production uses ${selected.displayName}, but ${sheet.name}'s assigned voice uses ${assigned?.displayName ?? resolvedModel}. Choose the assigned model for this line.`,
+            );
+          }
+          return;
+        }
         const model = this.opts.manifest?.models.find(
           (m) =>
             m.provider === voice.provider &&
             m.capability === "voice-tts" &&
-            (resolvedModel === undefined || m.id === resolvedModel),
+            m.id === resolvedModel,
         );
         if (!model) {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
+          return;
+        }
+        if (this.readModel.getState().app.models.disabled.includes(model.id)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in Providers.`);
           return;
         }
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
@@ -12305,13 +12400,17 @@ export class Coordinator {
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
       receiptsFor: (runId) => receipts.get(runId) ?? [],
-      createSession: ({ cwd, runId }) => {
+      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
+      createSession: ({ cwd, runId, model }) => {
         const token = tokenByRun.get(runId);
         const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
         return createPreparedSession(
           this.opts.adapter!,
           cwd,
-          this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          this.sessionInput({
+            ...(url ? { worldQueryUrl: url } : {}),
+            ...(model !== undefined ? { model } : {}),
+          }),
           { purpose: "world-chat", agent: "world-builder" },
         );
       },
