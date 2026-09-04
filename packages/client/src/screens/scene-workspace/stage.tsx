@@ -191,6 +191,7 @@ export function SceneStage({
   const host = useRef<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
+  const frozen = locked || exporting !== null;
 
   // The end key is the end pose, so it always sits at the shot's length: a staging kept before
   // the shot was retimed plays to its end pose here and is repaired by the next Keep.
@@ -214,8 +215,8 @@ export function SceneStage({
   const activeKey = keys[active] ?? null;
   // The viewport outlives many renders and its callbacks must see the current draft, not the
   // one standing when it was created.
-  const latest = useRef({ working, active });
-  latest.current = { working, active };
+  const latest = useRef({ working, active, frozen });
+  latest.current = { working, active, frozen };
 
   // A new snapshot that carries the draft's move retires the draft; one that does not — an edit
   // from elsewhere — rebases any half the person did not touch and leaves their own half standing.
@@ -300,14 +301,14 @@ export function SceneStage({
     playStart.current = null;
   };
   const patchCamera = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
-    const current = latest.current.working;
-    if (current === null) return;
+    const { working: current, frozen: editingFrozen } = latest.current;
+    if (current === null || editingFrozen) return;
     cameraDirty.current = true;
     setDraft(change(current));
   };
   const patchBlocking = (change: (current: ResolvedShotStaging) => ResolvedShotStaging) => {
-    const current = latest.current.working;
-    if (current === null) return;
+    const { working: current, frozen: editingFrozen } = latest.current;
+    if (current === null || editingFrozen) return;
     blockingDirty.current = true;
     setDraft(change(current));
   };
@@ -618,10 +619,6 @@ export function SceneStage({
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
-  // While the playblast records, the staging it shows must hold still (R-35). Only then: a draft
-  // edit writes nothing, so a pending write has no claim on it.
-  const frozen = exporting !== null;
-
   return (
     <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage">
       <div className="fy-swstage__head">

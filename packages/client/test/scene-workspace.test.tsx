@@ -336,6 +336,39 @@ describe("scene detail owns the workspace", () => {
     assert.equal(command.staging?.sets, undefined);
   });
 
+  it("freezes blocking while a promotion command is landing", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    delete scene.blocking;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    const blocking = { cast: [{ sheetId: "maren-kest", x: 2, z: 2 }], sets: [] };
+    const keys = [{ t: 0, p: [0, 1.5, 3] as [number, number, number], l: [0, 1.2, 0] as [number, number, number] }];
+    shot.staging = { version: 1, ...blocking, keys };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const mover = q(mounted, ".fy-swstage__mover") as HTMLButtonElement;
+    assert.equal(mover.disabled, true);
+    await click(mover);
+
+    const landed = structuredClone(state);
+    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    landedScene.version += 1;
+    landedScene.blocking = { version: 1, ...blocking };
+    const landedShot = orderedShots(landedScene).find((candidate) => candidate.id === "sh_12")!;
+    landedShot.staging = { version: 2, keys };
+    await act(async () => __setStateForTest(landed));
+
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 1);
+    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
+    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /holds/);
+  });
+
   it("rebases the untouched half of a Stage draft when a newer scene snapshot arrives", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
