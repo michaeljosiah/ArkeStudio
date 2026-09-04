@@ -382,6 +382,18 @@ export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaO
   return () => worldChatMediaListeners.delete(listener);
 }
 
+export type ConversationActionDecisionResult = Extract<
+  DomainEvent,
+  { type: "conversation-action.decision-result" }
+>;
+const conversationActionDecisionListeners = new Set<(answer: ConversationActionDecisionResult) => void>();
+export function subscribeConversationActionDecision(
+  listener: (answer: ConversationActionDecisionResult) => void,
+): () => void {
+  conversationActionDecisionListeners.add(listener);
+  return () => conversationActionDecisionListeners.delete(listener);
+}
+
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
 const lyricsDraftedListeners = new Set<(answer: LyricsDrafted) => void>();
 export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void {
@@ -973,6 +985,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
+    }
+    if (event.type === "conversation-action.decision-result") {
+      for (const listener of conversationActionDecisionListeners) listener(event);
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
@@ -3763,6 +3778,28 @@ export function sendWorldChat(
     attachmentIds,
     ...(subject !== undefined ? { subject } : {}),
   });
+}
+
+/** Decide exactly the card and conversation revision currently on screen. */
+export function decideConversationAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  expectedConversationSeq: number,
+  expectedStatus: "pending" | "stale",
+  decision: "approve" | "deny",
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "conversation-action-decide",
+    worldId,
+    conversationId,
+    actionId,
+    expectedConversationSeq,
+    expectedStatus,
+    decision,
+    requestId,
+  }) ? requestId : null;
 }
 
 /** Accept or reject one of Arke's editor requests (SPEC-039 R-29): the only boundary that lands or discards it. */

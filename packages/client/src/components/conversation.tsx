@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
+  ConversationActionCard,
   FrameRunState,
   StagedProposal,
   WorldChatContext,
@@ -14,6 +15,7 @@ import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
   createWorldChat,
+  decideConversationAction,
   frameRunCommand,
   rejectWorldChatPoint,
   restoreBible,
@@ -23,6 +25,7 @@ import {
   retryWorldChatTurn,
   sendWorldChat,
   subscribeWorldChatMediaOpened,
+  subscribeConversationActionDecision,
   useStore,
   useWorldChatProgress,
   useWorldChatWrapUpRefusal,
@@ -89,8 +92,15 @@ export function ConversationTranscript({
   }
   return (
     <div className="fy-chat__transcript" aria-live="polite">
-      {messages.map((m) => (
-        <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
+      {messages.map((m) => {
+        const actions = m.turnId === undefined
+          ? []
+          : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
+        return (
+        <div
+          key={m.id}
+          className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`, actions.length > 0 && "fy-chat__turn--action")}
+        >
           <div className="fy-chat__bubble">
             {m.text}
             {m.role === "studio" && m.receipts.length > 0 && (
@@ -165,8 +175,16 @@ export function ConversationTranscript({
               {...(shotLabel === undefined ? {} : { shotLabel })}
             />
           )}
+          {actions.map((action) => (
+            <ConversationPermissionCard
+              key={action.actionId}
+              action={action}
+              conversationSeq={workspace?.seq ?? 0}
+            />
+          ))}
         </div>
-      ))}
+        );
+      })}
       {/*
         The turn in flight, where its reply will be. In the transcript rather than on the composer
         because that is where the answer is going to appear, and it is where the eye already is
@@ -190,6 +208,178 @@ export function ConversationTranscript({
       )}
     </div>
   );
+}
+
+const ACTION_STATUS: Record<ConversationActionCard["status"], string> = {
+  pending: "Needs your decision",
+  approved: "Approved",
+  "awaiting-host": "Waiting for you",
+  queued: "Queued",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  denied: "Denied",
+  stale: "Needs a fresh review",
+  superseded: "Replaced",
+};
+
+const DECIDABLE_CARD_FAMILIES = new Set([
+  "authored-diff",
+  "command",
+  "destructive",
+  "take-review",
+  "host-action",
+  "setting",
+]);
+
+export function ConversationPermissionCard({
+  action,
+  conversationSeq,
+}: {
+  action: ConversationActionCard;
+  conversationSeq: number;
+}) {
+  const card = useRef<HTMLElement>(null);
+  const request = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family);
+  const terminal = ["completed", "failed", "cancelled", "denied", "stale", "superseded"].includes(action.status);
+
+  useEffect(
+    () => subscribeConversationActionDecision((answer) => {
+      if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
+      request.current = null;
+      setBusy(false);
+      setAnnouncement(
+        answer.disposition === "recorded"
+          ? `${action.shown.title}: ${answer.decision === "approve" ? "approved" : "denied"}.`
+          : answer.detail ?? `${action.shown.title} could not be decided.`,
+      );
+      requestAnimationFrame(() => card.current?.focus());
+    }),
+    [action.actionId, action.shown.title],
+  );
+
+  const decide = (decision: "approve" | "deny") => {
+    const expectedStatus = action.status === "stale" ? "stale" : "pending";
+    const sent = decideConversationAction(
+      action.worldId,
+      action.conversationId,
+      action.actionId,
+      conversationSeq,
+      expectedStatus,
+      decision,
+    );
+    if (sent === null) {
+      setAnnouncement("The decision could not be sent.");
+      return;
+    }
+    request.current = sent;
+    setBusy(true);
+    setAnnouncement("");
+  };
+
+  const body = <ConversationActionBody action={action} supported={supported} />;
+  return (
+    <article
+      ref={card}
+      tabIndex={-1}
+      className="fy-actioncard"
+      data-status={action.status}
+      aria-label={`${action.shown.title}, ${ACTION_STATUS[action.status]}`}
+    >
+      <div className="fy-actioncard__head">
+        <div>
+          <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
+          <h3>{action.shown.title}</h3>
+        </div>
+        <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
+      </div>
+      <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
+      {terminal ? (
+        <details className="fy-actioncard__details">
+          <summary>Review details</summary>
+          {body}
+        </details>
+      ) : body}
+      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {action.decision && (
+        <div className="fy-actioncard__audit">
+          {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
+          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${action.decision.decidedAt}`}
+        </div>
+      )}
+      {action.receipt && (
+        <div className="fy-actioncard__receipt">
+          <strong>Result</strong>
+          <span>{action.receipt.summary}</span>
+        </div>
+      )}
+      {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
+      {action.status === "pending" && supported && (
+        <div className="fy-actioncard__actions">
+          <Button
+            variant="primary"
+            disabled={busy || !action.availableDecisions.includes("approve")}
+            onClick={() => decide("approve")}
+          >
+            {busy ? "Deciding…" : "Approve"}
+          </Button>
+          <Button
+            variant="ghost"
+            disabled={busy || !action.availableDecisions.includes("deny")}
+            onClick={() => decide("deny")}
+          >
+            Deny
+          </Button>
+        </div>
+      )}
+      {!supported && (
+        <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
+      )}
+      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+    </article>
+  );
+}
+
+function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+  const body = action.shown.body;
+  if (!supported) return null;
+  switch (body.family) {
+    case "authored-diff":
+      return <div className="fy-actioncard__body">
+        {body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+          <strong>{field.label}</strong>
+          <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
+          <span aria-hidden="true">→</span>
+          <span>{field.after ?? "Removed"}</span>
+        </div>)}
+        {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
+    case "command":
+      return <div className="fy-actioncard__body">
+        {body.commands.map((command) => <div key={`${command.label}:${command.detail ?? ""}`} className="fy-actioncard__line"><strong>{command.label}</strong>{command.detail && <span>{command.detail}</span>}</div>)}
+        <p>{body.expectedResult}</p>
+      </div>;
+    case "destructive":
+      return <div className="fy-actioncard__body">
+        <strong>Will remove</strong>
+        <ul>{body.removed.map((item) => <li key={item}>{item}</li>)}</ul>
+        {body.retained.length > 0 && <p>Retained: {body.retained.join(" · ")}</p>}
+        {body.blockers.map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
+    case "take-review":
+      return <div className="fy-actioncard__body"><p>{body.mediaKind} · {body.destination}</p><p>Current: {body.currentSelection ?? "None"}</p>{body.reason && <p>{body.reason}</p>}</div>;
+    case "host-action":
+      return <div className="fy-actioncard__body"><strong>{body.action}</strong><p>{body.effect}</p></div>;
+    case "setting":
+      return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
+    case "generation":
+      return null;
+  }
 }
 
 const REPORT_FAILURE_STATUSES = new Set(["failed", "missing", "needs-reconciliation"]);

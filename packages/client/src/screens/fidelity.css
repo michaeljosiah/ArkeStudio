@@ -4584,6 +4584,7 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-chat__turn { display: flex; flex-direction: column; }
 .fy-chat__turn--user { align-self: flex-end; align-items: flex-end; max-width: 380px; }
 .fy-chat__turn--studio { align-self: flex-start; max-width: 440px; }
+.fy-chat__turn--action { width: min(620px, 100%); max-width: min(620px, 100%); }
 .fy-chat__bubble { font: 400 13px/1.6 var(--font-sans); white-space: pre-wrap; }
 /*
  * The tail. Each bubble squares off the one corner that faces its own speaker, which is what
@@ -4612,6 +4613,49 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * confinement worked, and the reply is the only thing at fault.
  */
 .fy-chat__refusals { margin-top: 6px; font: 400 10.5px var(--font-mono); color: var(--warning); }
+
+/* A reviewed action belongs to the turn that prepared it, but not to the Studio's speech bubble. */
+.fy-actioncard {
+  width: 100%; margin-top: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  border: 1px solid var(--border); border-left: 3px solid var(--warning); border-radius: 10px;
+  background: var(--card); box-shadow: var(--shadow-xs); color: var(--card-foreground);
+}
+.fy-actioncard:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-actioncard[data-status="completed"] { border-left-color: var(--success); }
+.fy-actioncard[data-status="failed"],
+.fy-actioncard[data-status="stale"] { border-left-color: var(--destructive); }
+.fy-actioncard[data-status="denied"],
+.fy-actioncard[data-status="cancelled"],
+.fy-actioncard[data-status="superseded"] { border-left-color: var(--muted-foreground); }
+.fy-actioncard__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fy-actioncard__head h3 { margin: 2px 0 0; font: 600 14px/1.35 var(--font-sans); }
+.fy-actioncard__reason,
+.fy-actioncard__status,
+.fy-actioncard__audit { font: 400 10px/1.45 var(--font-mono); color: var(--muted-foreground); }
+.fy-actioncard__reason { text-transform: uppercase; letter-spacing: .06em; }
+.fy-actioncard__status { flex: none; font-weight: 600; color: var(--foreground); text-align: right; }
+.fy-actioncard__consequence,
+.fy-actioncard__body p { margin: 0; font: 400 12px/1.55 var(--font-sans); }
+.fy-actioncard__body { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.fy-actioncard__body ul { margin: 0; padding-left: 18px; font: 400 12px/1.55 var(--font-sans); }
+.fy-actioncard__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font: 400 12px/1.5 var(--font-sans); }
+.fy-actioncard__change { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: baseline; font: 400 12px/1.5 var(--font-sans); }
+.fy-actioncard__before { color: var(--muted-foreground); text-decoration: line-through; overflow-wrap: anywhere; }
+.fy-actioncard__notice,
+.fy-actioncard__unsupported { margin: 0; font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+.fy-actioncard__unsupported { padding: 8px 10px; border-radius: 7px; background: var(--muted); }
+.fy-actioncard__details summary { cursor: pointer; font: 500 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-actioncard__details[open] summary { margin-bottom: 9px; }
+.fy-actioncard__receipt { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 8px; border-top: 1px solid var(--border); font: 400 11px/1.5 var(--font-sans); }
+.fy-actioncard__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fy-actioncard__live:empty { display: none; }
+.fy-actioncard__live { font: 400 11px/1.5 var(--font-sans); color: var(--muted-foreground); }
+
+@media (max-width: 520px) {
+  .fy-actioncard__change { grid-template-columns: 1fr; gap: 3px; }
+  .fy-actioncard__change > [aria-hidden="true"] { display: none; }
+  .fy-actioncard__actions > * { flex: 1; }
+}
 
 /* A turn that failed, where its reply would have been. Quiet: this is the app apologising, not
    an alarm, and the conversation above it is still perfectly good. */

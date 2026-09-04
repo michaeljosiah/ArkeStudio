@@ -168,6 +168,66 @@ function renderMediaConversation(): string {
   );
 }
 
+function renderActionConversation(family: "authored-diff" | "generation" = "authored-diff"): string {
+  const state = stateWithConversation();
+  const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
+  state.worldChat!.messages[1]!.turnId = turnId as never;
+  state.worldChat!.actions = [{
+    actionId: "act_01J8F3K2QW9VZX4N7M0RTYB6HC",
+    conversationId: CONVERSATION_ID,
+    turnId,
+    worldId: FIXTURE_WORLD_ID,
+    actorId: "local-user",
+    scope: "world",
+    actionKind: "rename-world",
+    authorityKind: "world-store",
+    cardFamily: family,
+    targets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
+    payloadDigest: `sha256:${"a".repeat(64)}`,
+    baseObservations: [{ requirement: "world-metadata", target: FIXTURE_WORLD_ID, revisionOrDigest: "v1", complete: true }],
+    dependencies: [],
+    createdAt: "2026-08-06T10:00:01Z",
+    authority: { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` },
+    authorityRevision: 1,
+    previewDigest: `sha256:${"b".repeat(64)}`,
+    shown: {
+      title: "Rename this world",
+      consequence: "Changes the world name everywhere it appears.",
+      affectedTargets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
+      ripples: [],
+      permissionReason: "authored-change",
+      body: family === "authored-diff"
+        ? {
+            family,
+            fields: [{ label: "Name", before: "Old name", after: "New name" }],
+            conflicts: [],
+            openChoices: [],
+          }
+        : {
+            family,
+            medium: "image",
+            purpose: "World cover",
+            prompt: "Private prompt content",
+            references: [],
+            provider: "provider",
+            model: "model",
+            quantity: 1,
+            output: "One image",
+            cost: "Estimate unavailable",
+          },
+    },
+    status: "pending",
+    preparedAt: "2026-08-06T10:00:01Z",
+    availableDecisions: ["approve", "deny"],
+  }] as never;
+  __setStateForTest(state);
+  return renderToString(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
 /** The markup between the rail's opening tag and the end of the document. */
 function railHtml(html: string): string {
   const start = html.indexOf('class="fy-gate__side"');
@@ -211,6 +271,32 @@ describe("World Chat is built on the Genesis split", () => {
     const side = /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*padding-top:\s*52px/s;
     assert.match(CSS, head, "the conversation column clears the nav at 52px");
     assert.match(CSS, side, "and the rail clears it by exactly as much");
+  });
+});
+
+describe("conversation permission cards", () => {
+  it("places a coordinator-owned review beside its producing turn with native decisions", () => {
+    const html = renderActionConversation();
+    assert.match(html, /Rename this world/);
+    assert.match(html, /Changes the world name everywhere it appears/);
+    assert.match(html, /Old name/);
+    assert.match(html, /New name/);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
+    assert.match(html, /<button[^>]*>Deny<\/button>/);
+    assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
+  });
+
+  it("keeps a body owned by a later client version unapprovable without dumping it", () => {
+    const html = renderActionConversation("generation");
+    assert.match(html, /This card type is not available in this version/);
+    assert.doesNotMatch(html, />Approve<\/button>/);
+    assert.doesNotMatch(html, /Private prompt content/);
+  });
+
+  it("keeps cards fluid at narrow widths and exposes text status alongside colour", () => {
+    assert.match(CSS, /\.fy-chat__turn--action \{[^}]*max-width:\s*min\(620px, 100%\)/);
+    assert.match(CSS, /@media \(max-width: 520px\)/);
+    assert.match(renderActionConversation(), /Needs your decision/);
   });
 });
 
