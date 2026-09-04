@@ -150,7 +150,22 @@ describe("design tokens", () => {
     assert.match(css, /\.fy-swrow__preview\s*\{[^}]*width: 44px; height: 44px/);
     assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__generate, \.fy-swedit, \.fy-swrow__slot button,[\s\S]*?\.fy-swrow__menu button, \.fy-swrow__confirm button, \.fy-swpreview__retry \{ min-width: 44px; min-height: 44px;/);
     assert.match(css, /\.fy-swpreview__filmstrip\s*\{[^}]*overflow-x:\s*auto/);
-    assert.match(css, /@media \(pointer: coarse\)[\s\S]*?\.fy-swrow__stale button, \.fy-swrow__prompt button,[\s\S]*?\.fy-swpreview__transport button, \.fy-swpreview__filmstrip button,[\s\S]*?\.fy-swstage__step, \.fy-swstage__play, \.fy-swstage__keytools button, \.fy-swstage__nudge button,[\s\S]*?\.fy-swstage__modes button, \.fy-swstage__ghost, \.fy-swstage__chips button \{ min-width: 44px; min-height: 44px;/);
+    const coarse = /@media \(pointer: coarse\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? "";
+    const coarseTargets = [...coarse.matchAll(/([^{}]+)\{ min-width: 44px; min-height: 44px; \}/g)]
+      .flatMap((match) => match[1]!.split(",").map((selector) => selector.trim()));
+    for (const selector of [
+      ".fy-swstage__step",
+      ".fy-swstage__play",
+      ".fy-swstage__keytools button",
+      ".fy-swstage__nudge button",
+      ".fy-swstage__modes button",
+      ".fy-swstage__ghost",
+      ".fy-swstage__chips button",
+      ".fy-swstage__set input",
+      ".fy-swstage__set-head button",
+    ]) {
+      assert.ok(coarseTargets.includes(selector), `${selector} keeps a 44px coarse-pointer target`);
+    }
     assert.match(imageActions, /@media \(pointer: coarse\)[\s\S]*?\.fy-imgdl\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/);
     assert.match(css, /\.fy-swalt:focus-within\s*\{[^}]*clip-path:\s*none/, "focused edge words escape the visually-hidden clipping box");
   });
