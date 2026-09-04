@@ -7184,6 +7184,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__mover > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
 .fy-swstage__mover > span:last-child { border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 .fy-swstage__mover > span[data-walks="true"] { border-color: transparent; background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-swstage__sets { display: flex; flex-direction: column; gap: 7px; }
+.fy-swstage__set { display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--border); border-radius: 7px; }
+.fy-swstage__set-head { display: flex; align-items: center; gap: 5px; }
+.fy-swstage__set-head input { flex: 1; min-width: 0; }
+.fy-swstage__set-head button { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.fy-swstage__set-head button:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+.fy-swstage__set input { box-sizing: border-box; height: 24px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 5px; font: 400 10px var(--font-mono); }
+.fy-swstage__set-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.fy-swstage__set-fields label { min-width: 0; display: flex; align-items: center; gap: 3px; color: var(--neutral-400); font: 400 9px var(--font-mono); }
+.fy-swstage__set-fields input { width: 100%; min-width: 0; }
+.fy-swstage__set-add { width: 100%; }
 .fy-swstage__spacer { flex: 1; }
 .fy-swstage__block--playblast .ui-btn { width: 100%; }
 .fy-swstage__timeline { flex: none; display: flex; align-items: center; gap: 12px; }
@@ -7313,7 +7324,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-swvariants__panel > header button, .fy-swvariants__grid article button,
   .fy-swpreview__transport button, .fy-swpreview__filmstrip button,
   .fy-swstage__step, .fy-swstage__play, .fy-swstage__keytools button, .fy-swstage__nudge button,
-  .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button { min-width: 44px; min-height: 44px; }
+  .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button,
+  .fy-swstage__set input, .fy-swstage__set-head button { min-width: 44px; min-height: 44px; }
   .fy-swboard__sheet, .fy-swboard-sheet__head button { width: 44px; height: 44px; }
   .fy-swboard-sheet__retry-cell, .fy-swboard-sheet__foot button { min-width: 44px; min-height: 44px; }
 }
