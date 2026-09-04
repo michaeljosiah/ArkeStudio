@@ -6,6 +6,7 @@ import {
   type BibleEdit,
   type ModelEditorRequest,
   type ModelSceneEdit,
+  type ModelWorldChatAction,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -84,6 +85,8 @@ export interface AcceptedTurn {
   editorRequests: readonly ModelEditorRequest[];
   /** Scene edits this turn described, still unapplied (SPEC-036 R-38); the runner lands them against the version it showed. */
   sceneEdits: readonly ModelSceneEdit[];
+  /** Exact authored operations this turn described, still unprepared. */
+  actions: readonly ModelWorldChatAction[];
 }
 
 export type ValidationOutcome =
@@ -318,6 +321,13 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       }
     }
   }
+  for (const action of result.actions) {
+    for (const id of action.checkReceiptIds) {
+      if (!receiptIds.has(id)) {
+        problems.push(problem("foreign-receipt", "A cited action read was not produced by this turn."));
+      }
+    }
+  }
 
   // Step 9: group membership and atomicity.
   for (const op of result.groupOperations) {
@@ -439,6 +449,7 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       bibleEdits: result.bibleEdits,
       editorRequests: result.editorRequests,
       sceneEdits: result.sceneEdits,
+      actions: result.actions,
     },
   };
 }

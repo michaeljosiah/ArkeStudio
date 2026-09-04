@@ -370,7 +370,9 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <strong>Will remove</strong>
         <ul>{body.removed.map((item) => <li key={item}>{item}</li>)}</ul>
         {body.retained.length > 0 && <p>Retained: {body.retained.join(" · ")}</p>}
+        {body.dependentChanges.length > 0 && <p>Dependent changes: {body.dependentChanges.join(" · ")}</p>}
         {body.blockers.map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+        <p>Undo {body.undoAvailable ? "available" : "not available"}</p>
       </div>;
     case "take-review":
       return <div className="fy-actioncard__body"><p>{body.mediaKind} · {body.destination}</p><p>Current: {body.currentSelection ?? "None"}</p>{body.reason && <p>{body.reason}</p>}</div>;

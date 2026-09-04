@@ -299,6 +299,7 @@ export const ArkeDestructiveBodySchema = z
     family: z.literal("destructive"),
     removed: z.array(z.string().min(1).max(500)).min(1),
     retained: z.array(z.string().min(1).max(500)).default([]),
+    dependentChanges: z.array(z.string().min(1).max(1_000)).default([]),
     blockers: z.array(z.string().min(1).max(1_000)).default([]),
     undoAvailable: z.boolean(),
   })

@@ -4,6 +4,15 @@ import {
   WorldChatEditorRequestActionSchema,
   WorldChatProposalActionSchema,
   WorldChatSceneActionSchema,
+  WorldChatArtDirectionActionSchema,
+  WorldChatArtDirectionRestoreActionSchema,
+  WorldChatCanonActionSchema,
+  WorldChatCanonRestoreActionSchema,
+  WorldChatCanonRetireActionSchema,
+  WorldChatSheetActionSchema,
+  WorldChatSheetRestoreActionSchema,
+  WorldChatSheetRetireActionSchema,
+  WorldChatWorldMetadataActionSchema,
   type ArkeActionAuthority,
   type ArkeActionScope,
   type ArkeActionSupport,
@@ -434,6 +443,51 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-editor-request",
     schema: WorldChatEditorRequestActionSchema,
     ...action("production", "command", "timeline", "authored-change", ["timeline"]),
+  },
+  "world-chat-world-metadata": {
+    kind: "world-chat-world-metadata",
+    schema: WorldChatWorldMetadataActionSchema,
+    ...action("world", "authored-diff", "world-store", "authored-change", ["world-metadata", "art-direction"]),
+  },
+  "world-chat-canon": {
+    kind: "world-chat-canon",
+    schema: WorldChatCanonActionSchema,
+    ...action("world", "authored-diff", "proposal-manager", "authored-change", ["canon", "sheets"]),
+  },
+  "world-chat-canon-retire": {
+    kind: "world-chat-canon-retire",
+    schema: WorldChatCanonRetireActionSchema,
+    ...action("world", "destructive", "world-store", "destructive-change", ["canon", "sheets"]),
+  },
+  "world-chat-canon-restore": {
+    kind: "world-chat-canon-restore",
+    schema: WorldChatCanonRestoreActionSchema,
+    ...action("world", "authored-diff", "world-store", "authored-change", ["canon", "sheets"]),
+  },
+  "world-chat-sheet": {
+    kind: "world-chat-sheet",
+    schema: WorldChatSheetActionSchema,
+    ...action("world", "authored-diff", "proposal-manager", "authored-change", ["sheets", "canon"]),
+  },
+  "world-chat-sheet-retire": {
+    kind: "world-chat-sheet-retire",
+    schema: WorldChatSheetRetireActionSchema,
+    ...action("world", "destructive", "world-store", "destructive-change", ["sheets", "canon"]),
+  },
+  "world-chat-sheet-restore": {
+    kind: "world-chat-sheet-restore",
+    schema: WorldChatSheetRestoreActionSchema,
+    ...action("world", "authored-diff", "world-store", "authored-change", ["sheets", "canon"]),
+  },
+  "world-chat-art-direction": {
+    kind: "world-chat-art-direction",
+    schema: WorldChatArtDirectionActionSchema,
+    ...action("world", "authored-diff", "proposal-manager", "authored-change", ["art-direction"]),
+  },
+  "world-chat-art-direction-restore": {
+    kind: "world-chat-art-direction-restore",
+    schema: WorldChatArtDirectionRestoreActionSchema,
+    ...action("world", "authored-diff", "world-store", "authored-change", ["art-direction"]),
   },
 } as const;
 

@@ -49,7 +49,7 @@ const MAX_MESSAGES = 50;
 const ACTION_STATUS_TRANSITIONS: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
   // Recovery may discover that the bound authority was decided through its original surface.
   pending: ["completed", "failed", "cancelled", "stale"],
-  approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled"],
+  approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled", "stale"],
   "awaiting-host": ["completed", "failed", "cancelled"],
   queued: ["running", "completed", "failed", "cancelled"],
   running: ["completed", "failed", "cancelled"],

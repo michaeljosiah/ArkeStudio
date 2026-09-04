@@ -41,6 +41,7 @@ export interface PreparedConversationActionAuthority {
   readonly authority: ConversationActionAuthorityBinding;
   readonly authorityRevision: number;
   readonly shown: ConversationActionShownProjection;
+  readonly approvalBlockedReason?: string;
 }
 
 export type ConversationActionValidation =
@@ -74,6 +75,8 @@ export interface ConversationActionAuthorityAdapter {
   deny?(action: ConversationActionCard): Promise<void>;
   /** Null means the authority still has exactly the projected status. */
   reconcile?(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null>;
+  /** The exact authority-owned inverse available after successful execution. */
+  undo?(action: ConversationActionCard): { readonly kind: string; readonly id: string } | null;
 }
 
 export interface PrepareConversationActionInput {
@@ -455,6 +458,7 @@ export class ConversationActionLifecycle {
         const adapter = this.adapters.get(existing.actionKind);
         if (adapter) await this.continueApproved(existing, adapter, true);
       }
+      if (existing?.status === "completed") await this.linkAvailableUndo(existing);
       if (existing?.status === "denied") await this.settleDenied(existing);
       const current = await this.loadAction(input.conversationId, input.actionId);
       return {
@@ -754,7 +758,10 @@ export class ConversationActionLifecycle {
         await this.settleDenied(action);
         continue;
       }
-      if (terminal(action.status)) continue;
+      if (terminal(action.status)) {
+        if (action.status === "completed") await this.linkAvailableUndo(action);
+        continue;
+      }
       const adapter = this.adapters.get(action.actionKind);
       if (!adapter) continue;
       if (action.status === "approved") {
@@ -792,6 +799,12 @@ export class ConversationActionLifecycle {
     }).catch(() => {
       /* the durable denial remains authoritative; startup or a duplicate request retries cleanup */
     });
+  }
+
+  private async linkAvailableUndo(action: ConversationActionCard): Promise<void> {
+    if (action.status !== "completed" || action.undo) return;
+    const undo = this.adapters.get(action.actionKind)?.undo?.(action);
+    if (undo) await this.linkUndo(action.conversationId, action.actionId, undo);
   }
 
   private async assertActionIdAvailable(intent: ConversationActionPrepareIntent): Promise<void> {
@@ -912,7 +925,9 @@ export class ConversationActionLifecycle {
       preparedAt: this.now(),
       ...(descriptor.support.execution.state === "blocked"
         ? { approvalBlockedReason: descriptor.support.execution.reason }
-        : {}),
+        : prepared.approvalBlockedReason
+          ? { approvalBlockedReason: prepared.approvalBlockedReason }
+          : {}),
     });
     beforeAppend?.();
     const appended = await store.append(
@@ -1068,7 +1083,8 @@ export class ConversationActionLifecycle {
     for (;;) {
       const loaded = await this.loadConversation(action.conversationId);
       const current = loaded.actions.find((one) => one.actionId === action.actionId);
-      if (!current || current.status === outcome.status || !transitionAllowed(current.status, outcome.status)) {
+      if (!current || !transitionAllowed(current.status, outcome.status)) {
+        if (current?.status === "completed") await this.linkAvailableUndo(current);
         return false;
       }
       try {
@@ -1087,6 +1103,10 @@ export class ConversationActionLifecycle {
             expectedSeq: loaded.seq,
           },
         );
+        if (outcome.status === "completed") {
+          const completed = await this.loadAction(action.conversationId, action.actionId);
+          if (completed) await this.linkAvailableUndo(completed);
+        }
         return !appended.deduplicated;
       } catch (error) {
         if (error instanceof ConversationSequenceError) continue;

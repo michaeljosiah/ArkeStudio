@@ -44,6 +44,7 @@ import {
   ConversationActionUndoLinkSchema,
 } from "./arke-actions.js";
 import { ArkeReadTargetSchema } from "./arke-reads.js";
+import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -1645,6 +1646,7 @@ export const TURN_RESULT_BOUNDS = {
   reply: 8_000,
   candidateOperations: 12,
   groupOperations: 6,
+  actions: 12,
 } as const;
 
 export const WorldChatTurnResultSchema = z
@@ -1675,6 +1677,8 @@ export const WorldChatTurnResultSchema = z
      * thread. Defaulted like the others.
      */
     sceneEdits: z.array(ModelSceneEditSchema).max(SCENE_EDIT_BOUNDS.perTurn).default([]),
+    /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
+    actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -2150,7 +2154,78 @@ const exampleTurnResult = {
   bibleEdits: [],
   editorRequests: [],
   sceneEdits: [],
+  actions: [],
 } satisfies WorldChatTurnResult;
+
+const exampleWorldActions = {
+  "world-metadata": {
+    kind: "world-metadata",
+    changes: { logline: "At slack water, a bell-keeper must answer a drowned city before it answers her." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  canon: {
+    kind: "canon",
+    change: {
+      operation: "amend",
+      entryId: "CANON-012",
+      changes: { statement: "The harbour bells ring only at slack water.", links: ["maren-kest"] },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "canon-retire": {
+    kind: "canon-retire",
+    entryId: "CANON-012",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "canon-restore": {
+    kind: "canon-restore",
+    entryId: "CANON-012",
+    version: 4,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  sheet: {
+    kind: "sheet",
+    change: {
+      operation: "edit",
+      sheetType: "character",
+      sheetId: "maren-kest",
+      changes: { billing: "lead", sections: [{ heading: "Relationships", body: "Sera Kest raised her." }] },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "sheet-retire": {
+    kind: "sheet-retire",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "sheet-restore": {
+    kind: "sheet-restore",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    version: 3,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "art-direction": {
+    kind: "art-direction",
+    changes: {
+      description: "Painterly salt-air naturalism with bold colour scripting.",
+      audio: { music: "environmental-only", subtitles: "never" },
+      failureModes: ["Hands stay whole and countable."],
+      keyArtIntent: {
+        subject: "Maren beneath the slack-water bells",
+        characters: ["Maren Kest"],
+        location: "The Vigil",
+      },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "art-direction-restore": {
+    kind: "art-direction-restore",
+    version: 2,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+} satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
 const exampleEditorRequest = {
@@ -2198,6 +2273,7 @@ export const WORLD_CHAT_SHAPE_EXAMPLES = {
   groupOperation: exampleGroupOperation,
   turnResult: exampleTurnResult,
   bibleEdits: exampleBibleEdits,
+  worldActions: exampleWorldActions,
 } as const;
 
 /**
@@ -2359,9 +2435,9 @@ export function worldChatResultShapeGuide(): string {
 
 Return one JSON object and nothing else — no prose around it, no markdown fences:
 
-{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...]}
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions}; all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -2469,6 +2545,17 @@ op is one of set-section | append-to-section | remove-section | replace-document
 heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
 
 Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
+
+### World actions
+
+Actions wait for Approve. checkReceiptIds cite final reads: metadata + art direction; both Canon/sheet lists; or art direction.
+
+- world-metadata changes: {name: string?, logline: string|null?, tone: string|null?, genre: string|null?}
+- canon: create(entryType,title,statement,links); amend(entryId,changes); open-thread(title,question,consideredEntryIds); settle-thread(entryId,resolvedType,statement); set-status(entryId,change); set-considered-entries(entryId,consideredEntryIds). Types: rule|lore|location|faction|timeline|tone.
+- canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
+- sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
+- sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
+- art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
 
 ### Editor requests
 

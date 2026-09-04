@@ -888,6 +888,13 @@ export class WorldChatRunner {
       }
     }
 
+    if (outcome.turn.actions.length > 0 && (!this.deps.prepareActions || !this.deps.bindActions)) {
+      return {
+        ok: false,
+        problems: [{ code: "action-unavailable", safeMessage: "World changes are unavailable in this conversation. Answer without changing the world." }],
+      };
+    }
+
     const completedRun = runFrom(events, runId);
     let actions: readonly PreparedWorldChatAction[] = [];
     try {
@@ -904,6 +911,7 @@ export class WorldChatRunner {
         sceneEdits,
         sceneBaseVersion,
         editorRequests: requests,
+        actions: outcome.turn.actions,
         receipts: this.deps.receiptsFor(runId),
         at,
       }) ?? [];

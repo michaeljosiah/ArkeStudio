@@ -304,6 +304,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       return (
         before.description !== after.description ||
         before.masterLook !== after.masterLook ||
+        JSON.stringify(before.keyArtIntent) !== JSON.stringify(after.keyArtIntent) ||
         JSON.stringify(before.audio) !== JSON.stringify(after.audio) ||
         JSON.stringify(before.failureModes) !== JSON.stringify(after.failureModes)
       );
@@ -366,6 +367,7 @@ export class Committer {
     const worldRaw = await this.readLive("world.json");
     if (worldRaw === null) throw new CommitPlanError("world.json missing — not a world");
     const worldDoc = JsonFile.parse(worldRaw);
+    const worldBefore = { ...worldDoc.value };
     const stale: CommitStaleError["stale"] = [];
     const liveByPath = new Map<string, string | null>();
     for (const f of input.files) {
@@ -496,6 +498,7 @@ export class Committer {
                 version: baseRecord.version,
                 description: baseRecord.description,
                 ...(baseRecord.masterLook ? { masterLook: baseRecord.masterLook } : {}),
+                ...(baseRecord.keyArtIntent !== undefined ? { keyArtIntent: baseRecord.keyArtIntent } : {}),
                 acceptedAt: baseRecord.acceptedAt,
                 audio: baseRecord.audio,
                 failureModes: baseRecord.failureModes,
@@ -509,6 +512,7 @@ export class Committer {
             version: toVersion,
             description: proposed.description,
             ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+            ...(proposed.keyArtIntent !== undefined ? { keyArtIntent: proposed.keyArtIntent } : {}),
             acceptedAt: at,
             audio: proposed.audio,
             failureModes: proposed.failureModes,
@@ -519,6 +523,7 @@ export class Committer {
           fieldsChanged = [
             ...(baseRecord?.description !== next.description ? ["description"] : []),
             ...(baseRecord?.masterLook !== next.masterLook ? ["master-look"] : []),
+            ...(JSON.stringify(baseRecord?.keyArtIntent) !== JSON.stringify(next.keyArtIntent) ? ["key-art-intent"] : []),
             ...(JSON.stringify(baseRecord?.audio) !== JSON.stringify(next.audio) ? ["audio-policy"] : []),
             ...(JSON.stringify(baseRecord?.failureModes ?? []) !== JSON.stringify(next.failureModes)
               ? ["failure-modes"]
@@ -644,15 +649,34 @@ export class Committer {
     }
     // The caller's own fields last, so a rename cannot be undone by bookkeeping above it —
     // and `id`, `slug` and `schemaVersion` are refused by name rather than quietly dropped.
+    const clearedWorldFields: string[] = [];
     if (input.worldFields) {
       for (const [key, value] of Object.entries(input.worldFields)) {
         if (key === "id" || key === "slug" || key === "schemaVersion" || key === "canonRevision") {
           throw new Error(`world.${key} is not a label and cannot be set this way`);
         }
-        worldUpdates[key] = value;
+        if (value === null) clearedWorldFields.push(key);
+        else worldUpdates[key] = value;
       }
     }
     worldDoc.set(worldUpdates);
+    for (const key of clearedWorldFields) delete worldDoc.value[key];
+    worldDoc.set({});
+    WorldMetaSchema.parse(worldDoc.value);
+    if (input.worldFields) {
+      const fieldsChanged = Object.keys(input.worldFields).filter(
+        (key) => JSON.stringify(worldBefore[key]) !== JSON.stringify(worldDoc.value[key]),
+      );
+      changes.push({
+        ts: at,
+        commitId,
+        entity: "world",
+        fieldsChanged,
+        source: input.source,
+        canonRevisionAfter: revisionTo,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+      });
+    }
     const worldNew = worldDoc.serialize();
 
     const journal: Journal = {

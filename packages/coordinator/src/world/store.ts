@@ -1,7 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { ART_DIRECTION_PATH, BIBLE_PATH, type ExternalEdit, type WorldBundle } from "@arke-studio/contracts";
+import {
+  ART_DIRECTION_PATH,
+  ArtDirectionRecordSchema,
+  BIBLE_PATH,
+  WorldAuthoredFieldChangesSchema,
+  type ExternalEdit,
+  type WorldAuthoredFieldChanges,
+  type WorldBundle,
+} from "@arke-studio/contracts";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
@@ -51,6 +59,16 @@ export interface WorldStoreEvents {
    * and is where that guarantee actually lives (R-28) — nothing is merged silently there either.
    */
   onAdopted?: () => void;
+}
+
+/** Checked after a fresh scan and inside the store's mutation queue. Null means still current. */
+export type WorldStatePrecondition = () => string | null;
+
+export class WorldStateStaleError extends Error {
+  constructor(readonly detail: string) {
+    super(detail);
+    this.name = "WorldStateStaleError";
+  }
 }
 
 export class WorldStore {
@@ -174,7 +192,7 @@ export class WorldStore {
    * commits, watcher-suppressed so our own writes never read as external, rescanned after so
    * the bundle stays honest (SPEC-004).
    */
-  async gateOp<T>(fn: () => Promise<T>): Promise<T> {
+  async gateOp<T>(fn: () => Promise<T>, precondition?: WorldStatePrecondition): Promise<T> {
     this.assertWritable();
     return this.serialise(async () => {
       // Admission happened before enqueue so work already ahead of close may drain. This second
@@ -183,6 +201,11 @@ export class WorldStore {
       this.watcher?.suppress();
       const admission = { active: true };
       try {
+        if (precondition) {
+          await this.rescan();
+          const detail = precondition();
+          if (detail) throw new WorldStateStaleError(detail);
+        }
         return await this.admittedGate.run(admission, fn);
       } finally {
         // Async-local context is inherited by timers and detached promises. Revoking the shared
@@ -261,12 +284,21 @@ export class WorldStore {
   }
 
   /** Serialised commit through the one primitive (D1). Rescans so the bundle stays honest. */
-  async commit(input: CommitInput, hooks?: CommitHooks): Promise<CommitResult> {
+  async commit(
+    input: CommitInput,
+    hooks?: CommitHooks,
+    precondition?: WorldStatePrecondition,
+  ): Promise<CommitResult> {
     this.assertWritable();
     return this.serialise(async () => {
       this.assertLockHeld();
       this.watcher?.suppress();
       try {
+        if (precondition) {
+          await this.rescan();
+          const detail = precondition();
+          if (detail) throw new WorldStateStaleError(detail);
+        }
         return await this.commitUnserialised(input, hooks);
       } finally {
         this.watcher?.unsuppress();
@@ -306,17 +338,48 @@ export class WorldStore {
     return this.commit({ kind: "world-rename", source, files: [], worldFields: { name: trimmed } });
   }
 
+  /** Update only registered authored world fields; null clears an optional field. */
+  async updateWorldMetadata(
+    changes: WorldAuthoredFieldChanges,
+    source: string,
+    requestId?: string,
+    precondition?: WorldStatePrecondition,
+  ): Promise<CommitResult> {
+    const fields = WorldAuthoredFieldChangesSchema.parse(changes);
+    return this.commit(
+      {
+        kind: "world-metadata-edit",
+        source,
+        files: [],
+        worldFields: fields,
+        ...(requestId ? { requestId } : {}),
+      },
+      undefined,
+      precondition,
+    );
+  }
+
   /** Retire, never delete (R-26): the entity stays on disk, marked, still resolving. */
-  async retire(portablePath: string, source: string): Promise<CommitResult> {
+  async retire(
+    portablePath: string,
+    source: string,
+    requestId?: string,
+    precondition?: WorldStatePrecondition,
+  ): Promise<CommitResult> {
     const live = await this.readEntity(portablePath);
     if (live === null) throw new CommitPlanError(`${portablePath} does not exist`);
     const doc = MarkdownFile.parse(live);
     doc.setData({ retired: true });
-    return this.commit({
-      kind: "retire",
-      source,
-      files: [{ path: portablePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
-    });
+    return this.commit(
+      {
+        kind: "retire",
+        source,
+        files: [{ path: portablePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
+        ...(requestId ? { requestId } : {}),
+      },
+      undefined,
+      precondition,
+    );
   }
 
   /** Undo the first authored look by returning the world to its metadata-derived direction. */
@@ -334,7 +397,13 @@ export class WorldStore {
    * Restore a historical version as a new version (R-20): the content of v<n> becomes the
    * next version; v(n+1)…current stay in history untouched.
    */
-  async restoreVersion(portablePath: string, version: number, source: string): Promise<CommitResult> {
+  async restoreVersion(
+    portablePath: string,
+    version: number,
+    source: string,
+    requestId?: string,
+    precondition?: WorldStatePrecondition,
+  ): Promise<CommitResult> {
     const kind = classify(portablePath);
     const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "season", "episode", "art-direction"]);
     const historyPath = restorable.has(kind.track) ? historyPathForVersion(portablePath, version) : null;
@@ -344,9 +413,27 @@ export class WorldStore {
       );
     }
 
-    const snapshot = await this.readEntity(historyPath);
-    if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
     const live = await this.readEntity(portablePath);
+    let snapshot = await this.readEntity(historyPath);
+    // The first derived look and imported legacy histories live inside the accepted record rather
+    // than as standalone snapshots. Materialise that embedded version for the same commit path.
+    if (snapshot === null && kind.track === "art-direction" && live !== null) {
+      const record = ArtDirectionRecordSchema.parse(JSON.parse(live));
+      const historical = record.history.find((entry) => entry.version === version);
+      if (historical) {
+        snapshot = `${JSON.stringify({
+          version: record.version,
+          description: historical.description,
+          ...(historical.masterLook ? { masterLook: historical.masterLook } : {}),
+          ...(historical.keyArtIntent !== undefined ? { keyArtIntent: historical.keyArtIntent } : {}),
+          acceptedAt: record.acceptedAt,
+          audio: historical.audio,
+          failureModes: historical.failureModes,
+          history: record.history,
+        }, null, 2)}\n`;
+      }
+    }
+    if (snapshot === null) throw new CommitPlanError(`no history snapshot at ${historyPath}`);
     /*
      * A restored scene comes back graph-backed (SPEC-029 R-15) — see `restoredSceneContent`,
      * which decides what those bytes are and refuses a snapshot it cannot stand behind. Undo is
@@ -365,28 +452,41 @@ export class WorldStore {
         );
       }
     }
-    return this.commit({
-      kind: "restore",
-      source,
-      files: [
-        {
-          path: portablePath,
-          action: live === null ? "create" : "replace",
-          content,
-          baseHash: live === null ? null : sha256(live),
-        },
-      ],
-    });
+    return this.commit(
+      {
+        kind: "restore",
+        source,
+        files: [
+          {
+            path: portablePath,
+            action: live === null ? "create" : "replace",
+            content,
+            baseHash: live === null ? null : sha256(live),
+          },
+        ],
+        ...(requestId ? { requestId } : {}),
+      },
+      undefined,
+      precondition,
+    );
   }
 
   /** Reserve canon ids under the lock — logged like any other allocation (R-11, R-21). */
-  async allocateCanonIds(count: number, source: string): Promise<string[]> {
-    const result = await this.commit({
-      kind: "canon-id-allocation",
-      source,
-      files: [],
-      allocateCanonIds: count,
-    });
+  async allocateCanonIds(
+    count: number,
+    source: string,
+    precondition?: WorldStatePrecondition,
+  ): Promise<string[]> {
+    const result = await this.commit(
+      {
+        kind: "canon-id-allocation",
+        source,
+        files: [],
+        allocateCanonIds: count,
+      },
+      undefined,
+      precondition,
+    );
     return result.allocatedCanonIds;
   }
 

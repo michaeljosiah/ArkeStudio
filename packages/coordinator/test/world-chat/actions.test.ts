@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   newId,
@@ -6,6 +8,7 @@ import {
   ulid,
   type CandidateGroup,
   type CandidateId,
+  type ArkeReadRequirement,
   type ConversationActionCard,
   type ConversationId,
   type MessageId,
@@ -17,6 +20,7 @@ import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
 import { sceneVersionFor } from "../../src/productions/scene-edits.js";
+import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
 import { prepareWorldChatActions, worldChatActionAdapters, type WorldChatActionTurn } from "../../src/world-chat/actions.js";
@@ -25,7 +29,14 @@ import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { assembleStory } from "../productions/assemble.js";
-import { bibleFence, timelineFence } from "../../src/world-chat/target-reads.js";
+import {
+  artDirectionFence,
+  bibleFence,
+  canonFence,
+  sheetsFence,
+  timelineFence,
+  worldMetadataFence,
+} from "../../src/world-chat/target-reads.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 const NOW = () => AT;
@@ -134,8 +145,35 @@ function turn(
     sceneEdits: [],
     sceneBaseVersion: null,
     editorRequests: [],
+    actions: [],
     at: AT,
     ...over,
+  };
+}
+
+function currentReceipt(
+  store: WorldStore,
+  requirement: Extract<ArkeReadRequirement, "world-metadata" | "canon" | "sheets" | "art-direction">,
+): WorldChatCheckReceipt {
+  const bundle = store.getBundle();
+  const fence = requirement === "world-metadata"
+    ? worldMetadataFence(bundle)
+    : requirement === "canon"
+      ? canonFence(bundle)
+      : requirement === "sheets"
+        ? sheetsFence(bundle)
+        : artDirectionFence(bundle);
+  return {
+    id: newId("check"),
+    runId: newId("run"),
+    tool: "target-read",
+    status: "complete",
+    consulted: [],
+    target: { requirement, id: requirement === "art-direction" ? "art-direction" : store.worldId },
+    observedRevisionOrDigest: fence,
+    complete: true,
+    nextCursor: null,
+    at: AT,
   };
 }
 
@@ -438,5 +476,332 @@ describe("World Chat authority adapters", () => {
     const result = await decide(w.lifecycle, w.log, action);
     assert.equal(result.status, "completed");
     assert.equal((await readEditorRequest(w.store, PRODUCTION, action.authority.id))?.status, "accepted");
+  });
+
+  it("updates authored world metadata only after its card is approved", async () => {
+    const w = await setup();
+    const metadata = currentReceipt(w.store, "world-metadata");
+    const artDirection = currentReceipt(w.store, "art-direction");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [metadata, artDirection],
+      actions: [{
+        kind: "world-metadata",
+        changes: { logline: "The drowned city answers at slack water.", tone: null },
+        checkReceiptIds: [metadata.id, artDirection.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.notEqual(w.store.getBundle().meta.logline, "The drowned city answers at slack water.");
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "authored-diff");
+    if (action.shown.body.family === "authored-diff") {
+      assert.deepEqual(action.shown.body.fields.map((field) => field.label), ["Logline", "Tone"]);
+    }
+
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.status, "completed");
+    assert.equal(w.store.getBundle().meta.logline, "The drowned city answers at slack water.");
+    assert.equal(w.store.getBundle().meta.tone, undefined);
+  });
+
+  it("does not prepare or commit an unchanged metadata action", async () => {
+    const w = await setup();
+    const metadata = currentReceipt(w.store, "world-metadata");
+    const artDirection = currentReceipt(w.store, "art-direction");
+    const before = w.store.getBundle().meta;
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [metadata, artDirection],
+      actions: [{
+        kind: "world-metadata",
+        changes: { name: before.name },
+        checkReceiptIds: [metadata.id, artDirection.id],
+      }],
+    });
+    const [prepared] = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, [prepared!]);
+
+    await assert.rejects(() => w.lifecycle.bindIntent(prepared!.intent, prepared!.payload));
+    assert.deepEqual(w.store.getBundle().meta, before);
+    assert.equal((await loaded(w.log)).actions.length, 0);
+  });
+
+  it("requires the art-direction read used to derive metadata consequences", async () => {
+    const w = await setup();
+    const metadata = currentReceipt(w.store, "world-metadata");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [metadata],
+      actions: [{
+        kind: "world-metadata",
+        changes: { tone: "storm-lit" },
+        checkReceiptIds: [metadata.id],
+      }],
+    });
+
+    assert.throws(
+      () => prepareWorldChatActions(w.store, w.lifecycle, oneTurn),
+      /requires a complete current art-direction read/,
+    );
+  });
+
+  it("fences a direct metadata commit inside the store queue", async () => {
+    const w = await setup();
+    const metadata = currentReceipt(w.store, "world-metadata");
+    const artDirection = currentReceipt(w.store, "art-direction");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [metadata, artDirection],
+      actions: [{
+        kind: "world-metadata",
+        changes: { tone: "storm-lit" },
+        checkReceiptIds: [metadata.id, artDirection.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const action = (await loaded(w.log)).actions[0]!;
+
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const blocker = w.store.ownedWrite(async () => {
+      entered();
+      await held;
+    });
+    await started;
+    const concurrent = w.store.updateWorldMetadata({ genre: "changed in front of the approval" }, "test");
+    const adapter = worldChatActionAdapters(w.store, w.gate, NOW)
+      .find((candidate) => candidate.actionKind === "world-chat-world-metadata")!;
+    const executing = adapter.execute(action);
+    release();
+    await blocker;
+    await concurrent;
+    const result = await executing;
+
+    assert.equal(result.status, "stale");
+    assert.notEqual(w.store.getBundle().meta.tone, "storm-lit");
+  });
+
+  it("stages and accepts a Canon amendment through ProposalManager", async () => {
+    const w = await setup();
+    const canon = currentReceipt(w.store, "canon");
+    const sheets = currentReceipt(w.store, "sheets");
+    const before = w.store.getBundle().canon.find((entry) => entry.id === "CANON-001")!.body;
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [canon, sheets],
+      actions: [{
+        kind: "canon",
+        change: { operation: "amend", entryId: "CANON-001", changes: { statement: "The bells answer only at slack water." } },
+        checkReceiptIds: [canon.id, sheets.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.equal(w.store.getBundle().canon.find((entry) => entry.id === "CANON-001")!.body, before);
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.authority.kind, "proposal-manager");
+    const proposal = await w.gate.readManifest(action.authority.id);
+    assert.deepEqual(proposal.decision, {
+      mode: "attended",
+      owner: { kind: "world-chat", conversationId: w.conversationId },
+    });
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.status, "completed");
+    assert.equal(
+      w.store.getBundle().canon.find((entry) => entry.id === "CANON-001")!.body,
+      "The bells answer only at slack water.",
+    );
+  });
+
+  it("does not duplicate a retired sheet into another retired record", async () => {
+    const w = await setup();
+    await w.store.retire("locations/the-vigil.md", "test");
+    const sheets = currentReceipt(w.store, "sheets");
+    const canon = currentReceipt(w.store, "canon");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [sheets, canon],
+      actions: [{
+        kind: "sheet",
+        change: { operation: "duplicate", sheetType: "location", sheetId: "the-vigil", newName: "The Vigil Copy" },
+        checkReceiptIds: [sheets.id, canon.id],
+      }],
+    });
+    const [prepared] = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, [prepared!]);
+
+    await assert.rejects(() => w.lifecycle.bindIntent(prepared!.intent, prepared!.payload));
+    assert.equal(
+      (await w.gate.listOpen()).some((proposal) => proposal.source === `world-chat-action:${prepared!.intent.actionId}`),
+      false,
+    );
+    assert.equal(w.store.getBundle().sheets.some((sheet) => sheet.id === "the-vigil-copy"), false);
+  });
+
+  it("fences all Canon inputs inside proposal acceptance", async () => {
+    const w = await setup();
+    const canon = currentReceipt(w.store, "canon");
+    const sheets = currentReceipt(w.store, "sheets");
+    const before = w.store.getBundle().canon.find((entry) => entry.id === "CANON-001")!.body;
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [canon, sheets],
+      actions: [{
+        kind: "canon",
+        change: { operation: "amend", entryId: "CANON-001", changes: { statement: "This must not land." } },
+        checkReceiptIds: [canon.id, sheets.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const action = (await loaded(w.log)).actions[0]!;
+
+    let release!: () => void;
+    let entered!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const blocker = w.store.ownedWrite(async () => {
+      entered();
+      await held;
+    });
+    await started;
+    const concurrent = w.store.retire("locations/the-vigil.md", "test");
+    const adapter = worldChatActionAdapters(w.store, w.gate, NOW)
+      .find((candidate) => candidate.actionKind === "world-chat-canon")!;
+    const executing = adapter.execute(action);
+    release();
+    await blocker;
+    await concurrent;
+    const result = await executing;
+
+    assert.equal(result.status, "stale");
+    assert.equal(w.store.getBundle().canon.find((entry) => entry.id === "CANON-001")!.body, before);
+    assert.equal(
+      (await w.gate.listOpen()).some((proposal) => proposal.id === action.authority.id),
+      false,
+      "a stale card cannot leave a separately approvable proposal behind",
+    );
+  });
+
+  it("refuses rather than auto-confirming proposal consequences that changed after review", async () => {
+    const w = await setup();
+    const art = currentReceipt(w.store, "art-direction");
+    const before = w.store.getBundle().artDirection.description;
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [art],
+      actions: [{
+        kind: "art-direction",
+        changes: { description: "Painterly salt-air naturalism." },
+        checkReceiptIds: [art.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const action = (await loaded(w.log)).actions[0]!;
+    await writeFile(
+      join(w.store.dir, ".proposals", action.authority.id, "ripple.json"),
+      `${JSON.stringify({ computedAt: AT, governing: false, items: [] }, null, 2)}\n`,
+    );
+
+    const result = await decide(w.lifecycle, w.log, action);
+
+    assert.equal(result.status, "stale");
+    assert.equal(w.store.getBundle().artDirection.description, before);
+    assert.equal((await w.gate.listOpen()).some((proposal) => proposal.id === action.authority.id), false);
+  });
+
+  it("names retirement consequences and retires without deleting history", async () => {
+    const w = await setup();
+    const sheets = currentReceipt(w.store, "sheets");
+    const canon = currentReceipt(w.store, "canon");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [sheets, canon],
+      actions: [{
+        kind: "sheet-retire",
+        sheetType: "location",
+        sheetId: "the-vigil",
+        checkReceiptIds: [sheets.id, canon.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "destructive");
+    if (action.shown.body.family === "destructive") {
+      assert.equal(action.shown.body.undoAvailable, true);
+      assert.ok(action.shown.body.retained.some((item) => /history/i.test(item)));
+      assert.ok(action.shown.body.dependentChanges.length > 0);
+    }
+    assert.notEqual(w.store.getBundle().sheets.find((sheet) => sheet.id === "the-vigil")!.retired, true);
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.status, "completed");
+    assert.equal(w.store.getBundle().sheets.find((sheet) => sheet.id === "the-vigil")!.retired, true);
+    const completed = (await loaded(w.log)).actions[0]!;
+    assert.deepEqual(
+      completed.undo && { kind: completed.undo.kind, id: completed.undo.id },
+      { kind: "sheet-version", id: `location:the-vigil:v${action.authorityRevision}` },
+    );
+  });
+
+  it("lands a key-art-only change and restores embedded art-direction history", async () => {
+    const w = await setup();
+    await mkdir(join(w.store.dir, "build"), { recursive: true });
+    await writeFile(
+      join(w.store.dir, "build", "build.json"),
+      `${JSON.stringify({ blueprint: { keyArt: { subject: "Legacy founding brief", characters: [] } } }, null, 2)}\n`,
+    );
+    assert.equal((await readKeyArtBrief(w.store.dir))?.subject, "Legacy founding brief");
+
+    const art = currentReceipt(w.store, "art-direction");
+    const intentTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [art],
+      actions: [{
+        kind: "art-direction",
+        changes: { keyArtIntent: { subject: "Maren beneath the bells", characters: ["Maren Kest"] } },
+        checkReceiptIds: [art.id],
+      }],
+    });
+    const preparedIntent = prepareWorldChatActions(w.store, w.lifecycle, intentTurn);
+    await appendTurn(w.log, intentTurn, preparedIntent);
+    await bindAll(w.lifecycle, preparedIntent);
+    const intentResult = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
+    assert.equal(intentResult.status, "completed");
+    assert.equal(w.store.getBundle().artDirection.keyArtIntent?.subject, "Maren beneath the bells");
+    assert.equal((await readKeyArtBrief(w.store.dir))?.subject, "Maren beneath the bells");
+
+    const clearArt = currentReceipt(w.store, "art-direction");
+    const clearTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [clearArt],
+      actions: [{ kind: "art-direction", changes: { keyArtIntent: null }, checkReceiptIds: [clearArt.id] }],
+    });
+    const preparedClear = prepareWorldChatActions(w.store, w.lifecycle, clearTurn);
+    await appendTurn(w.log, clearTurn, preparedClear);
+    await bindAll(w.lifecycle, preparedClear);
+    const clearResult = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions.at(-1)!);
+    assert.equal(clearResult.status, "completed");
+    assert.equal(w.store.getBundle().artDirection.keyArtIntent, null);
+    assert.equal(await readKeyArtBrief(w.store.dir), null, "an explicit clear must not revive the founding brief");
+
+    const restoredArt = currentReceipt(w.store, "art-direction");
+    const restoreTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [restoredArt],
+      actions: [{ kind: "art-direction-restore", version: 2, checkReceiptIds: [restoredArt.id] }],
+    });
+    const preparedRestore = prepareWorldChatActions(w.store, w.lifecycle, restoreTurn);
+    await appendTurn(w.log, restoreTurn, preparedRestore);
+    await bindAll(w.lifecycle, preparedRestore);
+    const restoreAction = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(restoreAction.shown.body.family, "authored-diff");
+    const restoreResult = await decide(w.lifecycle, w.log, restoreAction);
+    assert.equal(restoreResult.status, "completed");
+    assert.equal(w.store.getBundle().artDirection.description, "Cold-water realism");
+    assert.ok(w.store.getBundle().artDirection.version > 5);
   });
 });

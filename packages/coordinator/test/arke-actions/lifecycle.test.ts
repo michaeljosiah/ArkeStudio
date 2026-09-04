@@ -540,6 +540,22 @@ describe("conversation action folding and decisions", () => {
     assert.equal(state.executions, 1);
   });
 
+  it("records an authority that becomes stale under its execution lock", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const authority: ConversationActionAuthorityAdapter = {
+      ...adapter({ executions: 0 }),
+      execute: async () => ({ status: "stale", detail: "The locked source changed." }),
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW });
+    const action = await prepare(lifecycle, conversationId);
+
+    const result = await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+
+    assert.equal(result.status, "stale");
+    assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "stale");
+  });
+
   it("blocks approval until dependencies complete", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);
@@ -567,6 +583,23 @@ describe("conversation action folding and decisions", () => {
     assert.equal(actions.find((one) => one.actionId === original.actionId)?.status, "superseded");
     assert.equal(actions.find((one) => one.actionId === original.actionId)?.supersededBy, replacement.actionId);
     assert.equal(actions.find((one) => one.actionId === replacement.actionId)?.undo?.id, "version:1");
+  });
+
+  it("links an authority-projected inverse when execution completes", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const authority: ConversationActionAuthorityAdapter = {
+      ...adapter({ executions: 0 }),
+      undo: () => ({ kind: "world-version", id: "version:1" }),
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW });
+    const action = await prepare(lifecycle, conversationId);
+
+    await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+
+    const completed = (await loaded(worldPath, conversationId)).actions[0]!;
+    assert.equal(completed.status, "completed");
+    assert.deepEqual(completed.undo, { kind: "world-version", id: "version:1", linkedAt: AT });
   });
 });
 

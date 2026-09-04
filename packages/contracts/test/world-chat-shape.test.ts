@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   CandidateEvidenceSchema,
+  ModelWorldChatActionSchema,
   ModelCandidateDraftSchema,
   ModelCandidateOperationSchema,
   ModelGroupOperationSchema,
@@ -116,6 +117,13 @@ describe("the shape guide's examples satisfy the schemas they teach", () => {
   it("the complete result example parses", () => {
     const parsed = WorldChatTurnResultSchema.safeParse(WORLD_CHAT_SHAPE_EXAMPLES.turnResult);
     assert.ok(parsed.success, parsed.success ? "" : parsed.error.message);
+  });
+
+  it("every world action example parses", () => {
+    for (const [kind, example] of Object.entries(WORLD_CHAT_SHAPE_EXAMPLES.worldActions)) {
+      const parsed = ModelWorldChatActionSchema.safeParse(example);
+      assert.ok(parsed.success, `${kind} action example: ${parsed.success ? "" : parsed.error.message}`);
+    }
   });
 });
 

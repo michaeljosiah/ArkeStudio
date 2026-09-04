@@ -650,6 +650,7 @@ export function materialiseCandidate(
       const record = ArtDirectionRecordSchema.parse({
         version: current.version + 1,
         description: String(draft["description"]).trim(),
+        ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
         acceptedAt: at,
         // The fourth place that rebuilds this record (#244), and the one talking about the look
         // in a chat rather than on a form. A conversation that never mentioned music must not
@@ -663,6 +664,7 @@ export function materialiseCandidate(
             version: current.version,
             description: current.description,
             ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+            ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
             acceptedAt: current.acceptedAt ?? bundle.meta.created,
             audio: current.audio,
             failureModes: [...current.failureModes],

@@ -91,6 +91,18 @@ export function artDirectionFence(bundle: WorldBundle): string {
   return fence(bundle.artDirection, bundle.artDirection.version);
 }
 
+export function worldMetadataFence(bundle: WorldBundle): string {
+  return fence(bundle.meta, bundle.meta.updated);
+}
+
+export function canonFence(bundle: WorldBundle): string {
+  return fence(bundle.canon, bundle.meta.canonRevision);
+}
+
+export function sheetsFence(bundle: WorldBundle): string {
+  return fence(bundle.sheets);
+}
+
 export function bibleFence(bundle: WorldBundle): string {
   return fence(bundle.bible, bundle.bible.version);
 }
@@ -212,7 +224,7 @@ export class WorldChatTargetReads {
         assertArgs(args, []);
         readTarget = target("world-metadata", bundle.meta.worldId);
         rows = [{ key: "metadata", value: bundle.meta }];
-        revisionOrDigest = fence(bundle.meta, bundle.meta.updated);
+        revisionOrDigest = worldMetadataFence(bundle);
         break;
       case "list_world_index": {
         assertArgs(args, []);
@@ -230,13 +242,13 @@ export class WorldChatTargetReads {
         assertArgs(args, []);
         readTarget = target("canon", bundle.meta.worldId);
         rows = [...bundle.canon].sort((a, b) => a.id.localeCompare(b.id)).map((entry) => ({ key: entry.id, value: entry }));
-        revisionOrDigest = fence(bundle.canon, bundle.meta.canonRevision);
+        revisionOrDigest = canonFence(bundle);
         break;
       case "list_sheets":
         assertArgs(args, []);
         readTarget = target("sheets", bundle.meta.worldId);
         rows = [...bundle.sheets].sort((a, b) => a.id.localeCompare(b.id)).map((sheet) => ({ key: sheet.id, value: sheet }));
-        revisionOrDigest = fence(bundle.sheets);
+        revisionOrDigest = sheetsFence(bundle);
         break;
       case "get_bible":
         assertArgs(args, []);
