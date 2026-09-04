@@ -2540,6 +2540,7 @@ function TakesView({
         ) : (
           <div className="fy-takegrid">
             {takes.map((t, i) => {
+              const durationSec = typeof t.params.durationSec === "number" ? t.params.durationSec : shot.durationSec;
               return (
                 <article
                   key={t.id}
@@ -2566,7 +2567,7 @@ function TakesView({
                     <span className="fy-take__name">Take {i + 1}</span>
                     <span style={{ flex: 1 }} />
                     <span className="fy-mono">
-                      {t.id === accepted ? "✓ SELECTED" : seconds(shot.durationSec)}
+                      {t.id === accepted ? "✓ SELECTED" : seconds(durationSec)}
                     </span>
                   </span>
                 </article>

@@ -212,6 +212,21 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(!html.includes('class="fy-playbtn"'), "the grid promises no inert play control");
   });
 
+  it("shows each take's duration and falls back to the shot's planned duration (#782)", () => {
+    const state = withSaltlight((production) => ({
+      ...production,
+      takes: production.takes.map((take, index) => ({
+        ...take,
+        params: index === 0 ? { ...take.params, durationSec: 2 } : take.params,
+      })),
+      selections: {},
+    }));
+    const page = parseHTML(render(state, GENERATE)).document;
+    const labels = [...page.querySelectorAll(".fy-take__foot")].map((foot) => foot.textContent?.replace(/\s/g, ""));
+
+    assert.deepEqual(labels, ["Take12s", "Take24s"]);
+  });
+
   it("plays video media with real controls while still frames remain pictures (#729)", async () => {
     const mounted = await mount(FIXTURE_STATE);
     const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
