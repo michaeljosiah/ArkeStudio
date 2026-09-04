@@ -121,6 +121,7 @@ function component(id: string, over: Partial<SetupComponent> = {}): SetupCompone
     displayName: id,
     purpose: "test component",
     sizeMb: 1000,
+    installLocation: "C:\\ArkeStudio\\models",
     state: "available",
     bytesDone: 0,
     bytesTotal: 0,

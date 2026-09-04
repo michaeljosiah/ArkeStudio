@@ -1805,6 +1805,14 @@ export class Coordinator {
               // Weight entries land in the folder the engine actually reads: the same
               // resolver detection, launch and pre-flight use, so nothing can disagree.
               externalDirs: { "comfyui-models": () => this.opts.comfyui?.service.modelsDir() ?? null },
+              componentLocations: {
+                "comfyui-runtime": () => {
+                  const engine = this.opts.comfyui?.service.engineStatus();
+                  if (engine?.source === "user-path") return engine.location;
+                  if (engine?.source === "user-url") return null;
+                  return undefined;
+                },
+              },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
             },
           )

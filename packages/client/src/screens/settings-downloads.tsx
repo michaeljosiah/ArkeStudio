@@ -45,6 +45,7 @@ function ProgressRow({ component, progress }: { component: SetupComponent; progr
           <div className="fy-set__caps">
             {component.purpose} · {sizeMb(component.sizeMb)}
           </div>
+          <div className="fy-set__caps">Location · {component.installLocation ?? "Unavailable"}</div>
         </div>
         <RuntimeStatus tone={needsAttention(component) ? "warn" : componentIsSettled(component.state) ? "ok" : "idle"}>
           {progress.active

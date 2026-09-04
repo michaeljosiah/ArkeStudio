@@ -134,6 +134,7 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
     await svc.run();
     const status = last(events);
     assert.equal(status.components[0]!.state, "ready");
+    assert.equal(status.components[0]!.installLocation, join(appRoot, "comfyui-runtime"));
     // The whole tree arrived under the component dir, marker intact, archive cleaned away.
     const marker = join(appRoot, "comfyui-runtime", "ComfyUI_windows_portable", "ComfyUI", "main.py");
     assert.equal((await stat(marker)).isFile(), true);
@@ -190,15 +191,18 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
 
   it("an explicitly selected external engine is never fetched (D10)", async () => {
     const appRoot = await tempDir("arke-tree-");
+    const externalRoot = await tempDir("arke-external-tree-");
     const events: DomainEvent[] = [];
     const d = deps({ externallyPresent: true });
     const svc = new LocalSetupService(d, (e) => events.push(e), {
       appRoot,
       catalogue: [treeEntry()],
       throttleMs: 0,
+      componentLocations: { "comfyui-runtime": () => externalRoot },
     });
     await svc.detect();
     assert.equal(last(events).components[0]!.state, "present");
+    assert.equal(last(events).components[0]!.installLocation, externalRoot);
     await svc.run();
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was downloaded");
   });
@@ -243,6 +247,7 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
 
     await svc.run();
     assert.deepEqual(last(events).components.map((component) => component.state), ["ready", "ready"]);
+    assert.equal(last(events).components[1]!.installLocation, modelsDir);
     assert.equal(
       (await stat(join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors"))).isFile(),
       true,
@@ -266,6 +271,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     });
     await svc.detect();
     assert.equal(last(events).components[0]!.state, "present", "the user's file IS presence (R-8)");
+    assert.equal(last(events).components[0]!.installLocation, modelsDir);
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0);
   });
 

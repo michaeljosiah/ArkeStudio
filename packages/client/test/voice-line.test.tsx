@@ -410,6 +410,7 @@ describe("remote ComfyUI locality", () => {
             displayName: "ComfyUI",
             purpose: "Runs image and video recipes",
             sizeMb: 2034,
+            installLocation: "C:\\ArkeStudio\\comfyui-runtime",
             state: "available",
             bytesDone: 0,
             bytesTotal: 2034 * 1024 * 1024,

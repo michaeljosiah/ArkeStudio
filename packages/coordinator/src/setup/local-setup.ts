@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import {
   componentIsSettled,
@@ -58,6 +59,8 @@ export interface SetupOptions {
    * then blocked with the reason rather than falling back to a folder the engine never reads.
    */
   externalDirs?: Record<string, () => string | null>;
+  /** Host-owned destinations that supersede a component's managed location. */
+  componentLocations?: Record<string, () => string | null | undefined>;
   /** Awaited after a newly installed component becomes ready, before dependants are attempted. */
   onComponentReady?: (componentId: string) => Promise<void>;
 }
@@ -120,6 +123,7 @@ export class LocalSetupService {
         displayName: entry.displayName,
         purpose: entry.purpose,
         sizeMb: entry.sizeMb,
+        installLocation: this.installLocationOf(entry),
         state: entry.optional === true ? "available" : "queued",
         bytesDone: 0,
         bytesTotal: entry.sizeMb * 1024 * 1024,
@@ -142,7 +146,12 @@ export class LocalSetupService {
 
   status(): SetupStatus {
     return {
-      components: [...this.components.values()].map(({ entry: _entry, ...c }) => c),
+      components: [...this.components.values()].map(({ entry, ...c }) => ({
+        ...c,
+        // Resolved at publication time because a newly activated or remapped engine can change
+        // where dependent weights land without rebuilding the setup service.
+        installLocation: this.installLocationOf(entry),
+      })),
       running: this.running,
       diskFreeMb: this.diskFreeMb,
       diskCheckedAt: this.diskCheckedAt,
@@ -194,27 +203,31 @@ export class LocalSetupService {
     return join(this.opts.appRoot, spec.dir);
   }
 
-  /**
-   * The folder this component's bytes actually land in — which is not always under the app.
-   * A weight entry naming an external root writes into the folder the user mapped, and that
-   * folder is very often on another drive, because putting a model library somewhere with room
-   * for it is the whole reason the mapping exists. Guarding it against the app's volume
-   * measures the wrong disk in both directions, so the destination is resolved here and the
-   * guard measures what it names.
-   *
-   * Null only where a `files` entry has no mapped folder yet; install blocks that with the
-   * better reason, so the guard leaves it alone.
-   */
-  private destinationOf(entry: CatalogueEntry): string | null {
+  /** The concrete final folder, resolved here rather than inferred from component ids in a reader. */
+  private installLocationOf(entry: CatalogueEntry): string | null {
+    const hostLocation = this.opts.componentLocations?.[entry.id]?.();
+    if (hostLocation !== undefined) return hostLocation;
     const spec = entry.spec;
     if (spec.kind === "files") {
       const root = this.filesRoot(spec);
       return root === null ? null : join(root, spec.dir);
     }
     if (spec.kind === "archive" || spec.kind === "tree") return this.toolDir(spec);
-    // An installer stages under the app's own models folder. A pull lands wherever that runtime
-    // keeps its store, which is not ours to know — the app's volume stays the honest guess.
-    return this.modelsDir();
+    if (spec.kind === "pull") {
+      if (process.env["OLLAMA_MODELS"]) return resolve(process.env["OLLAMA_MODELS"]);
+      return process.platform === "linux"
+        ? "/usr/share/ollama/.ollama/models"
+        : join(homedir(), ".ollama", "models");
+    }
+    // The staged installer is temporary. State the runtime's documented final location instead.
+    if (process.platform === "darwin") return "/Applications/Ollama.app";
+    if (process.platform === "linux") return "/usr/local/bin";
+    return join(process.env["LOCALAPPDATA"] ?? join(homedir(), "AppData", "Local"), "Programs", "Ollama");
+  }
+
+  /** The installer download is staged on Arke's volume before Ollama writes its final location. */
+  private guardDestinationOf(entry: CatalogueEntry): string | null {
+    return entry.spec.kind === "installer" ? this.modelsDir() : this.installLocationOf(entry);
   }
 
   /**
@@ -411,7 +424,7 @@ export class LocalSetupService {
     const volumeKey = (dir: string): string => (process.platform === "win32" ? rootOf(dir) : resolve(dir));
     const volumes = new Map<string, { root: string; dirs: Set<string>; needMb: number; components: Live[] }>();
     for (const c of outstanding) {
-      const dir = this.destinationOf(c.entry);
+      const dir = this.guardDestinationOf(c.entry);
       if (dir === null) continue; // no mapped folder — install states that, and states it better
       const key = volumeKey(dir);
       const group = volumes.get(key) ?? { root: rootOf(dir), dirs: new Set<string>(), needMb: 0, components: [] };

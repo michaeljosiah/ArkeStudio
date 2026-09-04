@@ -31,6 +31,7 @@ function weights(patch: Partial<SetupComponent>): SetupComponent {
     displayName: "Local · Draft Image · weights",
     purpose: "Model files for Local · Draft Image",
     sizeMb: 6617,
+    installLocation: "D:\\ComfyUI\\models",
     state: "available",
     bytesDone: 0,
     bytesTotal: 6617 * 1024 * 1024,

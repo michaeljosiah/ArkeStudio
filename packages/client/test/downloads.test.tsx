@@ -34,6 +34,7 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     displayName: patch.id,
     purpose: "test",
     sizeMb: 100,
+    installLocation: "C:\\ArkeStudio",
     state: "available",
     bytesDone: 0,
     bytesTotal: 0,
@@ -48,6 +49,7 @@ const RUNTIME = component({
   displayName: "Ollama",
   purpose: "Runs language models here",
   sizeMb: 750,
+  installLocation: "C:\\Users\\Arke\\AppData\\Local\\Programs\\Ollama",
 });
 
 const MODEL = component({
@@ -56,6 +58,7 @@ const MODEL = component({
   displayName: "Gemma 4 · 12B",
   purpose: "Reads images and holds a 256K context",
   sizeMb: 7600,
+  installLocation: "D:\\Ollama\\models",
   requires: ["ollama-runtime"],
   provides: [GEMMA.id],
   // Declared by the service for an optional component Arke can take back — an Ollama pull is
@@ -148,6 +151,7 @@ describe("Downloads shows everything in flight, whichever screen started it (R-8
       engine: "comfyui",
       displayName: "Draft video · weights",
       sizeMb: 13_700,
+      installLocation: "E:\\ComfyUI\\models",
       state: "queued",
     }),
   ];
@@ -157,6 +161,9 @@ describe("Downloads shows everything in flight, whichever screen started it (R-8
     assert.match(text, /Gemma 4 · 12B/);
     assert.match(text, /Draft video · weights/);
     assert.match(text, /25% · 8 MB\/s/);
+    assert.match(text, /D:\\Ollama\\models/);
+    assert.match(text, /E:\\ComfyUI\\models/);
+    assert.match(text, /C:\\Users\\Arke\\AppData\\Local\\Programs\\Ollama/);
   });
 
   it("states the same percentage the capability row does (R-82)", () => {

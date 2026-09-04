@@ -122,6 +122,7 @@ describe("screen inventory", () => {
               displayName: "Kokoro voice",
               purpose: "Speaks on this machine",
               sizeMb: 88,
+              installLocation: "C:\\ArkeStudio\\models\\kokoro",
               state: "downloading",
               bytesDone: 44 * 1024 * 1024,
               bytesTotal: 88 * 1024 * 1024,
