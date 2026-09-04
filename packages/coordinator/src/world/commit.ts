@@ -17,9 +17,11 @@ import {
 import {
   carriesSceneFlow,
   carriesStageBlocking,
+  carriesStagePerformance,
   upgradeLegacySceneCandidate,
   GRAPH_SCENE_SCHEMA_VERSION,
   STAGE_BLOCKING_SCHEMA_VERSION,
+  STAGE_PERFORMANCE_SCHEMA_VERSION,
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { appendChanges, readChanges } from "./change-writer.js";
@@ -592,10 +594,14 @@ export class Committer {
     const landsStageBlocking = files.some(
       (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStageBlocking(f.newContent),
     );
+    const landsStagePerformance = files.some(
+      (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStagePerformance(f.newContent),
+    );
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
       landsStageBlocking ? STAGE_BLOCKING_SCHEMA_VERSION : 0,
+      landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

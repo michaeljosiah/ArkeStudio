@@ -110,6 +110,16 @@ function key(t: number, p: readonly [number, number, number], l: readonly [numbe
   };
 }
 
+function figureAction(description: string, sheetId: string): string {
+  const words = description.toLowerCase();
+  const mention = `@${sheetId.toLowerCase()}`;
+  const start = words.indexOf(mention);
+  if (start < 0) return "";
+  const after = words.slice(start + mention.length);
+  const nextMention = after.search(/@[a-z0-9]/);
+  return after.slice(0, nextMention < 0 ? 140 : nextMention);
+}
+
 /**
  * A first staging, from nothing but the shot: cast in a loose line facing the lens, one massing
  * box per named location, and a camera move read off the framing words. Deterministic on
@@ -121,11 +131,25 @@ export function stageShot(
   input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"] },
 ): ResolvedShotStaging {
   const framing = input.framing ?? shot.framing;
-  const cast = input.cast.slice(0, 5).map((sheetId, index) => ({
-    sheetId,
-    x: round(-1.5 + index * 1.5 - (Math.min(input.cast.length, 5) - 1) * 0.75),
-    z: index % 2 === 0 ? 0 : -0.5,
-  }));
+  const cast = input.cast.slice(0, 5).map((sheetId, index) => {
+    const x = round(-1.5 + index * 1.5 - (Math.min(input.cast.length, 5) - 1) * 0.75);
+    const z = index % 2 === 0 ? 0 : -0.5;
+    const action = figureAction(shot.description, sheetId);
+    const pose = /\b(?:sits?|sitting|seated|takes? (?:a )?seat)\b/.test(action)
+      ? "sit" as const
+      : /\b(?:lies?|lying|reclines?|reclining|prone|supine)\b/.test(action)
+        ? "lie" as const
+        : undefined;
+    const walking = pose === undefined && /\b(?:walks?|walking|paces?|pacing|crosses?|crossing)\b/.test(action);
+    const distance = Math.min(2.4, Math.max(0.7, input.durationSec * 1.2));
+    return {
+      sheetId,
+      x,
+      z,
+      ...(pose === undefined ? {} : { pose }),
+      ...(walking ? { to: [x, round(z - distance)] as [number, number] } : {}),
+    };
+  });
   const sets = input.sets.slice(0, 2).map((name, index) => ({
     name,
     x: index === 0 ? -3.4 : 4.2,
@@ -317,8 +341,16 @@ export function stagingPromptClause(
     })
     .map((figure) => nameOf(figure.sheetId));
   const walk = walkers.length === 0 ? "" : ` ${walkers.join(", ")} ${walkers.length === 1 ? "walks" : "walk"} through the shot.`;
+  const poses = staging.cast.flatMap((figure) =>
+    figure.pose === "sit"
+      ? [`${nameOf(figure.sheetId)} is seated`]
+      : figure.pose === "lie"
+        ? [`${nameOf(figure.sheetId)} is lying down`]
+        : [],
+  );
+  const posture = poses.length === 0 ? "" : ` ${poses.join("; ")}.`;
   return [
-    `Camera move, ${stagingMoveWord(keys, staging.cast)}, blocked out on the stage (${keys.length} keys).${walk}`,
+    `Camera move, ${stagingMoveWord(keys, staging.cast)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...stagingBeats(staging, nameOf, durationSec),
   ].join("\n");
 }
