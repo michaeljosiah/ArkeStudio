@@ -1308,6 +1308,8 @@ export class Coordinator {
   private readonly exports = new Map<string, ExportHandle>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
+  private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
   private backfillAbort: AbortController | null = null;
   /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
@@ -2279,6 +2281,18 @@ export class Coordinator {
   }
 
   async openWorld(worldId: string): Promise<void> {
+    const existing = this.openingWorlds.get(worldId);
+    if (existing) return existing;
+    const opening = this.openWorldOnce(worldId);
+    this.openingWorlds.set(worldId, opening);
+    try {
+      await opening;
+    } finally {
+      if (this.openingWorlds.get(worldId) === opening) this.openingWorlds.delete(worldId);
+    }
+  }
+
+  private async openWorldOnce(worldId: string): Promise<void> {
     // Captured before the load, because recovery must not run on a world that was already open:
     // it closes any run still marked running, and on the open world that could be a live turn
     // rather than an abandoned one. Held here rather than trusted from the caller — the client
