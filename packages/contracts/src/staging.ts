@@ -187,14 +187,24 @@ function key(t: number, p: readonly [number, number, number], l: readonly [numbe
   };
 }
 
-function figureAction(description: string, sheetId: string): string {
+function figureAction(description: string, sheetId: string, cast: readonly string[]): string {
   const words = description.toLowerCase();
   const mention = `@${sheetId.toLowerCase()}`;
   const start = words.indexOf(mention);
   if (start < 0) return "";
   const after = words.slice(start + mention.length);
-  const nextMention = after.search(/@[a-z0-9]/);
-  return after.slice(0, nextMention < 0 ? 140 : nextMention);
+  const sentenceStart = Math.max(words.lastIndexOf(".", start), words.lastIndexOf("!", start), words.lastIndexOf("?", start)) + 1;
+  const castMentions = cast.map((id) => `@${id.toLowerCase()}`);
+  const hasPreviousCast = castMentions.some((candidate) => words.lastIndexOf(candidate, start - 1) >= sentenceStart);
+  const ends = [140];
+  for (const candidate of castMentions) {
+    const at = after.indexOf(candidate);
+    if (at >= 0) ends.push(at);
+  }
+  const punctuation = after.search(/[.!?]/);
+  if (punctuation >= 0) ends.push(punctuation);
+  const prefix = hasPreviousCast ? "" : words.slice(sentenceStart, start);
+  return `${prefix} ${after.slice(0, Math.min(...ends))}`;
 }
 
 const PROP_PROFILES: ReadonlyArray<{
@@ -245,7 +255,7 @@ export function stageShot(
   const blocked = input.cast.slice(0, 5).map((sheetId, index) => {
     const x = round(-1.5 + index * 1.5 - (Math.min(input.cast.length, 5) - 1) * 0.75);
     const z = index % 2 === 0 ? 0 : -0.5;
-    const action = figureAction(shot.description, sheetId);
+    const action = figureAction(shot.description, sheetId, input.cast);
     const pose = /\b(?:sits?|sitting|seated|takes? (?:a )?seat)\b/.test(action)
       ? "sit" as const
       : /\b(?:lies?|lying|reclines?|reclining|prone|supine)\b/.test(action)
