@@ -144,13 +144,22 @@ function episodicState(count = 2): ClientState {
   });
 }
 
-function unassignedState(): ClientState {
+function unassignedState(withAssignedEmptyScene = false): ClientState {
   return withSaltlight((production) => {
     const withScenes = withSecondScene(production);
     return {
       ...withScenes,
       meta: { ...withScenes.meta, kind: "series" },
-      episodes: [{ id: "ep_empty", version: 1, order: 1, title: "Episode 01", scenes: [] }],
+      scenes: withAssignedEmptyScene
+        ? withScenes.scenes.map((scene) => scene.id === "sc_04" ? { ...scene, shots: [] } : scene)
+        : withScenes.scenes,
+      episodes: [{
+        id: "ep_empty",
+        version: 1,
+        order: 1,
+        title: "Episode 01",
+        scenes: withAssignedEmptyScene ? ["sc_04"] : [],
+      }],
       episodeFiles: { ep_empty: "01-episode-01" },
     };
   });
@@ -403,6 +412,13 @@ describe("the takes, watched (turn 102c)", () => {
     assert.equal(input.value, "Unassigned");
     assert.ok(mounted.container.textContent?.includes("Shot 12"), "the first loose shot becomes current");
     assert.ok(mounted.container.textContent?.includes("5 · The lamps hold"), "all loose scenes remain navigable");
+  });
+
+  it("points to unassigned scenes when the selected episode's scenes have no shots (#790)", () => {
+    const html = render(unassignedState(true), GENERATE);
+
+    assert.ok(html.includes("1 unassigned scene is available in the episode picker."));
+    assert.ok(!html.includes("Choose another episode or generate its first shot."));
   });
 
   it("never guesses the mark (review 2026-08-22): an acceptance on a hidden record marks nothing", () => {

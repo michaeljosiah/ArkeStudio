@@ -2432,7 +2432,7 @@ function TakesView({
           </header>
           <EmptyState
             title="Nothing to review yet"
-            hint={selectedEpisode !== null && selectedEpisode.scenes.length === 0 && unassignedScenes.length > 0
+            hint={selectedEpisode !== null && all.length === 0 && unassignedScenes.length > 0
               ? `${unassignedScenes.length} unassigned scene${unassignedScenes.length === 1 ? " is" : "s are"} available in the episode picker.`
               : selectedEpisode === null
                 ? "Generate a scene and its takes arrive here."
