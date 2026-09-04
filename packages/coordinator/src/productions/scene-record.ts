@@ -41,6 +41,7 @@ export const GRAPH_SCENE_SCHEMA_VERSION = 3;
 export const STAGE_BLOCKING_SCHEMA_VERSION = 6;
 export const STAGE_PERFORMANCE_SCHEMA_VERSION = 7;
 export const STAGE_EASING_SCHEMA_VERSION = 8;
+export const STAGE_RIG_SCHEMA_VERSION = 9;
 
 /**
  * A write refused because the graph it would land is not one path (R-59, R-61).
@@ -301,6 +302,35 @@ export function carriesStageEasing(raw: string): boolean {
       const keys = (staging as Record<string, unknown>)["keys"];
       return Array.isArray(keys) && keys.some((key) =>
         typeof key === "object" && key !== null && ("easeIn" in key || "easeOut" in key));
+    });
+  } catch {
+    return false;
+  }
+}
+
+/** Do these scene bytes carry deterministic camera-rig settings or pins? */
+export function carriesStageRig(raw: string): boolean {
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const object = value as Record<string, unknown>;
+    const direct = Array.isArray(object["shots"]) ? object["shots"] : [];
+    const flow = object["flow"];
+    const nodes = typeof flow === "object" && flow !== null && Array.isArray((flow as Record<string, unknown>)["nodes"])
+      ? (flow as Record<string, unknown>)["nodes"] as unknown[]
+      : [];
+    const shots = [
+      ...direct,
+      ...nodes.flatMap((node) =>
+        typeof node === "object" && node !== null && (node as Record<string, unknown>)["kind"] === "shot"
+          ? [(node as Record<string, unknown>)["shot"]]
+          : []),
+    ];
+    return shots.some((shot) => {
+      if (typeof shot !== "object" || shot === null) return false;
+      const staging = (shot as Record<string, unknown>)["staging"];
+      return typeof staging === "object" && staging !== null &&
+        ("rig" in staging || "seed" in staging || "rigIntensity" in staging);
     });
   } catch {
     return false;

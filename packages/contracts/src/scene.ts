@@ -140,6 +140,15 @@ export const SceneBlockingSchema = z
   .strict();
 export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
 
+export const StageRigSchema = z.enum(["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"]);
+export type StageRig = z.infer<typeof StageRigSchema>;
+
+const ShotRigShape = {
+  rig: StageRigSchema.optional(),
+  seed: z.number().int().min(0).optional(),
+  rigIntensity: z.number().min(0).max(2).optional(),
+};
+
 const ShotBlockingOverrideShape = {
   /** Present together only when this shot deliberately overrides the scene blocking. */
   cast: z.array(StagingFigureSchema).optional(),
@@ -148,7 +157,7 @@ const ShotBlockingOverrideShape = {
 
 /** The editable half of shot staging; versions and output pins are coordinator-owned. */
 export const ShotStageEditSchema = z
-  .object({ ...ShotBlockingOverrideShape, keys: z.array(StagingKeySchema) })
+  .object({ ...ShotBlockingOverrideShape, ...ShotRigShape, keys: z.array(StagingKeySchema) })
   .strict()
   .superRefine((value, context) => {
     if ((value.cast === undefined) !== (value.sets === undefined)) {
@@ -162,6 +171,7 @@ export const ShotStagingSchema = z
     /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
     version: z.number().int().min(1),
     ...ShotBlockingOverrideShape,
+    ...ShotRigShape,
     keys: z.array(StagingKeySchema),
     /**
       * The playblast and opening frame filed from this staging, and what they were rendered from:
@@ -176,6 +186,9 @@ export const ShotStagingSchema = z
         durationSec: z.number().positive().optional(),
         aspect: z.string().min(1).optional(),
         lens: z.string().optional(),
+        rig: StageRigSchema.optional(),
+        seed: z.number().int().min(0).optional(),
+        rigIntensity: z.number().min(0).max(2).optional(),
         /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
         blocking: z.discriminatedUnion("owner", [
           z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),

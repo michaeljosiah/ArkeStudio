@@ -591,6 +591,35 @@ describe("scene detail owns the workspace", () => {
     assert.equal(command.staging?.cast?.[0]?.pose, "lie");
   });
 
+  it("edits deterministic camera rig character with the staged camera", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    shot.staging = {
+      version: 1,
+      cast: [],
+      sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 3], l: [0, 1, 0] }],
+      rig: "handheld",
+      seed: 42,
+      rigIntensity: 1,
+    };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(all(mounted, ".fy-swstage__row button").find((button) => button.textContent === "handheld")!);
+    await click(q(mounted, '[aria-label="More rig motion"]')!);
+    await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.equal(command.staging?.rig, "crane");
+    assert.equal(command.staging?.seed, 42);
+    assert.equal(command.staging?.rigIntensity, 1.25);
+  });
+
   it("plays a staging kept before the shot was retimed to its end pose, and repairs it on Keep", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

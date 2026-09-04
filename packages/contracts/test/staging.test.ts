@@ -7,6 +7,8 @@ import {
   ShotStagingSchema,
   MAX_STAGE_WALK_SPEED_MPS,
   STAGE_FRAME_RATE,
+  stageRigOffset,
+  stageRigSeed,
   stageShot,
   stageWalkSpeed,
   stagingEase,
@@ -45,6 +47,9 @@ describe("the Stage's arithmetic", () => {
     assert.equal(first.keys[1]?.t, 4);
     assert.equal(first.keys[0]?.easeOut, 0.25);
     assert.equal(first.keys[1]?.easeIn, 0.25);
+    assert.equal(first.rig, "dolly");
+    assert.equal(first.seed, stageRigSeed("sh_12"));
+    assert.equal(first.rigIntensity, 1);
     assert.match(stagingPromptClause(first, () => "Maren", 4), /ease out 25%[\s\S]*ease in 25%/);
     assert.ok(first.keys[1]!.p[2] < first.keys[0]!.p[2], "a push-in ends closer");
     assert.ok(ShotStagingSchema.safeParse(first).success, "what staging writes is what the schema reads");
@@ -60,6 +65,15 @@ describe("the Stage's arithmetic", () => {
     assert.ok(stagingEase(from, to, 0.9) > 0.9);
     assert.equal(stagingEase(from, to, 1), 1);
     assert.ok(Number.isFinite(stagingEase({ easeOut: 1 }, { easeIn: 1 }, 0.5)), "overlapping ease is clamped");
+  });
+
+  it("replays seeded camera rig motion exactly", () => {
+    const first = stageRigOffset("handheld", 42, 1, 1.25);
+    assert.deepEqual(stageRigOffset("handheld", 42, 1, 1.25), first);
+    assert.notDeepEqual(stageRigOffset("handheld", 43, 1, 1.25), first);
+    assert.notDeepEqual(stageRigOffset("handheld", 42, 1, 1.5), first);
+    assert.deepEqual(stageRigOffset("sticks", 42, 2, 1.25), { position: [0, 0, 0], rotation: [0, 0, 0] });
+    assert.equal(stagingMoveWord([{ t: 0, p: [0, 1, 3], l: [0, 1, 0] }], [], "handheld"), "handheld static");
   });
 
   it("blocks explicit cast performance from the shot text", () => {
@@ -240,6 +254,9 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagePlayblastIsStale({ blocking: { version: 3, cast: [], sets: [] } }, staging, shown), true);
     const legacyLocal = { ...staging, cast: [], sets: [], playblast: { artifactId: pin.artifactId, version: 1 } };
     assert.equal(stagePlayblastIsStale({ blocking: { version: 9, cast: [], sets: [] } }, legacyLocal, shown), false);
+    const rigged = { ...staging, rig: "handheld" as const, seed: 42, rigIntensity: 1, playblast: { ...pin, rig: "handheld" as const, seed: 42, rigIntensity: 1 } };
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, rigged, shown), false);
+    assert.equal(stagePlayblastIsStale({ blocking: { version: 2, cast: [], sets: [] } }, { ...rigged, seed: 43 }, shown), true);
   });
 
   it("keeps Stage authorship on the edit-stage wire command", () => {

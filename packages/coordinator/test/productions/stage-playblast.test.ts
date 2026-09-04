@@ -70,7 +70,14 @@ async function harness() {
       command: {
         kind: "edit-stage",
         shotId: SHOT,
-        staging: { cast: fresh.cast, sets: fresh.sets, keys: fresh.keys },
+        staging: {
+          cast: fresh.cast,
+          sets: fresh.sets,
+          keys: fresh.keys,
+          rig: fresh.rig,
+          seed: fresh.seed,
+          rigIntensity: fresh.rigIntensity,
+        },
       },
     });
   };
@@ -111,7 +118,10 @@ describe("filing a playblast from the Stage", () => {
       assert.ok(pinned, "the staging names its playblast");
       assert.equal(pinned.version, 1);
       assert.deepEqual(pinned.blocking, { owner: "shot" });
-      assert.equal(bundle().meta.schemaVersion, 6, "the new strict pin is fenced even on private blocking");
+      assert.equal(pinned.rig, "dolly");
+      assert.equal(pinned.seed, staged.shot.staging?.seed);
+      assert.equal(pinned.rigIntensity, 1);
+      assert.equal(bundle().meta.schemaVersion, 9, "the deterministic rig is fenced even on private blocking");
       assert.equal(after.scene.version, sceneVersion + 1, "the pin is a versioned scene write");
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
       assert.ok(artifact, "the pinned id resolves on the shelf");

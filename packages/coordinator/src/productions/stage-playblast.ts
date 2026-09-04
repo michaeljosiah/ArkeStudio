@@ -106,6 +106,9 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
         durationSec: input.durationSec,
         aspect: input.aspect,
         ...(input.lens !== undefined ? { lens: input.lens } : {}),
+        ...(shot.staging.rig === undefined ? {} : { rig: shot.staging.rig }),
+        ...(shot.staging.seed === undefined ? {} : { seed: shot.staging.seed }),
+        ...(shot.staging.rigIntensity === undefined ? {} : { rigIntensity: shot.staging.rigIntensity }),
         blocking: effectiveStageBlocking(record, shot.staging).identity,
       },
     };
