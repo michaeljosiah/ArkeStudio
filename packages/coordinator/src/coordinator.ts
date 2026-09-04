@@ -9029,6 +9029,20 @@ export class Coordinator {
         });
         return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
       }
+      case "bible-helper-run": {
+        // This frame shipped ahead of its coordinator seam. A correlated refusal is the honest
+        // result until that read-only helper exists; silence leaves the editor waiting forever.
+        this.emit({
+          at: this.nowIso(),
+          type: "bible.helper-answered",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          helper: msg.helper,
+          options: null,
+          reason: "Bible helpers are not available in this build.",
+        });
+        return;
+      }
       case "bench-draft-lyrics": {
         // The same one-turn harness call the enhancer makes, and the same discipline: the
         // answer is an EVENT, because a draft reaches the song only when the author presses
@@ -11616,6 +11630,8 @@ export class Coordinator {
         return;
       }
     }
+    const unhandled: never = msg;
+    return unhandled;
   }
 
   /**
