@@ -88,6 +88,7 @@ describe("the Stage's arithmetic", () => {
     assert.ok(staged.cast[1]?.to);
     assert.ok((stageWalkSpeed(staged.cast[1]!, 4) ?? Infinity) <= MAX_STAGE_WALK_SPEED_MPS);
     assert.deepEqual(staged.sets[1], { name: "counter", x: -2.25, z: 0.6, w: 2, h: 0.9, d: 0.7 });
+    assert.equal(staged.sets.length, 2, "the next figure does not inherit the previous figure's prop");
     assert.ok(ShotStagingSchema.safeParse(staged).success);
     assert.equal(ShotStagingSchema.safeParse({
       ...staged,
@@ -96,6 +97,19 @@ describe("the Stage's arithmetic", () => {
     const prompt = stagingPromptClause(staged, (id) => id === "maren-kest" ? "Maren" : "Ivo", 4);
     assert.match(prompt, /Ivo walks through the shot\. Maren is seated\./);
     assert.match(prompt, /counter: 2\.00m wide, 0\.90m high, 0\.70m deep at x -2\.25m, z 0\.60m/);
+  });
+
+  it("keeps locations inside a figure's sentence and reads setting text before its first mention", () => {
+    const located = stageShot(shot({
+      description: "@wren-halloway sits in @railway-hotel-lobby with her hands flat on the desk.",
+    }), { cast: ["wren-halloway"], sets: [], durationSec: 4 });
+    assert.equal(located.cast[0]?.pose, "sit");
+    assert.equal(located.sets[0]?.name, "desk", "a location mention does not end the action");
+
+    const settingFirst = stageShot(shot({
+      description: "Behind the front counter, @wren-halloway does not stand up.",
+    }), { cast: ["wren-halloway"], sets: [], durationSec: 4 });
+    assert.equal(settingFirst.sets[0]?.name, "counter", "the first figure owns its sentence's leading setting");
   });
 
   it("reads the move off the framing: static holds, orbit sweeps, crane rises, and a castless shot stays in the world", () => {
