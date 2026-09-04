@@ -470,7 +470,7 @@ export const ConversationActionRecordSchema = z
     preparedAt: IsoDateTimeSchema,
     decision: ConversationActionDecisionSchema.optional(),
     statusDetail: z.string().max(1_000).optional(),
-    receipt: ConversationActionTombstoneReceiptSchema.optional(),
+    receipt: ConversationActionReceiptSchema.optional(),
     supersededBy: ConversationActionIdSchema.optional(),
     undo: ConversationActionUndoLinkSchema.optional(),
   })
@@ -496,7 +496,7 @@ export const ConversationActionTombstoneSchema = z
     authority: ConversationActionAuthorityBindingSchema,
     payloadDigest: Sha256Schema,
     previewDigest: Sha256Schema,
-    receipt: ConversationActionReceiptSchema.optional(),
+    receipt: ConversationActionTombstoneReceiptSchema.optional(),
   })
   .strict();
 export type ConversationActionTombstone = z.infer<typeof ConversationActionTombstoneSchema>;
