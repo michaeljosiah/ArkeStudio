@@ -27,6 +27,7 @@ import {
   offeredAspects,
   parseAspect,
   passesForDuration,
+  providerModelId,
   reconcileStrategy,
   sceneImageOutput,
   sumMicroUsd,
@@ -56,6 +57,11 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.ok(!refused.ok && /not in the model manifest/.test(refused.reason));
     assert.ok(!refused.ok && refused.reason.includes(`v${SHIPPED_MANIFEST.manifestVersion}`));
     assert.equal(requireModel(SHIPPED_MANIFEST, "seedance-2.0").ok, true);
+  });
+
+  it("declares provider-native ids instead of guessing them from stable model ids", () => {
+    assert.equal(providerModelId(model("gemma4-12b")), "gemma4:12b");
+    assert.equal(providerModelId(model("claude-sonnet-5")), "claude-sonnet-5");
   });
 
   it("every FAL model the manifest offers has a route behind it", () => {

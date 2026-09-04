@@ -268,6 +268,8 @@ export type AspectRange = z.infer<typeof AspectRangeSchema>;
 export const ManifestModelSchema = z
   .object({
     id: z.string().min(1),
+    /** The provider or harness spelling when it differs from the stable manifest id. */
+    providerModelId: z.string().min(1).optional(),
     provider: ProviderIdSchema,
     capability: CapabilitySchema,
     displayName: z.string().min(1),
@@ -337,6 +339,11 @@ export const ManifestModelSchema = z
   })
   .strict();
 export type ManifestModel = z.infer<typeof ManifestModelSchema>;
+
+/** The identifier sent to the provider-facing harness, kept explicit where its spelling differs. */
+export function providerModelId(model: Pick<ManifestModel, "id" | "providerModelId">): string {
+  return model.providerModelId ?? model.id;
+}
 
 export const ModelManifestSchema = z
   .object({

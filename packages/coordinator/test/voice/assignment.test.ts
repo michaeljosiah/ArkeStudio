@@ -13,6 +13,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
 import type { ComfyUiEngineService } from "../../src/comfyui/engine.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
+import { setProductionModel } from "../../src/productions/ops.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { FakeProvider } from "../queue/fake-provider.js";
 import { until } from "../wait.js";
@@ -324,6 +325,38 @@ describe("cloned voice assignment", () => {
         h.events.some((event) => event.type === "job.updated"),
         false,
       );
+    } finally {
+      await h.provider.close();
+    }
+  });
+
+  it("refuses a production voice default that conflicts with the assigned voice", async () => {
+    const h = await harness();
+    try {
+      const store = h.provider.openStore();
+      assert.ok(store);
+      await setProductionModel(store, "saltlight", "voice-tts", SIBLING_MODEL.id);
+      const path = join(h.worldDir, "characters", "maren-kest.md");
+      const current = await readFile(path, "utf8");
+      await writeFile(
+        path,
+        current.replace(
+          /voice:\r?\n(?:  .*\r?\n){4}/,
+          "voice:\n  provider: comfyui\n  model: comfyui-cloned-voice\n  voiceId: harbour\n  label: Harbour\n  assignedAtVersion: 4\n",
+        ),
+      );
+      await store.reload();
+      await h.send({
+        kind: "voice-line",
+        requestId: REQUEST,
+        worldId: WORLD_ID,
+        productionId: "saltlight",
+        shotId: "sh_12",
+      });
+      const conflict = h.events.find((event) => event.type === "queue.enqueue-result");
+      assert.ok(conflict && conflict.type === "queue.enqueue-result");
+      assert.equal(conflict.disposition, "rejected");
+      assert.match(conflict.failures[0]?.reason ?? "", /Other Local Voice.*Local Cloned Voice/);
     } finally {
       await h.provider.close();
     }

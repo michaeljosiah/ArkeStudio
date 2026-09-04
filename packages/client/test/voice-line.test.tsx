@@ -68,6 +68,7 @@ describe("the voice-line dialog", () => {
     if (prodId === undefined) return;
     const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/generate/voice-line`);
     assert.match(html, /data-testid="voice-line-generate"/);
+    assert.match(html, /Remember for this production/);
     assert.doesNotMatch(html, /Voice generation arrives with SPEC-011/);
   });
 
@@ -203,6 +204,62 @@ describe("the voice-line dialog", () => {
     assert.match(html, /voice · Harbour \(comfyui\)/);
     assert.match(html, /Assigned voice unavailable/);
     assert.match(html, /Cloned voice setup is unavailable in this build/);
+    const at = html.indexOf('data-testid="voice-line-generate"');
+    assert.ok(at >= 0 && html.slice(at, html.indexOf(">", at)).includes("disabled"));
+  });
+
+  it("blocks a conflicting production default and offers the assigned model for this line", () => {
+    const prodId = production()?.meta.id;
+    if (prodId === undefined) return;
+    const assignedModel = {
+      id: "eleven_assigned_voice",
+      provider: "elevenlabs" as const,
+      capability: "voice-tts" as const,
+      displayName: "Assigned speech model",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { deliveries: ["measured" as const] },
+      pricing: { kind: "perCharacter" as const, microUsdPerCharacter: 300 },
+    };
+    const productionModel = { ...assignedModel, id: "eleven_production_voice", displayName: "Production speech model" };
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        manifest: {
+          ...(FIXTURE_STATE.app.manifest ?? { manifestVersion: 1, generated: "2026-08-25", models: [] }),
+          models: [...(FIXTURE_STATE.app.manifest?.models ?? []), assignedModel, productionModel],
+        },
+      },
+      world: {
+        ...FIXTURE_STATE.world!,
+        sheets: FIXTURE_STATE.world!.sheets.map((sheet) => ({
+          ...sheet,
+          voice: {
+            provider: "elevenlabs",
+            model: assignedModel.id,
+            voiceId: "v_8Kq2",
+            label: "Low tide",
+            assignedAtVersion: sheet.version,
+          },
+        })),
+        productions: FIXTURE_STATE.world!.productions.map((item) =>
+          item.meta.id === prodId
+            ? {
+                ...item,
+                meta: {
+                  ...item.meta,
+                  models: { ...item.meta.models, "voice-tts": productionModel.id },
+                },
+              }
+            : item,
+        ),
+      },
+    };
+    const html = render(`/w/${FIXTURE_WORLD_ID}/p/${prodId}/generate/voice-line`, state);
+    assert.match(html, /This production uses Production speech model/);
+    assert.match(html, /value="eleven_assigned_voice"/);
+    assert.match(html, /assigned voice/);
+    assert.doesNotMatch(html, /Assigned voice unavailable/);
     const at = html.indexOf('data-testid="voice-line-generate"');
     assert.ok(at >= 0 && html.slice(at, html.indexOf(">", at)).includes("disabled"));
   });

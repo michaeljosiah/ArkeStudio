@@ -433,9 +433,9 @@ describe("per-agent settings", () => {
     for (const agent of Object.values(agentsIn(config))) assert.equal(agent.model, undefined);
   });
 
-  it("an agent's own model beats the session-wide one", () => {
+  it("a dispatch model beats the agent default for this session", () => {
     const config = buildSessionConfig({ model: "openai/gpt-5.2", agents: { "canon-qa": { model: "ollama/gemma4" } } });
-    assert.equal(agentsIn(config)["canon-qa"]!.model, "ollama/gemma4");
+    assert.equal(agentsIn(config)["canon-qa"]!.model, "openai/gpt-5.2");
     assert.equal(agentsIn(config)["sheet-editor"]!.model, "openai/gpt-5.2");
   });
 

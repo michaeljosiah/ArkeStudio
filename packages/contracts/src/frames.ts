@@ -410,6 +410,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       text: z.string().min(1).max(16_000),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
+      /** This turn's language-model override; absent uses the production's remembered choice. */
+      modelId: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
     })
@@ -1419,6 +1421,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       shotId: z.string().min(1),
+      /** This line's model override; it must still host the speaker's assigned voice. */
+      modelId: z.string().min(1).optional(),
       /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
       /** One of DELIVERIES; absent leaves the read at the provider's own default. */

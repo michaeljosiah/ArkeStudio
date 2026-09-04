@@ -105,10 +105,9 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
       }),
       // The confinement is decided once, in contracts, and only spelled here (R-10, R-17).
       ...renderV1(confinementFor(member, { web: input.researchWeb === true })),
-      // The agent's own choice wins over the session-wide one; absent, OpenCode keeps using
-      // whatever it is configured with, which is the only safe default — pinning a model the
-      // user's OpenCode has no auth for would break every session.
-      ...(override?.model ?? input.model ? { model: override?.model ?? input.model } : {}),
+      // A dispatch choice is narrower than an agent default and therefore wins for this session.
+      // With neither, OpenCode keeps its own default rather than Studio inventing one.
+      ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
     };
   }
   return {

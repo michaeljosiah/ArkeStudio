@@ -73,7 +73,12 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string }) => Promise<{ sessionId: string }>;
+  /** Resolve an explicit or production language choice without ever substituting another model. */
+  resolveLanguageModel?: (input: {
+    entryContext: WorldChatContext | undefined;
+    modelId?: string;
+  }) => Promise<{ modelId?: string; sessionModel?: string; inputTokenLimit?: number; reason?: string }>;
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
@@ -341,8 +346,9 @@ export class WorldChatRunner {
     text: string,
     attachmentIds: readonly string[] = [],
     subject?: WorldChatSubject,
+    modelId?: string,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId);
   }
 
   /**
@@ -362,7 +368,11 @@ export class WorldChatRunner {
       // Already answered -- a second click, or a stale screen. Re-asking would duplicate a reply.
       return { status: "completed", reply: "" };
     }
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId);
+    const previousModel = [...events]
+      .reverse()
+      .map(({ event }) => ("run" in event ? event.run : undefined))
+      .find((run) => run?.turnId === turnId)?.model;
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, undefined, previousModel);
   }
 
   /**
@@ -376,6 +386,7 @@ export class WorldChatRunner {
     attachmentIds: readonly string[] = [],
     existingTurnId?: TurnId,
     subject?: WorldChatSubject,
+    modelId?: string,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (!adapter || !adapter.readiness().ready) {
@@ -412,6 +423,12 @@ export class WorldChatRunner {
     const { events } = await store.read();
     const meta = await store.readMeta();
     const view = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    const modelChoice = this.deps.resolveLanguageModel
+      ? await this.deps.resolveLanguageModel({
+          entryContext: view.entryContext,
+          ...(modelId !== undefined ? { modelId } : {}),
+        })
+      : modelId !== undefined ? { modelId } : {};
     // On a retry the words being asked again are already in the log under their original id, and
     // that id is the one evidence must cite — the fresh `message` above is never appended then.
     const original = existingTurnId
@@ -463,7 +480,7 @@ export class WorldChatRunner {
         " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
     };
     const assembled = assembleContext({
-      budgetChars: budgetFor(adapter.knownInputTokenLimit?.() ?? undefined),
+      budgetChars: budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
         ? {
             entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}`,
@@ -483,7 +500,6 @@ export class WorldChatRunner {
       currentUserMessage: text,
       currentUserMessageId: currentMessage.id,
     });
-
     const run: WorldChatRun = {
       id: runId,
       turnId,
@@ -492,6 +508,7 @@ export class WorldChatRunner {
       basedOnConversationSeq: events.length > 0 ? events[events.length - 1]!.seq : 0,
       status: "running",
       adapter: adapter.id,
+      ...(modelChoice.modelId !== undefined ? { model: modelChoice.modelId } : {}),
       harnessCleanup: "pending",
       contextDigest: assembled.digest,
       startedAt: at,
@@ -503,6 +520,12 @@ export class WorldChatRunner {
       existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
       { at },
     );
+    if (modelChoice.reason !== undefined) {
+      const reason = `rejected: ${modelChoice.reason}`;
+      await this.finish(store, run, "failed", reason);
+      this.cancelling.delete(conversationId);
+      return { status: "failed", reason };
+    }
     if (controller.signal.aborted) {
       await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
       this.cancelling.delete(conversationId);
@@ -519,7 +542,11 @@ export class WorldChatRunner {
       });
       prepared = true;
       const session = this.deps.createSession
-        ? await this.deps.createSession({ cwd, runId })
+        ? await this.deps.createSession({
+            cwd,
+            runId,
+            ...(modelChoice.sessionModel !== undefined ? { model: modelChoice.sessionModel } : {}),
+          })
         : await adapter.createSession({ purpose: "world-chat", cwd, agent: "world-builder" });
       const timeoutMs = this.deps.timeoutMs ?? DEFAULT_TURN_TIMEOUT_MS;
 
