@@ -546,19 +546,41 @@ describe("scene detail owns the workspace", () => {
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.command.kind, "edit-stage");
     if (command.command.kind !== "edit-stage") return;
-    assert.ok(command.command.staging);
-    assert.equal("version" in command.command.staging, false);
-    assert.equal(command.command.staging?.keys[0]?.p[1], 1.65);
+    const kept = command.command.staging;
+    assert.ok(kept);
+    assert.equal("version" in kept, false);
+    assert.equal(kept.keys[0]?.p[1], 1.65);
 
-    // Lowering back to the kept height is not a move at all — the chip goes without a click.
+    // Keep freezes edits until the authoritative scene lands; the draft remains in case it refuses.
+    const pendingLower = q(mounted, '[aria-label="Lower"]') as HTMLButtonElement;
+    assert.equal(pendingLower.disabled, true);
+    await click(pendingLower);
+    assert.match(stage.textContent ?? "", /1\.65m/, "a disabled control cannot move the pending draft");
+
+    const landed = structuredClone(state);
+    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    landedScene.version += 1;
+    const landedShot = orderedShots(landedScene).find((candidate) => candidate.id === "sh_12")!;
+    landedShot.staging = { ...landedShot.staging!, ...kept, version: landedShot.staging!.version + 1 };
+    await act(async () => __setStateForTest(landed));
+    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null, "the landed draft retires");
+    assert.match(stage.textContent ?? "", /1\.65m/);
+
+    // Returning to the newly kept height is not a move at all.
     await click(q(mounted, '[aria-label="Lower"]')!);
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
-    // Discard is the draft going away.
+    assert.match(stage.textContent ?? "", /1\.55m/);
+    assert.ok(q(mounted, '[data-testid="stage-moved"]'));
+    await click(q(mounted, '[aria-label="Raise"]')!);
+    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
+
+    // Discard returns a later draft to the camera that actually landed.
+    await click(q(mounted, '[aria-label="Lower"]')!);
     await click(q(mounted, '[aria-label="Lower"]')!);
     assert.match(stage.textContent ?? "", /1\.45m/);
     await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
-    assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
-    assert.match(stage.textContent ?? "", /1\.55m/);
+    assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
+    assert.match(stage.textContent ?? "", /1\.65m/);
   });
 
   it("marks a blocked walk whose implied speed is too fast", async () => {
