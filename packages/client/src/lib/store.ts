@@ -1875,6 +1875,14 @@ export function setupRepair(componentId: string): void {
   send({ kind: "setup-repair", componentId });
 }
 
+export function setupPause(componentId: string): void {
+  send({ kind: "setup-pause", componentId });
+}
+
+export function setupResume(componentId: string): void {
+  send({ kind: "setup-resume", componentId });
+}
+
 export function setupCancel(): void {
   send({ kind: "setup-cancel" });
 }

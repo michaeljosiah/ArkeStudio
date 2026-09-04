@@ -872,8 +872,11 @@ async function initialize(): Promise<{ port: number }> {
 
   const setupEngine = (id: string, healthReady: boolean) => {
     const component = coordinator?.getState().app.setup?.components.find((item) => item.id === id);
-    if (component?.state === "downloading" || component?.state === "installing") {
-      return { state: "downloading" as const, detail: "Model download is in progress." };
+    if (component?.state === "downloading" || component?.state === "installing" || component?.state === "paused") {
+      return {
+        state: "downloading" as const,
+        detail: component.state === "paused" ? "Model download is paused." : "Model download is in progress.",
+      };
     }
     if (component?.state === "failed") {
       const verification = /checksum|verification|not the file/i.test(component.detail ?? "");

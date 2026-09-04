@@ -50,7 +50,14 @@ function service(catalogue: readonly CatalogueEntry[], appRoot: string) {
   const events: DomainEvent[] = [];
   const svc = new LocalSetupService(
     {
-      fetchStream: async () => ({ ok: false, status: 500, contentLength: null, body: (async function* () {})() }),
+      fetchStream: async () => ({
+        ok: false,
+        status: 500,
+        contentLength: null,
+        acceptRanges: false,
+        contentRangeStart: null,
+        body: (async function* () {})(),
+      }),
       run: async () => ({ code: 1, output: "" }),
       which: async () => null,
       probeUrl: async () => false,
@@ -79,6 +86,7 @@ describe("the closure is declared data, and its total is what the button says (R
       bytesDone: 0,
       bytesTotal: 0,
       bytesPerSecond: null,
+      pauseSupported: false,
       ...(entry.requires !== undefined ? { requires: [...entry.requires] } : {}),
       ...(entry.installedMb !== undefined ? { installedMb: entry.installedMb } : {}),
     }));
@@ -157,7 +165,14 @@ describe("remove answers for what Arke owns, and nothing else (R-43)", () => {
     const events: DomainEvent[] = [];
     const svc = new LocalSetupService(
       {
-        fetchStream: async () => ({ ok: false, status: 500, contentLength: null, body: (async function* () {})() }),
+        fetchStream: async () => ({
+          ok: false,
+          status: 500,
+          contentLength: null,
+          acceptRanges: false,
+          contentRangeStart: null,
+          body: (async function* () {})(),
+        }),
         run: async () => ({ code: 1, output: "" }),
         which: async () => null,
         probeUrl: async () => false,
@@ -191,7 +206,14 @@ describe("remove answers for what Arke owns, and nothing else (R-43)", () => {
     const events: DomainEvent[] = [];
     const svc = new LocalSetupService(
       {
-        fetchStream: async () => ({ ok: false, status: 500, contentLength: null, body: (async function* () {})() }),
+        fetchStream: async () => ({
+          ok: false,
+          status: 500,
+          contentLength: null,
+          acceptRanges: false,
+          contentRangeStart: null,
+          body: (async function* () {})(),
+        }),
         run: async (command, args) => {
           asked.push([command, ...args]);
           return { code: 0, output: "" };
@@ -259,6 +281,7 @@ describe("one projection for a transfer, computed once (R-82)", () => {
       bytesDone: 2.5 * 1024 * 1024 * 1024,
       bytesTotal: 10 * 1024 * 1024 * 1024,
       bytesPerSecond: 12 * 1024 * 1024,
+      pauseSupported: true,
     };
     assert.deepEqual(transferProgress(moving), { percent: 25, doneMb: 2560, mbPerSecond: 12, active: true });
     // A server that never said how big the file is gives 0 rather than a made-up denominator.

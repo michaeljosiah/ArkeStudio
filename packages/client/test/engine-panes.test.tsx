@@ -33,6 +33,7 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     bytesDone: 0,
     bytesTotal: 0,
     bytesPerSecond: null,
+    pauseSupported: false,
     ...patch,
   };
 }
@@ -176,6 +177,52 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // partition rather than overlap — the recipe list takes what the engine has answered for,
     // the model group only what it has not (SPEC-034 R-7, SPEC-033 R-6).
     assert.doesNotMatch(comfy, /RECIPES[\s\S]*MODELS/);
+  });
+
+  it("controls the Arke-managed engine transfer from the engine row", () => {
+    const renderManaged = (runtime: SetupComponent): string => {
+      const base = stateWith();
+      return render(
+        "/settings/providers?provider=comfyui",
+        stateWith({
+          comfyui: {
+            ...base.app.comfyui!,
+            engine: { ...base.app.comfyui!.engine, source: "absent", state: "absent" },
+          },
+          setup: { running: runtime.state === "downloading", diskFreeMb: 400_000, diskCheckedAt: null, components: [runtime] },
+        }),
+      );
+    };
+    const active = component({
+      id: "comfyui-runtime",
+      engine: "comfyui",
+      state: "downloading",
+      pauseSupported: true,
+    });
+    assert.match(renderManaged(active), /data-testid="comfyui-managed-option"[\s\S]*>Pause<\/button>/);
+    assert.match(renderManaged({ ...active, pauseSupported: false }), /Cannot be paused/);
+    assert.match(
+      renderManaged({ ...active, state: "paused", bytesDone: 50, bytesTotal: 100 }),
+      /data-testid="comfyui-managed-option"[\s\S]*>Resume<\/button>/,
+    );
+  });
+
+  it("keeps paused progress and Resume on ordinary engine component rows", () => {
+    const paused = component({
+      id: "ollama-runtime",
+      engine: "ollama",
+      displayName: "Ollama runtime",
+      state: "paused",
+      bytesDone: 25,
+      bytesTotal: 100,
+      pauseSupported: true,
+    });
+    const html = render(
+      "/settings/providers?provider=ollama",
+      stateWith({ setup: { running: false, diskFreeMb: 400_000, diskCheckedAt: null, components: [paused] } }),
+    );
+    assert.match(plain(html), /Ollama runtime[\s\S]*paused · 25%[\s\S]*Resume/);
+    assert.match(html, /width:25%/);
   });
 
   it("offers a connection check, not a restart, for an external URL", () => {

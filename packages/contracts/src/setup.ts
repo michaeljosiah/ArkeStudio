@@ -20,6 +20,8 @@ export const SetupComponentStateSchema = z.enum([
   /** Waiting its turn. */
   "queued",
   "downloading",
+  /** A byte-range HTTP transfer owned by Arke is durable on disk and can continue from here. */
+  "paused",
   /** Bytes are here; the runtime's own installer or model-pull is running. */
   "installing",
   /** Arrived and usable. */
@@ -53,6 +55,8 @@ export const SetupComponentSchema = z
     bytesTotal: z.number().int().min(0).default(0),
     /** Measured, not guessed; null while nothing is moving. */
     bytesPerSecond: z.number().int().min(0).nullable().default(null),
+    /** Whether the active transfer can pause or the retained transfer can safely resume. */
+    pauseSupported: z.boolean().default(false),
     /** The reason, whenever the state is one that owes you one. */
     detail: z.string().optional(),
     /**

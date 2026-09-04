@@ -4898,6 +4898,14 @@ export class Coordinator {
         this.setup?.retry(msg.componentId);
         return;
       }
+      case "setup-pause": {
+        this.setup?.pause(msg.componentId);
+        return;
+      }
+      case "setup-resume": {
+        this.setup?.resume(msg.componentId);
+        return;
+      }
       case "setup-repair": {
         // Only a completed deletion queues work. A held file remains a stated repair failure;
         // running detection there would otherwise bless the same corrupt bytes as present again.
