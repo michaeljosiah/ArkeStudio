@@ -104,6 +104,13 @@ export const CONTROL_REGISTRY = {
     route: "/settings/providers",
     targetParam: "component",
   },
+  /** Continue an app-owned ranged transfer from its durable byte boundary. */
+  "component-resume": {
+    label: "Resume",
+    place: "Settings · Downloads",
+    route: "/settings/downloads",
+    targetParam: "component",
+  },
   /** The provider's key row: save, replace, test (SPEC-008 §2.4). */
   "provider-key": {
     label: "Key",
@@ -780,7 +787,7 @@ const engineUnavailable: Rule = {
     const managedInTransit = ctx.sources.setup?.components.some(
       (c) =>
         c.id === "comfyui-runtime" &&
-        (c.state === "queued" || c.state === "downloading" || c.state === "installing"),
+        (c.state === "queued" || c.state === "downloading" || c.state === "paused" || c.state === "installing"),
     );
     if (engine.state === "absent" && managedInTransit === true) return [];
     const disabled = comfyui.recipes.filter(
@@ -1181,7 +1188,12 @@ const waitingOnComponent: Rule = {
     if (setup === null) return [];
     const findings: DraftFinding[] = [];
     for (const component of setup.components) {
-      if (component.state !== "queued" && component.state !== "downloading" && component.state !== "installing") {
+      if (
+        component.state !== "queued" &&
+        component.state !== "downloading" &&
+        component.state !== "paused" &&
+        component.state !== "installing"
+      ) {
         continue;
       }
       const waiting: string[] = setup.components
@@ -1214,7 +1226,10 @@ const waitingOnComponent: Rule = {
           { name: "waiting", value: waiting.join(", "), source: "app.setup.components", measuredAt: ctx.now },
         ],
         cause: { statement: `${waiting.join(", ")} waiting on this ${component.state} component` },
-        remedy: null,
+        remedy:
+          component.state === "paused" && component.pauseSupported
+            ? { control: "component-resume", target: component.id }
+            : null,
         consequences: [],
       });
     }

@@ -40,6 +40,7 @@ import {
   SceneSchema,
   SelectionsSchema,
   SheetSchema,
+  SetupComponentSchema,
   TakeSchema,
   ulid,
   UlidSchema,
@@ -1405,6 +1406,27 @@ describe("domain events and frames", () => {
     );
     for (const kind of ["install-update-and-restart", "install-update-on-close", "acknowledge-update"]) {
       assert.doesNotThrow(() => ClientMessageSchema.parse({ kind }));
+    }
+  });
+
+  it("validates resumable setup state and controls", () => {
+    const paused = SetupComponentSchema.parse({
+      id: "weights",
+      displayName: "Weights",
+      purpose: "Runs here",
+      sizeMb: 1,
+      installLocation: "C:\\models",
+      state: "paused",
+      bytesDone: 512,
+      bytesTotal: 1024,
+      bytesPerSecond: null,
+      pauseSupported: true,
+    });
+    assert.equal(paused.state, "paused");
+    assert.equal(paused.pauseSupported, true);
+    for (const kind of ["setup-pause", "setup-resume"] as const) {
+      assert.deepEqual(ClientMessageSchema.parse({ kind, componentId: "weights" }), { kind, componentId: "weights" });
+      assert.throws(() => ClientMessageSchema.parse({ kind, componentId: "" }));
     }
   });
 

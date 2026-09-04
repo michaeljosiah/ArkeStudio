@@ -472,6 +472,7 @@ describe("remote ComfyUI locality", () => {
             bytesDone: 0,
             bytesTotal: 2034 * 1024 * 1024,
             bytesPerSecond: null,
+            pauseSupported: false,
           }],
         },
       },

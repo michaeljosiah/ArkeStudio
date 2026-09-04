@@ -92,6 +92,7 @@ function generatedSources(random: () => number): DiagnosticsSources {
           bytesDone: 0,
           bytesTotal: 0,
           bytesPerSecond: null,
+          pauseSupported: false,
           detail: componentDetail,
           blockedBy: "disk",
           blockedVolumeRoot: "D:\\",

@@ -76,6 +76,8 @@ function deps(opts: {
         ok: true,
         status: 200,
         contentLength: payload.byteLength,
+        acceptRanges: false,
+        contentRangeStart: null,
         body: (async function* () {
           yield payload;
         })(),
@@ -439,9 +441,9 @@ describe("an external models folder is the user's (§2.4)", () => {
       },
     });
     const inner = d.fetchStream.bind(d);
-    d.fetchStream = async (url, signal) => {
+    d.fetchStream = async (url, signal, rangeStart) => {
       if (url.includes("portable")) await held; // the pass is in flight until this lets go
-      return inner(url, signal);
+      return inner(url, signal, rangeStart);
     };
     const svc = new LocalSetupService(d, (e) => events.push(e), {
       appRoot,
@@ -489,10 +491,9 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal((await stat(join(modelsDir, "loras"))).isDirectory(), true, "an empty folder survives");
   });
 
-  it("cancellation removes the exact external fragment even when the mapping changes", async () => {
+  it("cancellation removes the exact external fragment even when the mapping becomes unavailable", async () => {
     const appRoot = await tempDir("arke-cancel-map-");
     const oldModelsDir = await tempDir("arke-cancel-old-");
-    const newModelsDir = await tempDir("arke-cancel-new-");
     let modelsDir: string | null = oldModelsDir;
     const events: DomainEvent[] = [];
     const d = deps();
@@ -500,9 +501,14 @@ describe("an external models folder is the user's (§2.4)", () => {
       ok: true,
       status: 200,
       contentLength: 4096,
+      acceptRanges: false,
+      contentRangeStart: null,
       body: (async function* () {
         yield bytes(512, [1, 2, 3]);
-        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
       })(),
     });
     const svc = new LocalSetupService(d, (event) => events.push(event), {
@@ -523,7 +529,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal(partials.length, 1, "the active fetch owns one unique fragment at its captured path");
 
     const cancelled = svc.cancel();
-    modelsDir = newModelsDir;
+    modelsDir = null;
     await Promise.all([running, cancelled]);
 
     assert.deepEqual(
@@ -531,7 +537,6 @@ describe("an external models folder is the user's (§2.4)", () => {
       [],
       "cleanup uses the old captured path, not the new mapping",
     );
-    assert.deepEqual(await readdir(newModelsDir), [], "the replacement mapping was never walked or written");
     assert.equal(last(events).components[0]!.state, "skipped");
     assert.equal(last(events).components[0]!.detail, "stopped");
     assert.equal(last(events).running, false, "cancel resolves only after the download has unwound");

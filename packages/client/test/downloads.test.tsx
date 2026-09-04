@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { comfyUiWeightsComponentId, type ClientState, type ManifestModel, type SetupComponent } from "@arke-studio/contracts";
+import {
+  comfyUiWeightsComponentId,
+  type ClientMessage,
+  type ClientState,
+  type ManifestModel,
+  type SetupComponent,
+} from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __setBridgeForTest, __setStateForTest, setupPause, setupResume } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -39,6 +46,7 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     bytesDone: 0,
     bytesTotal: 0,
     bytesPerSecond: null,
+    pauseSupported: false,
     ...patch,
   };
 }
@@ -173,6 +181,66 @@ describe("Downloads shows everything in flight, whichever screen started it (R-8
     const local = render(LANGUAGE_ROW, stateWith(moving));
     assert.match(plain(downloads), /25%/);
     assert.match(local, /width:25%/);
+  });
+
+  it("offers Pause only when the active source supports it", () => {
+    const supported = plain(
+      render(
+        "/settings/downloads",
+        stateWith([{ ...MODEL, state: "downloading", pauseSupported: true }]),
+      ),
+    );
+    assert.match(supported, /Pause/);
+    assert.doesNotMatch(supported, /Cannot be paused/);
+
+    const unsupported = plain(
+      render(
+        "/settings/downloads",
+        stateWith([{ ...MODEL, state: "downloading", pauseSupported: false }]),
+      ),
+    );
+    assert.match(unsupported, /Cannot be paused/);
+    assert.doesNotMatch(unsupported, /\bPause\b/);
+  });
+
+  it("keeps a paused transfer, its progress, Resume and Stop all visible", () => {
+    const paused = {
+      ...MODEL,
+      state: "paused" as const,
+      bytesDone: 1900 * MB,
+      bytesTotal: 7600 * MB,
+      pauseSupported: true,
+    };
+    const html = render("/settings/downloads", stateWith([paused]));
+    const text = plain(html);
+    assert.match(text, /IN FLIGHT/);
+    assert.match(text, /paused · 25%/);
+    assert.match(text, /Resume/);
+    assert.match(text, /Stop all/);
+    assert.match(html, /width:25%/);
+  });
+
+  it("sends pause and resume for the component being controlled", () => {
+    const sent: ClientMessage[] = [];
+    const bridge: ArkeBridge = {
+      appVersion: "test",
+      platform: "test",
+      connect: () => {},
+      subscribe: () => {},
+      send: (json) => sent.push(JSON.parse(json) as ClientMessage),
+    };
+    __setStateForTest(stateWith([]));
+    __setBridgeForTest(bridge);
+    try {
+      setupPause(MODEL.id);
+      setupResume(MODEL.id);
+      assert.deepEqual(sent, [
+        { kind: "setup-pause", componentId: MODEL.id },
+        { kind: "setup-resume", componentId: MODEL.id },
+      ]);
+    } finally {
+      __setBridgeForTest(null);
+    }
   });
 
   it("names what an install left behind, with its path and its size (R-45)", () => {

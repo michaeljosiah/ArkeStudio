@@ -633,9 +633,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
-  /** Local-runtime setup: leave one out, try one again, replace one, or stop the lot. */
+  /** Local-runtime setup: leave one out, try one again, pause/resume, replace one, or stop the lot. */
   z.object({ kind: z.literal("setup-skip"), componentId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("setup-retry"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-pause"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-resume"), componentId: z.string().min(1) }).strict(),
   /**
    * Discard what is on disk for one component and fetch it again. Retry trusts what is already
    * there — presence is completion — so it is no answer to a file that arrived intact and is

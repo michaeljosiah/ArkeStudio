@@ -127,6 +127,7 @@ describe("screen inventory", () => {
               bytesDone: 44 * 1024 * 1024,
               bytesTotal: 88 * 1024 * 1024,
               bytesPerSecond: 2 * 1024 * 1024,
+              pauseSupported: false,
             },
           ],
         },
@@ -138,6 +139,43 @@ describe("screen inventory", () => {
       assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
       assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("keeps retained paused setup progress visible and resumable", () => {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        setup: {
+          running: false,
+          diskFreeMb: 100_000,
+          diskCheckedAt: null,
+          components: [
+            {
+              id: "voxa-kokoro",
+              displayName: "Kokoro voice",
+              purpose: "Speaks on this machine",
+              sizeMb: 88,
+              installLocation: "C:\\ArkeStudio\\models\\kokoro",
+              state: "paused",
+              bytesDone: 44 * 1024 * 1024,
+              bytesTotal: 88 * 1024 * 1024,
+              bytesPerSecond: null,
+              pauseSupported: true,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const html = renderAt("/starting");
+      assert.match(html, /paused kokoro voice/);
+      assert.match(html, />Resume<\/button>/);
+      assert.match(html, /44 MB of (?:<!-- -->)?88 MB/);
+      assert.match(html, /fy-setupbar__fill/);
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

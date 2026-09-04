@@ -11,6 +11,7 @@ import {
   type VoiceRuntimeStatus,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
+import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
   HealthDot,
   RuntimeHead,
@@ -97,8 +98,15 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
                 </div>
               </div>
               <RuntimeStatus tone={c.state === "failed" ? "warn" : settled ? "ok" : "idle"}>
-                {c.state === "present" ? "already here" : c.state === "downloading" ? `${pct}%` : c.state}
+                {c.state === "present"
+                  ? "already here"
+                  : c.state === "downloading"
+                    ? `${pct}%`
+                    : c.state === "paused"
+                      ? `paused · ${pct}%`
+                      : c.state}
               </RuntimeStatus>
+              <SetupTransferControl component={c} />
               {offered && <Button onClick={() => setupRetry(c.id)}>Download · {sizeMb(c.sizeMb)}</Button>}
               {!settled && !offered && c.state !== "skipped" && (
                 <button type="button" className="fy-set__link" onClick={() => setupSkip(c.id)}>
@@ -117,8 +125,8 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
                 </button>
               )}
             </div>
-            {/* The bar only exists while something is actually moving. */}
-            {c.state === "downloading" && (
+            {/* Paused bytes remain visible because they are retained for the resume. */}
+            {(c.state === "downloading" || c.state === "paused") && (
               <div className="fy-set__bar">
                 <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
               </div>
@@ -382,16 +390,18 @@ export function ComfyUiDetail() {
         <div className="fy-set__why" data-testid="comfyui-managed-option">
           <span className="fy-set__dot" />
           <span>Arke-managed ComfyUI · {managedRuntime.sizeMb} MB download</span>
-          <button
-            type="button"
-            className="fy-set__link"
-            disabled={managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"}
-            onClick={() => setupRetry(managedRuntime.id)}
-          >
-            {managedRuntime.state === "downloading" || managedRuntime.state === "installing" || managedRuntime.state === "queued"
-              ? "installing…"
-              : "Download"}
-          </button>
+          {managedRuntime.state === "downloading" || managedRuntime.state === "paused" ? (
+            <SetupTransferControl component={managedRuntime} />
+          ) : (
+            <button
+              type="button"
+              className="fy-set__link"
+              disabled={managedRuntime.state === "installing" || managedRuntime.state === "queued"}
+              onClick={() => setupRetry(managedRuntime.id)}
+            >
+              {managedRuntime.state === "installing" || managedRuntime.state === "queued" ? "installing…" : "Download"}
+            </button>
+          )}
         </div>
       )}
       <div className="fy-rt__keyline">
@@ -487,6 +497,7 @@ export function ComfyUiDetail() {
               {weights?.state === "available" && (
                 <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
               )}
+              {weights !== undefined && <SetupTransferControl component={weights} />}
               {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") &&
                 weights.repairRequired !== true && (
                   <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
@@ -515,15 +526,17 @@ export function ComfyUiDetail() {
                     : speaksForRecipe
                       ? weights.state === "downloading"
                         ? `${pct}%`
-                        : weights.state
+                        : weights.state === "paused"
+                          ? `paused · ${pct}%`
+                          : weights.state
                       : recipe.state,
                 ]
                   .filter(Boolean)
                   .join(" · ")}
               </RuntimeStatus>
             </div>
-            {/* The bar only exists while something is actually moving. */}
-            {weights?.state === "downloading" && (
+            {/* Paused bytes remain visible because they are retained for the resume. */}
+            {(weights?.state === "downloading" || weights?.state === "paused") && (
               <div className="fy-set__bar">
                 <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
               </div>

@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open, readdir, rename, rm, stat } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, parse, resolve } from "node:path";
 import {
@@ -24,11 +24,23 @@ import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catal
  */
 
 export interface SetupDeps {
-  /** Streamed GET. `contentLength` is null when the server does not say. */
+  /** Streamed GET. A non-null `rangeStart` must be sent as `Range: bytes=<start>-`. */
   fetchStream(
     url: string,
     signal: AbortSignal,
-  ): Promise<{ ok: boolean; status: number; contentLength: number | null; body: AsyncIterable<Uint8Array> }>;
+    rangeStart: number | null,
+    validator?: string | null,
+  ): Promise<{
+    ok: boolean;
+    status: number;
+    contentLength: number | null;
+    acceptRanges: boolean;
+    contentRangeStart: number | null;
+    contentRangeEnd?: number | null;
+    contentRangeTotal?: number | null;
+    validator?: string | null;
+    body: AsyncIterable<Uint8Array>;
+  }>;
   /** Run a program to completion. Used for the third-party installer and `ollama pull`. */
   run(command: string, args: readonly string[], signal: AbortSignal): Promise<{ code: number; output: string }>;
   /** Absolute path of a command on PATH, or null. */
@@ -77,6 +89,43 @@ interface RepairBlock {
 
 class IncompleteDownloadCleanupError extends Error {}
 
+class DownloadPausedError extends Error {
+  constructor(message: string, readonly pauseSupported: boolean) {
+    super(message);
+  }
+}
+
+class DiscardDownloadError extends Error {}
+
+interface DownloadReceipt {
+  version: 1;
+  owner: "arke-studio/local-setup";
+  componentId: string;
+  url: string;
+  target: string;
+  partialPath: string;
+  durableBytes: number;
+  downloadComplete: boolean;
+  totalBytes: number | null;
+  rangeSupported: boolean;
+  validator: string | null;
+  closureIds: string[];
+}
+
+interface OwnedDownload {
+  receipt: DownloadReceipt;
+  receiptPath: string;
+  targetMatches: boolean;
+}
+
+interface ActiveTransfer {
+  componentId: string;
+  abort: AbortController;
+  rangeSupported: boolean;
+  receiving: boolean;
+  preserve: "pause" | "dispose" | null;
+}
+
 const DEFAULT_THROTTLE_MS = 400;
 const DEFAULT_HEADROOM_MB = 2000;
 
@@ -110,6 +159,13 @@ export class LocalSetupService {
   private readonly repairBlocks = new Map<string, RepairBlock>();
   /** The run in progress, so a second caller awaits it rather than getting a silent no-op. */
   private inFlight: Promise<void> | null = null;
+  /** HTTP has its own cancellation: Pause must not kill an installer or model pull. */
+  private activeTransfer: ActiveTransfer | null = null;
+  /** Explicit resumes survive the detect pass that precedes every run. */
+  private readonly resuming = new Set<string>();
+  /** The install action a paused member belongs to, persisted into its receipt for restart. */
+  private readonly pendingClosures = new Map<string, readonly string[]>();
+  private readonly receiptUpdates = new Set<Promise<void>>();
 
   constructor(
     private readonly deps: SetupDeps,
@@ -128,6 +184,7 @@ export class LocalSetupService {
         bytesDone: 0,
         bytesTotal: entry.sizeMb * 1024 * 1024,
         bytesPerSecond: null,
+        pauseSupported: false,
         ...(entry.caveat !== undefined ? { detail: entry.caveat } : {}),
         // Carried onto the wire so a capability row can ask what a component makes available
         // without a second copy of the catalogue in the renderer (SPEC-033 R-39).
@@ -182,10 +239,219 @@ export class LocalSetupService {
 
   private async componentReady(id: string): Promise<void> {
     await this.opts.onComponentReady?.(id).catch(() => {});
+    // A paused dependency leaves the rest of its install closure blocked. Once it lands, put
+    // exactly those now-satisfied dependants back into the drain so Resume finishes the action
+    // the person originally started rather than requiring a second Install press.
+    for (const component of this.components.values()) {
+      if (
+        component.state === "blocked" &&
+        component.blockedBy === "dependency" &&
+        (component.entry.requires ?? []).every((dependency) => {
+          const state = this.components.get(dependency)?.state;
+          return state === "ready" || state === "present";
+        })
+      ) {
+        this.set(component.id, { state: "queued", bytesPerSecond: null, detail: undefined });
+      }
+    }
   }
 
   private modelsDir(): string {
     return join(this.opts.appRoot, "models");
+  }
+
+  /** Receipts live under Arke's root even when the bytes themselves land in a user-mapped folder. */
+  private receiptsDir(): string {
+    return join(this.opts.appRoot, ".setup-downloads");
+  }
+
+  private receiptPath(componentId: string, url: string, target: string): string {
+    // Deliberately independent of the destination folder: a mapping may change while Arke is
+    // closed. The declared filename still separates two files from the same component and URL.
+    const key = createHash("sha256").update(`${componentId}\0${url}\0${parse(target).base}`).digest("hex");
+    return join(this.receiptsDir(), `${key}.json`);
+  }
+
+  private async syncDirectory(path: string): Promise<void> {
+    const directory = await open(toExtendedLength(path), "r").catch(() => null);
+    if (directory === null) return;
+    try {
+      await directory.sync();
+    } catch {
+      // Windows does not expose directory fsync; the file handles themselves are still flushed.
+    } finally {
+      await directory.close().catch(() => {});
+    }
+  }
+
+  private async writeReceipt(path: string, receipt: DownloadReceipt): Promise<void> {
+    receipt.closureIds = [...(this.pendingClosures.get(receipt.componentId) ?? receipt.closureIds)];
+    await mkdir(toExtendedLength(dirname(path)), { recursive: true });
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const file = await open(toExtendedLength(temporary), "wx");
+    try {
+      await file.writeFile(JSON.stringify(receipt));
+      await file.sync();
+    } finally {
+      await file.close().catch(() => {});
+    }
+    await rename(toExtendedLength(temporary), toExtendedLength(path)).catch(async (err) => {
+      await rm(toExtendedLength(temporary), { force: true }).catch(() => {});
+      throw err;
+    });
+    await this.syncDirectory(dirname(path));
+  }
+
+  /**
+   * A path in a receipt is trusted only when the current catalogue independently derives every
+   * identity in it. The UUID-shaped sibling check prevents a damaged receipt from turning Stop
+   * all into deletion of an arbitrary path in a mapped folder.
+   */
+  private async ownedDownload(
+    componentId: string,
+    spec: DownloadFile,
+    target: string,
+    allowMoved = false,
+  ): Promise<OwnedDownload | null> {
+    const receiptPath = this.receiptPath(componentId, spec.url, target);
+    const raw = await readFile(toExtendedLength(receiptPath), "utf8").catch(() => null);
+    if (raw === null) return null;
+    let value: unknown;
+    try {
+      value = JSON.parse(raw);
+    } catch {
+      return null;
+    }
+    if (typeof value !== "object" || value === null) return null;
+    const receipt = value as Partial<DownloadReceipt>;
+    const totalBytes = receipt.totalBytes;
+    const savedTarget = typeof receipt.target === "string" ? receipt.target : "";
+    const prefix = `${savedTarget}.`;
+    const uuid = typeof receipt.partialPath === "string"
+      && receipt.partialPath.startsWith(prefix)
+      && receipt.partialPath.endsWith(".partial")
+      ? receipt.partialPath.slice(prefix.length, -".partial".length)
+      : "";
+    if (
+      receipt.version !== 1
+      || receipt.owner !== "arke-studio/local-setup"
+      || receipt.componentId !== componentId
+      || receipt.url !== spec.url
+      || (!allowMoved && savedTarget !== target)
+      || typeof receipt.partialPath !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(uuid)
+      || !Number.isSafeInteger(receipt.durableBytes)
+      || receipt.durableBytes! < 0
+      || typeof receipt.downloadComplete !== "boolean"
+      || !(totalBytes === null || (typeof totalBytes === "number" && Number.isSafeInteger(totalBytes) && totalBytes >= 0))
+      || typeof receipt.rangeSupported !== "boolean"
+      || !(receipt.validator === null || typeof receipt.validator === "string")
+      || !Array.isArray(receipt.closureIds)
+      || !receipt.closureIds.includes(componentId)
+      || receipt.closureIds.some((id) => typeof id !== "string" || id.length === 0)
+      || receipt.closureIds.some((id) => !this.components.has(id))
+    ) {
+      return null;
+    }
+    const info = await stat(toExtendedLength(receipt.partialPath)).catch(() => null);
+    if (!info?.isFile()) {
+      // Receipt-first allocation and final-file rename both have a safe, recoverable state with
+      // no partial. Clearing only this app-owned metadata cannot delete somebody else's bytes.
+      await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+      return null;
+    }
+    if (info.size < receipt.durableBytes!) return null;
+    return { receipt: receipt as DownloadReceipt, receiptPath, targetMatches: savedTarget === target };
+  }
+
+  private downloadTargets(entry: CatalogueEntry): Array<{ spec: DownloadFile; target: string }> {
+    const spec = entry.spec;
+    if (spec.kind === "files") {
+      // A missing external mapping still needs a deterministic basename so the app-owned receipt
+      // can recover and discard bytes from the old mapping. No download writes to this fallback.
+      const root = this.filesRoot(spec) ?? join(this.opts.appRoot, ".unmapped");
+      return spec.files.map((file) => ({ spec: file, target: join(root, spec.dir, file.file) }));
+    }
+    if (spec.kind === "tree") {
+      return [{ spec: spec.file, target: join(`${join(this.opts.appRoot, spec.dir)}.staging`, spec.file.file) }];
+    }
+    if (spec.kind === "installer") {
+      return [{ spec: spec.file, target: join(this.modelsDir(), ".staging", spec.file.file) }];
+    }
+    if (spec.kind === "archive") {
+      const file = this.archiveFor(spec);
+      return file === null ? [] : [{ spec: file, target: join(this.toolDir(spec), ".staging", file.file) }];
+    }
+    return [];
+  }
+
+  private async pausedProgress(entry: CatalogueEntry): Promise<{
+    bytesDone: number;
+    pauseSupported: boolean;
+    detail: string;
+    closureIds: readonly string[];
+  } | null> {
+    let bytesDone = 0;
+    let paused: OwnedDownload | null = null;
+    for (const { spec, target } of this.downloadTargets(entry)) {
+      const complete = await stat(toExtendedLength(target)).catch(() => null);
+      if (complete?.isFile() && complete.size > 0) {
+        bytesDone += complete.size;
+        continue;
+      }
+      const owned = await this.ownedDownload(entry.id, spec, target, true);
+      if (owned !== null) {
+        bytesDone += owned.receipt.durableBytes;
+        paused = owned;
+      }
+    }
+    if (paused === null) return null;
+    const canResume =
+      paused.receipt.rangeSupported ||
+      paused.receipt.downloadComplete ||
+      (paused.receipt.totalBytes !== null && paused.receipt.durableBytes === paused.receipt.totalBytes);
+    return {
+      bytesDone,
+      pauseSupported: canResume && paused.targetMatches,
+      detail: paused.targetMatches
+        ? canResume ? "paused" : "this source does not support pause"
+        : "the download location changed; Stop all can discard the retained bytes",
+      closureIds: paused.receipt.closureIds,
+    };
+  }
+
+  private async discardOwned(entry: CatalogueEntry): Promise<NonNullable<SetupComponent["leftovers"]>> {
+    const leftovers: NonNullable<SetupComponent["leftovers"]> = [];
+    for (const { spec, target } of this.downloadTargets(entry)) {
+      const owned = await this.ownedDownload(entry.id, spec, target, true);
+      if (owned === null) continue;
+      try {
+        await rm(toExtendedLength(owned.receipt.partialPath), { force: true });
+      } catch {
+        // Keep the receipt: it is the only durable proof that this survivor is ours.
+        leftovers.push({
+          path: owned.receipt.partialPath,
+          sizeMb: Math.round(owned.receipt.durableBytes / (1024 * 1024)),
+        });
+        continue;
+      }
+      await rm(toExtendedLength(owned.receiptPath), { force: true }).catch(() => {});
+    }
+    return leftovers;
+  }
+
+  private persistPendingClosure(entry: CatalogueEntry): void {
+    const update = (async () => {
+      for (const { spec, target } of this.downloadTargets(entry)) {
+        const owned = await this.ownedDownload(entry.id, spec, target, true);
+        if (owned !== null) await this.writeReceipt(owned.receiptPath, owned.receipt);
+      }
+    })().catch(() => {
+      // The next checkpoint retries this write for an active transfer. A paused receipt remains
+      // valid for its earlier closure rather than turning a UI action into an unhandled rejection.
+    });
+    this.receiptUpdates.add(update);
+    void update.finally(() => this.receiptUpdates.delete(update));
   }
 
   /**
@@ -259,6 +525,7 @@ export class LocalSetupService {
 
   /** What is already here. Cheap, and always runs before anything is fetched. */
   async detect(): Promise<void> {
+    const recoveredClosures: Array<{ pausedId: string; componentIds: readonly string[] }> = [];
     for (const [id, c] of this.components) {
       if (c.state === "skipped") continue;
       const repairBlock = this.repairBlocks.get(id);
@@ -285,34 +552,56 @@ export class LocalSetupService {
       }
       const present = await this.isPresent(c.entry).catch(() => false);
       if (present) {
+        await this.discardOwned(c.entry);
         this.set(id, {
           state: "present",
           bytesDone: c.bytesTotal,
           bytesPerSecond: null,
+          pauseSupported: false,
           repairRequired: undefined,
         });
-      } else if (c.state === "present") {
-        this.set(id, { state: c.entry.optional === true ? "available" : "queued", bytesDone: 0 });
+      } else if (c.state !== "downloading" && c.state !== "installing" && !this.resuming.has(id)) {
+        const paused = await this.pausedProgress(c.entry);
+        if (paused !== null) {
+          this.set(id, {
+            state: "paused",
+            bytesDone: paused.bytesDone,
+            bytesPerSecond: null,
+            pauseSupported: paused.pauseSupported,
+            detail: paused.detail,
+          });
+          recoveredClosures.push({ pausedId: id, componentIds: paused.closureIds });
+          for (const member of paused.closureIds) this.pendingClosures.set(member, paused.closureIds);
+        } else if (c.state === "present" || c.state === "paused") {
+          this.set(id, {
+            state: c.entry.optional === true ? "available" : "queued",
+            bytesDone: 0,
+            pauseSupported: false,
+          });
+        }
+      }
+    }
+    for (const recovered of recoveredClosures) {
+      let afterPaused = false;
+      for (const id of recovered.componentIds) {
+        if (id === recovered.pausedId) {
+          afterPaused = true;
+          continue;
+        }
+        if (!afterPaused) continue;
+        const component = this.components.get(id);
+        if (!component || componentIsSettled(component.state)) continue;
+        this.set(id, {
+          state: "blocked",
+          bytesPerSecond: null,
+          detail: `waiting on ${this.components.get(recovered.pausedId)?.displayName ?? recovered.pausedId}`,
+          blockedBy: "dependency",
+        });
       }
     }
     this.diskFreeMb = await this.deps.diskFreeMb(this.opts.appRoot).catch(() => null);
     this.diskCheckedAt = new Date().toISOString();
     this.publish();
-  }
-
-  /** Remove leftover fragments, and any directory emptied by doing so. */
-  private async sweepPartials(dir: string): Promise<void> {
-    const entries = await readdir(toExtendedLength(dir), { withFileTypes: true }).catch(() => []);
-    for (const e of entries) {
-      const path = join(dir, e.name);
-      if (e.isDirectory()) {
-        await this.sweepPartials(path);
-        const left = await readdir(toExtendedLength(path)).catch(() => ["keep"]);
-        if (left.length === 0) await rm(toExtendedLength(path), { recursive: true, force: true }).catch(() => {});
-      } else if (e.name.endsWith(".partial")) {
-        await rm(toExtendedLength(path), { force: true }).catch(() => {});
-      }
-    }
   }
 
   private async isPresent(entry: CatalogueEntry): Promise<boolean> {
@@ -376,9 +665,6 @@ export class LocalSetupService {
   }
 
   private async runOnce(): Promise<void> {
-    // Nothing is in flight here (one run at a time), so any .partial is the debris of a run
-    // that was cancelled or killed. Sweep it: a fragment must never quietly become a file.
-    await this.sweepPartials(this.modelsDir());
     await this.detect();
 
     // Drained, not snapshotted. A component can be queued *during* a pass — Repair does it,
@@ -429,7 +715,10 @@ export class LocalSetupService {
       const key = volumeKey(dir);
       const group = volumes.get(key) ?? { root: rootOf(dir), dirs: new Set<string>(), needMb: 0, components: [] };
       group.dirs.add(dir);
-      group.needMb += c.entry.installedMb ?? c.sizeMb;
+      // Resumed bytes already occupy this volume. Guard only the remaining peak instead of
+      // requiring room for a second copy of a 40 GB prefix that is already here.
+      const retainedMb = Math.floor(c.bytesDone / (1024 * 1024));
+      group.needMb += Math.max(0, (c.entry.installedMb ?? c.sizeMb) - retainedMb);
       group.components.push(c);
       volumes.set(key, group);
     }
@@ -492,7 +781,11 @@ export class LocalSetupService {
           this.publish();
           continue;
         }
-        await this.install(live.entry);
+        try {
+          await this.install(live.entry);
+        } finally {
+          this.resuming.delete(live.id);
+        }
       }
     } finally {
       this.running = false;
@@ -534,7 +827,7 @@ export class LocalSetupService {
           return;
         }
         const dir = join(filesRoot, spec.dir);
-        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         let done = 0;
         for (const f of spec.files) {
@@ -554,6 +847,7 @@ export class LocalSetupService {
           state: "ready",
           bytesDone: done,
           bytesPerSecond: null,
+          pauseSupported: false,
           repairRequired: undefined,
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
@@ -568,13 +862,15 @@ export class LocalSetupService {
         // never half a runtime, exactly as a partial file is never a file.
         const dir = join(this.opts.appRoot, spec.dir);
         const staged = `${dir}.staging`;
-        await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
         const archive = join(staged, spec.file.file);
-        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        if ((await this.ownedDownload(entry.id, spec.file, archive)) === null) {
+          await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+        }
+        this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         const received = await this.download(entry.id, spec.file, archive, 0);
 
-        this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "unpacking" });
+        this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
         const unpacked = await this.deps.run(systemTar(), ["-xf", archive, "-C", staged], this.abort.signal);
         await rm(toExtendedLength(archive), { force: true }).catch(() => {});
@@ -594,6 +890,7 @@ export class LocalSetupService {
           state: "ready",
           bytesDone: received,
           bytesPerSecond: null,
+          pauseSupported: false,
           ...(entry.caveat !== undefined ? { detail: entry.caveat } : { detail: undefined }),
         });
         this.publish();
@@ -603,11 +900,16 @@ export class LocalSetupService {
 
       if (spec.kind === "installer") {
         const staged = join(this.modelsDir(), ".staging", spec.file.file);
-        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         await this.download(entry.id, spec.file, staged, 0);
 
-        this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "running Ollama's own installer" });
+        this.set(entry.id, {
+          state: "installing",
+          bytesPerSecond: null,
+          pauseSupported: false,
+          detail: "running Ollama's own installer",
+        });
         this.publish();
         const silent = await this.deps.run(staged, spec.silentArgs, this.abort.signal);
         const arrived = silent.code === 0 && (await this.settles());
@@ -625,7 +927,7 @@ export class LocalSetupService {
           }
         }
         await rm(toExtendedLength(staged), { force: true }).catch(() => {});
-        this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null });
+        this.set(entry.id, { state: "ready", detail: undefined, bytesPerSecond: null, pauseSupported: false });
         this.publish();
         await this.componentReady(entry.id);
         return;
@@ -645,11 +947,11 @@ export class LocalSetupService {
         const dir = this.toolDir(spec);
         const staged = join(dir, ".staging");
         const archive = join(staged, file.file);
-        this.set(entry.id, { state: "downloading", bytesDone: 0, detail: undefined });
+        this.set(entry.id, { state: "downloading", bytesPerSecond: null, pauseSupported: false, detail: undefined });
         this.publish();
         const received = await this.download(entry.id, file, archive, 0);
 
-        this.set(entry.id, { state: "installing", bytesPerSecond: null, detail: "unpacking" });
+        this.set(entry.id, { state: "installing", bytesPerSecond: null, pauseSupported: false, detail: "unpacking" });
         this.publish();
         // Extracting into the staging directory keeps a half-unpacked archive from ever looking
         // like presence. `bsdtar` by absolute path, not `tar` off PATH — see systemTar.
@@ -670,14 +972,25 @@ export class LocalSetupService {
         await rm(toExtendedLength(target), { force: true }).catch(() => {});
         await rename(toExtendedLength(extracted), toExtendedLength(target));
         await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
-        this.set(entry.id, { state: "ready", bytesDone: received, bytesPerSecond: null, detail: undefined });
+        this.set(entry.id, {
+          state: "ready",
+          bytesDone: received,
+          bytesPerSecond: null,
+          pauseSupported: false,
+          detail: undefined,
+        });
         this.publish();
         await this.componentReady(entry.id);
         return;
       }
 
       // A pull: the runtime fetches its own model and reports its own progress; ours is coarse.
-      this.set(entry.id, { state: "installing", detail: `${spec.command} ${spec.args.join(" ")}`, bytesPerSecond: null });
+      this.set(entry.id, {
+        state: "installing",
+        detail: `${spec.command} ${spec.args.join(" ")}`,
+        bytesPerSecond: null,
+        pauseSupported: false,
+      });
       this.publish();
       const pulled = await this.deps.run(spec.command, spec.args, this.abort.signal);
       if (pulled.code !== 0) {
@@ -688,10 +1001,22 @@ export class LocalSetupService {
       this.publish();
       if (pulled.code === 0) await this.componentReady(entry.id);
     } catch (err) {
-      if (this.abort.signal.aborted && !(err instanceof IncompleteDownloadCleanupError)) {
-        this.set(entry.id, { state: "skipped", bytesPerSecond: null, detail: "stopped" });
+      if (err instanceof DownloadPausedError) {
+        this.set(entry.id, {
+          state: "paused",
+          bytesPerSecond: null,
+          pauseSupported: err.pauseSupported,
+          detail: err.message,
+        });
+      } else if (this.abort.signal.aborted && !(err instanceof IncompleteDownloadCleanupError)) {
+        this.set(entry.id, { state: "skipped", bytesPerSecond: null, pauseSupported: false, detail: "stopped" });
       } else {
-        this.set(entry.id, { state: "failed", detail: err instanceof Error ? err.message : String(err) });
+        this.set(entry.id, {
+          state: "failed",
+          bytesPerSecond: null,
+          pauseSupported: false,
+          detail: err instanceof Error ? err.message : String(err),
+        });
       }
       this.publish();
     }
@@ -707,81 +1032,269 @@ export class LocalSetupService {
     return false;
   }
 
-  /** Stream one file to disk. Returns the bytes it contributed. */
-  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number): Promise<number> {
-    const res = await this.deps.fetchStream(spec.url, this.abort.signal);
-    if (!res.ok) throw new Error(`${spec.file}: the source answered ${res.status}`);
+  /** Verify the complete bytes on disk; hash state is deliberately not serialized across pauses. */
+  private async verifyDownload(spec: DownloadFile, partial: string, cancelled: () => boolean): Promise<void> {
+    const source = await open(toExtendedLength(partial), "r");
+    const hash = spec.sha256 ? createHash("sha256") : null;
+    const head: number[] = [];
+    const buffer = new Uint8Array(1024 * 1024);
+    try {
+      let position = 0;
+      for (;;) {
+        if (cancelled()) throw new Error("stopped");
+        const { bytesRead } = await source.read(buffer, 0, buffer.byteLength, position);
+        if (bytesRead === 0) break;
+        const chunk = buffer.subarray(0, bytesRead);
+        if (head.length < 8) head.push(...chunk.subarray(0, 8 - head.length));
+        hash?.update(chunk);
+        position += bytesRead;
+      }
+    } finally {
+      await source.close().catch(() => {});
+    }
+    if (spec.magic && !spec.magic.every((byte, index) => head[index] === byte)) {
+      throw new DiscardDownloadError(`${spec.file}: what arrived is not the file we asked for`);
+    }
+    if (spec.sha256 && hash?.digest("hex") !== spec.sha256) {
+      throw new DiscardDownloadError(`${spec.file}: checksum mismatch`);
+    }
+  }
 
+  /** Stream one file to disk. Returns its complete byte count, including a resumed prefix. */
+  private async download(componentId: string, spec: DownloadFile, target: string, alreadyDone: number): Promise<number> {
     await mkdir(toExtendedLength(dirname(target)), { recursive: true });
-    // A unique, exclusively-created name is the ownership proof. In a user-mapped folder, a
-    // conventional `<target>.partial` may belong to somebody else and must never be truncated or
-    // swept. The captured path is cleaned directly, so changing the mapping cannot orphan it.
-    const partial = `${target}.${randomUUID()}.partial`;
-    const sink = await open(toExtendedLength(partial), "wx");
+    const expectedReceiptPath = this.receiptPath(componentId, spec.url, target);
+    const owned = await this.ownedDownload(componentId, spec, target);
+    if (owned === null && (await stat(toExtendedLength(expectedReceiptPath)).catch(() => null)) !== null) {
+      throw new Error(`${spec.file}: the saved download receipt no longer matches this catalogue and target`);
+    }
+
+    const resuming = owned !== null;
+    let receipt: DownloadReceipt;
+    let receiptPath: string;
+    if (owned !== null) {
+      receipt = owned.receipt;
+      receiptPath = owned.receiptPath;
+      const info = await stat(toExtendedLength(receipt.partialPath));
+      if (info.size > receipt.durableBytes) {
+        const partial = await open(toExtendedLength(receipt.partialPath), "r+");
+        try {
+          await partial.truncate(receipt.durableBytes);
+          await partial.sync();
+        } finally {
+          await partial.close().catch(() => {});
+        }
+      }
+    } else {
+      receiptPath = expectedReceiptPath;
+      receipt = {
+        version: 1,
+        owner: "arke-studio/local-setup",
+        componentId,
+        url: spec.url,
+        target,
+        partialPath: `${target}.${randomUUID()}.partial`,
+        durableBytes: 0,
+        downloadComplete: false,
+        totalBytes: null,
+        rangeSupported: false,
+        validator: null,
+        closureIds: [...(this.pendingClosures.get(componentId) ?? [componentId])],
+      };
+      let createdPartial = false;
+      try {
+        await this.writeReceipt(receiptPath, receipt);
+        const initial = await open(toExtendedLength(receipt.partialPath), "wx");
+        createdPartial = true;
+        await initial.close();
+        await this.syncDirectory(dirname(receipt.partialPath));
+      } catch (err) {
+        if (createdPartial) await rm(toExtendedLength(receipt.partialPath), { force: true }).catch(() => {});
+        await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
+        throw err;
+      }
+    }
+
+    const resumedAt = receipt.durableBytes;
+    if (!receipt.downloadComplete && receipt.totalBytes !== null && resumedAt === receipt.totalBytes) {
+      receipt.downloadComplete = true;
+      await this.writeReceipt(receiptPath, receipt);
+    }
+    if (resuming && !receipt.downloadComplete && !receipt.rangeSupported) {
+      throw new Error(`${spec.file}: this source does not support resuming the saved download`);
+    }
+    const sink = await open(toExtendedLength(receipt.partialPath), "r+");
+    const transfer: ActiveTransfer = {
+      componentId,
+      abort: new AbortController(),
+      rangeSupported: receipt.rangeSupported,
+      receiving: true,
+      preserve: null,
+    };
+    this.activeTransfer = transfer;
     const started = Date.now();
     let received = 0;
-    let head: number[] = [];
     let lastEmit = 0;
-    const hash = spec.sha256 ? createHash("sha256") : null;
+    let lastCheckpoint = 0;
     let landed = false;
     let failure: unknown = null;
 
     try {
-      for await (const chunk of res.body) {
-        if (this.abort.signal.aborted) throw new Error("stopped");
-        // Eight bytes, not four: the 7z signature is six, and a head shorter than the declared
-        // magic can never match it — which read as "not the file we asked for" on a good file.
-        if (head.length < 8) head = [...head, ...Array.from(chunk.subarray(0, 8 - head.length))];
-        received += chunk.byteLength;
-        hash?.update(chunk);
-        let offset = 0;
-        while (offset < chunk.byteLength) {
-          const { bytesWritten } = await sink.write(chunk, offset, chunk.byteLength - offset, null);
-          if (bytesWritten === 0) throw new Error(`${spec.file}: the incomplete download could not be written`);
-          offset += bytesWritten;
+      if (!receipt.downloadComplete) {
+        const res = await this.deps.fetchStream(
+          spec.url,
+          transfer.abort.signal,
+          resuming ? resumedAt : null,
+          resuming ? receipt.validator : null,
+        );
+        if (resuming) {
+          if (res.status !== 206) {
+            throw new DiscardDownloadError(`${spec.file}: resume was refused because the source answered ${res.status}, not 206`);
+          }
+          if (res.contentRangeStart !== resumedAt) {
+            throw new DiscardDownloadError(
+              `${spec.file}: resume was refused because Content-Range started at ${res.contentRangeStart ?? "an unknown byte"}, not ${resumedAt}`,
+            );
+          }
+          const rangeEnd = res.contentRangeEnd ?? null;
+          const rangeTotal = res.contentRangeTotal ?? null;
+          if (
+            rangeEnd === null ||
+            rangeTotal === null ||
+            !Number.isSafeInteger(rangeEnd) ||
+            !Number.isSafeInteger(rangeTotal) ||
+            rangeEnd < resumedAt ||
+            rangeEnd !== rangeTotal - 1 ||
+            (res.contentLength !== null && res.contentLength !== rangeEnd - resumedAt + 1)
+          ) {
+            throw new DiscardDownloadError(`${spec.file}: resume was refused because Content-Range did not describe the complete remainder`);
+          }
+          if (receipt.totalBytes !== null && rangeTotal !== receipt.totalBytes) {
+            throw new DiscardDownloadError(`${spec.file}: resume was refused because the source size changed`);
+          }
+          if (receipt.validator !== null && res.validator !== receipt.validator) {
+            throw new DiscardDownloadError(`${spec.file}: resume was refused because the source changed`);
+          }
+          receipt.totalBytes = rangeTotal;
+        } else if (res.status !== 200) {
+          throw new DiscardDownloadError(`${spec.file}: the source answered ${res.status}`);
         }
 
-        const now = Date.now();
-        if (now - lastEmit >= (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS)) {
-          lastEmit = now;
-          const elapsed = Math.max(1, now - started) / 1000;
-          this.set(componentId, {
-            bytesDone: alreadyDone + received,
-            bytesPerSecond: Math.round(received / elapsed),
-          });
-          this.publish();
+        if (!resuming) {
+          receipt.validator = res.validator ?? null;
+          receipt.totalBytes = res.contentLength;
         }
-      }
-      if (this.abort.signal.aborted) throw new Error("stopped");
+        transfer.rangeSupported = resuming
+          ? receipt.rangeSupported
+          : res.acceptRanges && (receipt.validator !== null || spec.sha256 !== undefined);
+        receipt.rangeSupported = transfer.rangeSupported;
+        await this.writeReceipt(receiptPath, receipt);
+        this.set(componentId, { pauseSupported: transfer.rangeSupported });
+        this.publish();
 
-      if (spec.magic && !spec.magic.every((b, i) => head[i] === b)) {
-        throw new Error(`${spec.file}: what arrived is not the file we asked for`);
-      }
-      if (res.contentLength !== null && received !== res.contentLength) {
-        throw new Error(`${spec.file}: the download stopped short (${received} of ${res.contentLength} bytes)`);
-      }
-      if (spec.sha256 && hash?.digest("hex") !== spec.sha256) {
-        throw new Error(`${spec.file}: checksum mismatch`);
+        for await (const chunk of res.body) {
+          if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
+          let offset = 0;
+          while (offset < chunk.byteLength) {
+            const { bytesWritten } = await sink.write(
+              chunk,
+              offset,
+              chunk.byteLength - offset,
+              resumedAt + received + offset,
+            );
+            if (bytesWritten === 0) throw new Error(`${spec.file}: the incomplete download could not be written`);
+            offset += bytesWritten;
+          }
+          received += chunk.byteLength;
+          const now = Date.now();
+          if (now - lastCheckpoint >= Math.max(5_000, (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS) * 10)) {
+            lastCheckpoint = now;
+            await sink.sync();
+            receipt.durableBytes = resumedAt + received;
+            await this.writeReceipt(receiptPath, receipt);
+          }
+          if (now - lastEmit >= (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS)) {
+            lastEmit = now;
+            const elapsed = Math.max(1, now - started) / 1000;
+            this.set(componentId, {
+              bytesDone: alreadyDone + resumedAt + received,
+              bytesPerSecond: Math.round(received / elapsed),
+            });
+            this.publish();
+          }
+        }
+        if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
+        if (res.contentLength !== null && received !== res.contentLength) {
+          throw new Error(`${spec.file}: the download stopped short (${received} of ${res.contentLength} bytes)`);
+        }
+
+        await sink.sync();
+        receipt.durableBytes = resumedAt + received;
+        receipt.downloadComplete = true;
+        await this.writeReceipt(receiptPath, receipt);
       }
 
+      transfer.receiving = false;
+      this.set(componentId, { pauseSupported: false });
+      this.publish();
       await sink.close();
-      // Only a whole file ever takes the real name — a partial is never mistaken for presence.
+      await this.verifyDownload(
+        spec,
+        receipt.partialPath,
+        () => transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed,
+      );
+      if (transfer.abort.signal.aborted || this.abort.signal.aborted || this.disposed) throw new Error("stopped");
+      // Only a verified whole file takes the real name. Rename remains the atomic visibility step.
       await rm(toExtendedLength(target), { force: true }).catch(() => {});
-      await rename(toExtendedLength(partial), toExtendedLength(target));
+      await rename(toExtendedLength(receipt.partialPath), toExtendedLength(target));
       landed = true;
+      await rm(toExtendedLength(receiptPath), { force: true }).catch(() => {});
     } catch (err) {
       failure = err;
     }
 
     await sink.close().catch(() => {});
+    if (this.activeTransfer === transfer) this.activeTransfer = null;
     if (!landed) {
+      if (transfer.preserve !== null && transfer.abort.signal.aborted) {
+        // Pause is an explicit durability boundary. Persist every byte written before reporting
+        // the paused count, even when the ordinary progress throttle had not fired yet.
+        const checkpoint = await open(toExtendedLength(receipt.partialPath), "r+");
+        try {
+          await checkpoint.sync();
+        } finally {
+          await checkpoint.close().catch(() => {});
+        }
+        const info = await stat(toExtendedLength(receipt.partialPath));
+        receipt.durableBytes = info.size;
+        await this.writeReceipt(receiptPath, receipt);
+        this.set(componentId, { bytesDone: alreadyDone + receipt.durableBytes });
+        throw new DownloadPausedError(
+          transfer.preserve === "pause" ? "paused" : "paused when Arke closed",
+          transfer.rangeSupported,
+        );
+      }
+      const retainForResume =
+        failure !== null &&
+        !(failure instanceof DiscardDownloadError) &&
+        !transfer.abort.signal.aborted &&
+        !this.abort.signal.aborted &&
+        !this.disposed &&
+        receipt.rangeSupported &&
+        receipt.durableBytes > 0;
+      if (retainForResume) {
+        throw new DownloadPausedError(
+          `paused after ${failure instanceof Error ? failure.message : String(failure)}`,
+          true,
+        );
+      }
       try {
-        await rm(toExtendedLength(partial), { force: true });
+        await rm(toExtendedLength(receipt.partialPath), { force: true });
+        await rm(toExtendedLength(receiptPath), { force: true });
+        this.set(componentId, { bytesDone: alreadyDone });
       } catch (err) {
-        // Named with its path and its size, on the component, so Downloads can offer to reclaim
-        // it. A message alone says a file survived and gives nobody a way to act on it (R-45).
         this.set(componentId, {
-          leftovers: [{ path: partial, sizeMb: Math.round(received / (1024 * 1024)) }],
+          leftovers: [{ path: receipt.partialPath, sizeMb: Math.round(receipt.durableBytes / (1024 * 1024)) }],
         });
         throw new IncompleteDownloadCleanupError(
           `${spec.file}: the incomplete download could not be removed (${errorCode(err)})`,
@@ -789,7 +1302,37 @@ export class LocalSetupService {
       }
       throw failure;
     }
-    return received;
+    return receipt.durableBytes;
+  }
+
+  /** Pause only the current ranged HTTP transfer; installers and runtime-owned pulls are untouched. */
+  pause(componentId: string): boolean {
+    const transfer = this.activeTransfer;
+    if (
+      transfer === null
+      || transfer.componentId !== componentId
+      || !transfer.rangeSupported
+      || !transfer.receiving
+      || this.components.get(componentId)?.state !== "downloading"
+    ) {
+      return false;
+    }
+    transfer.preserve = "pause";
+    transfer.abort.abort();
+    return true;
+  }
+
+  /** Queue a durable ranged transfer without resetting the progress its receipt proves. */
+  resume(componentId: string): boolean {
+    const component = this.components.get(componentId);
+    if (!component || component.state !== "paused" || !component.pauseSupported) return false;
+    this.resuming.add(componentId);
+    this.set(componentId, { state: "queued", bytesPerSecond: null, detail: undefined });
+    this.publish();
+    // If the old pass is still handling a later component, this id is already in that pass's
+    // attempted set. Always schedule one drain after it settles so Resume cannot strand at queued.
+    void this.run().then(() => this.run());
+    return true;
   }
 
   /** Leave this one out. A skipped component is never attempted again this session. */
@@ -806,7 +1349,7 @@ export class LocalSetupService {
    */
   retry(componentId: string): void {
     const c = this.components.get(componentId);
-    if (!c || c.state === "ready" || c.state === "present") return;
+    if (!c || c.state === "ready" || c.state === "present" || c.state === "paused") return;
     if (this.repairBlocks.has(componentId)) {
       this.set(componentId, { state: "failed", repairRequired: true });
       this.publish();
@@ -836,12 +1379,24 @@ export class LocalSetupService {
    */
   installClosure(componentId: string): SetupClosure {
     const closure = setupClosure(this.status().components, componentId);
+    for (const id of closure.componentIds) this.pendingClosures.set(id, closure.componentIds);
+    for (const id of closure.componentIds) {
+      const component = this.components.get(id);
+      if (component !== undefined) this.persistPendingClosure(component.entry);
+    }
     for (const id of closure.componentIds) {
       const c = this.components.get(id);
       // Anything already on its way is left exactly as it is. Re-queuing a component that is
       // 60% through its download zeroes its bytes and takes the bar off both surfaces, so the
       // person who pressed Install on a second model is told the first transfer stopped.
-      if (!c || componentIsSettled(c.state) || c.state === "queued" || c.state === "downloading" || c.state === "installing") {
+      if (
+        !c
+        || componentIsSettled(c.state)
+        || c.state === "queued"
+        || c.state === "downloading"
+        || c.state === "paused"
+        || c.state === "installing"
+      ) {
         continue;
       }
       if (this.repairBlocks.has(id)) {
@@ -1040,22 +1595,50 @@ export class LocalSetupService {
     return true;
   }
 
-  /** Stop everything in flight. Whatever finished stays; nothing half-written survives. */
+  /** Stop everything and discard only partials whose current catalogue receipt proves ownership. */
   async cancel(): Promise<void> {
+    const stopped = new Set<string>();
+    if (this.activeTransfer !== null) {
+      this.activeTransfer.preserve = null;
+      this.activeTransfer.abort.abort();
+    }
     this.abort.abort();
     for (const [id, c] of this.components) {
-      if (c.state === "downloading" || c.state === "installing" || c.state === "queued") {
-        this.set(id, { state: "skipped", bytesPerSecond: null, detail: "stopped" });
+      if (c.state === "downloading" || c.state === "paused" || c.state === "installing" || c.state === "queued") {
+        stopped.add(id);
+        this.set(id, {
+          state: "skipped",
+          bytesDone: 0,
+          bytesPerSecond: null,
+          pauseSupported: false,
+          detail: "stopped",
+        });
       }
     }
     this.publish();
     await this.inFlight;
+    await Promise.all(this.receiptUpdates);
+    for (const component of this.components.values()) {
+      const leftovers = await this.discardOwned(component.entry);
+      if (leftovers.length > 0) this.set(component.id, { leftovers });
+    }
+    for (const id of stopped) {
+      this.set(id, { state: "skipped", bytesDone: 0, bytesPerSecond: null, pauseSupported: false, detail: "stopped" });
+    }
+    this.publish();
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
+    if (this.activeTransfer !== null) {
+      // Only a range-capable source can survive as useful work. Keeping bytes from an ordinary
+      // 200 response would strand an unresumable partial on the next launch.
+      this.activeTransfer.preserve = this.activeTransfer.rangeSupported ? "dispose" : null;
+      this.activeTransfer.abort.abort();
+    }
     this.abort.abort();
     await this.inFlight;
+    await Promise.all(this.receiptUpdates);
   }
 }
 

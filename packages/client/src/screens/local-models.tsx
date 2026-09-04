@@ -21,6 +21,7 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { ChevronDown, ChevronRight } from "../components/icons.js";
+import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { detectRuntimes, setupInstall, setupRemove, setupRepair, useSetup, useStore } from "../lib/store.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
 import {
@@ -382,9 +383,11 @@ function ModelRow({
   // A transfer's progress rides between the state and the size (R-19): the percentage alone
   // does not say 62 percent of what, and the bar below is a shape rather than a figure.
   const moving = entry.component !== undefined ? transferProgress(entry.component) : null;
+  const paused = entry.component?.state === "paused";
   const parts = [
-    ROW_STATE_LABEL[state],
-    moving?.active === true ? `${moving.percent}%` : undefined,
+    paused && state === "downloading" ? "paused" : ROW_STATE_LABEL[state],
+    paused && state !== "downloading" ? "paused" : undefined,
+    moving?.active === true || paused ? `${moving?.percent ?? 0}%` : undefined,
     entry.fitLabel,
     entry.sizeMbytes && sizeMb(entry.sizeMbytes),
   ];
@@ -406,6 +409,7 @@ function ModelRow({
         </div>
         {entry.recommended && <span className="fy-prov__unverified">recommended</span>}
         <RuntimeStatus tone={elsewhere ? undefined : STATE_TONE[state]}>{line}</RuntimeStatus>
+        {!elsewhere && entry.component !== undefined && <SetupTransferControl component={entry.component} />}
         {/*
          * Starting work stays where the decision is made; watching it belongs to Downloads
          * (R-83). The figure on the button is the whole closure's, because quoting the model's
@@ -443,7 +447,12 @@ function ModelRow({
             Remove
           </button>
         )}
-        {!elsewhere && (state === "downloading" || state === "installing") && (
+        {!elsewhere &&
+          entry.component !== undefined &&
+          (entry.component.state === "queued" ||
+            entry.component.state === "downloading" ||
+            entry.component.state === "paused" ||
+            entry.component.state === "installing") && (
           <button type="button" className="fy-set__link" onClick={onOpenDownloads}>
             Downloads
           </button>
@@ -463,7 +472,8 @@ function ModelRow({
         </div>
       )}
       {/* The same projection Downloads computes, never a second one (R-82). */}
-      {entry.component !== undefined && transferProgress(entry.component).active && (
+      {entry.component !== undefined &&
+        (transferProgress(entry.component).active || entry.component.state === "paused") && (
         <div className="fy-set__bar">
           <div className="fy-set__barfill" style={{ width: `${transferProgress(entry.component).percent}%` }} />
         </div>
