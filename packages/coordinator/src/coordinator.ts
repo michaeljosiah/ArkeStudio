@@ -444,6 +444,7 @@ import {
   conversationActionDigest,
   recoverConversationActions,
   type ConversationActionAuthorityAdapter,
+  type ConversationActionLifecycleOptions,
 } from "./arke-actions/lifecycle.js";
 import {
   prepareWorldChatActions,
@@ -1737,13 +1738,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
         await this.durableExportReads(store.worldId);
-        await recoverConversationActions({
-          worldPath: store.dir,
-          worldId: store.worldId,
-          adapters: this.conversationActionAdapters(store),
-          now: () => this.nowIso(),
-          isWorldOpen: () => !this.stopping && this.stillOpen(store),
-        });
+        await recoverConversationActions(this.conversationActionLifecycleOptions(store));
         if (!this.stillOpen(store)) return;
         // Recovery may find nothing to append while the durable card log is still newer than the
         // process projection (for example, after a crash between binding and broadcast).
@@ -2678,12 +2673,7 @@ export class Coordinator {
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
       await this.durableExportReads(store.worldId);
-      const actions = await recoverConversationActions({
-        worldPath: store.dir,
-        worldId: store.worldId,
-        adapters: this.conversationActionAdapters(store),
-        now,
-      });
+      const actions = await recoverConversationActions(this.conversationActionLifecycleOptions(store));
       if (
         outcome.repaired.length > 0 ||
         outcome.sweptTombstones.length > 0 ||
@@ -6600,18 +6590,7 @@ export class Coordinator {
           {
             // Plan status is folded from the journal joined with live queue facts, so the probe
             // comes from here rather than from the write path reaching for the dispatcher.
-            activePlans: async (productionId) => {
-              const plans = await listPlans(store, productionId).catch(() => []);
-              const active: Array<{ planId: string; sceneId: string; status: string }> = [];
-              for (const plan of plans) {
-                const state = await planState(store, plan, this.planDriverDeps()).catch(() => null);
-                if (state === null) continue;
-                if (state.status === "authorized" || state.status === "active") {
-                  active.push({ planId: plan.planId, sceneId: plan.sceneId, status: state.status });
-                }
-              }
-              return active;
-            },
+            activePlans: (productionId) => this.activeScenePlans(store, productionId),
           },
         ).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
@@ -7791,6 +7770,7 @@ export class Coordinator {
           actionId: msg.actionId,
           payload: msg,
         });
+        await this.refreshConversationOutcome(store, msg.conversationId);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -12524,6 +12504,21 @@ export class Coordinator {
     if (bench) this.readModel.setBench({ worldId, session: bench.session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
+    // Dispatch itself refreshes Bench while holding the action execution lock. Reconcile in the
+    // background so fast completions wait for that dispatch's durable queued outcome.
+    this.trackBackground(this.reconcileBenchConversationActions(store, sessionId));
+  }
+
+  private async reconcileBenchConversationActions(store: WorldStore, sessionId: SessionId): Promise<void> {
+    const { activeActions } = await discoverConversations(store.dir);
+    if (this.stopping || !this.stillOpen(store)) return;
+    const lifecycle = this.conversationActionLifecycle(store);
+    for (const action of activeActions) {
+      if (action.actionKind !== "world-chat-bench-generation" || action.authority.id !== sessionId) continue;
+      if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
+        await this.refreshConversationOutcome(store, action.conversationId);
+      }
+    }
   }
 
   /**
@@ -13130,6 +13125,7 @@ export class Coordinator {
     const suppliedKinds = new Set(supplied.map((adapter) => adapter.actionKind));
     const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
     const deps: WorldChatActionAdapterDeps = {
+      activePlans: (productionId) => this.activeScenePlans(store, productionId),
       ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
       ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
       ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -13287,9 +13283,21 @@ export class Coordinator {
     return { status: "running" as const, detail: "The local export is running." };
   }
 
-  private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
+  private async activeScenePlans(store: WorldStore, productionId: string) {
+    const plans = await listPlans(store, productionId).catch(() => []);
+    const active: Array<{ planId: string; sceneId: string; status: string }> = [];
+    for (const plan of plans) {
+      const state = await planState(store, plan, this.planDriverDeps()).catch(() => null);
+      if (state?.status === "authorized" || state?.status === "active") {
+        active.push({ planId: plan.planId, sceneId: plan.sceneId, status: state.status });
+      }
+    }
+    return active;
+  }
+
+  private conversationActionLifecycleOptions(store: WorldStore): ConversationActionLifecycleOptions {
     let worldPath = store.dir;
-    return new ConversationActionLifecycle({
+    return {
       worldPath: () => worldPath,
       worldId: store.worldId,
       adapters: this.conversationActionAdapters(store, (path) => {
@@ -13297,7 +13305,11 @@ export class Coordinator {
       }),
       now: () => this.nowIso(),
       isWorldOpen: () => !this.stopping && this.stillOpen(store),
-    });
+    };
+  }
+
+  private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
+    return new ConversationActionLifecycle(this.conversationActionLifecycleOptions(store));
   }
 
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
@@ -13591,15 +13603,23 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
-    const { summaries } = await discoverConversations(store.dir);
+    const { summaries, activeActions } = await discoverConversations(store.dir);
     if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
+    this.readModel.setStagePlayblastRequests(activeActions.flatMap((action) => {
+      if (action.actionKind !== "world-chat-production-stage-playblast" || action.status !== "awaiting-host" || !action.productionId) return [];
+      const shotId = action.targets.find((target) => target.kind === "shot")?.id;
+      // The observation fallback supports cards prepared before scene targets were included.
+      const prefix = `${action.productionId}:`;
+      const sceneId = action.targets.find((target) => target.kind === "scene")?.id ??
+        action.baseObservations.find((observation) => observation.requirement === "scenes" && observation.target.startsWith(prefix))?.target.slice(prefix.length);
+      return shotId && sceneId ? [{ worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, productionId: action.productionId, sceneId, shotId }] : [];
+    }));
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
-    const { summaries } = await discoverConversations(store.dir);
+    await this.refreshConversations(store);
     if (!this.stillOpen(store)) return;
-    this.readModel.setConversations(summaries);
     if (this.getState().worldChat?.conversationId === conversationId) {
       await this.openWorldChat(store, conversationId);
     } else {

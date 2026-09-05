@@ -527,6 +527,7 @@ describe("World Chat authority adapters", () => {
     assert.equal(result.reason, "stale");
     assert.equal((await loaded(w.log)).actions[0]!.status, "stale");
     assert.equal((await readBible(w.store.dir)).text.includes("Only approval writes this."), false);
+    await assert.rejects(readFile(join(w.store.dir, ".history/bible/prepared", `${action.actionId}.json`)), { code: "ENOENT" });
   });
 
   it("writes a scene rename only after its card is approved", async () => {
@@ -1547,6 +1548,37 @@ describe("World Chat authority adapters", () => {
     assert.equal(orderedShots(after)[0]!.description, description);
     assert.equal(after.version, before.version + 1);
   });
+
+  for (const status of ["authorized", "active"] as const) {
+    it(`refuses a chat-driven shot deletion while its scene has an ${status} plan`, async () => {
+      const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+      let active = false;
+      let probed = false;
+      const w = await setup(context, { activePlans: async (productionId) => {
+        assert.equal(productionId, PRODUCTION);
+        probed = true;
+        return active ? [{ planId: "plan-live", sceneId: context.sceneId, status }] : [];
+      } });
+      const before = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+        .scenes.find((scene) => scene.id === context.sceneId)!;
+      const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+      const oneTurn = turn(w.conversationId, context, {
+        receipts: [receipt],
+        actions: [{ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+          command: { kind: "delete-shot", shotId: "sh_13" }, checkReceiptIds: [receipt.id] }],
+      });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      active = true;
+      const card = (await loaded(w.log)).actions[0]!;
+      assert.equal((await decide(w.lifecycle, w.log, card)).status, "failed");
+      assert.ok(probed, "the command probes live plans after approval");
+      const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+        .scenes.find((scene) => scene.id === context.sceneId)!;
+      assert.deepEqual(after, before);
+    });
+  }
 
   it("compiles and exports boards through separate approved authorities", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };

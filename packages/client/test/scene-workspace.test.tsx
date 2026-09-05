@@ -189,7 +189,12 @@ describe("scene detail owns the workspace", () => {
     assert.equal(staging.keys[1]!.t, 4, "the last key sits at the shot's length");
   });
 
-  it("opens the requested shot in Stage when an approved conversation action awaits the renderer", async () => {
+  for (const entryContext of [
+    { kind: "world" },
+    { kind: "production", productionId: "saltlight" },
+    { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+  ] as const) {
+  it(`opens the requested Stage shot after leaving the ${entryContext.kind} conversation`, async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const conversationId = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
     const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -200,7 +205,7 @@ describe("scene detail owns the workspace", () => {
       updatedAt: "2026-09-04T12:00:00.000Z",
       pointCount: 0,
       openProposalCount: 0,
-      entryContext: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      entryContext,
       notCarried: [],
     }];
     state.worldChat = {
@@ -248,6 +253,11 @@ describe("scene detail owns the workspace", () => {
       }],
     } as never;
 
+    state.stagePlayblastRequests = [{
+      worldId: FIXTURE_WORLD_ID, conversationId, actionId: "act_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      productionId: "saltlight", sceneId: "sc_04", shotId: "sh_13",
+    }];
+    state.worldChat = null; // Navigation closes the originating chat before the scene mounts.
     const mounted = await mountState(state);
     const stage = q(mounted, '[data-testid="workspace-stage"]');
     assert.ok(stage, "the awaiting host action opens Stage without another gesture");
@@ -258,6 +268,19 @@ describe("scene detail owns the workspace", () => {
     );
     assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
   });
+  }
+
+  for (const mismatch of ["worldId", "productionId", "sceneId"] as const) {
+    it(`does not record a Stage handoff for another ${mismatch}`, async () => {
+      const state = structuredClone(FIXTURE_STATE) as ClientState;
+      state.stagePlayblastRequests = [{
+        worldId: FIXTURE_WORLD_ID, conversationId: "cv_other", actionId: "act_other",
+        productionId: "saltlight", sceneId: "sc_04", shotId: "sh_13", [mismatch]: "other",
+      }];
+      const mounted = await mountState(state);
+      assert.equal(q(mounted, '[data-testid="workspace-stage"]'), null);
+    });
+  }
 
   it("never anchors a new camera to a character outside the capped scene block", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;

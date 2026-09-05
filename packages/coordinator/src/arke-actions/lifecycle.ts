@@ -695,6 +695,18 @@ export class ConversationActionLifecycle {
     }
   }
 
+  /** Publish an authority's live outcome without dispatching or replaying the action. */
+  async reconcileAction(conversationId: ConversationId, actionId: ConversationActionId): Promise<boolean> {
+    return serialise(executions, this.operationKey(actionId), async () => {
+      if (this.options.isWorldOpen && !this.options.isWorldOpen()) return false;
+      const current = await this.loadAction(conversationId, actionId);
+      if (!current || terminal(current.status)) return false;
+      const adapter = this.adapters.get(current.actionKind);
+      const authority = await adapter?.reconcile?.(current).catch(() => null) ?? null;
+      return authority ? this.appendOutcome(this.store(conversationId), current, authority) : false;
+    });
+  }
+
   /** Reconcile unbound intents and authority-owned statuses after restart. */
   async recoverConversation(conversationId: ConversationId): Promise<ConversationActionRecoveryOutcome> {
     const store = this.store(conversationId);
@@ -792,14 +804,7 @@ export class ConversationActionLifecycle {
         if (await this.continueApproved(action, adapter, true)) outcome.reconciled++;
         continue;
       }
-      const reconciled = await serialise(executions, this.operationKey(action.actionId), async () => {
-        const current = await this.loadAction(action.conversationId, action.actionId);
-        if (!current || terminal(current.status) || current.status === "approved") {
-          return false;
-        }
-        const authority = await adapter.reconcile?.(current).catch(() => null) ?? null;
-        return authority ? this.appendOutcome(store, current, authority) : false;
-      });
+      const reconciled = await this.reconcileAction(action.conversationId, action.actionId);
       if (reconciled) outcome.reconciled++;
     }
     return outcome;

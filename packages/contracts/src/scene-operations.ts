@@ -87,7 +87,7 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("insert-shot"),
       at: ShotAnchorSchema,
-      shot: ShotSchema.omit({ id: true, number: true }),
+      shot: ShotSchema.omit({ id: true, number: true, staging: true }),
     })
     .strict(),
   z.object({ kind: z.literal("move-shot"), shotId: ShotIdSchema, to: ShotAnchorSchema }).strict(),

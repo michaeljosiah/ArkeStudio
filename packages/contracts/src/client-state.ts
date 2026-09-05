@@ -542,6 +542,15 @@ export const ClientStateSchema = z
      * it — the same reason the world snapshot carries conversation rows and not their contents.
      */
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
+    /** Approved Stage handoffs survive closing their source conversation during navigation. */
+    stagePlayblastRequests: z.array(z.object({
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      actionId: z.string().min(1),
+      productionId: z.string().min(1),
+      sceneId: z.string().min(1),
+      shotId: z.string().min(1),
+    }).strict()).optional(),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),
     /**

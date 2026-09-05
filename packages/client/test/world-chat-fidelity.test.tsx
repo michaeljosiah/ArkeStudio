@@ -174,6 +174,7 @@ function renderActionConversation(
 ): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
+  state.worldChat!.messages[0]!.turnId = turnId as never;
   state.worldChat!.messages[1]!.turnId = turnId as never;
   state.worldChat!.actions = [{
     actionId: "act_01J8F3K2QW9VZX4N7M0RTYB6HC",

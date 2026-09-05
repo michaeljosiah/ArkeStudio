@@ -89,7 +89,7 @@ export function ConversationTranscript({
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
   const messages = workspace?.messages ?? [];
-  const visibleTurns = new Set(messages.map((message) => message.turnId));
+  const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
   // The message window is bounded; outstanding decisions and running work must stay reachable.
   const olderActions = (workspace?.actions ?? []).filter((action) =>
     !visibleTurns.has(action.turnId) &&
@@ -112,7 +112,7 @@ export function ConversationTranscript({
         </div>
       )}
       {messages.map((m) => {
-        const actions = m.turnId === undefined
+        const actions = m.role !== "studio" || m.turnId === undefined
           ? []
           : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
         return (

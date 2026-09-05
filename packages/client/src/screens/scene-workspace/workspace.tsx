@@ -371,20 +371,8 @@ export function SceneWorkspace({
     setSubject({ kind: "shot", shotId: shotId as never });
     setView("stage");
   };
-  const activeConversation = state?.worldChat;
-  const activeConversationSummary = activeConversation === null || activeConversation === undefined
-    ? undefined
-    : world.conversations.find((conversation) => conversation.id === activeConversation.conversationId);
-  const activeContext = activeConversationSummary?.entryContext;
-  const playblastAction = activeContext?.kind === "scene" &&
-    activeContext.productionId === production.meta.id && activeContext.sceneId === scene.id
-    ? activeConversation?.actions.find((action) =>
-        action.actionKind === "world-chat-production-stage-playblast" && action.status === "awaiting-host")
-    : undefined;
-  const playblastShotId = playblastAction?.targets.find((target) => target.kind === "shot")?.id;
-  const playblastRequest = playblastAction && playblastShotId
-    ? { actionId: playblastAction.actionId, conversationId: activeConversation!.conversationId, shotId: playblastShotId }
-    : undefined;
+  const playblastRequest = state?.stagePlayblastRequests?.find((request) =>
+    request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
   useEffect(() => {
     if (playblastRequest === undefined) return;
     setSubject({ kind: "shot", shotId: playblastRequest.shotId as never });

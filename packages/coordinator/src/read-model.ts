@@ -151,6 +151,7 @@ export class ReadModel {
       worldChat: world === null ? null : this.state.worldChat,
       bench: world === null ? null : this.state.bench,
       frameRuns: sameWorld ? this.state.frameRuns : [],
+      stagePlayblastRequests: sameWorld ? this.state.stagePlayblastRequests : [],
     };
   }
 
@@ -181,6 +182,10 @@ export class ReadModel {
 
   setWorldChat(worldChat: ClientState["worldChat"]): void {
     this.state = { ...this.state, worldChat };
+  }
+
+  setStagePlayblastRequests(requests: NonNullable<ClientState["stagePlayblastRequests"]>): void {
+    this.state = { ...this.state, stagePlayblastRequests: requests.filter((request) => request.worldId === this.state.world?.meta.worldId) };
   }
 
   setBench(bench: ClientState["bench"]): void {

@@ -289,6 +289,7 @@ export interface WorldChatActionTurn {
 }
 
 export interface WorldChatActionAdapterDeps {
+  readonly activePlans?: import("../productions/scene-commands.js").SceneCommandDeps["activePlans"];
   readonly pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
   readonly pickFolder?: () => Promise<string | null>;
   readonly mediaProbe?: MediaProbe;
@@ -1037,7 +1038,10 @@ function worldActionTargets(
       { kind: "take", id: action.takeId, label: action.takeId },
       { kind: "shot", id: action.shotId, label: action.shotId },
     ];
-    case "production-stage-playblast": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
+    case "production-stage-playblast": return [
+      { kind: "scene", id: action.sceneId, label: action.sceneId },
+      { kind: "shot", id: action.shotId, label: action.shotId },
+    ];
     case "audio-spine-command": return [{ kind: "audio-spine", id: action.productionId, label: "Audio spine" }];
     case "production-routing": return [{ kind: "routing", id: action.productionId, label: "Branch routing" }];
     case "production-routing-traversal": return [
@@ -3465,7 +3469,7 @@ async function executeSharedResource(
         baseVersion: scene.version,
         command: sceneCommandFrom(payload.action.command),
         requestId: action.actionId,
-      });
+      }, deps.activePlans ? { activePlans: deps.activePlans } : {});
       return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${scene.version + 1}`, summary: "The semantic scene command was applied." } };
     }
     case "world-chat-production-board-compile":
@@ -3758,9 +3762,9 @@ export function worldChatActionAdapters(
       const prepared = await readPreparation(store, "bible", action);
       if (!prepared) return { ok: false, reason: "blocked", detail: "The prepared Bible edit is unavailable." };
       const current = await readBible(store.dir);
-      return current.version === action.authorityRevision
-        ? { ok: true }
-        : { ok: false, reason: "stale", detail: "The Bible changed after this edit was prepared." };
+      if (current.version === action.authorityRevision) return { ok: true };
+      await removePreparation(store, "bible", action.actionId);
+      return { ok: false, reason: "stale", detail: "The Bible changed after this edit was prepared." };
     },
     execute: async (action) => {
       const prepared = WorldChatBibleActionSchema.parse(await readPreparation(store, "bible", action));
