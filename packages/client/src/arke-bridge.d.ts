@@ -69,6 +69,15 @@ export interface ArkeBridge {
     path: string,
     name: string,
   ): Promise<{ ok: true } | { ok: false; cancelled: true } | { ok: false; cancelled?: false; reason: string }>;
+  /**
+   * Put a picture on the system clipboard. Desktop only, and optional for that reason: the
+   * browser build writes it itself through the async clipboard, which the host's permission
+   * handler refuses in the app.
+   *
+   * PNG bytes the renderer already read back from a URL it was displaying, so nothing crosses
+   * that was not already on screen and no filesystem path is involved (SPEC-001 R-9).
+   */
+  copyImage?(bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: string }>;
 }
 
 export type ThemePreference = "system" | "light" | "dark";

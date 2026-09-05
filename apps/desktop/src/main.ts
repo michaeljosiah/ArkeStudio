@@ -14,7 +14,7 @@ import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, Notification, safeStorage, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
@@ -385,6 +385,28 @@ function registerHostIpc(): void {
     async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) =>
       await saveMediaFromHost(event.sender, input),
   );
+  /*
+   * Put a picture on the system clipboard.
+   *
+   * The renderer already read these bytes back from a URL it was displaying, so nothing is
+   * reachable here that was not already on screen — this is a clipboard write and no more. It is
+   * the host's job rather than the renderer's because Chromium's async clipboard consults the
+   * permission layer, and this window's handler answers no to everything but the microphone.
+   *
+   * Always PNG by the time it arrives: `nativeImage` reads PNG and JPEG only, and the world
+   * holds WebP besides, so the repaint happens on the renderer side where every format the
+   * page could display can be decoded.
+   */
+  ipcMain.handle("arke:copy-image", async (event, input: { bytes?: unknown }) => {
+    if (!window || event.sender !== window.webContents) return { ok: false, reason: "that window cannot copy" };
+    const raw = input?.bytes;
+    const bytes = raw instanceof Uint8Array ? raw : raw instanceof ArrayBuffer ? new Uint8Array(raw) : null;
+    if (!bytes || bytes.byteLength === 0) return { ok: false, reason: "there is no image here to copy" };
+    const image = nativeImage.createFromBuffer(Buffer.from(bytes));
+    if (image.isEmpty()) return { ok: false, reason: "that image could not be read" };
+    clipboard.writeImage(image);
+    return { ok: true };
+  });
   ipcMain.on("arke:activity-activation-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;
     activityActivationReady = true;
