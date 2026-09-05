@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  deleteShot,
   DispatchPlanSchema,
   foldPlan,
+  orderedShots,
   planScene,
+  SceneRecordSchema,
   START_FRAME_PREAMBLE,
   type DispatchPlan,
   type ManifestModel,
@@ -27,6 +30,7 @@ import {
 import { encodePng, solidImage } from "../../src/references/png.js";
 import type { BoundaryFrameMaker } from "../../src/takes/boundary.js";
 import { WorldStore } from "../../src/world/store.js";
+import { sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -493,5 +497,80 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
       fixture.production.scenes.length,
       "the plans directory is invisible to the scanner",
     );
+  });
+});
+
+describe("authorization is serialised with the scene's own writes (SPEC-029 R-39; issue 654)", () => {
+  it("a plan priced before a shot deletion lands is refused, and nothing is written", async () => {
+    /*
+     * The one interleaving the deletion blocker could not see: the delete derives its R-39
+     * blockers inside the gate and finds no plan; the plan, priced against the scene as it was,
+     * then lands beside the world carrying a pass for the shot the delete just removed.
+     *
+     * Staged the way the scene-commands suite stages its accept — something else holds the
+     * write queue, the deletion commits from inside it, and the plan write queues behind having
+     * already read and compiled the scene.
+     */
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    const bundle = store.getBundle();
+    const production = bundle.productions.find((p) => p.meta.id === "saltlight")!;
+    const scene = production.scenes.find((s) => s.id === "sc_04")!;
+    const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+    const scenePlan = planScene(
+      {
+        world: bundle.meta,
+        productionId: "saltlight",
+        sheets: bundle.sheets,
+        kits: bundle.referenceKits,
+        scene,
+        selections: {},
+        model: CHAINING,
+      },
+      "whole-scene",
+    );
+
+    let releaseHolder = (): void => {};
+    let queued = (): void => {};
+    const holderMayFinish = new Promise<void>((resolve) => (releaseHolder = resolve));
+    const planQueued = new Promise<void>((resolve) => (queued = resolve));
+
+    const holding = store.gateOp(async () => {
+      await planQueued;
+      const raw = await readFile(join(dir, path), "utf8");
+      const deleted = deleteShot(SceneRecordSchema.parse(JSON.parse(raw)), {
+        shotId: orderedShots(scene).at(-1)!.id,
+      });
+      await store.commitUnserialised({
+        kind: "scene-command",
+        source: "delete-shot",
+        files: [
+          { path, action: "replace", content: `${JSON.stringify(deleted, null, 2)}\n`, baseHash: sha256(raw) },
+        ],
+      });
+      await holderMayFinish;
+    });
+
+    // Priced against the scene as read, then queued behind the holder for its write.
+    const authorizing = createDispatchPlan(store, {
+      worldId: WORLD_ID,
+      productionId: "saltlight",
+      scene,
+      plan: scenePlan,
+      model: CHAINING,
+      world: bundle,
+      policy: "review-gated",
+      requestId: "01J8E0000000000000000000R9",
+      clock: CLOCK,
+    });
+    queued();
+    releaseHolder();
+    await holding;
+
+    await assert.rejects(authorizing, new RegExp(`the scene moved v${scene.version} → v${scene.version + 1}`));
+    assert.deepEqual(await listPlans(store, "saltlight"), [], "no plan file appeared for the removed shot");
+    const after = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!;
+    assert.equal(after.version, scene.version + 1, "the deletion itself landed");
   });
 });
