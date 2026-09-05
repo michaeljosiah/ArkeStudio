@@ -1,7 +1,7 @@
 import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
-import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio } from "./audio-reference.js";
+import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio, masterPerformanceShotIds } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -1411,6 +1411,7 @@ export interface ScenePlanInput {
   /** Explicit bypass applies only to this dispatch. */
   audioReferencesDisabled?: boolean;
   performanceReferences?: readonly FrozenPerformanceAudio[];
+  masterReferences?: readonly FrozenMasterAudio[];
   world: WorldMeta;
   sheets: Sheet[];
   kits: ReferenceKit[];
@@ -2307,7 +2308,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   for (const entry of shots) {
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
       imageCount: entry.bound.length, taskMode: entry.continuation ? "continue" : entry.frame ? "first-frame" : "generate",
-      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences });
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
   }
@@ -2315,7 +2316,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
     const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
     reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
-      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences });
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
   }
 
   return {

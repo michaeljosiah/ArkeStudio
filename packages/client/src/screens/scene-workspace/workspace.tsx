@@ -1,5 +1,6 @@
+import { MasterAudioPicker } from "../../components/master-audio-picker.js";
 import { PerformanceAudioPicker } from "../../components/performance-audio-picker.js";
-import { type PerformanceAudioChoice } from "../../lib/scene-plan.js";
+import { type MasterAudioChoice, type PerformanceAudioChoice } from "../../lib/scene-plan.js";
 import { TableReadPanel } from "../../components/table-read-panel.js";
 import { PerformancePanel } from "../../components/performance-panel.js";
 import { planForScene } from "../../lib/scene-plan.js";
@@ -91,12 +92,13 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [masterAudio, setMasterAudio] = useState<MasterAudioChoice[]>([]);
   const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioChoice[]>([]);
   const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
-  useEffect(() => { setPerformanceAudio([]); }, [sceneKey]);
+  useEffect(() => { setPerformanceAudio([]); setMasterAudio([]); }, [sceneKey]);
   const currentSceneKey = useRef(sceneKey);
   currentSceneKey.current = sceneKey;
   const pendingGenerator = useRef<{ requestId: string; sceneKey: string } | null>(null);
@@ -387,7 +389,7 @@ export function SceneWorkspace({
     setView("stage");
   }, [playblastRequest?.actionId, playblastRequest?.shotId]);
   const videoPlan = videoModel ? planForScene({ world, production, scene: legacySceneView(scene), model: videoModel,
-    audioReferencesDisabled, performanceAudio }, "whole-scene").wholeScene : null;
+    audioReferencesDisabled, performanceAudio, masterAudio }, "whole-scene").wholeScene : null;
   const videoAudioPlans = videoPlan?.passReferences.map(p => p.audioReferences).filter(p => p !== undefined) ?? [];
   const videoAudioProblems = videoAudioPlans.flatMap(p => p.problems);
   if (!audioReferencesDisabled && performanceAudio.some(request => {
@@ -396,6 +398,7 @@ export function SceneWorkspace({
     return !performance || performance.target.sceneId !== scene.id || performance.target.sceneVersion !== scene.version ||
       performance.provenance.outputHash !== request.hash || review?.decision !== "accept" || review.ts !== request.acceptedReviewAt;
   })) videoAudioProblems.push("A selected performance changed. Remove it and choose a currently accepted performance.");
+  if (!audioReferencesDisabled && masterAudio.some(r => production.timeline?.status !== "ready" || r.binding.timelineHash !== production.timeline.hash)) videoAudioProblems.push("The master playback timeline changed. Prepare the current slices again.");
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
     if (videoPlan?.timingProblems?.length) { setPlanError(videoPlan.timingProblems.join(" ")); return; }
@@ -407,6 +410,7 @@ export function SceneWorkspace({
       "whole-scene",
       videoModel.id,
       "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio.map(({ preview: _preview, ...request }) => request),
+      audioReferencesDisabled ? [] : masterAudio.map(({ preview: _preview, ...request }) => request),
     );
     setPlanError(null);
   };
@@ -460,11 +464,12 @@ export function SceneWorkspace({
               {videoPlan.timingProblems?.map((message,i)=><p role="alert" key={`problem-${i}`}>{message}</p>)}
             </div> : null}
             {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>Timeline content: {videoPlan.pack.totalSec.toFixed(3)}s in {videoPlan.pack.passes.length} passes. Provider step padding stays outside these picture slots.</p>}
-            {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0) && <div aria-label="Scene character audio references">
+            {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0 || masterAudio.length > 0 || videoAudioProblems.length > 0) && <div aria-label="Scene character audio references">
               <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>
-              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.sheetId}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}
+              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.label}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}
               {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
             </div>}
+            <MasterAudioPicker key={`${sceneKey}/master`} world={world} production={production} sceneId={scene.id} value={masterAudio} onChange={setMasterAudio} />
             <PerformanceAudioPicker key={sceneKey} world={world} production={production} sceneId={scene.id} value={performanceAudio} onChange={setPerformanceAudio} />
             <SceneSynopsis
               scene={legacySceneView(scene)}

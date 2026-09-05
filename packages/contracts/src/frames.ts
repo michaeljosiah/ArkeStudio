@@ -1,4 +1,4 @@
-import { PerformanceAudioRequestSchema } from "./audio-reference.js";
+import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
@@ -1981,6 +1981,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z.object({ kind: z.literal("prepare-master-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
   z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
   z
@@ -1988,6 +1990,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("dispatch-scene-planned"),
       audioReferencesDisabled: z.boolean().optional(),
       performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2109,6 +2112,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("dispatch-scene"),
       audioReferencesDisabled: z.boolean().optional(),
       performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,

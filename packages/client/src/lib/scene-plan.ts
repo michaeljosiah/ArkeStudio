@@ -1,4 +1,4 @@
-import { type PerformanceAudioRequest, type PreparedPerformanceAudioReview, type FrozenPerformanceAudio } from "@arke-studio/contracts";
+import { type MasterAudioRequest, type MasterAudioReview, type FrozenMasterAudio, type PerformanceAudioRequest, type PreparedPerformanceAudioReview, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { planScene, type ManifestModel, type Scene, type SizeTier } from "@arke-studio/contracts";
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
 
@@ -10,11 +10,13 @@ import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
  * this cost*, and the screen's whole claim is that it runs the same function on the same inputs
  * — so it is assembled once, here, and both callers read it.
  */
+export type MasterAudioChoice = MasterAudioRequest & { preview: MasterAudioReview };
 export type PerformanceAudioChoice = PerformanceAudioRequest & { preview?: PreparedPerformanceAudioReview };
 
 export interface ScenePlanInput {
   audioReferencesDisabled?: boolean;
   performanceAudio?: PerformanceAudioChoice[];
+  masterAudio?: MasterAudioChoice[];
   world: WorldBundle;
   production: ProductionBundle;
   scene: Scene;
@@ -44,7 +46,13 @@ export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-s
       label: "@Audio1", performance, acceptedReviewAt: request.acceptedReviewAt, warningCodes: request.warningCodes,
       attestations: [], acknowledgementId: "preview-only" }];
   });
+  const masterReferences: FrozenMasterAudio[] = (input.masterAudio ?? []).map(request => ({
+    intent: "performance-sync", characterName: `Shot ${request.binding.shotId} master playback`, label: "@Audio1", master: request.binding,
+    prepared: { file: `audio-inputs/sha256-${request.hash.slice(7)}.wav`, provenance: request.preview.provenance },
+    warningCodes: request.warningCodes, acknowledgementId: "preview-only",
+  }));
   const planInput = {
+    masterReferences,
     performanceReferences,
     timingProduction: production,
     audioReferencesDisabled: input.audioReferencesDisabled,

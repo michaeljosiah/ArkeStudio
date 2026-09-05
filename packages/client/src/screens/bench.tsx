@@ -2111,7 +2111,7 @@ function BenchWorkspace({
             {characterAudio && <div aria-label="Character audio references" style={{ flexBasis: "100%" }}>
               <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
                 params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use assigned character voice references for this dispatch</label>
-              {characterAudio.references.map(r => <p key={r.sheetId}>{r.characterName} · {r.label} · {("sample" in r ? r.sample : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
+              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
               {characterAudio.references.length > 0 && <p>The model generates synchronized audio. Voice identity and cadence are guidance, not guaranteed reproduction.</p>}
               {characterAudio.problems.map((problem, i) => <p key={i} role="alert">{problem}</p>)}
             </div>}

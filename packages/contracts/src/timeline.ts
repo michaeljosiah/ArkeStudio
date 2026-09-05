@@ -94,6 +94,7 @@ export const TimelineClipSchema = z
      */
     sourceInFrames: WholeFrameSchema.default(0),
     source: TimelineClipSourceSchema,
+    performanceSourceClipId: TimelineClipIdSchema.optional(),
     /** Audio clips: gain in dB, 0 when absent (SPEC-038 R-13). */
     gainDb: z.number().min(-60).max(12).optional(),
     /**
@@ -432,6 +433,7 @@ const SignedFramesSchema = z
  * writes name the same clip.
  */
 export const TimelineCommandSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
   z.object({ kind: z.literal("move-to-order"), clipId: TimelineClipIdSchema, index: WholeFrameSchema }).strict(),
   z.object({ kind: z.literal("move-to-frame"), clipId: TimelineClipIdSchema, startFrame: WholeFrameSchema }).strict(),
@@ -514,7 +516,8 @@ export type TimelineCommand = z.infer<typeof TimelineCommandSchema>;
 export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take" }>;
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
-export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio">): string | null {
+export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId">): string | null {
+  if (clip.performanceSourceClipId && (kind !== "picture" || clip.source.kind !== "shot")) return "master playback belongs to a shot on a Picture track";
   if (kind === "subtitle") return "a Subtitle track holds cues, not clips";
   if (clip.source.kind === "performance" && kind !== "dialogue") return "an exact performance belongs on a Dialogue track";
   if (kind === "picture") return null;
@@ -546,6 +549,8 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Use ${command.takeId} for ${command.shotId}`;
     case "place":
       return `Place ${command.clip.source.label} on ${command.trackId}`;
+    case "set-performance-source":
+      return `Change performance playback for ${command.clipId}`;
     case "set-clip-gain":
       return `Set ${command.clipId} to ${command.gainDb} dB`;
     case "set-track":
@@ -1399,6 +1404,20 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const clip = TimelineClipSchema.parse(command.clip);
       touch(working, track.id, clip.id, null);
       replaceTrackClips(working, track.id, [...track.clips, clip]);
+      return;
+    }
+    case "set-performance-source": {
+      const { track, clip, ordered } = findClip(working, command.clipId);
+      if (track.kind !== "picture" || clip.source.kind !== "shot") throw new TimelineOperationRefused("Performance playback belongs to a shot on the Picture track");
+      if (command.sourceClipId !== null) {
+        const source = findClip(working, command.sourceClipId);
+        if (source.track.kind !== "music" || source.clip.source.kind !== "artifact") throw new TimelineOperationRefused("Choose an audio artifact placed on a Music track");
+        if (clip.startFrame < source.clip.startFrame || clipEnd(clip) > clipEnd(source.clip)) throw new TimelineOperationRefused("The soundtrack clip must cover the entire shot slot");
+      }
+      touch(working, track.id, clip.id, clip);
+      const { performanceSourceClipId: _previous, ...rest } = clip;
+      replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id
+        ? { ...rest, ...(command.sourceClipId === null ? {} : { performanceSourceClipId: command.sourceClipId }) } : candidate));
       return;
     }
     case "set-clip-gain": {

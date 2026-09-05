@@ -1,4 +1,4 @@
-import { type PerformanceAudioRequest } from "@arke-studio/contracts";
+import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
 import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
@@ -3155,6 +3155,7 @@ export function dispatchScenePlanned(
   tier?: SizeTier,
   audioReferencesDisabled?: boolean,
   performanceAudio?: PerformanceAudioRequest[],
+  masterAudio?: MasterAudioRequest[],
 ): string {
   const requestId = ulid();
   send({
@@ -3167,6 +3168,7 @@ export function dispatchScenePlanned(
     modelId,
     policy,
     ...(performanceAudio?.length ? { performanceAudio } : {}),
+    ...(masterAudio?.length ? { masterAudio } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
     ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),

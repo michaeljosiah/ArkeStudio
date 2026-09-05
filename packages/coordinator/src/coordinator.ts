@@ -9,7 +9,7 @@ import { preparePerformanceGeneration, readPerformanceGenerationQuote, validateP
 import { reviewPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -7050,10 +7050,11 @@ export class Coordinator {
           fail("The scene or selected model is no longer available.");
           return;
         }
-        let performanceReferences;
+        let performanceReferences, masterReferences;
         try {
-          if (msg.audioReferencesDisabled && msg.performanceAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          if (msg.audioReferencesDisabled && (msg.performanceAudio?.length || msg.masterAudio?.length)) throw new Error("Disabled references cannot carry selected performances.");
           performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+          masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
           fail(reason);
@@ -7066,7 +7067,7 @@ export class Coordinator {
           {
             timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
-            performanceReferences,
+            performanceReferences, masterReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -7590,10 +7591,11 @@ export class Coordinator {
         }
         // The negatives derive from the production's audio design (SPEC-019 R-9, R-11): a cut
         // that composes its own score means the model must not lay music under every clip.
-        let performanceReferences;
+        let performanceReferences, masterReferences;
         try {
-          if (msg.audioReferencesDisabled && msg.performanceAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          if (msg.audioReferencesDisabled && (msg.performanceAudio?.length || msg.masterAudio?.length)) throw new Error("Disabled references cannot carry selected performances.");
           performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+          masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
           const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
           this.rejectEnqueue(msg.requestId, msg.kind, reason);
@@ -7605,7 +7607,7 @@ export class Coordinator {
           {
             timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
-            performanceReferences,
+            performanceReferences, masterReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -11878,6 +11880,19 @@ export class Coordinator {
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: "The recording could not be kept. Check the current authored line, desktop audio tools and capture, then retry. Existing performances are retained." });
+        }
+        return;
+      }
+      case "prepare-master-audio-reference": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId || msg.binding.productionId !== msg.productionId || !this.opts.audioMediaTools) throw new Error("Open the world with audio preparation tools available.");
+          const masterAudioReference = await prepareMasterAudioReference(store, this.opts.audioMediaTools, msg.binding);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "prepared", masterAudioReference });
+        } catch (error) {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Master audio preparation failed." });
         }
         return;
       }

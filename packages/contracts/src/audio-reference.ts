@@ -1,6 +1,8 @@
+import { basePictureTrack } from "./timeline.js";
+import type { ProductionBundle } from "./client-state.js";
 import { z } from "zod";
-import { AudioAssetProvenanceSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
-import { IsoDateTimeSchema, SlugSchema } from "./ids.js";
+import { AudioRangeSchema, AudioAssetProvenanceSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
+import { ArtifactIdSchema, ShotIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { PerformanceIdSchema, PerformanceRecordSchema } from "./performance.js";
 import { CharacterVoiceSampleSchema } from "./voice-sample.js";
 import type { ManifestModel } from "./manifest.js";
@@ -44,6 +46,42 @@ export const FrozenPerformanceAudioSchema = z.object({
   warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema), acknowledgementId: z.string().min(1),
 }).strict();
 export type FrozenPerformanceAudio = z.infer<typeof FrozenPerformanceAudioSchema>;
+export const MasterAudioBindingSchema = z.object({
+  productionId: SlugSchema, shotId: ShotIdSchema, timelineHash: FullSha256Schema, timelineRevision: z.number().int().nonnegative(),
+  sourceClipId: z.string().min(1), artifactId: ArtifactIdSchema, range: AudioRangeSchema,
+}).strict();
+export const MasterAudioReviewSchema = z.object({ operationId: z.string().uuid(), binding: MasterAudioBindingSchema,
+  preparedFile: z.string().min(1), provenance: AudioAssetProvenanceSchema }).strict();
+export type MasterAudioReview = z.infer<typeof MasterAudioReviewSchema>;
+export const MasterAudioRequestSchema = z.object({ operationId: z.string().uuid(), hash: FullSha256Schema,
+  binding: MasterAudioBindingSchema, warningCodes: z.array(z.string()), cloudBasis: z.enum(["self", "authorized", "licensed"]) }).strict();
+export type MasterAudioRequest = z.infer<typeof MasterAudioRequestSchema>;
+export const FrozenMasterAudioSchema = z.object({ intent: z.literal("performance-sync"), sheetId: z.undefined().optional(),
+  characterName: z.string().min(1), label: z.string().regex(/^@Audio[1-3]$/), master: MasterAudioBindingSchema,
+  prepared: PreparedReferenceAudioSchema, warningCodes: z.array(z.string()), acknowledgementId: z.string().min(1),
+}).strict();
+export type FrozenMasterAudio = z.infer<typeof FrozenMasterAudioSchema>;
+
+/** Physical soundtrack time derives from the placed music, never a picture take's trim. */
+export function masterAudioBinding(production: ProductionBundle, shotId: string): z.infer<typeof MasterAudioBindingSchema> {
+  const state = production.timeline;
+  if (state?.status !== "ready" || !state.hash) throw new Error("Save the production timeline before preparing master playback.");
+  const timeline = state.timeline;
+  const clips = basePictureTrack(timeline)?.clips.filter(c => c.source.kind === "shot" && c.source.shotId === shotId) ?? [];
+  const picture = clips[0];
+  if (clips.length !== 1 || !picture?.performanceSourceClipId) throw new Error("Choose one Picture slot with an enabled performance soundtrack.");
+  const source = timeline.tracks.flatMap(track => track.kind === "music" ? track.clips : []).find(c => c.id === picture.performanceSourceClipId);
+  if (!source || source.source.kind !== "artifact" || picture.startFrame < source.startFrame ||
+    picture.startFrame + picture.durationFrames > source.startFrame + source.durationFrames) throw new Error("The selected master soundtrack no longer covers this shot.");
+  const inSec = (source.sourceInFrames + picture.startFrame - source.startFrame) / timeline.frameRate;
+  return MasterAudioBindingSchema.parse({ productionId: production.meta.id, shotId, timelineHash: state.hash,
+    timelineRevision: timeline.revision, sourceClipId: source.id, artifactId: source.source.artifactId,
+    range: { inSec, outSec: inSec + picture.durationFrames / timeline.frameRate } });
+}
+export function masterPerformanceShotIds(production?: ProductionBundle): string[] {
+  return production?.timeline?.status === "ready" ? (basePictureTrack(production.timeline.timeline)?.clips ?? [])
+    .flatMap(c => c.source.kind === "shot" && c.performanceSourceClipId ? [c.source.shotId] : []) : [];
+}
 export const AudioReferenceEffectsSchema = z.object({
   wording: z.literal("prompt-guided"), timing: z.literal("not-preserved"), identity: z.literal("guidance"),
   cadence: z.literal("guidance"), lipSync: z.literal("generated"), generatedAudio: z.boolean(),
@@ -52,10 +90,11 @@ export const AudioReferenceEffectsSchema = z.object({
 export const CharacterAudioPlanSchema = z.object({
   version: z.literal(1), disabled: z.boolean(), route: z.string().nullable(),
   effects: AudioReferenceEffectsSchema.optional(),
-  references: z.array(z.union([FrozenCharacterAudioSchema, FrozenPerformanceAudioSchema])).max(3), problems: z.array(z.string()),
+  references: z.array(z.union([FrozenCharacterAudioSchema, FrozenPerformanceAudioSchema, FrozenMasterAudioSchema])).max(3), problems: z.array(z.string()),
 }).strict();
 export type CharacterAudioPlan = z.infer<typeof CharacterAudioPlanSchema>;
 export function referenceAudioAsset(ref: CharacterAudioPlan["references"][number]) {
+  if ("master" in ref) return { ...ref.prepared, warningCodes: ref.warningCodes, attestations: [], acknowledgementId: ref.acknowledgementId };
   return "sample" in ref ? ref.sample : { ...(ref.prepared ?? ref.performance), warningCodes: ref.warningCodes,
     attestations: ref.attestations, acknowledgementId: ref.acknowledgementId };
 }
@@ -74,16 +113,19 @@ export function characterAudioRoute(model: { provider: string; id: string }, tas
 
 /** Resolve authored speaking roles, never incidental mentions. Ordering follows reviewed script coverage. */
 export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly Shot[]; sheets: readonly Sheet[];
-  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[] }): CharacterAudioPlan {
+  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[]; requiredMasterShots?: readonly string[] }): CharacterAudioPlan {
   const route = characterAudioRoute(input.model, input.taskMode);
   const plan: CharacterAudioPlan = { version: 1, disabled: input.disabled === true, route: route?.endpoint ?? null, references: [], problems: [] };
-  if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length)) return plan;
+  if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length && !input.masterReferences?.length && !input.requiredMasterShots?.length)) return plan;
   const speakers: string[] = [];
   const add = (speaker: string | undefined) => {
     if (!speaker) plan.problems.push("Resolve the speaker for the covered dialogue before dispatch.");
     else if (!speakers.includes(speaker)) speakers.push(speaker);
   };
+  const masters = (input.masterReferences ?? []).filter(ref => input.shots.some(shot => shot.id === ref.master.shotId));
   for (const shot of input.shots) {
+    if (input.requiredMasterShots?.includes(shot.id) && !masters.some(ref => ref.master.shotId === shot.id)) plan.problems.push("An enabled performance shot needs its prepared master slice. Prepare it or explicitly disable audio references.");
+    if (masters.some(ref => ref.master.shotId === shot.id)) continue;
     const covered = shot.covers?.map(c => input.scene.script?.blocks.find(b => b.id === c.blockId));
     if (covered?.length) {
       for (const block of covered) {
@@ -92,9 +134,14 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
       }
     } else if (shot.audio?.kind === "dialogue" || shot.audio?.kind === "vo") add(shot.audio.speaker);
   }
+  for (const ref of masters) {
+    if (!route) plan.problems.push("This route cannot carry master performance playback.");
+    plan.references.push({ ...ref, label: `@Audio${plan.references.length + 1}` });
+  }
   const explicit = (input.performanceReferences ?? []).filter(ref => input.shots.some(shot => shot.id === ref.performance.target.shotId));
   for (const ref of explicit) {
     if (!route) plan.problems.push("This route cannot carry the selected performance audio.");
+    if (masters.some(master => master.master.shotId === ref.performance.target.shotId)) plan.problems.push("Choose a master slice or character performances for a shot, not both.");
     if (!speakers.includes(ref.sheetId)) plan.problems.push("The performance does not match a speaking character in this shot.");
     plan.references.push({ ...ref, label: `@Audio${plan.references.length + 1}` });
   }
@@ -125,15 +172,16 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
 
 export function characterAudioInstructions(plan: CharacterAudioPlan): string {
   return plan.references.map(r => r.intent === "performance-sync"
-    ? `${r.characterName} performs the supplied ${r.label} audio. Synchronize visible speech and movement to that performance. The supplied external audio remains the final soundtrack.`
+    ? "master" in r ? `Use ${r.label} as the playback for ${r.characterName}. Synchronize visible performance to the supplied soundtrack; do not invent competing music or dialogue. External master audio remains final.` : `${r.characterName} performs the supplied ${r.label} audio. Synchronize visible speech and movement to that performance. The supplied external audio remains the final soundtrack.`
     : `${r.characterName} uses ${r.label} as voice guidance. Speak the scene's authored dialogue; do not repeat the audio reference's words.`).join("\n");
 }
 
 export function planSubjectCharacterAudio(input: { world: WorldBundle; subject: { productionId: string; sceneId: string;
   kind: string; shotId?: string; members?: readonly { shotId: string }[] }; model: ManifestModel;
   imageCount: number; taskMode?: string; disabled?: boolean }): CharacterAudioPlan {
-  const scene = input.world.productions.find(p => p.meta.id === input.subject.productionId)?.scenes.find(s => s.id === input.subject.sceneId);
+  const production = input.world.productions.find(p => p.meta.id === input.subject.productionId);
+  const scene = production?.scenes.find(s => s.id === input.subject.sceneId);
   if (!scene) return { version: 1, disabled: input.disabled === true, route: null, references: [], problems: ["The scene is no longer available."] };
   const ids = new Set(input.subject.shotId ? [input.subject.shotId] : input.subject.members?.map(m => m.shotId) ?? []);
-  return planCharacterAudio({ ...input, scene, shots: orderedShots(scene).filter(s => ids.has(s.id)), sheets: input.world.sheets, kits: input.world.referenceKits });
+  return planCharacterAudio({ ...input, requiredMasterShots: masterPerformanceShotIds(production), scene, shots: orderedShots(scene).filter(s => ids.has(s.id)), sheets: input.world.sheets, kits: input.world.referenceKits });
 }

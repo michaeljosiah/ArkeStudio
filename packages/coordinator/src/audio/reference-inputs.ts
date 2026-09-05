@@ -1,3 +1,5 @@
+import { orderedShots, masterAudioBinding, MasterAudioReviewSchema, type MasterAudioRequest, type FrozenMasterAudio } from "@arke-studio/contracts";
+import { sha256 } from "../world/text-files.js";
 import { readFile } from "node:fs/promises";
 import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
 import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "./storage.js";
@@ -32,7 +34,8 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
     if (ref.label !== `@Audio${index + 1}`) throw new Error("Audio reference bindings changed.");
     const sample = referenceAudioAsset(ref);
     if (requireCurrent) {
-      if ("sample" in ref) {
+      if ("master" in ref) await requireCurrentMasterBinding(store, ref.master);
+      else if ("sample" in ref) {
         const current = store.getBundle().referenceKits.find(k => k.sheetId === ref.sheetId)?.designatedVoiceSample;
         if (!current || !("schemaVersion" in current) || current.provenance.outputHash !== sample.provenance.outputHash) throw new Error("The assigned character sample changed. Review the dispatch again.");
       } else {
@@ -42,7 +45,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
           review?.decision !== "accept" || review.ts !== ref.acceptedReviewAt) throw new Error("The accepted performance changed. Review the dispatch again.");
       }
     }
-    const file = "sample" in ref ? `references/${ref.sheetId}/${sample.file}`
+    const file = "master" in ref ? `productions/${ref.master.productionId}/${ref.prepared.file}` : "sample" in ref ? `references/${ref.sheetId}/${sample.file}`
       : ref.prepared ? `productions/${ref.performance.target.productionId}/${ref.prepared.file}`
       : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${sample.file}`;
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, file), store.closingSignal, route.maxBytesPerFile);
@@ -50,9 +53,9 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
     if (seconds > route.maxTotalDurationSec) throw new Error("Audio references exceed the combined duration limit.");
     clearAudioDispatch({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
       rights, scope: "cloud-reference-upload", warningCodes: sample.warningCodes, attestations: sample.attestations,
-      requiredAttestations: ["single-speaker", "no-music"], statementVersion: 1, acknowledgementId: sample.acknowledgementId });
+      requiredAttestations: "master" in ref ? [] : ["single-speaker", "no-music"], statementVersion: 1, acknowledgementId: sample.acknowledgementId });
     const mp3 = sample.file.endsWith(".mp3");
-    result.push({ name: `${ref.sheetId}.${mp3 ? "mp3" : "wav"}`, contentType: mp3 ? "audio/mpeg" as const : "audio/wav" as const, data: bytes });
+    result.push({ name: `audio-${index + 1}.${mp3 ? "mp3" : "wav"}`, contentType: mp3 ? "audio/mpeg" as const : "audio/wav" as const, data: bytes });
   }
   return result;
 }
@@ -130,4 +133,60 @@ async function acceptPerformanceAudioRange(store: WorldStore, performance: Perfo
       action: "create", baseHash: null, content: JSON.stringify(asset) + "\n" }] };
   });
   return asset!;
+}
+
+async function requireCurrentMasterBinding(store: WorldStore, binding: MasterAudioRequest["binding"]) {
+  const production = store.getBundle().productions.find(p => p.meta.id === binding.productionId);
+  if (!production || JSON.stringify(masterAudioBinding(production, binding.shotId)) !== JSON.stringify(binding)) throw new Error("The master playback binding changed. Prepare the current slice again.");
+  const raw = await readFile(await audioWorldPath(store.dir, `productions/${binding.productionId}/timeline.json`), "utf8");
+  if (sha256(raw) !== binding.timelineHash) throw new Error("The timeline changed. Refresh before preparing playback.");
+}
+export async function prepareMasterAudioReference(store: WorldStore, tools: AudioMediaTools, binding: MasterAudioRequest["binding"]) {
+  await requireCurrentMasterBinding(store, binding);
+  const candidate = await prepareAudio(store, tools, { kind: "artifact", artifactId: binding.artifactId, range: binding.range });
+  await requireCurrentMasterBinding(store, binding);
+  return MasterAudioReviewSchema.parse({ operationId: candidate.operationId, binding, preparedFile: candidate.stagedFile, provenance: candidate.provenance });
+}
+export async function resolveMasterAudioReferences(store: WorldStore, productionId: string, sceneId: string,
+  requests: readonly MasterAudioRequest[], requestId: string): Promise<FrozenMasterAudio[]> {
+  const references: FrozenMasterAudio[] = [];
+  for (const [index, request] of requests.entries()) {
+    const binding = request.binding;
+    const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+    if (binding.productionId !== productionId || !production?.scenes.some(s => s.id === sceneId && orderedShots(s).some(shot => shot.id === binding.shotId))) throw new Error("The master slice belongs to another scene.");
+    if (requests.slice(0, index).some(r => r.binding.shotId === binding.shotId)) throw new Error("A shot has more than one master slice.");
+    await requireCurrentMasterBinding(store, binding);
+    const prefix = `productions/${productionId}`;
+    const receiptPath = `${prefix}/audio-inputs/${request.operationId}.json`;
+    const receipt = await readFile(await store.ownedWrite(() => audioWorldPath(store.dir, receiptPath, true)), "utf8").catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error;
+    });
+    const verify = (asset: { provenance: PerformanceRecord["provenance"] }) => {
+      const source = asset.provenance.source;
+      if (source.kind !== "artifact" || source.artifactId !== binding.artifactId || JSON.stringify(source.range) !== JSON.stringify(binding.range) ||
+        asset.provenance.outputHash !== request.hash) throw new Error("The prepared master slice changed. Prepare and review it again.");
+    };
+    let prepared;
+    if (receipt) { prepared = PreparedReferenceAudioSchema.parse(JSON.parse(receipt)); verify(prepared); }
+    else {
+      const candidate = JSON.parse(await readFile(await audioWorldPath(store.dir, `.staging/audio/${request.operationId}/candidate.json`), "utf8")) as PreparedAudioCandidate;
+      verify(candidate);
+      await acceptPreparedAudio(store, candidate, `${prefix}/audio-inputs`, (file, provenance) => {
+        prepared = PreparedReferenceAudioSchema.parse({ file: file.slice(prefix.length + 1), provenance });
+        return { kind: "prepare-master-reference", source: "user", requestId, files: [{ path: receiptPath, action: "create", baseHash: null,
+          content: JSON.stringify(prepared) + "\n" }] };
+      });
+    }
+    if (!prepared) throw new Error("Master slice preparation did not finish.");
+    const acknowledgementId = `master-reference/${requestId}/${index}`;
+    const prior = (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
+    await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: request.hash,
+      basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at: prior?.at ?? store.now() });
+    const bytes = await readAudioBytes(await audioWorldPath(store.dir, `${prefix}/${prepared.file}`), store.closingSignal, 15_000_000);
+    clearAudioDispatch({ bytes, hash: request.hash, report: prepared.provenance.qualityReport, rights: await readAudioRights(store),
+      scope: "cloud-reference-upload", acknowledgementId, warningCodes: request.warningCodes, attestations: [], requiredAttestations: [], statementVersion: 1 });
+    references.push({ intent: "performance-sync", characterName: `Shot ${binding.shotId} master playback`, label: "@Audio1", master: binding,
+      prepared, warningCodes: request.warningCodes, acknowledgementId });
+  }
+  return references;
 }
