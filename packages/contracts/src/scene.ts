@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 
 /**
  * A scene-script block (SPEC-023 R-13): the smallest stable thing a shot can cite. Block ids
@@ -226,6 +227,13 @@ export const ShotSchema = z
     framing: ShotFramingSchema.optional(),
     /** The blocked-out camera move and cast positions (the Stage), where the shot has been staged. */
     staging: ShotStagingSchema.optional(),
+    /**
+     * The prop states this shot cites (design turn 105, `stateOwner: shot-or-dispatch`; issue
+     * 536). The shot's own control is the one durable value: what it stores is what the next
+     * dispatch reads, and the first shot whose entry changes IS the transition. A cited prop with
+     * no entry resolves as unresolved — never the previous shot's state, never a guess.
+     */
+    propStates: z.array(z.object({ propId: PropIdSchema, stateId: PropStateIdSchema }).strict()).optional(),
     /**
      * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
      * an authored intent — the dispatch already chains when a boundary still exists; this records

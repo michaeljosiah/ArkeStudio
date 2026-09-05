@@ -35,6 +35,9 @@ function provenanceOf(job: Job): Provenance {
     ...(frozen?.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
     ...(frozen?.sceneId !== undefined ? { sceneId: frozen.sceneId } : {}),
     ...(frozen?.sceneVersion !== undefined ? { sceneVersion: frozen.sceneVersion } : {}),
+    // The prop states the pass compiled with (design turn 105; issue 536) — frozen at dispatch
+    // like the sheet versions beside them, never re-resolved against the scene at arrival.
+    ...(frozen?.propStates !== undefined ? { propStates: frozen.propStates } : {}),
     ...(job.recipe !== undefined
       ? { recipeVersion: job.recipe.version }
       : frozen?.recipeVersion !== undefined

@@ -319,6 +319,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
       },
       sheets: input.world.sheets,
       kits: input.world.referenceKits,
+      props: input.world.props,
       scene: input.scene,
       selections: input.production.selections,
       model: input.model,

@@ -1,3 +1,5 @@
+import type { PropStateProvenance } from "./prop.js";
+import type { ShotPropResolution } from "./planning.js";
 import {
   assemblePassBlocks,
   bindingPreamble,
@@ -260,7 +262,13 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         : { version: world.artDirection.version, source: "world", transport: "text" };
   const provenanceFor = (
     sheetIds: string[],
-  ): { canonRevision: number; sheets: Record<string, number>; artDirectionVersion: number } => ({
+    propStates: readonly ShotPropResolution[] = [],
+  ): {
+    canonRevision: number;
+    sheets: Record<string, number>;
+    artDirectionVersion: number;
+    propStates?: PropStateProvenance[];
+  } => ({
     canonRevision: world.meta.canonRevision,
     artDirectionVersion: world.artDirection.version,
     sheets: Object.fromEntries(
@@ -269,6 +277,19 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         .filter((s): s is Sheet => s !== undefined)
         .map((s) => [s.id, s.version]),
     ),
+    // Turn 105's five fields, frozen at dispatch for every cited prop — the unresolved ones
+    // included, since "no state was chosen" is a fact about this take too (issue 536).
+    ...(propStates.length > 0
+      ? {
+          propStates: propStates.map((entry) => ({
+            propId: entry.propId,
+            stateId: entry.stateId,
+            referenceId: entry.referenceId,
+            resolutionSource: entry.resolutionSource,
+            overrideSource: entry.overrideSource,
+          })),
+        }
+      : {}),
   });
   const sourcesFor = (sheets: Record<string, number>): CompiledPass["sources"] => ({
     canonRevision: world.meta.canonRevision,
@@ -331,7 +352,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           : entry.shot.durationSec !== undefined
             ? askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, route)
             : undefined;
-      const provenance = provenanceFor(entry.budget.carried.map((c) => c.sheetId));
+      const provenance = provenanceFor(entry.budget.carried.map((c) => c.sheetId), entry.propStates);
       return {
         target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
         model: {
@@ -445,7 +466,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       .map((block) => block.trim())
       .filter((block) => block.length > 0)
       .join("\n\n");
-    const provenance = provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId));
+    const provenance = provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId), passReferencePlan.propStates);
     return {
       target: { kind: "scene-pass" as const, id: scene.id, coversShots: pass.plan.map((p) => p.shotId) },
       model: {

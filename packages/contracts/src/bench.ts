@@ -241,7 +241,7 @@ export const BenchReferenceTokenSchema = z
       .object({
         subject: z.string().min(1).max(200),
         rolePhrase: z.string().min(1).max(300),
-        mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation"]),
+        mode: z.enum(["designated", "main-photo", "scoped-look", "sketch-citation", "prop-state"]),
       })
       .strict()
       .optional(),

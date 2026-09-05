@@ -17,7 +17,8 @@ export interface BudgetCandidate {
   /** Defaults to "image": every existing candidate is one, and every caller wrote it that way. */
   kind_?: ReferenceKind;
   sheetId: string;
-  kind: SheetKind;
+  /** A prop-state reference ranks between a location and the other mentions (design turn 105; issue 536). */
+  kind: SheetKind | "prop";
   /** Characters: "lead" | "support" | … Anything unstated sorts after "lead". */
   billing?: string;
   /** Order of first appearance in the shot description; lower first. */
@@ -27,6 +28,8 @@ export interface BudgetCandidate {
   /** A character with both sheet and main photo may spend a spare slot on identity depth. */
   hasSecondaryReference?: boolean;
   referenceRole?: "primary" | "secondary";
+  /** How a notice names it when it is not a sheet: a prop reads `Polaroid · on-fridge`, not its id. */
+  label?: string;
 }
 
 export interface BudgetResult {
@@ -53,7 +56,7 @@ export interface BudgetResult {
   subjectsOverRange: { carried: number; reliableTo: number } | null;
 }
 
-const KIND_RANK: Record<SheetKind, number> = { character: 0, location: 1, faction: 2 };
+const KIND_RANK: Record<SheetKind | "prop", number> = { character: 0, location: 1, prop: 2, faction: 3 };
 
 function rank(a: BudgetCandidate, b: BudgetCandidate): number {
   // 1 — characters before locations and factions: a face drifting is noticed most (§2.9).
@@ -70,7 +73,7 @@ function rank(a: BudgetCandidate, b: BudgetCandidate): number {
 function referenceLabel(candidate: BudgetCandidate): string {
   return candidate.referenceRole === "secondary"
     ? `${candidate.sheetId} (second reference)`
-    : candidate.sheetId;
+    : (candidate.label ?? candidate.sheetId);
 }
 
 /**

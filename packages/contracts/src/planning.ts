@@ -38,6 +38,7 @@ import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
 import type { Sheet, WorldMeta } from "./world.js";
+import type { Prop } from "./prop.js";
 
 /**
  * Dispatch planning (SPEC-012 §2.8–§2.11): prompts assembled from the world, mentions as the
@@ -75,6 +76,64 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
     else unknown.push(slug);
   }
   return { cast, unknown };
+}
+
+/** The slug a prop is mentioned by: `@polaroid` for a prop named "Polaroid" (issue 536). */
+export function propSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** One prop as a shot dispatches it: turn 105's five fields, plus the names a screen shows. */
+export interface ShotPropResolution {
+  propId: string;
+  propName: string;
+  stateId: string | null;
+  stateName: string | null;
+  referenceId: string | null;
+  /** World-relative, like an attachment's file; null dispatches on the prose alone. */
+  referenceFile: string | null;
+  resolutionSource: "shot" | "override" | "unresolved";
+  overrideSource: "manual" | null;
+}
+
+/**
+ * Which props a shot cites and the state each dispatches in (design turn 105; issue 536).
+ *
+ * A prop is cited by mention or by an entry on the shot's own control, and the control is the
+ * one durable value: nothing carries forward from an earlier shot (`timelineRule:
+ * manual-per-dispatch`). No entry, or an entry naming a state the prop no longer has, resolves
+ * `unresolved` — reported, never guessed — and a state with no accepted reference dispatches on
+ * the prose alone rather than borrowing an unrelated image.
+ */
+export function resolvePropStates(
+  shot: Shot,
+  props: readonly Prop[],
+  overrides?: Readonly<Record<string, string>>,
+): ShotPropResolution[] {
+  if (props.length === 0) return [];
+  const mentioned = parseMentions(shot.description);
+  const cited = props.filter(
+    (prop) =>
+      mentioned.includes(propSlug(prop.name)) || shot.propStates?.some((entry) => entry.propId === prop.id) === true,
+  );
+  return cited.map((prop) => {
+    const override = overrides?.[prop.id];
+    const chosen = override ?? shot.propStates?.find((entry) => entry.propId === prop.id)?.stateId;
+    const state = chosen === undefined ? undefined : prop.states.find((candidate) => candidate.id === chosen);
+    return {
+      propId: prop.id,
+      propName: prop.name,
+      stateId: state?.id ?? null,
+      stateName: state?.name ?? null,
+      referenceId: state?.reference?.id ?? null,
+      referenceFile: state?.reference !== undefined ? `references/${prop.id}/${state.reference.file}` : null,
+      resolutionSource: state === undefined ? "unresolved" : override !== undefined ? "override" : "shot",
+      overrideSource: state !== undefined && override !== undefined ? "manual" : null,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -639,9 +698,11 @@ export function packScene(
 export interface AttachmentDecision {
   sheetId: string;
   file: string | null;
-  mode: "designated" | "main-photo" | "scoped-look" | "sketch-citation";
+  mode: "designated" | "main-photo" | "scoped-look" | "sketch-citation" | "prop-state";
   role: "primary" | "secondary";
   staleGap: string | null;
+  /** A prop-state reference has no sheet to name; `sheetId` holds the prop id (issue 536). */
+  prop?: { name: string; state: string };
   /**
    * For a location sheet: the panel names top to bottom, read off the compilation actually
    * being sent rather than the kit's current views (#243). One image arrives carrying several
@@ -736,6 +797,19 @@ export function bindReferences(
   const bound: BoundReference[] = [];
   for (const decision of decisions) {
     if (decision.file === null) continue;
+    if (decision.prop !== undefined) {
+      bound.push({
+        index: bound.length + 1,
+        sheetId: decision.sheetId,
+        subject: decision.prop.name,
+        file: decision.file,
+        kind: "image",
+        rolePhrase: `prop reference — the ${decision.prop.name}, ${decision.prop.state}`,
+        mode: decision.mode,
+        sameSubjectAs: null,
+      });
+      continue;
+    }
     const sheet = sheets.find((s) => s.id === decision.sheetId);
     if (sheet === undefined) continue;
     const first = bound.find((b) => b.sheetId === decision.sheetId);
@@ -1226,6 +1300,17 @@ export interface DispatchWarnings {
   retiredCitations: string[];
   unknownMentions: string[];
   /**
+   * Cited props with no state chosen, or a chosen state with no accepted reference (design turn
+   * 105): named before spend, never guessed and never blocking. The shot dispatches on its prose.
+   */
+  propStates: Array<{
+    shotId: string;
+    number: number;
+    prop: string;
+    state: string | null;
+    issue: "unresolved" | "missing-reference";
+  }>;
+  /**
    * Cast owned by a *different* production (SPEC-020 R-6).
    *
    * The mention resolved — scope is not consulted at resolution time, deliberately (R-5, D3), so
@@ -1322,6 +1407,13 @@ export interface ScenePlanInput {
   world: WorldMeta;
   sheets: Sheet[];
   kits: ReferenceKit[];
+  /** The world's props (design turn 105; issue 536): what a shot's `propStates` resolves against. */
+  props?: readonly Prop[];
+  /**
+   * One-shot overrides made before spend, shot id → prop id → state id. Recorded on the take as
+   * `override` / `manual` and never written back to the shot (turn 105, `overrideScope: shot`).
+   */
+  propStateOverrides?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   scene: SceneRecord;
   selections: Selections;
   /**
@@ -1392,6 +1484,8 @@ export interface ShotDispatchPlan {
   references: AttachmentDecision[];
   /** The carried assets, numbered in transmission order (R-2). */
   bound: BoundReference[];
+  /** Each cited prop as this shot dispatches it (design turn 105; issue 536). */
+  propStates: ShotPropResolution[];
   /** Preamble, overridable body and negatives, kept apart so only the body is editable (R-3, R-13). */
   parts: PromptParts;
   budget: BudgetResult;
@@ -1428,6 +1522,8 @@ export interface ScenePlan {
     bound: BoundReference[];
     /** The clip's derived negatives, computed here so the dialog and the dispatch agree (R-9). */
     negatives: string | null;
+    /** The prop states the pass's shots cite, distinct by prop and state (issue 536). */
+    propStates: ShotPropResolution[];
   }>;
   pack: PackResult;
   /**
@@ -1453,13 +1549,17 @@ export interface ScenePlan {
 function sceneCast(
   scene: SceneRecord,
   sheets: Sheet[],
+  props: readonly Prop[],
 ): { resolved: ResolvedCast; perShot: Map<string, ResolvedCast> } {
   const perShot = new Map<string, ResolvedCast>();
   const shots = orderedShots(scene);
   const seen = new Map<string, { sheet: Sheet; retired: boolean }>();
   const unknown = new Set<string>();
+  // A mention that names a prop is not unknown (issue 536): it resolves one list over.
+  const propSlugs = new Set(props.map((prop) => propSlug(prop.name)));
   for (const shot of shots) {
-    const resolved = resolveCast(shot.description, sheets);
+    const cast = resolveCast(shot.description, sheets);
+    const resolved = { ...cast, unknown: cast.unknown.filter((slug) => !propSlugs.has(slug)) };
     perShot.set(shot.id, resolved);
     for (const entry of resolved.cast) if (!seen.has(entry.sheet.id)) seen.set(entry.sheet.id, entry);
     for (const u of resolved.unknown) unknown.add(u);
@@ -1474,6 +1574,7 @@ function budgetFor(
   sheets: Sheet[],
   model: ManifestModel,
   productionId?: string,
+  propStates: readonly ShotPropResolution[] = [],
 ) {
   const withLocation: Array<{ sheet: Sheet; retired: boolean }> = [...cast];
   const locationId = scene.inherits?.location;
@@ -1496,7 +1597,18 @@ function budgetFor(
       attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
         null,
   }));
-  return referenceBudget(candidates, model);
+  // Prop states ride after the cast and the location (turn 105's rank), and only when a state
+  // has an accepted reference: an unresolved or reference-less state never spends a slot.
+  const propCandidates: BudgetCandidate[] = propStates
+    .filter((entry) => entry.referenceFile !== null)
+    .map((entry, i) => ({
+      sheetId: entry.propId,
+      kind: "prop",
+      appearanceOrder: withLocation.length + i,
+      hasReference: true,
+      label: `${entry.propName} · ${entry.stateName ?? "unresolved"}`,
+    }));
+  return referenceBudget([...candidates, ...propCandidates], model);
 }
 
 /**
@@ -1717,7 +1829,32 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const { world, sheets, kits, scene, selections, model } = input;
   const productionStyleOverride = input.production?.styleOverride?.trim() || undefined;
   const effectiveStyle = styleFor(world, productionStyleFor(input.production, input.artDirection?.description));
-  const { resolved, perShot } = sceneCast(scene, sheets);
+  const props = input.props ?? [];
+  const { resolved, perShot } = sceneCast(scene, sheets, props);
+  // A carried prop state attaches its accepted reference; everything else attaches as before.
+  const attachmentsFor = (
+    carried: readonly BudgetCandidate[],
+    propStates: readonly ShotPropResolution[],
+  ): AttachmentDecision[] =>
+    carried.map((c) => {
+      if (c.kind === "prop") {
+        const entry = propStates.find((candidate) => candidate.propId === c.sheetId)!;
+        return {
+          sheetId: c.sheetId,
+          file: entry.referenceFile,
+          mode: "prop-state",
+          role: "primary",
+          staleGap: null,
+          prop: { name: entry.propName, state: entry.stateName ?? "unresolved" },
+        };
+      }
+      return attachmentFor(
+        kits.find((k) => k.sheetId === c.sheetId) ?? null,
+        sheets.find((s) => s.id === c.sheetId)!,
+        c.referenceRole,
+        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+      );
+    });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
   const ordered = orderedShots(scene);
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
@@ -1741,15 +1878,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   const shots: ShotDispatchPlan[] = ordered.map((shot) => {
     const cast = perShot.get(shot.id)!;
-    const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId);
-    const references = budget.carried.map((c) =>
-      attachmentFor(
-        kits.find((k) => k.sheetId === c.sheetId) ?? null,
-        sheets.find((s) => s.id === c.sheetId)!,
-        c.referenceRole,
-        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
-      ),
-    );
+    const propStates = resolvePropStates(shot, props, input.propStateOverrides?.[shot.id]);
+    const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId, propStates);
+    const references = attachmentsFor(budget.carried, propStates);
     // A strict start frame displaces the sheet references (issue 154): the first-frame route
     // takes exactly one image, so nothing else may ride, and the budget's carried set is named
     // in the warnings as what stepped aside rather than silently thinned.
@@ -1821,6 +1952,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       references,
       bound,
       parts,
+      propStates,
       budget,
       estimatedMicroUsd: estimate,
       ...(frame !== undefined ? { frame } : {}),
@@ -1900,20 +2032,25 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             if (!seen.has(cast.sheet.id)) seen.set(cast.sheet.id, cast);
           }
         }
-        const budget = budgetFor([...seen.values()], kits, scene, sheets, model, input.productionId);
-        const references = budget.carried.map((candidate) =>
-          attachmentFor(
-            kits.find((kit) => kit.sheetId === candidate.sheetId) ?? null,
-            sheets.find((sheet) => sheet.id === candidate.sheetId)!,
-            candidate.referenceRole,
-            { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
-          ),
-        );
+        // Every prop state the pass's shots cite, distinct by prop and state; the first state of
+        // a prop cited twice takes the slot, and the take's provenance still names both.
+        const propStates = pass.plan
+          .flatMap((entry) => {
+            const shot = ordered.find((s) => s.id === entry.shotId);
+            return shot ? resolvePropStates(shot, props, input.propStateOverrides?.[shot.id]) : [];
+          })
+          .filter(
+            (entry, i, all) =>
+              all.findIndex((other) => other.propId === entry.propId && other.stateId === entry.stateId) === i,
+          );
+        const budget = budgetFor([...seen.values()], kits, scene, sheets, model, input.productionId, propStates);
+        const references = attachmentsFor(budget.carried, propStates);
         return {
           passIndex: pass.index,
           references,
           budget,
           bound: bindReferences(references, sheets),
+          propStates,
           // A pass is one clip, so its negatives are the clip's. Silence is still stated, but
           // only when the whole clip is silent — one spoken beat among four is not a silent pass.
           negatives: derivedNegatives({
@@ -2071,6 +2208,14 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       .filter((g): g is string => g !== null),
     retiredCitations: resolved.cast.filter((c) => c.retired).map((c) => c.sheet.name),
     unknownMentions: resolved.unknown,
+    propStates: shots.flatMap((entry) =>
+      entry.propStates.flatMap((prop): DispatchWarnings["propStates"] => {
+        const named = { shotId: entry.shot.id, number: entry.shot.number, prop: prop.propName };
+        if (prop.stateId === null) return [{ ...named, state: null, issue: "unresolved" }];
+        if (prop.referenceFile === null) return [{ ...named, state: prop.stateName, issue: "missing-reference" }];
+        return [];
+      }),
+    ),
     foreignGuests: (() => {
       // The cast is `@` mentions, but a scene also cites its inherited location, which never
       // enters `resolved.cast` and which `budgetFor` deliberately carries into the references and
