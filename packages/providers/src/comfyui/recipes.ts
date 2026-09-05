@@ -79,6 +79,28 @@ export interface ComfyUiRecipe {
   engine: { minVersion: string; exercisedThroughVersion: string };
   params: Record<string, RecipeParamSpec>;
   graph: RecipeGraph;
+  /**
+   * The optional first frame, where a recipe's graph can run with one or without (issue 863).
+   *
+   * Declared here rather than known by the client, for the same reason `VIDEO_DERIVATIONS` is
+   * data: which nodes carry a frame and which slot consumes it is recipe authoring, and a client
+   * holding node ids of its own would be a second place to get them wrong.
+   *
+   * The carrier nodes are authored INTO the graph — they are part of the template digest, and
+   * `LoadImage` is one of the classes the compatibility probe asks about — and dropped at
+   * dispatch when no frame was sent, because `LoadImage.image` is a combo over the engine's
+   * `input/` directory and the empty placeholder is not a filename it has. Dropping a
+   * recipe-declared attachment is not the structural reach R-2 forbids: a caller can still only
+   * write into the leaf slots the recipe names, and cannot add, move or connect anything.
+   */
+  referenceFrame?: {
+    /** The internal param holding the frame's engine-side upload name. */
+    param: string;
+    /** The nodes that exist only to carry the frame. */
+    nodes: readonly string[];
+    /** The optional input slot they feed, cleared with them. */
+    slot: readonly [nodeId: string, inputKey: string];
+  };
   /** The one node whose outputs are fetched (§2.6) — never every image the history names. */
   outputNode: string;
   requires: {
@@ -312,11 +334,23 @@ export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 24
  * documentation, because the t2v assembly is not where documentation points: `MiniMaxH3ImageToVideo`
  * takes the prompt as a STRING (with the clip and video VAE) and emits the positive conditioning
  * and the joint AV latent itself. With `first_frame`/`last_frame` left unbound it IS the
- * text-to-video graph — the frames stay deliberately unbound in v1 (R-2), the same doctrine as the
- * Wan draft's unbound start image. `ConditioningZeroOut` fills the sampler's required negative
- * slot; at the distilled cfg 1.0 it is never evaluated. Euler, 8 steps, cfg 1.0 and sigma shift
- * 12/3 are the distillation's own contract (guidance is baked into the adapter), and 12/3 are the
+ * text-to-video graph. `ConditioningZeroOut` fills the sampler's required negative slot; at the
+ * distilled cfg 1.0 it is never evaluated. Euler, 8 steps, cfg 1.0 and sigma shift 12/3 are the
+ * distillation's own contract (guidance is baked into the adapter), and 12/3 are the
  * `MiniMaxH3SigmaShift` node's own defaults.
+ *
+ * v2 binds `first_frame` (issue 863), which is what lets a character's face reach a local video —
+ * and with it the free speaking sample, since H3's picture and voice come out of the same pass.
+ * It stays OPTIONAL: with no frame sent, the two carrier nodes are dropped and this is exactly
+ * the v1 text-to-video graph again.
+ *
+ * The `ImageScale` in front of it is the stated answer to a photo that disagrees with the bucket,
+ * and it was read off the node's own source rather than assumed. `MiniMaxH3ImageToVideo` resizes
+ * `first_frame` with crop `"disabled"` — the code calls it a "geometry anchor: plain stretch to
+ * canvas" — so a portrait photo handed straight to a 864×480 canvas is squashed to a flat mask,
+ * face and all. Scaling to the bucket with `crop: "center"` first makes the node's own resize a
+ * no-op and gives the frame the aspect-preserving cover-crop the node already gives `last_frame`.
+ * `lanczos` because that is the filter the node itself uses.
  *
  * File choices follow the publisher's guidance for this hardware class: `pruned_int8_convrot`
  * diffusion (adaLN tables precomputed, cu130 kernels) and the `nvfp4_awq` text encoder (no
@@ -324,15 +358,23 @@ export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 24
  * served — read 2026-08-28. The weights are under the MiniMax H3 Community License, whose
  * territorial terms are under review; the catalogue records that fact rather than deciding it.
  *
- * Verified end to end on 2026-08-28: this exact graph produced 5.17s of 864×480 video with native
- * stereo audio on the reference RTX 3080 in 14m53s, fetched back through the same paths every
- * other recipe uses.
+ * Verified end to end on 2026-08-28 (v1): the text-to-video graph produced 5.17s of 864×480 video
+ * with native stereo audio on the reference RTX 3080 in 14m53s, fetched back through the same
+ * paths every other recipe uses.
+ *
+ * Verified again on 2026-09-05 (v2, issue 863), through the real client rather than a hand-built
+ * prompt: a 1280×1920 character photo uploaded, cropped to 480×864 and bound as `first_frame`
+ * produced 5.167s of 480×864 h264 with 32 kHz stereo AAC in 14m00s — the same cost as the
+ * text-to-video run, so the frame is free. Frame 0 is the photo, aspect intact and head whole;
+ * by 4.5s the character has turned to camera and is mid-word, and the audio measures -14 dB mean
+ * against a -0.3 dB peak rather than silence. Whether the words are *the script* is what
+ * `speechVideo: "untested"` still does not claim.
  */
 const H3_VIDEO: ComfyUiRecipe = {
   id: "comfyui-h3-video",
   capability: "video",
   displayName: "Local · H3 Video",
-  recipeVersion: 1,
+  recipeVersion: 2,
   engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
@@ -340,8 +382,13 @@ const H3_VIDEO: ComfyUiRecipe = {
     durationSec: { kind: "number-enum", values: [5, 10, 15], bind: [] },
     aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
     length: { kind: "int", internal: true, required: true, min: 5, max: 362, bind: [["7", "length"]] },
-    width: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "width"]] },
-    height: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "height"]] },
+    // The bucket reaches the scaler as well as the canvas, so the frame is cropped to the size
+    // that is actually generated rather than to a second copy of these numbers.
+    width: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "width"], ["15", "width"]] },
+    height: { kind: "int", internal: true, required: true, min: 256, max: 1344, bind: [["7", "height"], ["15", "height"]] },
+    // The uploaded photo's filename on the engine, resolved at dispatch exactly as `speakerFile`
+    // is. Not required: absent is the text-to-video graph, and the client drops the nodes with it.
+    referenceFile: { kind: "string", internal: true, maxChars: 260, bind: [["14", "image"]] },
   },
   graph: {
     "1": {
@@ -365,7 +412,7 @@ const H3_VIDEO: ComfyUiRecipe = {
     "6": { class_type: "VAELoader", inputs: { vae_name: "minimax_h3_audio_vae_fp32.safetensors" } },
     "7": {
       class_type: "MiniMaxH3ImageToVideo",
-      inputs: { clip: ["4", 0], vae: ["5", 0], prompt: "", width: 864, height: 480, length: 124 },
+      inputs: { clip: ["4", 0], vae: ["5", 0], prompt: "", width: 864, height: 480, length: 124, first_frame: ["15", 0] },
     },
     "8": { class_type: "ConditioningZeroOut", inputs: { conditioning: ["7", 0] } },
     "9": {
@@ -390,7 +437,13 @@ const H3_VIDEO: ComfyUiRecipe = {
       class_type: "SaveVideo",
       inputs: { video: ["12", 0], filename_prefix: "arke", format: "mp4", codec: "h264" },
     },
+    "14": { class_type: "LoadImage", inputs: { image: "" } },
+    "15": {
+      class_type: "ImageScale",
+      inputs: { image: ["14", 0], upscale_method: "lanczos", width: 864, height: 480, crop: "center" },
+    },
   },
+  referenceFrame: { param: "referenceFile", nodes: ["14", "15"], slot: ["7", "first_frame"] },
   outputNode: "13",
   requires: {
     checkpoints: [
@@ -468,7 +521,9 @@ const H3_VIDEO: ComfyUiRecipe = {
  *
  * The clip reaches `LoadAudio` by **filename**, because that input is a combo over the engine's
  * `input/` directory — so a cloned voice's recording is uploaded to the engine (`POST /upload/image`
- * takes audio) and the returned name bound here. No other recipe needs this; see SPEC-022 §2.11.
+ * takes audio) and the returned name bound here. See SPEC-022 §2.11. H3's first frame reaches
+ * `LoadImage` the same way and over the same upload (issue 863), which is why the client has one
+ * upload path rather than one per kind of file.
  *
  * Verified end to end on 2026-08-19: this graph produced 4.59s of cloned speech on an RTX 3080 and
  * the output was fetched back through the same `/view` path the client uses.
@@ -858,9 +913,26 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     provider: "comfyui",
     capability: "video",
     displayName: H3_VIDEO.displayName,
-    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    /*
+     * One face, not a reference array (issue 863): the recipe binds a single `first_frame`, and
+     * a row claiming more would have the client dropping every picture past the first.
+     * `startFrame` stays false — that is the keyframe lane, with its own routes and fields, and
+     * nothing here reads a frame from it yet.
+     *
+     * Worth knowing what a count of one buys elsewhere: every surface that budgets references
+     * reads this number, so a scene pass now binds one character reference to H3 where it bound
+     * none, and H3 opens the shot on it. That is identity conditioning for a draft-quality local
+     * route, which is what the budget is for — but it is a keyframe, so the opening frame is
+     * whatever the reference planner bound. The route that would take a picture as a *reference*
+     * rather than as frame zero is H3's other node, `MiniMaxH3ReferenceToVideo`, and it is a
+     * second recipe rather than a flag on this one.
+     */
+    accepts: { referenceImages: 1, startFrame: false, endFrame: false },
     limits: {
       maxPromptChars: 2000,
+      // No switch, and sound regardless: H3 decodes an audio latent in the same pass and
+      // `CreateVideo` muxes it. `soundChoice` would be a control that lies.
+      alwaysSound: true,
       // Every length H3 offers, each one run on the reference machine — see H3_FRAMES_BY_SECONDS.
       maxDurationSec: 15,
       // Seconds → seconds, exactly as the wan row: the wire word is the number itself and the
@@ -870,6 +942,10 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       resolutions: ["480p"],
       aspects: Object.keys(H3_DIMENSIONS),
     },
+    // Stated rather than left to be inferred: the picture and the voice have both been run here,
+    // but nobody has yet watched H3 say a written line, so the speaking-sample picker offers it
+    // marked untested rather than withholding it (issue 858).
+    speechVideo: "untested",
     pricing: { kind: "unmetered" },
     requires: {
       vramMb: H3_VIDEO.hardware.minVramMb,

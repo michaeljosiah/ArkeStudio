@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
-import { dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
 import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
@@ -198,6 +199,21 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // see that — the loader classes exist on every backend. Declared, so a big AMD card is
     // refused before the 42 GB download rather than at model load.
     assert.deepEqual(row.requires?.accelerator, ["cuda"]);
+  });
+
+  it("the h3 row is admitted as a speaking-sample route, stated untested and offered after the verified ones", () => {
+    const routes = characterSpeakingVideoRoutes(SHIPPED_MANIFEST.models);
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
+    // The whole point of issue 863: one face and sound, both declared, and H3's sound is declared
+    // as what it is — always emitted, no switch — rather than as a `generate_audio` it does not have.
+    assert.equal(row.accepts.referenceImages, 1);
+    assert.equal(row.limits.alwaysSound, true);
+    assert.equal(row.limits.soundChoice, undefined);
+    assert.ok(routes.some((m) => m.id === row.id), "h3 is offered as a speaking-sample route");
+    // Offered, not defaulted: the picker's first entry is a verified route while H3's speech is
+    // untested, which is what keeps a fifteen-minute local run from becoming the quiet default.
+    assert.equal(row.speechVideo, "untested");
+    assert.notEqual(routes[0]?.id, row.id);
   });
 
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
@@ -518,6 +534,82 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     // The prompt reaches the FL2VA node itself — it is the conditioning assembly, not CLIPTextEncode.
     assert.equal(posted.prompt["7"]!.inputs["prompt"], "harbour at dawn, gulls crying");
     assert.equal(posted.prompt["12"]!.inputs["fps"], 24);
+    // No face sent, so the carrier nodes and the slot they fed are gone: this is byte for byte
+    // the text-to-video graph v1 shipped, and `LoadImage.image` never reaches the engine holding
+    // a placeholder it has no file for.
+    assert.equal("first_frame" in posted.prompt["7"]!.inputs, false);
+    assert.equal(posted.prompt["14"], undefined);
+    assert.equal(posted.prompt["15"], undefined);
+  });
+
+  it("h3 video: one face is uploaded by its own bytes, cropped to the bucket, and bound as the first frame", async () => {
+    const face = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 8, 7, 6]);
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "kest.png", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-face", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-h3-video",
+      capability: "video",
+      params: { prompt: "kest speaks to camera", durationSec: 5, aspect: "9:16", references: ["references/kest/main.png"] },
+      imageReferences: [{ name: "reference-01.png", contentType: "image/png", data: face }],
+    });
+    const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
+    // The world reader names references positionally, and the engine's input/ folder is one flat
+    // namespace shared by every world on the machine — so the bytes name themselves before they go.
+    assert.equal(upload.filename, `${createHash("sha256").update(face).digest("hex")}.png`);
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    // What the engine answered, not what was sent: LoadImage takes a name from its own folder.
+    assert.equal(posted.prompt["14"]!.inputs["image"], "kest.png");
+    assert.deepEqual(posted.prompt["7"]!.inputs["first_frame"], ["15", 0]);
+    // The node's own resize of first_frame is a plain stretch, so the scaler crops to exactly the
+    // canvas being generated — a portrait photo on a portrait bucket here, and the same numbers.
+    assert.equal(posted.prompt["15"]!.inputs["crop"], "center");
+    assert.equal(posted.prompt["15"]!.inputs["width"], 480);
+    assert.equal(posted.prompt["15"]!.inputs["height"], 864);
+    assert.equal(posted.prompt["7"]!.inputs["width"], 480);
+    assert.equal(posted.prompt["7"]!.inputs["height"], 864);
+  });
+
+  it("a recipe with one frame refuses two pictures, and one with none still refuses every picture", async () => {
+    const picture = { name: "reference-01.png", contentType: "image/png" as const, data: Uint8Array.from([1, 2]) };
+    const two = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(two.fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-h3-video",
+        capability: "video",
+        params: { prompt: "x", references: ["a.png", "b.png"] },
+        imageReferences: [picture, picture],
+      }),
+      /takes one reference image/,
+    );
+    assert.equal(two.calls.length, 0);
+    const none = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(none.fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-draft-video",
+        capability: "video",
+        params: { prompt: "x", references: ["a.png"] },
+        imageReferences: [picture],
+      }),
+      /takes no reference images/,
+    );
+    assert.equal(none.calls.length, 0);
+  });
+
+  it("a face the queue named but never prepared refuses, rather than generating a stranger", async () => {
+    const { fetch, calls } = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-h3-video",
+        capability: "video",
+        params: { prompt: "x", references: ["references/kest/main.png"] },
+      }),
+      /reference image that never arrived/,
+    );
+    assert.equal(calls.length, 0);
   });
 
   it("a length h3 does not offer refuses with h3's own menu, not wan's", async () => {

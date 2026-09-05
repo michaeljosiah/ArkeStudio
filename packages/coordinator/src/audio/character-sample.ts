@@ -115,6 +115,15 @@ export function characterSpeakingRequest(store: WorldStore, model: ManifestModel
     throw new Error("Choose a supported speech-video model, duration and accepted character photo.");
   }
   const resolution = model.limits.resolutions?.[0] ?? "720p";
+  /*
+   * Portrait where the route offers it (issue 863). A speaking sample is one face to camera, and
+   * a character's accepted photo is always a portrait — `imageOutputFor` never draws a main photo
+   * landscape. The landscape default this used to hardcode was harmless while every route carried
+   * the photo as one *reference* among nine, and stopped being harmless the moment a route bound
+   * it as the actual first frame: cover-cropping a 1024×1280 headshot into 864×480 takes the
+   * middle band and cuts the top of the head off, which is not a sample of anybody.
+   */
+  const aspect = model.limits.aspects?.includes("9:16") === true ? "9:16" : "16:9";
   const estimatedMicroUsd = estimateMicroUsd(model, { durationSec: request.durationSec, resolution });
   if (estimatedMicroUsd !== request.confirmedMicroUsd) throw new Error("The estimate changed. Review the current price before generating.");
   const bundle = store.getBundle();
@@ -122,7 +131,11 @@ export function characterSpeakingRequest(store: WorldStore, model: ManifestModel
     capability: "video", provider: model.provider, model: model.id, estimatedMicroUsd,
     params: { prompt: `${sheet.name}, the character in @Image1, speaks naturally to camera. A clean isolated voice, one speaker, no music. Speak exactly this reference script:\n${request.script}`,
       referenceScript: request.script, characterName: sheet.name, references: [`references/${sheet.id}/${photo}`],
-      durationSec: request.durationSec, resolution, aspect: "16:9", generate_audio: true,
+      durationSec: request.durationSec, resolution, aspect,
+      // Asked for only where a switch exists (the bench's own rule): a route that always makes
+      // sound has nothing to turn on, and a param it never reads would sit in the durable job
+      // row implying it did.
+      ...(model.limits.soundChoice === true ? { generate_audio: true } : {}),
       provenance: { canonRevision: bundle.meta.canonRevision, sheets: { [sheet.id]: sheet.version } } },
     landing: { dir: `references/${sheet.id}/incoming`, name: `voice-sample-${request.requestId}.mp4` } };
 }

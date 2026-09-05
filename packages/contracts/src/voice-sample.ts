@@ -25,8 +25,14 @@ export const VoiceSampleReviewSchema = z.object({
 export type VoiceSampleReview = z.infer<typeof VoiceSampleReviewSchema>;
 
 /**
- * What a speaking sample actually needs of a route: it must carry the character's face, and the
- * caller must be able to ask for sound. Both are declared capabilities.
+ * What a speaking sample actually needs of a route: it must carry the character's face, and its
+ * output must have sound. Both are declared capabilities.
+ *
+ * Sound is two declarations rather than one, because offering a switch and emitting sound are
+ * different facts (issue 863). The cloud routes publish `generate_audio` and say `soundChoice`;
+ * H3 publishes no switch and simply always makes sound, and had to say so before it could be
+ * admitted — a route that always makes sound answers "will there be a voice" more completely than
+ * one that merely could be asked.
  *
  * This used to also pin one provider and two model ids, and that clause was the whole bar in
  * practice — a route could satisfy both capabilities and still be told "No verified speech-video
@@ -38,7 +44,8 @@ export type VoiceSampleReview = z.infer<typeof VoiceSampleReviewSchema>;
  */
 export function supportsCharacterSpeakingVideo(model: ManifestModel): boolean {
   return model.capability === "video" && model.unverified !== true &&
-    model.accepts.referenceImages > 0 && model.limits.soundChoice === true;
+    model.accepts.referenceImages > 0 &&
+    (model.limits.soundChoice === true || model.limits.alwaysSound === true);
 }
 
 /**
