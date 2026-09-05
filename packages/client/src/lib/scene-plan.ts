@@ -47,6 +47,7 @@ export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-s
     },
     sheets: world.sheets,
     kits: world.referenceKits,
+    props: world.props,
     scene,
     selections: production.selections,
     model,
