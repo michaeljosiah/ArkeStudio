@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPerformanceSpool } from "../src/performance-spool.js";
@@ -20,7 +20,14 @@ it("performance capture grants only the exact studio top-level microphone reques
     rendererUrl: "file:///C:/Arke/client/index.html", requestingUrl: "file:///C:/other.html", mediaTypes: ["audio"] }), false);
 });
 it("opaque performance spools validate bytes, allow one claim and forget prior-process claims", async t => {
-  const root = await mkdtemp(join(tmpdir(), "arke-performance-spool-"));
+  /*
+   * Through `realpath`, because the spool refuses a root that is not already its own canonical
+   * path — the guard that stops a junction pointing the store somewhere else. A Windows CI
+   * runner's TEMP is an 8.3 alias (`RUNNER~1`), so a raw `mkdtemp` handed the spool a name that
+   * guard had to reject, and every stage in here returned "could not stage this recording" on
+   * windows-latest alone while passing everywhere a temp path has no short form.
+   */
+  const root = await realpath(await mkdtemp(join(tmpdir(), "arke-performance-spool-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const spool = createPerformanceSpool(root);
   assert.equal((await spool.stage({ bytes: new Uint8Array(), contentType: "audio/webm" })).ok, false);
