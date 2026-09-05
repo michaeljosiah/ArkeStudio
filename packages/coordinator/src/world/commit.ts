@@ -331,6 +331,7 @@ export class Committer {
   constructor(
     private readonly worldDir: string,
     private readonly clock: () => string = () => new Date().toISOString(),
+    private readonly assertOwned: () => Promise<void> = async () => {},
   ) {}
 
   private abs(portable: string): string {
@@ -345,8 +346,10 @@ export class Committer {
     }
   }
 
-  /** Run a full journalled commit. Callers serialise; the world lock guarantees one process. */
+  /** Run a full journalled commit. Callers serialise; WorldStore supplies the ownership check.
+   * Rechecking narrows stale-owner races but is not atomic with filesystem writes (ADR-002). */
   async commit(input: CommitInput, hooks: CommitHooks = {}): Promise<CommitResult> {
+    await this.assertOwned();
     const at = this.clock();
     const commitId = newId("cm");
 
@@ -722,10 +725,15 @@ export class Committer {
       if (moved.length > 0) throw new CommitStaleError(moved);
     } catch (err) {
       if (err instanceof CrashSignal) throw err; // a real kill leaves debris for recover()
+      await this.assertOwned(); // a successor, not a deposed process, owns rollback too
       // Still fully in `planning` — roll back so the world is byte-identical (R-15).
       await this.rollback(journal).catch(() => {});
       throw err;
     }
+
+    // Ownership loss leaves the prepared journal for the successor, never rolls it back
+    // under a different owner. This check still is not atomic with the following rename.
+    await this.assertOwned();
 
     // ---- committing: the point of no return --------------------------------
     await atomicWriteFile(journalPath, JSON.stringify({ ...journal, phase: "committing" }, null, 2));
@@ -737,6 +745,7 @@ export class Committer {
 
   /** Idempotent completion from `committing` — every step checks recorded hashes. */
   private async rollForward(journal: Journal, hooks: CommitHooks = {}): Promise<void> {
+    await this.assertOwned();
     const staging = (p: string) => this.abs(`${COMMIT_DIR}/staging/${journal.commitId}/${p}`);
 
     for (const [path, snapshot] of this.snapshotPlan(journal.files)) {
@@ -870,6 +879,7 @@ export class Committer {
    * lock is acquired and never on a read-only open (see `pendingRecovery`).
    */
   async recover(): Promise<Array<{ commitId: string; action: "rolled-back" | "rolled-forward" | "cleaned" }>> {
+    await this.assertOwned();
     const out: Array<{ commitId: string; action: "rolled-back" | "rolled-forward" | "cleaned" }> = [];
     let entries: string[];
     try {

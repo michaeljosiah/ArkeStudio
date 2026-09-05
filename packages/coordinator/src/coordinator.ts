@@ -1391,6 +1391,9 @@ export class Coordinator {
     opts.providerCalls?.setTransportFailureSink((record) => {
       void this.appLog?.append(record);
     });
+    opts.provider.onWorldLockError?.((worldId, message, consecutive) => {
+      void this.appLog?.append({ kind: "world.lock-heartbeat-failed", worldId, message, consecutive });
+    });
     this.credentials =
       opts.appRoot && opts.cipher
         ? new CredentialStore(
