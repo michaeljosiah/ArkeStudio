@@ -150,6 +150,19 @@ function valid(timeline: ProductionTimeline): ProductionTimeline {
 }
 
 describe("independent sound and roles (SPEC-042)", () => {
+  it("records neutral roles on new legacy-lane placements while preserving pre-existing roles", () => {
+    for (const kind of ["dialogue", "music", "ambience"] as const) {
+      const timeline = applyTimelineCommands(seedStoryPictureTimeline(production()), [{ kind: "add-track", trackId: "tr_old", trackKind: kind, name: "Old" }]);
+      timeline.tracks[1]!.clips = [audioClip("cl_old", SONG, "old.mp3", 0, 25)];
+      timeline.history = { undo: [], redo: [] }; // A pre-existing saved mix, before command history.
+      let next = applyTimelineCommands(timeline, [{ kind: "place", trackId: "tr_old", clip: audioClip("cl_new", SONG, "new.mp3", 25, 25) }]);
+      next = ProductionTimelineSchema.parse(JSON.parse(JSON.stringify(next)));
+      assert.equal(next.tracks[1]!.clips[0]!.role, undefined);
+      assert.deepEqual(next.tracks[1]!.clips.map(clip => effectiveAudioRole(next.tracks[1]!, clip)), [kind, "unspecified"]);
+      assert.deepEqual(undoTimelineHistory(next).tracks, timeline.tracks);
+    }
+  });
+
   it("recognises whole audio rounded onto the frame clock but refuses trimmed and unknown sources", () => {
     const heard = { sourceInSec: 0, startSec: 5, endSec: 5 + 25 / 24 };
     assert.equal(playsWholeAudioSource(heard, 1.03, 24), true, "rounding up still covers all source audio");
@@ -258,9 +271,9 @@ function mixed(): ProductionTimeline {
       {
         kind: "place",
         trackId: "tr_dialogue",
-        clip: { id: "cl_line", startFrame: 50, durationFrames: 50, sourceInFrames: 0, source: { kind: "take", takeId: VOICE, label: "line", sheetId: "maren-kest", voiceAssignedAtVersion: 4 }, gainDb: 0 },
+        clip: { id: "cl_line", startFrame: 50, durationFrames: 50, sourceInFrames: 0, source: { kind: "take", takeId: VOICE, label: "line", sheetId: "maren-kest", voiceAssignedAtVersion: 4 }, gainDb: 0, role: "dialogue" },
       },
-      { kind: "place", trackId: "tr_music", clip: audioClip("cl_song", SONG, "song.mp3", 0, 188, -6) },
+      { kind: "place", trackId: "tr_music", clip: { ...audioClip("cl_song", SONG, "song.mp3", 0, 188, -6), role: "music" } },
     ),
   );
 }
@@ -399,7 +412,7 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
       apply(
         mixed(),
         { kind: "add-track", trackId: "tr_ambience", trackKind: "ambience", name: "Ambience" },
-        { kind: "place", trackId: "tr_ambience", clip: audioClip("cl_bells", BELLS, "bells.wav", 150, 100) },
+        { kind: "place", trackId: "tr_ambience", clip: { ...audioClip("cl_bells", BELLS, "bells.wav", 150, 100), role: "ambience" } },
       ),
     );
     const result = buildRenderPlan({ production: production(), artifacts, timeline: { status: "ready", timeline: withBells }, scope: { kind: "production" }, preset: "review-cut" });

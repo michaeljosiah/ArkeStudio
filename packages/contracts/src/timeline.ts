@@ -199,7 +199,7 @@ export function effectiveAudioRole(track: Pick<TimelineTrack, "kind">, clip: Pic
 }
 
 export function placementAudioRole(track: Pick<TimelineTrack, "kind" | "defaultRole">): AudioRole {
-  return track.defaultRole ?? (track.kind === "dialogue" || track.kind === "music" || track.kind === "ambience" ? track.kind : "unspecified");
+  return track.defaultRole ?? "unspecified";
 }
 
 export const TimelineMoveDirectionSchema = z.enum(["earlier", "later"]);
@@ -1443,7 +1443,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       assertNewClipId(working, command.clip.id);
-      const clip = TimelineClipSchema.parse(AUDIO_TRACK_KINDS.has(track.kind) && (track.kind === "audio" || track.defaultRole !== undefined)
+      const clip = TimelineClipSchema.parse(AUDIO_TRACK_KINDS.has(track.kind)
         ? { ...command.clip, role: command.clip.role ?? placementAudioRole(track) } : command.clip);
       touch(working, track.id, clip.id, null);
       replaceTrackClips(working, track.id, [...track.clips, clip]);

@@ -146,6 +146,34 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.ok(rendered.ok, rendered.ok ? "" : rendered.reason);
   const dialogue = rendered.plan.audio.find(a => a.role === "dialogue")!;
   assert.equal(dialogue.startSec, 0.125); assert.equal(dialogue.endSec, 0.875); assert.equal(dialogue.sourceInSec, 0.125);
+  // Ordinary imported sound can share a reviewed track. Repair must find room after a Picture edit.
+  if (placed.timeline?.status !== "ready") throw new Error("timeline missing");
+  const performanceTrack = placed.timeline.timeline.tracks.find(track => track.clips.some(clip => clip.source.kind === "performance"))!;
+  const oldPlacement = performanceTrack.clips.find(clip => clip.source.kind === "performance")!;
+  const ordinary = store.getBundle().artifacts.find(artifact => artifact.kind === "audio")!; assert.ok(ordinary);
+  await applyTimelineCommand(store, production.meta.id, { kind: "commands", baseRevision: placed.timeline.timeline.revision, sourceFingerprint: "", commands: [
+    { kind: "add-track", trackId: "tr_repair-free", trackKind: "audio", name: "Free sound track" },
+    { kind: "place", trackId: performanceTrack.id, clip: { id: "cl_ordinary", startFrame: 60, durationFrames: 60, sourceInFrames: 0,
+      source: { kind: "artifact", artifactId: ordinary.id, label: ordinary.file } } },
+    { kind: "move-to-frame", clipId: "cl_dialogue_picture", startFrame: 60 },
+  ] });
+  const shifted = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (shifted.timeline?.status !== "ready") throw new Error("timeline missing");
+  await placeSelectedPerformance(store, { ...placement, requestId: ulid(), expectedTimelineRevision: shifted.timeline.timeline.revision,
+    expectedTimelineHash: shifted.timeline.hash! });
+  const repaired = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (repaired.timeline?.status !== "ready") throw new Error("timeline missing");
+  const repairedClip = repaired.timeline.timeline.tracks.find(track => track.id === "tr_repair-free")!.clips[0]!;
+  assert.deepEqual(repairedClip.source, oldPlacement.source, "repair preserves reviewed source identity and timing intent");
+  assert.notEqual(repairedClip.id, oldPlacement.id, "cross-track placement uses distinct history identities");
+  assert.deepEqual(repaired.timeline.timeline.tracks.find(track => track.id === performanceTrack.id)!.clips.map(clip => clip.id), ["cl_ordinary"]);
+  assert.ok(buildRenderPlan({ production: repaired, timeline: repaired.timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" }).ok);
+  await applyTimelineCommand(store, production.meta.id, { kind: "undo", baseRevision: repaired.timeline.timeline.revision });
+  const undone = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (undone.timeline?.status !== "ready") throw new Error("timeline missing");
+  assert.deepEqual(undone.timeline.timeline.tracks.find(track => track.id === performanceTrack.id)!.clips.find(clip => clip.id === oldPlacement.id), oldPlacement);
+  assert.equal(undone.timeline.timeline.tracks.find(track => track.id === "tr_repair-free")!.clips.length, 0);
+  await applyTimelineCommand(store, production.meta.id, { kind: "undo", baseRevision: undone.timeline.timeline.revision });
   const planned = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], []);
   assert.equal(planned.plan.items.find(i => i.lineId === performanceLineKey(next.target))?.route, "existing");
   assert.equal(planned.cloud.length, 0, "accepted playback never enqueues a synthesis");
@@ -213,6 +241,14 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.ok(pairRender.ok, pairRender.ok ? "" : pairRender.reason);
   assert.deepEqual(pairRender.plan.audio.filter(a => a.role === "dialogue").map(a => [a.startSec, a.endSec]).sort((a,b) => a[0]!-b[0]!), [[0.25,1.25],[1,1.5]]);
 
+  // The first half may already be correct while only its partner needs an adjustment.
+  await placeSelectedPerformance(store, { ...paired, requestId: ulid(), expectedTimelineRevision: afterPair.timeline.timeline.revision,
+    expectedTimelineHash: afterPair.timeline.hash!, partner: { ...paired.partner, timing: { ...paired.partner.timing, sourceRange: { inSec: 0, outSec: 0.4 } } } });
+  const adjustedPair = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (adjustedPair.timeline?.status !== "ready") throw new Error("timeline missing");
+  await applyTimelineCommand(store, production.meta.id, { kind: "undo", baseRevision: adjustedPair.timeline.timeline.revision });
+
+  const beforeClear = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.timeline;
   const clear = { kind: "clear-performance-selection" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
     lineKey: performanceLineKey(next.target), expectedSelectionHash: afterPair.performanceReview.selectionHash };
   await assert.rejects(clearPerformanceSelection(store, { ...clear, expectedSelectionHash: "stale" }), /selection changed/);
@@ -223,7 +259,7 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   const cleared = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
   assert.equal(cleared.performanceReview.selections[clear.lineKey]!.performanceId, null);
   assert.deepEqual(cleared.performanceReview.reviews, afterPair.performanceReview.reviews);
-  assert.deepEqual(cleared.timeline, afterPair.timeline, "clearing selection leaves already placed audio alone");
+  assert.deepEqual(cleared.timeline, beforeClear, "clearing selection leaves already placed audio alone");
 
   const scenePath = join(dir, `productions/${production.meta.id}/scenes/${production.sceneFiles[scene.id]}.json`);
   await store.close(); await rename(scenePath, `${scenePath}.missing`);

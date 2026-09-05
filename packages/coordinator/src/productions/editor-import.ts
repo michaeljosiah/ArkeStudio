@@ -36,7 +36,15 @@ export async function importEditorMedia(store: WorldStore, sources: readonly str
       if (result.outcome === "filed" || result.outcome === "deduplicated") {
         // Filing measures after its first commit; the return value predates that sidecar update.
         const id = result.artifact.id;
-        artifacts.push(store.getBundle().artifacts.find(artifact => artifact.id === id) ?? result.artifact);
+        const artifact = store.getBundle().artifacts.find(artifact => artifact.id === id) ?? result.artifact;
+        if (!["audio", "video", "image", "board"].includes(artifact.kind)) {
+          failures.push({ index, reason: `${basename(sourcePath)}: this file has no playable picture or sound` });
+        } else if (typeof editor.destination === "number" && artifact.kind === "audio") {
+          failures.push({ index, reason: `${basename(sourcePath)}: this file has no picture; use Import media to add it to an audio track` });
+        } else if (editor.destination !== "library" && (artifact.kind === "audio" || artifact.kind === "video") &&
+            !(artifact.mediaInfo && artifact.mediaInfo.durationSec > 0)) {
+          failures.push({ index, reason: `${basename(sourcePath)}: saved, but needs a measured duration before placement; recover it through Library → Add` });
+        } else artifacts.push(artifact);
       }
       else failures.push({ index, reason: `${basename(sourcePath)}: ${result.reason}` });
     } catch (error) {

@@ -61,6 +61,7 @@ import {
   basePictureTrack,
   mediaPlacementCommands,
   newAudioTrack,
+  migrateLegacyCut,
   buildRenderPlan,
   orderedTrackClips,
   secondsToFrames,
@@ -5854,6 +5855,8 @@ export function CutScreen() {
       timelineError = error instanceof Error ? error.message : String(error);
     }
   }
+  // Allocation must reserve the same legacy ids the first coordinator write migrates.
+  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, artifacts).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
@@ -6020,7 +6023,7 @@ export function CutScreen() {
   };
   const appendArtifact = (artifact: ArtifactSidecar) => {
     if (!editableTimeline) return;
-    try { sendCommands(mediaPlacementCommands(editableTimeline, [artifact], "append", mintClipId), "Append media"); }
+    try { sendCommands(mediaPlacementCommands(placementTimeline ?? editableTimeline, [artifact], "append", mintClipId), "Append media"); }
     catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); }
   };
   const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => {
@@ -6114,7 +6117,7 @@ export function CutScreen() {
     const commands: TimelineClipCommand[] = [];
     let target = track?.id;
     if (!target) {
-      if (sound) { const added = newAudioTrack(editableTimeline); commands.push(added); target = added.trackId; }
+      if (sound) { const added = newAudioTrack(placementTimeline ?? editableTimeline); commands.push(added); target = added.trackId; }
       else {
         let number = 1; while (editableTimeline.tracks.some(candidate => candidate.id === 'tr_overlay-' + number)) number++;
         target = ('tr_overlay-' + number) as TimelineTrackId;
@@ -6133,7 +6136,7 @@ export function CutScreen() {
     const dialogue = [...editableTimeline.tracks].sort((a, b) => a.order - b.order).find((track) => track.kind === "dialogue") ?? null;
     const commands: TimelineCommand[] = [];
     let fresh: TimelineTrackId = "tr_audio-1";
-    if (dialogue === null) { const added = newAudioTrack(editableTimeline); fresh = added.trackId; commands.push(added); }
+    if (dialogue === null) { const added = newAudioTrack(placementTimeline ?? editableTimeline); fresh = added.trackId; commands.push(added); }
     const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
     const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
     let startFrame = playheadFrame;
@@ -6503,7 +6506,7 @@ export function CutScreen() {
                 <RotateCw size={12} />
               </button>
             </span>
-            <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(editableTimeline)], "Add audio track")}>Add audio track</button>
+            <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(placementTimeline ?? editableTimeline)], "Add audio track")}>Add audio track</button>
             <button type="button" className="fy-tlbtn fy-tlbtn--text" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}>Scene labels</button>
             <span className="fy-timeline__group" role="group" aria-label="Order">
               <button

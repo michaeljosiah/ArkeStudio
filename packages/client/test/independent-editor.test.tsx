@@ -61,6 +61,22 @@ it("imports onto the main timeline without scenes or predefined audio lanes", as
   } finally { await screen.close(); }
 });
 
+it("reserves migrated track ids when adding audio to an unsaved legacy cut", async () => {
+  const state = stateWithVideo(false), p = state.world!.productions[0]!, artifactId = state.world!.artifacts[0]!.id;
+  p.cut.audio = [
+    { kind: "score", label: "Legacy score", entries: [{ artifactId, offsetSec: 0 }] },
+    { kind: "ambience", label: "Legacy ambience", entries: [{ artifactId, offsetSec: 0 }] },
+  ];
+  const screen = await mount(state);
+  try {
+    await act(async () => screen.button("Add audio track").click());
+    const request = screen.sent.find(message => message.kind === "timeline-command");
+    assert.ok(request?.kind === "timeline-command");
+    assert.deepEqual(request.commands, [{ kind: "add-track", trackId: "tr_audio-2", trackKind: "audio", name: "Audio 2" }]);
+    assert.equal(request.baseRevision, null);
+  } finally { await screen.close(); }
+});
+
 it("edits the clip role and future track default as separate commands", async () => {
   const state = stateWithVideo(false), p = state.world!.productions[0]!;
   const source = { kind: "artifact" as const, artifactId: state.world!.artifacts[0]!.id, label: "Recorded sound" };
