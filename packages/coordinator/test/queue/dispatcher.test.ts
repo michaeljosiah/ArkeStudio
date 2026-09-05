@@ -18,7 +18,8 @@ import { until } from "../wait.js";
  * mid-step — after dispose, no further journal writes or events happen, exactly like a dead
  * process — then a fresh queue over the same journal and the same provider-side state runs
  * recovery. Each run asserts: no job lost, no second submission without reconciliation, no
- * duplicate ledger entry, and a resolvable state.
+ * duplicate ledger entry, and a resolvable state. These are process-termination simulations
+ * under SPEC-009 §2.2.1, not physical OS-crash or power-cut tests.
  */
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";

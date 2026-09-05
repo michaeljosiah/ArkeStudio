@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { appendFlushed } from "../flushed-append.js";
+import { atomicWriteFile } from "../world/atomic.js";
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { LedgerEntrySchema, type LedgerEntry } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 import { readNdjson } from "../ndjson.js";
@@ -44,19 +46,18 @@ export class LedgerFile {
     // A final line without its newline is a torn write: keep every complete line, drop the tail.
     const cut = raw.lastIndexOf("\n");
     const keep = cut === -1 ? "" : raw.slice(0, cut + 1);
-    const tmp = join(dirname(this.path), `.tmp-ledger-repair-${process.pid}`);
-    await writeFile(tmp, keep, "utf8");
-    await rename(tmp, this.path);
+    await atomicWriteFile(this.path, keep);
     this.repaired = true;
   }
 
-  /** Append one terminal outcome (R-16). Serialised; validated before it can land. */
+  /** Append one terminal outcome (R-16). Serialised, validated and file-synced before resolving
+   * under SPEC-009 §2.2.1; a flush failure is not evidence that the row is absent. */
   append(entry: LedgerEntry): Promise<void> {
     const validated = LedgerEntrySchema.parse(entry);
     return this.queue.enqueue(async () => {
       await this.repairTail();
       await mkdir(dirname(this.path), { recursive: true });
-      await appendFile(this.path, JSON.stringify(validated) + "\n", "utf8");
+      await appendFlushed(this.path, JSON.stringify(validated) + "\n");
     });
   }
 
