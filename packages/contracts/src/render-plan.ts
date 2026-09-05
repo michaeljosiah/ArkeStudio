@@ -21,6 +21,7 @@ import {
   basePictureTrack,
   episodeTimelineRange,
   framesToSeconds,
+  secondsToFrames,
   orderedTrackClips,
   resolvePictureTimeline,
   type MixSettings,
@@ -57,6 +58,13 @@ export interface RenderAudioItem extends ExportAudioClip {
   /** Seconds into the source where the clip starts. */
   sourceInSec: number;
   clipId?: string;
+}
+
+/** A measured source rounded to the timeline clock can be transcribed without a trim tool. */
+export function playsWholeAudioSource(item: Pick<RenderAudioItem, "sourceInSec" | "startSec" | "endSec">,
+  sourceLengthSec: number | null, frameRate: FrameRate): boolean {
+  return item.sourceInSec === 0 && sourceLengthSec !== null && sourceLengthSec > 0 &&
+    item.endSec - item.startSec + 0.000001 >= Math.max(1, secondsToFrames(sourceLengthSec, frameRate)) / frameRate;
 }
 
 export interface SpeechRegion {

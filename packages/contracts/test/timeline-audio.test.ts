@@ -15,6 +15,7 @@ import {
   detachAudioCommands,
   effectiveAudioRole,
   migrateLegacyCut,
+  playsWholeAudioSource,
   redoTimelineHistory,
   resolvePictureTimeline,
   seedStoryPictureTimeline,
@@ -149,6 +150,31 @@ function valid(timeline: ProductionTimeline): ProductionTimeline {
 }
 
 describe("independent sound and roles (SPEC-042)", () => {
+  it("recognises whole audio rounded onto the frame clock but refuses trimmed and unknown sources", () => {
+    const heard = { sourceInSec: 0, startSec: 5, endSec: 5 + 25 / 24 };
+    assert.equal(playsWholeAudioSource(heard, 1.03, 24), true, "rounding up still covers all source audio");
+    assert.equal(playsWholeAudioSource(heard, 1.05, 24), true, "rounding down to the nearest frame is also a full placement");
+    assert.equal(playsWholeAudioSource({ ...heard, endSec: 6 }, 1.03, 24), false, "one frame trimmed off the tail requires a window");
+    assert.equal(playsWholeAudioSource({ ...heard, sourceInSec: 1 / 24 }, 1.03, 24), false);
+    assert.equal(playsWholeAudioSource(heard, null, 24), false);
+    assert.equal(playsWholeAudioSource({ ...heard, endSec: 8 }, 1.03, 24), true, "a padded clip contains the whole source");
+  });
+
+  it("detaches into free legacy tracks using only their explicit future default", () => {
+    for (const kind of ["dialogue", "ambience", "music"] as const) {
+      for (const defaultRole of [undefined, "music"] as const) {
+        const p = production();
+        const timeline = applyTimelineCommands(seedStoryPictureTimeline(p), [{ kind: "add-track", trackId: "tr_legacy", trackKind: kind, name: "Existing", defaultRole }]);
+        const command = { kind: "detach-audio", clipId: timeline.tracks[0]!.clips[0]!.id, newClipId: "cl_detached" } as const;
+        assert.throws(() => applyTimelineCommands(timeline, [command]), /current production sources/);
+        const detached = valid(applyTimelineCommands(timeline, [command], { sources: { production: p, artifacts: [] } }));
+        assert.equal(detached.tracks.length, 2, "reuse the available lane");
+        assert.equal(detached.tracks[1]!.clips[0]!.role, defaultRole ?? "unspecified");
+        assert.equal(detached.history.undo.length, timeline.history.undo.length + 1);
+        assert.deepEqual(undoTimelineHistory(detached).tracks, timeline.tracks);
+      }
+    }
+  });
   it("freezes the heard pass segment and selection trim when detaching a generated shot", () => {
     const p = production();
     const pass = p.takes[0]!;

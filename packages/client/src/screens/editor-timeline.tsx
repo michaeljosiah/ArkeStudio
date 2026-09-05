@@ -558,7 +558,7 @@ export function DetachAudio({ production, timeline, artifacts, clip, disabled, o
   catch (error) { reason = error instanceof Error ? error.message : String(error); }
   return <div className="fy-cutinspect__rows">
     <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={disabled || reason !== null}
-      onClick={() => onCommands(detachAudioCommands(production, timeline, artifacts, clip.id, mintClipId()), "Detach audio")}>Detach audio</button>
+      onClick={() => onCommands([{ kind: "detach-audio", clipId: clip.id, newClipId: mintClipId() }], "Detach audio")}>Detach audio</button>
     {reason && <p className="fy-cutinspect__note">{reason}</p>}
   </div>;
 }

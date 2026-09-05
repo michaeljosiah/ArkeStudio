@@ -52,6 +52,7 @@ import {
   ulid,
   CutFileSchema,
   buildRenderPlan,
+  playsWholeAudioSource,
   serializeTimedText,
   assembleSceneCommands,
   audibleTracks,
@@ -8745,8 +8746,7 @@ export class Coordinator {
             const clipSec = heardSource.endSec - heardSource.startSec;
             // Whole-source equivalence has to be established, not assumed: an unmeasured source
             // under a tail-trimmed clip is windowed like any other (round four).
-            const wholeSource =
-              sourceInSec === 0 && sourceLengthSec !== null && Math.abs(clipSec - sourceLengthSec) < 0.000001;
+            const wholeSource = playsWholeAudioSource(heardSource, sourceLengthSec, record.frameRate);
             let audio: Buffer;
             let contentType: string;
             if (ffmpeg !== undefined) {

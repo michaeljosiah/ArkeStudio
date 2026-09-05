@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   AUDIO_TRACK_KINDS,
   ProductionTimelineSchema,
+  SelectionsSchema,
   TimelineOperationRefused,
   orderedShots,
   applyTimelineCommands,
@@ -272,6 +273,11 @@ export async function applyTimelineCommand(
         // Trim bounds follow the take this batch commits, not the one it replaces: a switch to a
         // shorter take and a tail trim in one batch must be judged against the shorter source.
         let boundedBy: ProductionBundle = production;
+        // Accepting or trimming a take does not advance the timeline revision. Resolve a
+        // detachment from selections read under this gate, never from a renderer snapshot.
+        if (clipCommands.some(edit => edit.kind === "detach-audio")) {
+          boundedBy = { ...production, selections: SelectionsSchema.parse(JSON.parse(await readOptional(store, selectionsPath) ?? "{}")) };
+        }
         if (switches.length > 0) {
           const reviewsRaw = await readOptional(store, reviewsPath);
           const selectionsRaw = await readOptional(store, selectionsPath);
@@ -298,6 +304,7 @@ export async function applyTimelineCommand(
           label,
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
+          sources: { production: boundedBy, artifacts: store.getBundle().artifacts },
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
           ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });

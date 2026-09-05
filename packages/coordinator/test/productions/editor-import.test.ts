@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -8,6 +8,8 @@ import {
   applyTimelineCommands, audioGainDbAt, buildFfmpegArgs, buildRenderPlan, detachAudioCommands, effectiveAudioRole,
   mediaPlacementCommands, seedEmptyPictureTimeline, storyTimelineFingerprint, type ProductionBundle,
 } from "@arke-studio/contracts";
+import { createHash } from "node:crypto";
+import { acceptTake, setTrim } from "../../src/takes/review.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { createProduction } from "../../src/productions/ops.js";
@@ -44,7 +46,7 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
     kind: "commands", commands, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()),
   });
   await write([{ kind: "trim", clipId: picture.clips[0]!.id, edge: "start", deltaFrames: 12 }]);
-  await write(detachAudioCommands(production(), saved(production()), store.getBundle().artifacts, picture.clips[0]!.id, "cl_detached"));
+  await write([{ kind: "detach-audio", clipId: picture.clips[0]!.id, newClipId: "cl_detached" }]);
   timeline = saved(production());
   const detached = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_detached")!;
   assert.deepEqual([detached.startFrame, detached.sourceInFrames, detached.durationFrames, detached.role], [12, 12, 60, "unspecified"]);
@@ -103,6 +105,76 @@ it("preserves filed media on a stale import and reports partial filing without c
   assert.equal(saved(p()).revision, revision, "cancel/no selection writes nothing");
 });
 
+
+it("detaches the live accepted take and selection trim even when the renderer's timeline revision is current", async t => {
+  const dir = await makeTempWorld();
+  const firstId = "tk_01J8F0000000000000000000B2", nextId = "tk_01J8F0000000000000000000B3";
+  const takesDir = join(dir, "productions", "saltlight", "takes");
+  const first = JSON.parse(await readFile(join(takesDir, firstId, "take.json"), "utf8"));
+  for (const id of [firstId, nextId]) {
+    const folder = join(takesDir, id), bytes = Buffer.from(id);
+    await mkdir(folder, { recursive: true });
+    await writeFile(join(folder, "take.json"), JSON.stringify({ ...first, id }));
+    await writeFile(join(folder, "clip.mp4"), bytes);
+    await writeFile(join(folder, "media-info.json"), JSON.stringify({ sourceHash: "sha256:" + createHash("sha256").update(bytes).digest("hex"),
+      mediaInfo: { durationSec: 6, hasAudio: true }, probedAt: "2026-09-06T00:00:00Z" }));
+  }
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const p = () => store.getBundle().productions.find(production => production.meta.id === "saltlight")!;
+  await applyTimelineCommand(store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p()), commands: [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_live", startFrame: 0, durationFrames: 24, sourceInFrames: 0,
+      source: { kind: "shot", shotId: "sh_12", sceneNumber: 1, shotNumber: 2, label: "Live shot" }, audio: "keep" } },
+  ] });
+  const stale = p(), revision = saved(stale).revision;
+  assert.doesNotThrow(() => detachAudioCommands(stale, saved(stale), store.getBundle().artifacts, "cl_live", "cl_preview"));
+  await acceptTake(store, p(), { takeId: nextId, shotId: "sh_12", by: "user" });
+  await setTrim(store, p(), { shotId: "sh_12", trimInSec: .213 });
+  assert.equal(saved(p()).revision, revision, "selection changes have no timeline revision fence");
+  await applyTimelineCommand(store, "saltlight", { kind: "commands", baseRevision: revision, sourceFingerprint: storyTimelineFingerprint(stale),
+    commands: [{ kind: "detach-audio", clipId: "cl_live", newClipId: "cl_current-sound" }] });
+  const timeline = saved(p()), sound = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_current-sound")!;
+  assert.deepEqual(sound.source, { kind: "take", takeId: nextId, label: "Live shot", offsetSec: .213 });
+  assert.equal(timeline.tracks[0]!.clips[0]!.audio, "mute");
+  await applyTimelineCommand(store, "saltlight", { kind: "undo", baseRevision: timeline.revision });
+  assert.equal(saved(p()).tracks[0]!.clips[0]!.audio, "keep");
+  assert.equal(saved(p()).tracks.flatMap(track => track.clips).some(clip => clip.id === sound.id), false);
+});
+
+it("remeasures an unmeasured duplicate before appending it", async t => {
+  const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
+  const id = await createProduction(store, { title: "Remeasure", medium: "video", frameRate: 24 });
+  const p = () => store.getBundle().productions.find(production => production.meta.id === id)!;
+  const source = join(dir, "unmeasured.mp4"); await writeFile(source, "once unavailable");
+  const editor = { productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p()), destination: "library" as const };
+  await importEditorMedia(store, [source], editor, { abandoned: () => false });
+  const libraryId = saved(p()).library[0]!;
+  let probes = 0;
+  await importEditorMedia(store, [source], { ...editor, baseRevision: saved(p()).revision, destination: "append" }, {
+    abandoned: () => false, mediaProbe: { ...probe, async info() { probes++; return { durationSec: 3, hasAudio: true }; } },
+  });
+  assert.equal(probes, 1);
+  assert.equal(saved(p()).tracks[0]!.clips[0]!.durationFrames, 72);
+  assert.deepEqual(saved(p()).library, [libraryId], "reuse the same artifact identity");
+});
+
+it("plans imports after legacy cut migration reserves its audio track ids", async t => {
+  const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
+  const p = () => store.getBundle().productions.find(production => production.meta.id === "saltlight")!;
+  const artifact = store.getBundle().artifacts.find(item => item.kind === "audio")!; assert.ok(artifact);
+  await store.commit({ kind: "test-cut", source: "test", files: [{ path: "productions/saltlight/cut.json", action: "create", baseHash: null,
+    content: JSON.stringify({ audio: [
+      { kind: "score", label: "Existing score", entries: [{ artifactId: artifact.id }] },
+      { kind: "ambience", label: "Existing ambience", entries: [{ artifactId: artifact.id }] },
+    ], overlays: [] }) }] });
+  const source = join(dir, "new.wav"); await writeFile(source, "new sound");
+  await importEditorMedia(store, [source], { productionId: "saltlight", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p()), destination: "append" },
+    { mediaProbe: probe, abandoned: () => false });
+  const timeline = saved(p());
+  assert.equal(timeline.migratedCut, true);
+  assert.deepEqual(timeline.tracks.filter(track => track.id.startsWith("tr_audio-")).map(track => [track.id, track.name, track.clips.length]),
+    [["tr_audio-0", "Existing score", 1], ["tr_audio-1", "Existing ambience", 1], ["tr_audio-2", "Audio 2", 1]]);
+});
+
 it("roles are per clip, track defaults affect future placements only, and legacy mixes remain meaningful", async t => {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
   const p = store.getBundle().productions[0]!;
@@ -144,7 +216,7 @@ it("encodes and decodes imported footage with detached, independently edited aud
   });
   const picture = saved(p()).tracks[0]!.clips[0]!;
   await write([{ kind: "trim", clipId: picture.id, edge: "start", deltaFrames: 12 }]);
-  await write(detachAudioCommands(p(), saved(p()), store.getBundle().artifacts, picture.id, "cl_sound"));
+  await write([{ kind: "detach-audio", clipId: picture.id, newClipId: "cl_sound" }]);
   await write([{ kind: "split", clipId: "cl_sound", atFrame: 36, newClipId: "cl_sound-right" }]);
   await write([{ kind: "move-to-frame", clipId: "cl_sound-right", startFrame: 100 }, { kind: "trim", clipId: "cl_sound-right", edge: "end", deltaFrames: -12 }]);
   await unlink(first); await unlink(second);

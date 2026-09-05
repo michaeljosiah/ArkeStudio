@@ -101,9 +101,10 @@ it("shows the filename as an editable clip and detaches sound with a neutral rol
     await act(async () => screen.button("Detach audio").click());
     const batch = screen.sent.find(message => message.kind === "timeline-command");
     assert.ok(batch?.kind === "timeline-command");
-    assert.deepEqual(batch.commands.map(command => command.kind), ["add-track", "place", "set-clip-audio"]);
-    assert.equal(batch.commands[0]!.kind === "add-track" && batch.commands[0]!.trackKind, "audio");
-    const sound = batch.commands.find(command => command.kind === "place")!;
-    assert.equal(sound.kind === "place" && sound.clip.role, "unspecified");
+    assert.equal(batch.commands.length, 1);
+    const command = batch.commands[0]!;
+    assert.ok(command.kind === "detach-audio");
+    assert.equal(command.clipId, "cl_holiday");
+    assert.match(command.newClipId, /^cl_/);
   } finally { await screen.close(); }
 });

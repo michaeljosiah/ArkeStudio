@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import {
-  mediaPlacementCommands, seedFirstPictureTimeline, type ArtifactSidecar, type ClientMessage,
+  mediaPlacementCommands, migrateLegacyCut, seedFirstPictureTimeline, type ArtifactSidecar, type ClientMessage,
 } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 import { fileArtifact } from "../artifacts/filing.js";
@@ -21,7 +21,8 @@ export async function importEditorMedia(store: WorldStore, sources: readonly str
   if (!production) throw new Error("This production is no longer open");
   if (production.timeline?.status === "invalid") throw new Error(production.timeline.message);
   if (production.timeline?.status !== "ready" && production.spine) throw new Error("Open this production on the timeline before importing");
-  const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
+  const seed = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
+  const timeline = migrateLegacyCut(seed, production, store.getBundle().artifacts).timeline;
   const artifacts: ArtifactSidecar[] = [], failures: Array<{ index: number; reason: string }> = [];
   for (const [index, sourcePath] of sources.entries()) {
     if (options.abandoned()) throw new Error("The world closed during import");
