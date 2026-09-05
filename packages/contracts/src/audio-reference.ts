@@ -1,4 +1,4 @@
-import { basePictureTrack } from "./timeline.js";
+import { AUDIO_TRACK_KINDS, basePictureTrack } from "./timeline.js";
 import type { ProductionBundle } from "./client-state.js";
 import { z } from "zod";
 import { AudioRangeSchema, AudioAssetProvenanceSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
@@ -70,7 +70,7 @@ export function masterAudioBinding(production: ProductionBundle, shotId: string)
   const clips = basePictureTrack(timeline)?.clips.filter(c => c.source.kind === "shot" && c.source.shotId === shotId) ?? [];
   const picture = clips[0];
   if (clips.length !== 1 || !picture?.performanceSourceClipId) throw new Error("Choose one Picture slot with an enabled performance soundtrack.");
-  const source = timeline.tracks.flatMap(track => track.kind === "music" ? track.clips : []).find(c => c.id === picture.performanceSourceClipId);
+  const source = timeline.tracks.flatMap(track => AUDIO_TRACK_KINDS.has(track.kind) ? track.clips : []).find(c => c.id === picture.performanceSourceClipId);
   if (!source || source.source.kind !== "artifact" || picture.startFrame < source.startFrame ||
     picture.startFrame + picture.durationFrames > source.startFrame + source.durationFrames) throw new Error("The selected master soundtrack no longer covers this shot.");
   const inSec = (source.sourceInFrames + picture.startFrame - source.startFrame) / timeline.frameRate;

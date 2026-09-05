@@ -7616,3 +7616,6 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-switchmenu__here { flex: none; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-switchmenu__rule { display: block; height: 1px; margin: 4px 6px; background: var(--border); }
 .fy-switchmenu__item--all { color: var(--muted-foreground); }
+
+/* Optional audio roles use the same compact form treatment as subtitle sources. */
+.fy-audiosettings select, .fy-audiosettings input { min-width: 0; max-width: 150px; margin-left: auto; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 6px; font: 400 10.5px var(--font-sans); }

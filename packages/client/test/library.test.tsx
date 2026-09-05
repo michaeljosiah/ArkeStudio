@@ -160,7 +160,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       assert.ok(listed.some((key) => key.startsWith("shot:")), "shots are listed");
       assert.ok(listed.includes(`artifact:${BELLS}`), "the bells are listed");
       const bells = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${BELLS}"]`)!;
-      assert.equal(bells.querySelector(".fy-artrow__lane")?.textContent, "Music", "an audio file lands on Music");
+      assert.equal(bells.querySelector(".fy-artrow__lane")?.textContent, "Audio", "an audio file lands on Audio");
       assert.ok(bells.querySelector(".fy-artrow__dot"), "a used file carries the in-the-cut dot");
       const document_ = screen.container.querySelector<HTMLElement>('[data-library-item^="artifact:"] .fy-artrow__meta--destructive, [data-library-item] .fy-artrow__meta');
       assert.ok(document_, "rows carry a status line");
@@ -197,7 +197,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       assert.equal(commandsSent(screen).length, 0, "Locate never writes");
       // A file already in the cut can still be placed again, as a drop could (R-10). DOM nodes
       // never go through assert.equal: node's diff inspects the whole document and runs out of memory.
-      assert.ok(action(screen, "Add to timeline") !== null, "a used file is still offered Add to timeline");
+      assert.ok(action(screen, "Append to timeline") !== null, "a used file is still offered Add to timeline");
     } finally {
       await close(screen);
     }
@@ -209,7 +209,7 @@ describe("the Library (SPEC-039 T-3)", () => {
     try {
       assert.ok(rows(screen).includes(`artifact:${BOARD}`), "the board is listed");
       await act(async () => rowButton(screen, `artifact:${BOARD}`).click());
-      const add = action(screen, "Add to timeline");
+      const add = action(screen, "Append to timeline");
       assert.ok(add, "an unplaced picture offers Add");
       await act(async () => add.click());
       const [sent] = commandsSent(screen);

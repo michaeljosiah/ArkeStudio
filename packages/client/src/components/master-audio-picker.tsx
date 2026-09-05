@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { basePictureTrack, masterAudioBinding, orderedShots, storyTimelineFingerprint, ulid, type MasterAudioReview,
+import { AUDIO_TRACK_KINDS, basePictureTrack, masterAudioBinding, orderedShots, storyTimelineFingerprint, ulid, type MasterAudioReview,
   type ProductionBundle, type WorldBundle, type TimelineClipId } from "@arke-studio/contracts";
 import { type MasterAudioChoice } from "../lib/scene-plan.js";
 import { send, subscribePerformanceResults, subscribeTimelineRefusals } from "../lib/store.js";
@@ -21,17 +21,17 @@ export function MasterAudioPicker({ world, production, sceneId, value, onChange 
   }), []);
   useEffect(() => subscribeTimelineRefusals(event => { if (event.productionId === production.meta.id) setNotice(event.reason); }), [production.meta.id]);
   const state = production.timeline;
-  if (state?.status !== "ready") return <p>Save a timeline with a Music clip to use master playback.</p>;
+  if (state?.status !== "ready") return <p>Save a timeline with an audio clip to use master playback.</p>;
   const timeline = state.timeline;
   const scene = production.scenes.find(s => s.id === sceneId);
   const shots = new Set(scene ? orderedShots(scene).map(s => s.id) : []);
   const pictures = (basePictureTrack(timeline)?.clips ?? []).filter(c => c.source.kind === "shot" && shots.has(c.source.shotId));
-  const music = timeline.tracks.flatMap(t => t.kind === "music" ? t.clips.filter(c => c.source.kind === "artifact") : []);
+  const music = timeline.tracks.flatMap(t => AUDIO_TRACK_KINDS.has(t.kind) ? t.clips.filter(c => c.source.kind === "artifact") : []);
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   const stale = review && review.binding.timelineHash !== state.hash;
   return <details style={{ overflowWrap: "anywhere" }}><summary>Master playback for performance shots</summary>
-    <p>Choose a Music clip already placed on the timeline. Its exact shot slice guides visible motion; generated audio is off. The external soundtrack stays final, and synchronization is not guaranteed.</p>
-    {!music.length && <p>Place the soundtrack artifact on a Music track in the editor first.</p>}
+    <p>Choose an audio clip already placed on the timeline. Its exact shot slice guides visible motion; generated audio is off. The external soundtrack stays final, and synchronization is not guaranteed.</p>
+    {!music.length && <p>Place the soundtrack artifact on an audio track in the editor first.</p>}
     {pictures.map(clip => {
       if (clip.source.kind !== "shot") return null;
       const shotId = clip.source.shotId;

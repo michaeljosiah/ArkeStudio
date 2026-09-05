@@ -171,25 +171,26 @@ describe("typed tracks on the editor (issue 681)", () => {
 
   it("places from the Library without a drag, adding the track it needs, at the playhead", async () => {
     const { state } = migratedState();
+    state.world!.artifacts.find(artifact => artifact.id === BELLS)!.mediaInfo = { durationSec: 2, hasAudio: true };
     const screen = await mountCut(state);
     try {
-      // The non-drag path (SPEC-039 R-10): pick the row, then its Add to timeline action.
+      // The non-drag path (SPEC-039 R-10): pick the row, then its Append to timeline action.
       await act(async () => screen.container.querySelector<HTMLButtonElement>(`[data-library-item="artifact:${BELLS}"] .fy-artrow__pick`)!.click());
-      const add = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artrow__actions button")].find((button) => button.textContent?.includes("Add to timeline"));
-      assert.ok(add, "the bells offer Add to timeline");
+      const add = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artrow__actions button")].find((button) => button.textContent?.includes("Append to timeline"));
+      assert.ok(add, "the bells offer Append to timeline");
       await act(async () => add.click());
       const sent = commandsSent(screen).at(-1);
       assert.ok(sent);
-      assert.equal(sent.commands.length, 2, "no Music track exists yet, so one is added in the same batch");
-      assert.deepEqual(sent.commands[0], { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" });
+      assert.equal(sent.commands.length, 2, "no generic Audio track exists yet, so one is added in the same batch");
+      assert.deepEqual(sent.commands[0], { kind: "add-track", trackId: "tr_audio-1", trackKind: "audio", name: "Audio 1" });
       const place = sent.commands[1]!;
       assert.equal(place.kind, "place");
       if (place.kind !== "place") return;
-      assert.equal(place.trackId, "tr_music");
+      assert.equal(place.trackId, "tr_audio-1");
       assert.equal(place.clip.startFrame, 0, "at the playhead");
       assert.deepEqual(place.clip.source, { kind: "artifact", artifactId: BELLS, label: "harbour-bells.wav" });
       assert.equal(place.clip.gainDb, 0);
-      assert.equal(sent.label, "Place harbour-bells.wav");
+      assert.equal(sent.label, "Append media");
     } finally {
       await close(screen);
     }

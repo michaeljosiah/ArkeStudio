@@ -2375,7 +2375,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * has. They land on the **world's** shelf, not the production's: an artifact laid over one cut
    * is still the world's, and the panel says so by being the world's.
    */
-  z.object({ kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({
+    kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
+    sourcePaths: z.array(z.string().min(1)).min(1).max(16).optional(),
+    editor: z.object({
+      productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
+      sourceFingerprint: TimelineSourceFingerprintSchema,
+      destination: z.union([z.enum(["library", "append"]), z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)]),
+    }).strict().optional(),
+  }).strict(),
   /**
    * 82a: place an artifact over the picture for a window.
    *

@@ -1,6 +1,9 @@
 import { useState } from "react";
 import {
   AUDIO_TRACK_KINDS,
+  effectiveAudioRole,
+  placementAudioRole,
+  type AudioRole,
   DEFAULT_MIX,
   basePictureTrack,
   formatFrames,
@@ -22,7 +25,7 @@ import { frameAtPixel, framesFromDelta, previewTimeline, trackDragCommand, type 
 
 /**
  * The typed tracks beside the story's Picture (SPEC-038 R-12, R-13; SPEC-039 R-13, R-19c, R-23;
- * issue 681): every Picture track above the base, then Dialogue, Ambience and Music, in saved
+ * issue 681): every Picture track above the base, then audio tracks, in saved
  * order. A clip on these tracks moves by frame rather than by order — a bed is not a sequence —
  * and the lane accepts a Library drop, which becomes one `place` command at the dropped frame.
  * Mute and Solo are track commands on the row itself, so the rule that silences a track is the
@@ -58,6 +61,7 @@ export function laneIcon(kind: string): React.ReactNode {
       return <Film size={11} />;
     case "dialogue":
       return <Mic size={11} />;
+    case "audio":
     case "ambience":
       return <Waveform size={11} />;
     case "music":
@@ -80,13 +84,12 @@ function clipLabel(clip: TimelineClip): string {
   return clip.source.label;
 }
 
-/** Track rows in the target's lane order: overlay picture, then Dialogue, Ambience, Music. */
+/** Track rows in the target's lane order: overlay picture, then audio in saved order. */
 export function typedTracksOf(timeline: ProductionTimeline): TimelineTrack[] {
   const base = basePictureTrack(timeline);
   const ordered = [...timeline.tracks].sort((a, b) => a.order - b.order);
   const upperPicture = ordered.filter((track) => track.kind === "picture" && track.id !== base?.id);
-  const kind = (wanted: TimelineTrack["kind"]): TimelineTrack[] => ordered.filter((track) => track.kind === wanted);
-  return [...upperPicture, ...kind("dialogue"), ...kind("ambience"), ...kind("music")];
+  return [...upperPicture, ...ordered.filter(track => AUDIO_TRACK_KINDS.has(track.kind))];
 }
 
 export function TypedTrackRows({
@@ -339,64 +342,31 @@ export function TypedTrackRows({
   );
 }
 
-/** A clip's gain, as the Inspector authors it: one command per press (SPEC-038 R-13). */
-/**
- * The target's kind chips on a sound clip (SPEC-039 R-13): Dialogue, Ambience or Music, and the
- * clip moves to the first lane of that kind — a new one when there is none — in one batch that
- * undoes as one. The timeline has no move-between-tracks command, so the move is a delete and a
- * place of the same clip under a fresh id.
- */
-export function MoveToLane({
-  clip,
-  track,
-  timeline,
-  disabled,
-  onCommands,
-  mintClipId,
-}: {
-  clip: TimelineClip;
-  track: TimelineTrack;
-  timeline: ProductionTimeline;
-  disabled: boolean;
+/** A role describes the clip, without changing its identity, track or source references. */
+export function AudioClipSettings({ clip, track, disabled, onCommands }: {
+  clip: TimelineClip; track: TimelineTrack; disabled: boolean;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
-  mintClipId: () => TimelineClipId;
 }) {
-  const kinds: Array<["dialogue" | "ambience" | "music", string]> = [
-    ["dialogue", "Dialogue"],
-    ["ambience", "Ambience"],
-    ["music", "Music"],
-  ];
-  // A split-audio half is tied to its picture twin by id; moving it under a new id would leave
-  // the twin pointing at nothing, so the move waits until the link is undone.
-  const linked = clip.linkedClipId !== undefined;
-  const move = (kind: "dialogue" | "ambience" | "music", name: string) => {
-    if (kind === track.kind) return;
-    const dest = [...timeline.tracks].sort((a, b) => a.order - b.order).find((candidate) => candidate.kind === kind) ?? null;
-    const taken = new Set(timeline.tracks.map((candidate) => candidate.id));
-    let fresh: TimelineTrackId = `tr_${kind}`;
-    for (let n = 2; taken.has(fresh); n += 1) fresh = `tr_${kind}-${n}`;
-    const commands: TimelineClipCommand[] = [{ kind: "delete", clipId: clip.id }];
-    if (dest === null) commands.push({ kind: "add-track", trackId: fresh, trackKind: kind, name });
-    let startFrame = clip.startFrame;
-    for (const other of orderedTrackClips(dest ?? { clips: [] })) {
-      if (other.startFrame < startFrame + clip.durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
-    }
-    commands.push({ kind: "place", trackId: dest?.id ?? fresh, clip: { ...clip, id: mintClipId(), startFrame } });
-    onCommands(commands, `Move ${clipLabel(clip)} to ${name}`);
-  };
-  return (
-    <div className="fy-cutinspect__row fy-movekind">
-      <span>Kind</span>
-      <strong className="fy-movekind__chips" role="group" aria-label="Move to lane">
-        {kinds.map(([kind, name]) => (
-          <button key={kind} type="button" className="fy-movekind__chip" aria-pressed={track.kind === kind} disabled={disabled || linked || track.kind === kind} onClick={() => move(kind, name)}>
-            {name}
-          </button>
-        ))}
-        {linked && <span className="fy-mono fy-movekind__note">linked to its picture</span>}
-      </strong>
-    </div>
-  );
+  const roles: Array<[AudioRole, string]> = [["unspecified", "Unspecified"], ["dialogue", "Voice"], ["music", "Music"], ["ambience", "Ambience"]];
+  return <div className="fy-cutinspect__rows fy-audiosettings">
+    <label className="fy-cutinspect__row">Clip role
+      <select aria-label="Clip role" value={effectiveAudioRole(track, clip)} disabled={disabled || clip.source.kind === "performance"}
+        onChange={event => onCommands([{ kind: "set-clip-role", clipId: clip.id, role: event.target.value as AudioRole }], "Change audio role")}>
+        {roles.map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+      </select>
+    </label>
+    <label className="fy-cutinspect__row">Track name
+      <input key={track.id + track.name} aria-label="Track name" defaultValue={track.name} disabled={disabled}
+        onBlur={event => { const name = event.target.value.trim(); if (name && name !== track.name) onCommands([{ kind: "set-track", trackId: track.id, name }], "Rename audio track"); }} />
+    </label>
+    <label className="fy-cutinspect__row">Default for new clips
+      <select aria-label="Default role for new clips" value={placementAudioRole(track)} disabled={disabled}
+        onChange={event => onCommands([{ kind: "set-track", trackId: track.id, defaultRole: event.target.value as AudioRole }], "Change track default role")}>
+        {roles.map(([role, label]) => <option key={role} value={role}>{label}</option>)}
+      </select>
+    </label>
+    <p className="fy-cutinspect__note">The track default applies to future clips. This clip keeps its own role.</p>
+  </div>;
 }
 
 export function ClipGain({

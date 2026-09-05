@@ -424,7 +424,7 @@ export function refuseUnrenderablePlacements(
       if (media === undefined) refuse(`${command.clip.id} cites take ${source.takeId}, which has no media`);
     } else if (source.kind === "performance") {
       const performance = production.performances.find(p => p.id === source.performanceId);
-      if (kind !== "dialogue" || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
+      if (!audio || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
     } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
       refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
     }

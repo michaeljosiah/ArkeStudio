@@ -135,8 +135,9 @@ describe("Arke assembles a scene", () => {
     const subtitles = applied.tracks.find((track) => track.kind === "subtitle");
     assert.ok(subtitles, "a subtitle track is conformed from the shot lines");
     assert.deepEqual(subtitles.cues!.map((cue) => [cue.text, cue.startFrame, cue.endFrame]), [["Hold the line.", 0, 50]]);
-    const ambience = applied.tracks.find((track) => track.kind === "ambience");
-    assert.ok(ambience, "the linked bed lands on Ambience");
+    const ambience = applied.tracks.find((track) => track.kind === "audio");
+    assert.ok(ambience, "the linked bed lands on a generic Audio track");
+    assert.equal(ambience.clips[0]!.role, "ambience");
     assert.deepEqual(ambience.clips.map((clip) => [clip.startFrame, clip.durationFrames, clip.gainDb]), [[0, 88, -12]]);
     assert.deepEqual(applied.library, [
       { kind: "shot", shotId: "sh_1" },

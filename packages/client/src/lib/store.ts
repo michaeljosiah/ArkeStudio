@@ -3449,6 +3449,23 @@ export function uploadArtifacts(worldId: string): void {
   send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
 }
 
+export function importEditorMedia(
+  worldId: string, editor: NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>,
+  files?: readonly File[],
+): { requestId: string | null; reason?: string } {
+  if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
+  if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
+  const requestId = queueRequest("upload-artifacts");
+  const submitted = files
+    ? bridge!.importDroppedMedia!({ worldId, requestId, editor }, files).submitted
+    : send({ kind: "upload-artifacts", worldId, requestId, editor });
+  if (!submitted) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The files could not be imported. Check the connection and use Import media." };
+  }
+  return { requestId };
+}
+
 /**
  * Overlays (82a): the one stored position on the cut. Placing, moving and removing are one act —
  * where a thing sits — and none of them touch the artifact, which is only ever cited.

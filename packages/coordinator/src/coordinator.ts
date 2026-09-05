@@ -252,6 +252,8 @@ import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./t
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { importEditorMedia } from "./productions/editor-import.js";
+import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
 import {
@@ -776,6 +778,7 @@ export interface CoordinatorOptions {
    * Absent → attaching says so instead of doing nothing.
    */
   pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
+  confirmLargeMediaImport?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
   /** Choosing an artifact import folder; like pickFiles, the host path never reaches the renderer. */
   pickFolder?: () => Promise<string | null>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
@@ -8710,8 +8713,8 @@ export class Coordinator {
           // The same audible set the plan mixes (SPEC-038 R-6): a solo elsewhere silences these
           // clips in preview and export, so it silences them here too (round five).
           const dialogue = audibleTracks(record)
-            .filter((track) => track.kind === "dialogue")
-            .flatMap((track) => orderedTrackClips(track));
+            .filter((track) => AUDIO_TRACK_KINDS.has(track.kind))
+            .flatMap((track) => orderedTrackClips(track).filter(clip => effectiveAudioRole(track, clip) === "dialogue"));
           if (dialogue.length === 0) throw new Error("there are no Dialogue clips to transcribe");
           const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
           const commands: TimelineCommand[] = [];
@@ -8721,37 +8724,29 @@ export class Coordinator {
           const at = new Date().toISOString();
           const ffmpeg = this.opts.ffmpeg;
           const heard: Array<{ startFrame: number; endFrame: number; text: string; clip: (typeof dialogue)[number] }> = [];
+          const transcriptionPlan = buildRenderPlan({ production, artifacts: store.getBundle().artifacts, timeline: production.timeline, scope: { kind: "production" }, preset: "review-cut" });
+          if (!transcriptionPlan.ok) throw new Error(transcriptionPlan.reason);
           for (const clip of dialogue) {
-            let path: string | null = null;
+            const heardSource = transcriptionPlan.plan.audio.find(item => item.clipId === clip.id);
+            if (!heardSource) throw new Error(clip.id + ": the Voice source is not audible in this cut");
+            const path = join(store.dir, fromPortable(heardSource.path));
             let sourceLengthSec: number | null = null;
             if (clip.source.kind === "take") {
               const take = takesById.get(clip.source.takeId);
-              if (take?.media !== undefined) {
-                path = join(store.dir, "productions", production.meta.id, "takes", take.id, take.media);
-                sourceLengthSec = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec ?? null;
-              }
+              sourceLengthSec = production.takeMediaInfo[take?.segment?.passTakeId ?? clip.source.takeId]?.mediaInfo.durationSec ?? null;
             } else if (clip.source.kind === "artifact") {
-              const artifactId = clip.source.artifactId;
-              const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
-              if (artifact !== undefined) {
-                path = join(store.dir, "artifacts", fromPortable(artifact.file));
-                sourceLengthSec = artifact.mediaInfo?.durationSec ?? null;
-              }
+              const source = clip.source;
+              sourceLengthSec = store.getBundle().artifacts.find(artifact => artifact.id === source.artifactId)?.mediaInfo?.durationSec ?? null;
+            } else if (clip.source.kind === "performance") {
+              const source = clip.source;
+              sourceLengthSec = production.performances.find(performance => performance.id === source.performanceId)?.provenance.outputTechnical.durationSec ?? null;
             }
-            if (path === null) continue;
-            /*
-             * The words the model hears must be the words the clip plays (round three). A clip
-             * that starts into its source, or stops short of its end, is windowed through ffmpeg
-             * before it is heard; only a clip that plays its whole source is read as the file.
-             * With no ffmpeg there is no window, and the clip is refused by name rather than
-             * transcribed with speech it never plays.
-             */
-            const sourceInSec = clip.sourceInFrames / record.frameRate;
-            const clipSec = clip.durationFrames / record.frameRate;
+            const sourceInSec = heardSource.sourceInSec;
+            const clipSec = heardSource.endSec - heardSource.startSec;
             // Whole-source equivalence has to be established, not assumed: an unmeasured source
             // under a tail-trimmed clip is windowed like any other (round four).
             const wholeSource =
-              clip.sourceInFrames === 0 && sourceLengthSec !== null && clipSec >= sourceLengthSec - 1 / record.frameRate;
+              sourceInSec === 0 && sourceLengthSec !== null && Math.abs(clipSec - sourceLengthSec) < 0.000001;
             let audio: Buffer;
             let contentType: string;
             if (ffmpeg !== undefined) {
@@ -10808,14 +10803,29 @@ export class Coordinator {
       case "upload-artifacts": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        if (!store || store.worldId !== msg.worldId || !pick) {
+        if (!store || store.worldId !== msg.worldId || (!pick && !msg.sourcePaths)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
         }
-        const chosen = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        const chosen = msg.sourcePaths ?? await pick!({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
         // A closed dialog is not a failure. Nothing was filed and nothing is said.
         if (chosen.length === 0) {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        if (msg.editor) {
+          try {
+            const failures = await importEditorMedia(store, chosen, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            await this.refreshWorldSnapshot(msg.worldId);
+            this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
+          } catch (error) {
+            this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error ? error.message : String(error));
+            if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
+          }
           return;
         }
         const failures: Array<{ index: number; reason: string }> = [];

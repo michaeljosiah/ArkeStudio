@@ -15,6 +15,7 @@ import {
 } from "./cut.js";
 import {
   AUDIO_TRACK_KINDS,
+  effectiveAudioRole,
   DEFAULT_MIX,
   TimelineOperationRefused,
   basePictureTrack,
@@ -49,7 +50,7 @@ import { DEFAULT_SUBTITLE_STYLE, orderedCues, type SidecarFormat, type SubtitleO
 export type RenderScope = { kind: "production" } | { kind: "episode"; episodeId: string };
 
 /** What a sound is for, which decides whether speech lowers it (SPEC-038 R-12, R-14). */
-export type RenderAudioRole = "dialogue" | "ambience" | "music" | "picture";
+export type RenderAudioRole = "dialogue" | "ambience" | "music" | "picture" | "unspecified";
 
 export interface RenderAudioItem extends ExportAudioClip {
   role: RenderAudioRole;
@@ -249,7 +250,7 @@ function overlaysFromTimeline(
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
-        const sourceInSec = resolved.inSec + framesToSeconds(clip.sourceInFrames, frameRate);
+        const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
           sound.push({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id });
@@ -316,7 +317,7 @@ function audioFromTimeline(
         const resolved = resolveTakeMedia(production, takeId);
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         path = resolved.path;
-        segmentInSec = resolved.inSec;
+        segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
       } else if (clip.source.kind === "performance") {
         const source = clip.source;
         const performance = production.performances.find(p => p.id === source.performanceId);
@@ -340,11 +341,11 @@ function audioFromTimeline(
         startSec,
         endSec,
         gainDb: clip.gainDb ?? 0,
-        role: track.kind as RenderAudioRole,
+        role: effectiveAudioRole(track, clip),
         sourceInSec: physicalInSec ?? (segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate)),
         clipId: clip.id,
       });
-      if (track.kind === "dialogue") speech.push({ startSec, endSec });
+      if (effectiveAudioRole(track, clip) === "dialogue") speech.push({ startSec, endSec });
     }
   }
   const problems = dialogueTimingProblems(timings,slots,Math.max(0,...slots.map(s=>s.endSec)));
@@ -402,7 +403,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
 
   let cut;
   try {
-    cut = resolvePictureTimeline(production, timeline);
+    cut = resolvePictureTimeline(production, timeline, artifacts);
   } catch (error) {
     if (error instanceof TimelineOperationRefused) return { ok: false, reason: `timeline is not ready to render: ${error.reason}` };
     throw error;
@@ -480,7 +481,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
       if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
-      const inSec = (segment?.inSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
+      const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       items.push({
         type: "clip",
         path,

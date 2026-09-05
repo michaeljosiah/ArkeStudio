@@ -12,10 +12,13 @@ import {
   buildFfmpegArgs,
   buildRenderPlan,
   duckingEnvelope,
+  detachAudioCommands,
+  effectiveAudioRole,
   migrateLegacyCut,
   redoTimelineHistory,
   resolvePictureTimeline,
   seedStoryPictureTimeline,
+  sourceLengthFramesFor,
   trackEndFrame,
   undoTimelineHistory,
   type ProductionBundle,
@@ -144,6 +147,56 @@ function valid(timeline: ProductionTimeline): ProductionTimeline {
   assert.equal(parsed.success, true, parsed.success ? "" : JSON.stringify(parsed.error.issues));
   return timeline;
 }
+
+describe("independent sound and roles (SPEC-042)", () => {
+  it("freezes the heard pass segment and selection trim when detaching a generated shot", () => {
+    const p = production();
+    const pass = p.takes[0]!;
+    p.takes.push({ ...pass, id: "tk_01J8E0000000000000000000S1", media: undefined, segment: { passTakeId: pass.id, inSec: 1, outSec: 3 } });
+    p.selections.sh_1 = { acceptedTakeId: "tk_01J8E0000000000000000000S1", trimInSec: .213 };
+    let timeline = seedStoryPictureTimeline(p);
+    const id = timeline.tracks[0]!.clips[0]!.id;
+    timeline = applyTimelineCommands(timeline, [{ kind: "trim", clipId: id, edge: "end", deltaFrames: -10 }, { kind: "trim", clipId: id, edge: "start", deltaFrames: 5 }]);
+    const commands = detachAudioCommands(p, timeline, [], id, "cl_detached");
+    timeline = valid(applyTimelineCommands(timeline, commands));
+    const sound = timeline.tracks.find(track => track.kind === "audio")!.clips[0]!;
+    assert.deepEqual(sound.source, { kind: "take", takeId: "tk_01J8E0000000000000000000S1", label: timeline.tracks[0]!.clips[0]!.source.label, offsetSec: .213 });
+    assert.equal(sound.sourceInFrames, 5, "frame edits remain separate from the exact selection trim");
+    assert.throws(() => applyTimelineCommands(timeline, [{ kind: "trim", clipId: sound.id, edge: "end", deltaFrames: 100 }],
+      { sourceLength: sourceLengthFramesFor(p, []) }), /source/);
+    const render = () => buildRenderPlan({ production: p, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+    let plan = render(); assert.ok(plan.ok);
+    assert.equal(plan.plan.audio.find(item => item.clipId === "cl_detached")!.sourceInSec, 1.413);
+    p.selections.sh_1 = { acceptedTakeId: TAKE, trimInSec: 0 };
+    plan = render(); assert.ok(plan.ok);
+    assert.equal(plan.plan.audio.find(item => item.clipId === "cl_detached")!.sourceInSec, 1.413, "later selection changes do not replace detached sound");
+    assert.throws(() => detachAudioCommands(p, timeline, [], id, "cl_twice"), /already muted/);
+    const before = undoTimelineHistory(timeline);
+    p.takeMediaInfo[TAKE]!.mediaInfo.hasAudio = false;
+    assert.throws(() => detachAudioCommands(p, before, [], id, "cl_silent"), /no audio stream/);
+    delete p.takeMediaInfo[TAKE];
+    assert.throws(() => detachAudioCommands(p, before, [], id, "cl_unknown"), /Measure/);
+  });
+
+  it("persists future-only defaults and clip overrides through history and reload", () => {
+    let timeline = applyTimelineCommands(seedStoryPictureTimeline(production()), [
+      { kind: "add-track", trackId: "tr_new", trackKind: "audio", name: "Audio 1" },
+      { kind: "place", trackId: "tr_new", clip: audioClip("cl_first", SONG, "song.mp3", 0, 25) },
+    ]);
+    timeline = applyTimelineCommands(timeline, [{ kind: "set-track", trackId: "tr_new", defaultRole: "music", name: "Soundtrack" }]);
+    timeline = applyTimelineCommands(timeline, [{ kind: "place", trackId: "tr_new", clip: audioClip("cl_next", SONG, "song.mp3", 25, 25) }]);
+    timeline = applyTimelineCommands(timeline, [{ kind: "set-clip-role", clipId: "cl_next", role: "dialogue" }]);
+    timeline = ProductionTimelineSchema.parse(JSON.parse(JSON.stringify(timeline)));
+    const roles = (value: ProductionTimeline) => { const track = value.tracks.find(track => track.id === "tr_new")!; return track.clips.map(clip => effectiveAudioRole(track, clip)); };
+    assert.deepEqual(roles(timeline), ["unspecified", "dialogue"]);
+    const reverted = undoTimelineHistory(timeline);
+    assert.deepEqual(roles(reverted), ["unspecified", "music"]);
+    assert.deepEqual(roles(redoTimelineHistory(reverted)), roles(timeline));
+    const original = undoTimelineHistory(undoTimelineHistory(reverted));
+    assert.equal(original.tracks.find(track => track.id === "tr_new")!.defaultRole, undefined);
+    assert.deepEqual(roles(original), ["unspecified"]);
+  });
+});
 
 function apply(timeline: ProductionTimeline, ...commands: TimelineClipCommand[]): ProductionTimeline {
   return applyTimelineCommands(timeline, commands);

@@ -256,6 +256,22 @@ const bridge = {
     return { filed, unresolved };
   },
 
+  importDroppedMedia(
+    target: Omit<Extract<import("@arke-studio/contracts").ClientMessage, { kind: "upload-artifacts" }>, "sourcePaths" | "kind">,
+    files: readonly unknown[],
+  ): { submitted: boolean; unresolved: number[] } {
+    const sourcePaths: string[] = [], unresolved: number[] = [];
+    files.forEach((file, index) => {
+      try {
+        const path = webUtils.getPathForFile(file as File);
+        if (path) sourcePaths.push(path); else unresolved.push(index);
+      } catch { unresolved.push(index); }
+    });
+    if (!sourcePaths.length || unresolved.length || sourcePaths.length > 16 || socket?.readyState !== WebSocket.OPEN) return { submitted: false, unresolved };
+    bridge.send(JSON.stringify({ ...target, kind: "upload-artifacts", sourcePaths }));
+    return { submitted: true, unresolved };
+  },
+
   /** Bytes with no file behind them: the host spools them, then they file like anything else. */
   async attachBytes(
     target: AttachTarget,
