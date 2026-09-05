@@ -2540,6 +2540,17 @@ const exampleWorldActions = {
     shotId: "sh_001",
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "audio-spine-command": {
+    kind: "audio-spine-command",
+    productionId: "saltlight",
+    baseRevision: 2,
+    command: {
+      kind: "set-anchor",
+      shotId: "sh_001",
+      anchor: { startSec: 12, endSec: 18, clipAudio: { mode: "mute" } },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

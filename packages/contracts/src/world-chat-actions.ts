@@ -20,6 +20,7 @@ import { CompilationFormatSchema, ReferenceAngleSchema } from "./reference.js";
 import { CapabilitySchema } from "./provider.js";
 import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
+import { AudioSpineCommandSchema } from "./spine.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -848,6 +849,17 @@ const ProductionStagePlayblastModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+export const AudioSpineModelActionSchema = z
+  .object({
+    kind: z.literal("audio-spine-command"),
+    productionId: SlugSchema,
+    /** Null creates the first spine; every other command names the exact live revision. */
+    baseRevision: z.number().int().min(1).nullable(),
+    command: AudioSpineCommandSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export type AudioSpineModelAction = z.infer<typeof AudioSpineModelActionSchema>;
 
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
@@ -949,6 +961,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionTakeReviewModelActionSchema,
   ProductionTakeTrimModelActionSchema,
   ProductionStagePlayblastModelActionSchema,
+  AudioSpineModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1035,6 +1048,7 @@ export const WorldChatProductionTakeGenerationActionSchema = preparedAction("wor
 export const WorldChatProductionTakeReviewActionSchema = preparedAction("world-chat-production-take-review", ProductionTakeReviewModelActionSchema);
 export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-chat-production-take-trim", ProductionTakeTrimModelActionSchema);
 export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
+export const WorldChatAudioSpineActionSchema = preparedAction("world-chat-audio-spine-command", AudioSpineModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1092,6 +1106,7 @@ export type WorldChatProductionTakeGenerationAction = z.infer<typeof WorldChatPr
 export type WorldChatProductionTakeReviewAction = z.infer<typeof WorldChatProductionTakeReviewActionSchema>;
 export type WorldChatProductionTakeTrimAction = z.infer<typeof WorldChatProductionTakeTrimActionSchema>;
 export type WorldChatProductionStagePlayblastAction = z.infer<typeof WorldChatProductionStagePlayblastActionSchema>;
+export type WorldChatAudioSpineAction = z.infer<typeof WorldChatAudioSpineActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1197,5 +1212,6 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
+  WorldChatAudioSpineActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

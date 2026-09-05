@@ -7,7 +7,7 @@ import {
 } from "@arke-studio/contracts";
 import { z } from "zod";
 import {
-  ARKE_BLOCKED_AUTHORITY_SEAMS,
+  ARKE_AUTHORITY_ACTION_REGISTRY,
   ARKE_CLIENT_COMMAND_COMPILE_TIME_PARITY,
   ARKE_CLIENT_COMMAND_REGISTRY,
   findArkeClientCommand,
@@ -95,7 +95,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     }
   });
 
-  it("names unsafe command seams and the intended audio spine instead of exposing generic payloads", () => {
+  it("names unsafe command seams and exposes only the typed audio spine authority", () => {
     for (const kind of ["stage-sheet-edit", "save-routing", "save-audio-tracks", "file-artifact"] as const) {
       const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
       assert.equal(descriptor.classification, "supported-by-arke");
@@ -104,10 +104,11 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
       assert.deepEqual(modelActionCatalogue().find((entry) => entry.kind === kind)?.fields, []);
     }
 
-    const spine = ARKE_BLOCKED_AUTHORITY_SEAMS["audio-spine-command"];
+    const spine = ARKE_AUTHORITY_ACTION_REGISTRY["audio-spine-command"];
     assert.equal(spine.authority, "audio-spine");
-    assert.equal(spine.support.preparation.state, "blocked");
+    assert.equal(spine.support.preparation.state, "available");
     assert.equal(spine.support.reads.state, "available", "the typed spine reader now covers this authority");
-    assert.match(modelActionCatalogueText(), /audio-spine-command.*typed-audio-spine-command/);
+    assert.equal(spine.support.execution.state, "available");
+    assert.match(modelActionCatalogueText(), /audio-spine-command.*command:/);
   });
 });

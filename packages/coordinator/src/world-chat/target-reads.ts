@@ -1,9 +1,16 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  migrateLegacyCut,
   orderedShots,
   canonicalSceneFlow,
   isGraphScene,
+  productionFrameRate,
+  seedFirstPictureTimeline,
+  seedSpinePictureTimeline,
   sortScenes,
+  spineTimelineFingerprint,
+  storyShotFrames,
+  storyTimelineFingerprint,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
@@ -189,10 +196,150 @@ export function episodesFence(production: ProductionBundle | undefined): string 
   return fence(production?.episodes ?? []);
 }
 
-export function timelineFence(production: ProductionBundle | undefined): string {
+function visibleArtifacts(
+  production: ProductionBundle | undefined,
+  artifacts: WorldBundle["artifacts"],
+) {
+  if (production === undefined) return [];
+  return artifacts.filter((artifact) => artifact.production === undefined || artifact.production === production.meta.id);
+}
+
+function editableTimeline(
+  production: ProductionBundle | undefined,
+  artifacts: WorldBundle["artifacts"],
+) {
+  if (production === undefined || production.timeline?.status === "invalid") return null;
+  let timeline;
+  if (production.timeline?.status === "ready") {
+    timeline = production.timeline.timeline;
+  } else if (production.spine !== null) {
+    const durationSec = artifacts.find((artifact) => artifact.id === production.spine!.trackArtifactId)?.mediaInfo?.durationSec;
+    if (durationSec === undefined) return null;
+    timeline = seedSpinePictureTimeline(production, production.spine, durationSec);
+  } else {
+    timeline = seedFirstPictureTimeline(production);
+  }
+  return migrateLegacyCut(timeline, production, artifacts).timeline;
+}
+
+function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"]): Row[] {
+  const state = production?.timeline ?? { status: "absent" as const };
+  const timeline = editableTimeline(production, artifacts);
+  const frameRate = timeline?.frameRate ?? (production ? productionFrameRate(production.meta) : null);
+  const trackDurationSec = production?.spine === null || production?.spine === undefined
+    ? null
+    : artifacts.find((artifact) => artifact.id === production.spine!.trackArtifactId)?.mediaInfo?.durationSec ?? null;
+  const sourceFingerprint = production === undefined
+    ? null
+    : production.spine === null
+      ? storyTimelineFingerprint(production)
+      : trackDurationSec === null
+        ? null
+        : spineTimelineFingerprint(production, production.spine, trackDurationSec);
+  const rows: Row[] = [{
+    key: "00:state",
+    value: {
+      kind: "timeline-state",
+      status: state.status,
+      ...(state.status === "invalid" ? { message: state.message } : {}),
+      baseRevision: state.status === "ready" ? state.timeline.revision : null,
+      sourceFingerprint,
+      frameRate,
+      undoAvailable: state.status === "ready" && state.timeline.history.undo.length > 0,
+      redoAvailable: state.status === "ready" && state.timeline.history.redo.length > 0,
+    },
+  }];
+  if (timeline !== null) {
+    const tracks = [...timeline.tracks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+    rows.push(
+      { key: "01:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
+      ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
+      ...tracks.flatMap((track, trackIndex) => [
+        { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined } } },
+        ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
+        ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
+      ]),
+    );
+  }
+  if (production !== undefined) {
+    for (const scene of sortScenes(production.scenes)) {
+      for (const [index, shot] of orderedShots(scene).entries()) {
+        rows.push({
+          key: `50:shot:${padded(scene.number)}:${padded(index)}:${shot.id}`,
+          value: {
+            kind: "available-shot",
+            scene: { id: scene.id, number: scene.number, title: scene.title },
+            shot,
+            durationFrames: storyShotFrames(shot.durationSec, productionFrameRate(production.meta)),
+            selection: production.selections[shot.id] ?? null,
+            source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title },
+          },
+        });
+      }
+    }
+    for (const take of production.takes) {
+      const sheetId = typeof take.params["sheetId"] === "string" ? take.params["sheetId"] : undefined;
+      rows.push({
+        key: `60:take:${take.id}`,
+        value: {
+          kind: "available-take",
+          take,
+          mediaInfo: production.takeMediaInfo[take.id] ?? null,
+          source: {
+            kind: "take",
+            takeId: take.id,
+            label: take.media ?? take.id,
+            ...(sheetId !== undefined ? { sheetId, voiceAssignedAtVersion: take.provenance.sheets[sheetId] } : {}),
+          },
+        },
+      });
+    }
+  }
+  for (const artifact of visibleArtifacts(production, artifacts)) {
+    rows.push({
+      key: `70:artifact:${artifact.id}`,
+      value: { kind: "available-artifact", artifact, source: { kind: "artifact", artifactId: artifact.id, label: artifact.file } },
+    });
+  }
+  return rows.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function timelineFence(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"] = []): string {
   const state = production?.timeline ?? { status: "absent" as const };
   const version = state.status === "ready" ? state.timeline.revision : state.status;
-  return fence({ state, takes: production?.takes ?? [], media: production?.takeMediaInfo ?? {} }, version);
+  return fence(timelineRows(production, artifacts).map((row) => row.value), version);
+}
+
+function spineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"]): Row[] {
+  const spine = production?.spine ?? null;
+  const rows: Row[] = [{
+    key: "00:state",
+    value: { kind: "spine-state", status: spine === null ? "absent" : "ready", baseRevision: spine?.revision ?? null },
+  }];
+  if (spine !== null) {
+    rows.push(
+      { key: "01:metadata", value: { kind: "spine", schemaVersion: spine.schemaVersion, revision: spine.revision, trackArtifactId: spine.trackArtifactId, updatedAt: spine.updatedAt } },
+      ...spine.markers.map((marker, index) => ({ key: `10:marker:${padded(index)}:${marker.id}`, value: { kind: "spine-marker", marker } })),
+      ...Object.entries(spine.anchors).sort(([a], [b]) => a.localeCompare(b)).map(([shotId, anchor]) => ({ key: `20:anchor:${shotId}`, value: { kind: "spine-anchor", shotId, anchor } })),
+    );
+  }
+  if (production !== undefined) {
+    for (const scene of sortScenes(production.scenes)) {
+      for (const shot of orderedShots(scene)) {
+        rows.push({ key: `30:shot:${shot.id}`, value: { kind: "available-spine-shot", scene: { id: scene.id, number: scene.number, title: scene.title }, shot } });
+      }
+    }
+  }
+  for (const artifact of visibleArtifacts(production, artifacts)) {
+    if (artifact.kind !== "audio" && !(artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true)) continue;
+    rows.push({ key: `40:track:${artifact.id}`, value: { kind: "available-spine-track", artifact } });
+  }
+  return rows.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function spineFence(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"] = []): string {
+  const spine = production?.spine ?? null;
+  return fence(spineRows(production, artifacts).map((row) => row.value), spine?.revision ?? "absent");
 }
 
 function boundedLimit(raw: unknown): number {
@@ -559,39 +706,17 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("timeline", productionId);
-        const state = production?.timeline ?? { status: "absent" as const };
-        if (state.status !== "ready") {
-          rows = [{ key: "state", value: state }];
-        } else {
-          const timeline = state.timeline;
-          const tracks = [...timeline.tracks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-          rows = [
-            { key: "00:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
-            ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
-            ...tracks.flatMap((track, trackIndex) => [
-              { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined } } },
-              ...[...track.clips].sort((a, b) => a.startFrame - b.startFrame || a.id.localeCompare(b.id)).map((clip, clipIndex) => ({ key: `30:clip:${padded(trackIndex)}:${padded(clipIndex)}:${clip.id}`, value: { kind: "clip", trackId: track.id, clip } })),
-              ...(track.cues ?? []).map((cue, cueIndex) => ({ key: `40:cue:${padded(trackIndex)}:${padded(cueIndex)}:${cue.id}`, value: { kind: "cue", trackId: track.id, cue } })),
-            ]),
-            ...(production?.takes ?? []).map((take) => ({ key: `50:take:${take.id}`, value: { kind: "available-take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null } })),
-          ];
-        }
-        revisionOrDigest = timelineFence(production);
+        rows = timelineRows(production, bundle.artifacts);
+        revisionOrDigest = timelineFence(production, bundle.artifacts);
         break;
       }
       case "get_spine": {
         assertArgs(args, ["productionId"]);
         const productionId = requireString(args, "productionId");
-        const spine = productionOf(bundle, productionId)?.spine;
+        const production = productionOf(bundle, productionId);
         readTarget = target("spine", productionId);
-        rows = spine
-          ? [
-              { key: "metadata", value: { schemaVersion: spine.schemaVersion, revision: spine.revision, trackArtifactId: spine.trackArtifactId, updatedAt: spine.updatedAt } },
-              ...spine.markers.map((marker, index) => ({ key: `marker:${padded(index)}:${marker.id}`, value: marker })),
-              ...Object.entries(spine.anchors).sort(([a], [b]) => a.localeCompare(b)).map(([shotId, anchor]) => ({ key: `anchor:${shotId}`, value: { shotId, anchor } })),
-            ]
-          : [];
-        revisionOrDigest = fence(spine ?? null, spine?.revision ?? "absent");
+        rows = spineRows(production, bundle.artifacts);
+        revisionOrDigest = spineFence(production, bundle.artifacts);
         break;
       }
       case "get_routing": {

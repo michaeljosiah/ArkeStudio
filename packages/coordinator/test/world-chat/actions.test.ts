@@ -226,7 +226,10 @@ function currentReceipt(
                                   : scenesFence(production);
                               })()
                             : requirement === "timeline"
-                              ? timelineFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                              ? timelineFence(
+                                  bundle.productions.find((candidate) => candidate.meta.id === target),
+                                  bundle.artifacts,
+                                )
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
@@ -310,7 +313,7 @@ describe("World Chat authority adapters", () => {
       status: "complete",
       consulted: [],
       target: { requirement: "timeline", id: PRODUCTION },
-      observedRevisionOrDigest: timelineFence(production),
+      observedRevisionOrDigest: timelineFence(production, w.store.getBundle().artifacts),
       complete: true,
       nextCursor: null,
       at: AT,

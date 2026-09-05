@@ -1,5 +1,6 @@
 import {
   ClientMessageSchema,
+  AudioSpineModelActionSchema,
   WorldChatBibleActionSchema,
   WorldChatEditorRequestActionSchema,
   WorldChatProposalActionSchema,
@@ -60,6 +61,7 @@ import {
   WorldChatWorldArchiveActionSchema,
   WorldChatWorldExportActionSchema,
   WorldChatWorldMetadataActionSchema,
+  WorldChatAudioSpineActionSchema,
   type ArkeActionAuthority,
   type ArkeActionScope,
   type ArkeActionSupport,
@@ -776,6 +778,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionStagePlayblastActionSchema,
     ...action("production", "host-action", "scene-store", "host-file-access", ["scenes"]),
   },
+  "world-chat-audio-spine-command": {
+    kind: "world-chat-audio-spine-command",
+    schema: WorldChatAudioSpineActionSchema,
+    ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
+  },
 } as const;
 
 export interface ArkeBlockedAuthoritySeam {
@@ -788,31 +795,21 @@ export interface ArkeBlockedAuthoritySeam {
   readonly support: ArkeActionSupport;
 }
 
-/** Intended authorities that have no ClientMessage command to classify yet (SPEC-041 R-52). */
-export const ARKE_BLOCKED_AUTHORITY_SEAMS = {
+/** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
+export const ARKE_AUTHORITY_ACTION_REGISTRY = {
   "audio-spine-command": {
     kind: "audio-spine-command",
-    scope: "production",
-    cardFamily: "command",
-    authority: "audio-spine",
-    permissionReason: "authored-change",
-    requiredReads: ["spine", "artifacts", "shots", "audio"],
-    support: {
-      preparation: blocked(
-        ["typed-audio-spine-command"],
-        "The spine needs typed semantic commands for creation, track assignment, markers, anchors, audio policy, and deletion.",
-      ),
-      reads: AVAILABLE,
-      execution: blocked(
-        ["typed-audio-spine-command"],
-        "The audio spine has no safe semantic command seam for an action adapter.",
-      ),
-    },
+    schema: AudioSpineModelActionSchema,
+    ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
-} as const satisfies Record<string, ArkeBlockedAuthoritySeam>;
+} as const;
+
+/** Intended authorities whose semantic boundary is not implemented yet. */
+export const ARKE_BLOCKED_AUTHORITY_SEAMS: Readonly<Record<string, ArkeBlockedAuthoritySeam>> = {};
 
 export const ARKE_ACTION_REGISTRY = Object.freeze({
   clientCommands: ARKE_CLIENT_COMMAND_REGISTRY,
+  authorities: ARKE_AUTHORITY_ACTION_REGISTRY,
   blockedAuthorities: ARKE_BLOCKED_AUTHORITY_SEAMS,
 });
 
@@ -941,6 +938,19 @@ export function modelActionCatalogue(): readonly ModelActionCatalogueEntry[] {
       requiredReads: descriptor.requiredReads,
       support: descriptor.support,
       fields: descriptor.support.preparation.state === "available" ? fieldsFor(descriptor.schema) : [],
+    });
+  }
+  for (const descriptor of Object.values(ARKE_AUTHORITY_ACTION_REGISTRY)) {
+    entries.push({
+      kind: descriptor.kind,
+      description: descriptor.kind.replaceAll("-", " "),
+      scope: descriptor.scope,
+      cardFamily: descriptor.cardFamily,
+      authority: descriptor.authority,
+      permissionReason: descriptor.permissionReason,
+      requiredReads: descriptor.requiredReads,
+      support: descriptor.support,
+      fields: fieldsFor(descriptor.schema),
     });
   }
   for (const descriptor of Object.values(ARKE_BLOCKED_AUTHORITY_SEAMS)) {

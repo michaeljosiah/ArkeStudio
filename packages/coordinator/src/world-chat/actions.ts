@@ -14,6 +14,7 @@ import {
   sortScenes,
   WorldMetaSchema,
   ClientMessageSchema,
+  describeEditorRequestDigest,
   ModelWorldChatActionSchema,
   applyBibleEdits,
   sheetDir,
@@ -72,6 +73,7 @@ import {
   WorldChatSheetRestoreActionSchema,
   WorldChatSheetRetireActionSchema,
   WorldChatWorldMetadataActionSchema,
+  WorldChatAudioSpineActionSchema,
   WorldChatVoiceAssignmentActionSchema,
   WorldChatVoiceAuditionActionSchema,
   WorldChatVoiceCloneActionSchema,
@@ -140,6 +142,7 @@ import {
   readEditorRequest,
   readEditorRequestByAction,
   stageEditorRequests,
+  previewProductionEditorRequest,
   validateEditorRequest,
 } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
@@ -159,6 +162,7 @@ import {
   exportBoard,
   landBoard,
 } from "../productions/ops.js";
+import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
 import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
@@ -221,6 +225,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  spineFence,
   timelineFence,
   takesFence,
   voicesFence,
@@ -389,6 +394,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-take-review": ["takes"],
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
+  "audio-spine-command": ["spine"],
 };
 
 function currentWorldObservation(
@@ -438,7 +444,11 @@ function currentWorldObservation(
     }
     case "timeline": {
       const productionId = target ?? store.worldId;
-      return { target: productionId, fence: timelineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      return { target: productionId, fence: timelineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), bundle.artifacts) };
+    }
+    case "spine": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: spineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), bundle.artifacts) };
     }
     case "takes": {
       const productionId = target ?? store.worldId;
@@ -536,6 +546,7 @@ function productionActionTargets(
     case "production-stage-playblast": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
+    case "audio-spine-command": return [{ requirement: "spine", target: action.productionId }];
     default: return [];
   }
 }
@@ -652,6 +663,7 @@ function preparedWorldPayload(
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
     case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
+    case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
   }
 }
 
@@ -925,6 +937,7 @@ function worldActionTargets(
       { kind: "shot", id: action.shotId, label: action.shotId },
     ];
     case "production-stage-playblast": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
+    case "audio-spine-command": return [{ kind: "audio-spine", id: action.productionId, label: "Audio spine" }];
   }
 }
 
@@ -1091,7 +1104,7 @@ export function prepareWorldChatActions(
   const productionId = productionOfContext(turn.entryContext);
   if (productionId) {
     const production = store.getBundle().productions.find((one) => one.meta.id === productionId);
-    const read = completeObservation(turn.receipts ?? [], "timeline", productionId, timelineFence(production));
+    const read = completeObservation(turn.receipts ?? [], "timeline", productionId, timelineFence(production, store.getBundle().artifacts));
     if (turn.receipts !== undefined && turn.editorRequests.length > 0 && read === null) {
       throw new Error("A timeline request requires a complete current timeline read.");
     }
@@ -1114,7 +1127,7 @@ export function prepareWorldChatActions(
           payload,
           baseObservations: read
             ? [read]
-            : [{ requirement: "timeline", target: productionId, revisionOrDigest: timelineFence(production), complete: true }],
+            : [{ requirement: "timeline", target: productionId, revisionOrDigest: timelineFence(production, store.getBundle().artifacts), complete: true }],
           createdAt: turn.at,
         }),
       });
@@ -2568,6 +2581,32 @@ async function sharedResourceProjection(
       authorityRevision = scene.version;
       break;
     }
+    case "world-chat-audio-spine-command": {
+      authority = { kind: "audio-spine", id: intent.actionId };
+      const preview = previewAudioSpineCommand(bundle, payload.action, store.now());
+      authorityRevision = preview.authorityRevision;
+      shown = {
+        title: preview.title.slice(0, 200),
+        consequence: payload.action.command.kind === "delete-spine"
+          ? "Deletes the production's authored song clock, markers, and shot anchors."
+          : "Applies this semantic command through the version-fenced production audio-spine authority.",
+        affectedTargets: [...intent.targets],
+        ripples: payload.action.command.kind === "delete-spine"
+          ? ["A saved timeline remains authoritative and is not reordered or deleted."]
+          : [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: preview.commands.map((command) => ({
+            label: command.label.slice(0, 200),
+            ...(command.detail !== undefined ? { detail: clipped(command.detail, 4_000) ?? undefined } : {}),
+          })),
+          expectedResult: preview.expectedResult,
+          undoAvailable: false,
+        },
+      };
+      break;
+    }
     default:
       throw new Error("That shared-resource action cannot be projected.");
   }
@@ -3185,6 +3224,21 @@ async function executeSharedResource(
     case "world-chat-production-stage-playblast": {
       return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
     }
+    case "world-chat-audio-spine-command": {
+      const result = await applyProductionSpineCommand(store, payload.action, {
+        source: `world-chat:${action.conversationId}:${action.actionId}`,
+        requestId: action.actionId,
+        precondition,
+      });
+      return {
+        status: "completed",
+        receipt: {
+          kind: "audio-spine",
+          id: result.commit.commitId,
+          summary: result.spine === null ? "The audio spine was deleted." : `The audio spine advanced to revision ${result.spine.revision}.`,
+        },
+      };
+    }
     default:
       return { status: "failed", detail: "That shared-resource action cannot execute." };
   }
@@ -3421,6 +3475,34 @@ export function worldChatActionAdapters(
     },
   };
 
+  const editorProjection = (
+    intent: ConversationActionPrepareIntent,
+    request: Pick<ReturnType<typeof editorRequestForAction> extends Promise<infer T> ? NonNullable<T> : never, "id" | "productionId" | "summary" | "commands" | "baseRevision">,
+  ): PreparedConversationActionAuthority => {
+    const preview = previewProductionEditorRequest(store, request.productionId, { summary: request.summary, commands: request.commands }, now());
+    if (!preview.ok) throw new Error(`The editor request can no longer be previewed: ${preview.reason}`);
+    const result = [request.summary, ...describeEditorRequestDigest(preview.digest, preview.timeline.frameRate)].join("\n");
+    return {
+      authority: { kind: "timeline", id: request.id },
+      authorityRevision: request.baseRevision ?? 0,
+      shown: {
+        title: request.summary.slice(0, 200),
+        consequence: "Applies every shown effect atomically as one timeline revision and one Undo entry.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: preview.digest.effects.map((effect) => ({
+            label: effect.label.slice(0, 200),
+            ...(effect.detail !== undefined ? { detail: clipped(effect.detail, 4_000) ?? undefined } : {}),
+          })),
+          expectedResult: clipped(result, 4_000) ?? request.summary.slice(0, 4_000),
+          undoAvailable: true,
+        },
+      },
+    };
+  };
   const editor: ConversationActionAuthorityAdapter = {
     actionKind: "world-chat-editor-request",
     prepare: async ({ intent, payload }) => {
@@ -3433,44 +3515,12 @@ export function worldChatActionAdapters(
         now: now(),
       });
       if (!request) throw new Error("The editor request was not staged.");
-      return {
-        authority: { kind: "timeline", id: request.id },
-        authorityRevision: request.baseRevision ?? 0,
-        shown: {
-          title: request.summary.slice(0, 200),
-          consequence: "Applies these commands to the production timeline.",
-          affectedTargets: [...intent.targets],
-          ripples: [],
-          permissionReason: "authored-change",
-          body: {
-            family: "command",
-            commands: request.commands.map((command) => ({ label: command.kind.replaceAll("-", " ") })),
-            expectedResult: request.summary.slice(0, 4_000),
-            undoAvailable: true,
-          },
-        },
-      };
+      return editorProjection(intent, request);
     },
     recoverPreparation: async (intent) => {
       const action = await editorRequestForAction(store, intent.actionId);
       if (!action) return null;
-      return {
-        authority: { kind: "timeline", id: action.id },
-        authorityRevision: action.baseRevision ?? 0,
-        shown: {
-          title: action.summary.slice(0, 200),
-          consequence: "Applies these commands to the production timeline.",
-          affectedTargets: [...intent.targets],
-          ripples: [],
-          permissionReason: "authored-change",
-          body: {
-            family: "command",
-            commands: action.commands.map((command) => ({ label: command.kind.replaceAll("-", " ") })),
-            expectedResult: action.summary.slice(0, 4_000),
-            undoAvailable: true,
-          },
-        },
-      };
+      return editorProjection(intent, action);
     },
     abandonPreparation: async (intent) => {
       const request = await editorRequestForAction(store, intent.actionId);
@@ -3483,6 +3533,8 @@ export function worldChatActionAdapters(
       });
     },
     validate: async (action) => {
+      const current = observationsCurrent(store, action);
+      if (!current.ok) return current;
       const checked = await validateEditorRequest(store, action.productionId!, action.authority.id);
       return checked.ok
         ? { ok: true }
@@ -3914,6 +3966,7 @@ export function worldChatActionAdapters(
     "world-chat-production-take-review",
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",
+    "world-chat-audio-spine-command",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(
