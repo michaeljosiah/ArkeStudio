@@ -1,7 +1,7 @@
 import { copyFile, readdir, rm } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, WORLD_IMAGE_STEM } from "./world-image.js";
 
 /**
@@ -19,7 +19,11 @@ import { KEY_ART_EXTENSIONS, WORLD_IMAGE_DIR, WORLD_IMAGE_STEM } from "./world-i
  * goes with it (two would leave the scan choosing by sort order), and the candidate
  * directory is swept whole. Idempotent: no candidate waiting means nothing to do.
  */
-export async function adoptKeyArtCandidate(store: WorldStore, file?: string): Promise<boolean> {
+export async function adoptKeyArtCandidate(
+  store: WorldStore,
+  file?: string,
+  precondition?: WorldStatePrecondition,
+): Promise<boolean> {
   const incoming = join(store.dir, WORLD_IMAGE_DIR);
   const names = (await readdir(toExtendedLength(incoming)).catch(() => [] as string[]))
     .filter((name) => (KEY_ART_EXTENSIONS as readonly string[]).includes(extname(name).toLowerCase()))
@@ -37,6 +41,6 @@ export async function adoptKeyArtCandidate(store: WorldStore, file?: string): Pr
       await rm(toExtendedLength(join(store.dir, `${WORLD_IMAGE_STEM}${stale}`)), { force: true });
     }
     await rm(toExtendedLength(incoming), { recursive: true, force: true });
-  });
+  }, precondition);
   return true;
 }

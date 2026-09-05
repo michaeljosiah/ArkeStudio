@@ -194,7 +194,8 @@ async function serialise<T>(
 }
 
 export interface ConversationActionLifecycleOptions {
-  readonly worldPath: string;
+  /** Resolved for each write because archiving moves the world during an approved action. */
+  readonly worldPath: string | (() => string);
   readonly worldId: string;
   readonly adapters?: readonly ConversationActionAuthorityAdapter[];
   readonly now?: () => string;
@@ -782,12 +783,16 @@ export class ConversationActionLifecycle {
   }
 
   private store(conversationId: ConversationId): WorldChatStore {
-    return new WorldChatStore(conversationDir(this.options.worldPath, conversationId));
+    return new WorldChatStore(conversationDir(this.worldPath(), conversationId));
   }
 
   private operationKey(actionId: ConversationActionId): string {
-    const worldPath = resolve(this.options.worldPath);
+    const worldPath = resolve(this.worldPath());
     return `${process.platform === "win32" ? worldPath.toLowerCase() : worldPath}:${actionId}`;
+  }
+
+  private worldPath(): string {
+    return typeof this.options.worldPath === "function" ? this.options.worldPath() : this.options.worldPath;
   }
 
   private async settleDenied(action: ConversationActionCard): Promise<void> {
@@ -812,7 +817,7 @@ export class ConversationActionLifecycle {
     if (owner && owner !== intent.conversationId) {
       throw new ConversationActionPreparationError("That action ID already belongs to a different conversation.");
     }
-    const deleted = (await readConversationActionTombstones(this.options.worldPath))
+    const deleted = (await readConversationActionTombstones(this.worldPath()))
       .some((tombstone) => tombstone.actionId === intent.actionId);
     if (deleted) {
       throw new ConversationActionPreparationError("That action ID belongs to a deleted conversation.");
@@ -1130,7 +1135,8 @@ export class ConversationActionLifecycle {
   }
 
   private async findActionConversation(actionId: ConversationActionId): Promise<ConversationId | null> {
-    const root = conversationsDir(this.options.worldPath);
+    const worldPath = this.worldPath();
+    const root = conversationsDir(worldPath);
     let entries: string[];
     try {
       entries = await readdir(root);
@@ -1154,7 +1160,7 @@ export class ConversationActionLifecycle {
     };
     for (const entry of entries) {
       if (entry.startsWith(".")) continue;
-      const owner = await claimedBy(conversationDir(this.options.worldPath, entry as ConversationId));
+      const owner = await claimedBy(conversationDir(worldPath, entry as ConversationId));
       if (owner) return owner;
     }
     let deleted: string[] = [];
@@ -1183,7 +1189,7 @@ export async function recoverConversationActions(
   const total: ConversationActionRecoveryOutcome = { prepared: 0, reconciled: 0, failed: 0 };
   let entries: string[];
   try {
-    entries = await readdir(conversationsDir(options.worldPath));
+    entries = await readdir(conversationsDir(typeof options.worldPath === "function" ? options.worldPath() : options.worldPath));
   } catch {
     return total;
   }

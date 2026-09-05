@@ -1134,6 +1134,16 @@ async function initialize(): Promise<{ port: number }> {
       });
       return result.canceled ? [] : result.filePaths;
     },
+    pickFolder: async () => {
+      const parent = window;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: "Import an artifact folder",
+        buttonLabel: "Import",
+        properties: ["openDirectory"],
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
     // Fetching the local runtimes at setup: the shared Node seams (streamed HTTP, subprocesses).
     // The ComfyUI runtime entry asks whether an external source was deliberately selected
     // (SPEC-021 D10). A detected install remains an offer and does not suppress managed Download.

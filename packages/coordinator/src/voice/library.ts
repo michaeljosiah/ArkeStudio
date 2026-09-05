@@ -13,7 +13,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { DispatchVoiceReference } from "../queue/dispatcher.js";
 import { verifyArtifact } from "../queue/verify.js";
 
@@ -115,6 +115,7 @@ export interface CloneVoiceInput {
   consent: boolean;
   /** The sheet this was cloned while casting, if any — a link, never ownership (§2.3). */
   sheetId?: string;
+  mutation?: { source?: string; requestId?: string; precondition?: WorldStatePrecondition };
 }
 
 export type CloneVoiceOutcome = { ok: true; voice: ClonedVoice } | { ok: false; reason: string };
@@ -166,6 +167,8 @@ async function cloneVoiceSerialised(
   extension: string,
   hooks: CloneVoiceHooks,
 ): Promise<CloneVoiceOutcome> {
+  const stale = input.mutation?.precondition?.();
+  if (stale) throw new WorldStateStaleError(stale);
   // The library FIRST, and the ids come from it. Deriving `taken` from the caller's bundle let a
   // stale snapshot mint an id that already existed — and since the clip path is the id, step 2
   // then overwrote the earlier voice's recording before anything noticed.
@@ -327,7 +330,7 @@ async function cloneVoiceSerialised(
     recordsCommitStarted = true;
     await store.commitUnserialised({
       kind: "voice-clone",
-      source: "form",
+      source: input.mutation?.source ?? "form",
       files: [
         ...(provenanceFile !== null ? [provenanceFile] : []),
         {
@@ -337,6 +340,7 @@ async function cloneVoiceSerialised(
           baseHash: existingRaw === null ? null : sha256(existingRaw),
         },
       ],
+      ...(input.mutation?.requestId !== undefined ? { requestId: input.mutation.requestId } : {}),
     });
   } catch (err) {
     // Before commit(), no record can ever name these bytes, so compensation is safe. Once

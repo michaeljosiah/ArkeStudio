@@ -20,7 +20,7 @@ import {
 import { atomicWriteFile } from "../world/atomic.js";
 import { sha256 } from "../world/text-files.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./png.js";
 import { composeLocationSheet, type LocationSheetPanel } from "./location-sheet.js";
 
@@ -32,6 +32,12 @@ import { composeLocationSheet, type LocationSheetPanel } from "./location-sheet.
  */
 
 const kitPath = (sheetId: string): string => `references/${sheetId}/kit.json`;
+
+export interface ReferenceMutationOptions {
+  readonly source?: string;
+  readonly requestId?: string;
+  readonly precondition?: WorldStatePrecondition;
+}
 
 export async function readKit(
   store: WorldStore,
@@ -51,6 +57,7 @@ async function writeKit(
   kit: ReferenceKit,
   baseRaw: string | null,
   review?: ReviewDecision,
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const files: import("../world/commit.js").CommitFileInput[] = [
     {
@@ -61,10 +68,21 @@ async function writeKit(
     },
   ];
   if (!review) {
-    await store.commit({ kind: "kit-edit", source: "form", files });
+    await store.commit(
+      {
+        kind: "kit-edit",
+        source: options.source ?? "form",
+        files,
+        ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+      },
+      undefined,
+      options.precondition,
+    );
     return;
   }
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const path = "references/reviews.jsonl";
     let raw = "";
     let existed = false;
@@ -82,8 +100,9 @@ async function writeKit(
     });
     await store.commitUnserialised({
       kind: "reference-accept",
-      source: "review:user",
+      source: options.source ?? "review:user",
       files,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
 }
@@ -112,6 +131,7 @@ export async function lockTile(
   sheetId: string,
   angle: ReferenceAngle,
   name?: string,
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const tile = kit.tiles.find(
@@ -126,7 +146,7 @@ export async function lockTile(
       ? { anchor: tile.file }
       : {}),
   };
-  await writeKit(store, sheetId, next, raw);
+  await writeKit(store, sheetId, next, raw, undefined, options);
 }
 
 /**
@@ -175,6 +195,7 @@ export async function chooseAnchor(
     acceptedAt?: string;
     review?: ReviewDecision;
   },
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   for (const tile of kit.tiles) {
@@ -212,6 +233,7 @@ export async function chooseAnchor(
     },
     raw,
     input.review,
+    options,
   );
 }
 
@@ -231,6 +253,7 @@ export async function acceptCharacterSheet(
     artDirectionVersion: number;
     review?: ReviewDecision;
   },
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheet.id);
   const compilation: Compilation = {
@@ -251,6 +274,7 @@ export async function acceptCharacterSheet(
     { ...kit, compilations: [...others, compilation], designatedCompilation: input.file },
     raw,
     input.review,
+    options,
   );
 }
 
@@ -284,6 +308,7 @@ export async function acceptLocationView(
     replaceExistingName?: boolean;
     review?: ReviewDecision;
   },
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheet.id);
   const views = kit.locationViews ?? [];
@@ -346,6 +371,7 @@ export async function acceptLocationView(
     },
     raw,
     input.review,
+    options,
   );
 }
 
@@ -397,6 +423,7 @@ export async function acceptCharacterLook(
     artDirectionVersion: number;
     review?: ReviewDecision;
   },
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const others = (kit.looks ?? []).filter((look) => look.id !== input.id);
@@ -421,10 +448,16 @@ export async function acceptCharacterLook(
     },
     raw,
     input.review,
+    options,
   );
 }
 
-export async function promoteCharacterLook(store: WorldStore, sheet: Sheet, lookId: string): Promise<void> {
+export async function promoteCharacterLook(
+  store: WorldStore,
+  sheet: Sheet,
+  lookId: string,
+  options: ReferenceMutationOptions = {},
+): Promise<void> {
   const loaded = await loadOrEmpty(store, sheet.id);
   const look = loaded.kit.looks?.find((candidate) => candidate.id === lookId);
   if (!look) throw new Error(`no accepted look "${lookId}"`);
@@ -436,7 +469,7 @@ export async function promoteCharacterLook(store: WorldStore, sheet: Sheet, look
     artDirectionVersion: look.artDirectionVersion,
     source: "promotion",
     acceptedAt: store.now(),
-  });
+  }, options);
 }
 
 export async function attachCharacterLook(
@@ -444,6 +477,7 @@ export async function attachCharacterLook(
   sheetId: string,
   lookId: string,
   scope: NonNullable<ReferenceKit["looks"]>[number]["attachedTo"] | null,
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const looks = [...(kit.looks ?? [])];
@@ -476,28 +510,34 @@ export async function attachCharacterLook(
       looks[other] = cleared;
     }
   }
-  await writeKit(store, sheetId, { ...kit, looks }, raw);
+  await writeKit(store, sheetId, { ...kit, looks }, raw, undefined, options);
 }
 
 export async function setStyleOverride(
   store: WorldStore,
   sheetId: string,
   style: string | null,
+  options: ReferenceMutationOptions = {},
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const next = { ...kit };
   if (style === null) delete next.styleOverride;
   else next.styleOverride = style;
-  await writeKit(store, sheetId, next, raw);
+  await writeKit(store, sheetId, next, raw, undefined, options);
 }
 
 /** Designate the compilation that rides along (R-13, D8). */
-export async function designate(store: WorldStore, sheetId: string, file: string): Promise<void> {
+export async function designate(
+  store: WorldStore,
+  sheetId: string,
+  file: string,
+  options: ReferenceMutationOptions = {},
+): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   if (!kit.compilations.some((c) => c.file === file && c.accepted)) {
     throw new Error(`no accepted compilation "${file}" to designate`);
   }
-  await writeKit(store, sheetId, { ...kit, designatedCompilation: file }, raw);
+  await writeKit(store, sheetId, { ...kit, designatedCompilation: file }, raw, undefined, options);
 }
 
 // ---------------------------------------------------------------------------
@@ -575,8 +615,15 @@ export async function compileGrid(store: WorldStore, sheet: Sheet, clock: () => 
  * Land a grid: the PNG writes atomically inside the store's suppression envelope (our own
  * write must never read as an external edit), and kit.json records it in the same op.
  */
-export async function landGrid(store: WorldStore, sheet: Sheet, result: GridResult): Promise<void> {
+export async function landGrid(
+  store: WorldStore,
+  sheet: Sheet,
+  result: GridResult,
+  options: ReferenceMutationOptions = {},
+): Promise<void> {
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const loaded = await loadOrEmpty(store, sheet.id);
     const kit = loaded.kit;
     const others = kit.compilations.filter((c) => c.file !== result.compilation.file);
@@ -592,7 +639,7 @@ export async function landGrid(store: WorldStore, sheet: Sheet, result: GridResu
     await atomicWriteFile(join(store.dir, "references", sheet.id, result.compilation.file), result.png);
     await store.commitUnserialised({
       kind: "kit-compile",
-      source: "form",
+      source: options.source ?? "form",
       files: [
         {
           path: kitPath(sheet.id),
@@ -601,6 +648,7 @@ export async function landGrid(store: WorldStore, sheet: Sheet, result: GridResu
           baseHash: loaded.raw === null ? null : sha256(loaded.raw),
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
 }

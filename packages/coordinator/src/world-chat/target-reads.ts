@@ -103,6 +103,56 @@ export function sheetsFence(bundle: WorldBundle): string {
   return fence(bundle.sheets);
 }
 
+export function referencesFence(bundle: WorldBundle): string {
+  return fence({
+    kits: bundle.referenceKits,
+    takes: bundle.referenceTakes,
+    reviews: bundle.referenceReviews,
+    candidates: bundle.referenceCandidates,
+    keyArtCandidates: bundle.keyArtCandidates,
+    masterLookCandidates: bundle.masterLookCandidates,
+    staged: bundle.stagedReferences,
+  });
+}
+
+export function artifactsFence(bundle: WorldBundle): string {
+  return fence(bundle.artifacts);
+}
+
+export function voicesFence(bundle: WorldBundle): string {
+  return fence({
+    cloned: bundle.clonedVoices,
+    assignments: bundle.sheets
+      .filter((sheet) => sheet.voice !== undefined)
+      .map((sheet) => ({ sheetId: sheet.id, version: sheet.version, voice: sheet.voice })),
+  });
+}
+
+export function productionMetadataFence(bundle: WorldBundle, productionId: string): string {
+  const production = productionOf(bundle, productionId);
+  return fence(production?.meta ?? null, production?.meta.updated ?? "absent");
+}
+
+export function productionsFence(bundle: WorldBundle): string {
+  return fence(
+    [...bundle.productions]
+      .sort((a, b) => a.meta.id.localeCompare(b.meta.id))
+      .map((production) => production.meta),
+  );
+}
+
+function takeRows(production: ProductionBundle | undefined): Row[] {
+  return [
+    ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null } })),
+    ...(production?.reviews ?? []).map((review, index) => ({ key: `review:${review.ts}:${padded(index)}`, value: { kind: "review", review } })),
+    ...Object.entries(production?.selections ?? {}).map(([shotId, selection]) => ({ key: `selection:${shotId}`, value: { kind: "selection", shotId, selection } })),
+  ].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+export function takesFence(production: ProductionBundle | undefined): string {
+  return fence(takeRows(production).map((row) => row.value));
+}
+
 export function bibleFence(bundle: WorldBundle): string {
   return fence(bundle.bible, bundle.bible.version);
 }
@@ -265,14 +315,42 @@ export class WorldChatTargetReads {
       case "list_references":
         assertArgs(args, []);
         readTarget = target("references", bundle.meta.worldId);
-        rows = [...bundle.referenceKits].sort((a, b) => a.sheetId.localeCompare(b.sheetId)).map((kit) => ({ key: kit.sheetId, value: kit }));
-        revisionOrDigest = fence(bundle.referenceKits);
+        rows = [
+          ...[...bundle.referenceKits]
+            .sort((a, b) => a.sheetId.localeCompare(b.sheetId))
+            .map((kit) => ({ key: `kit:${kit.sheetId}`, value: { kind: "kit", kit } })),
+          ...[...bundle.referenceTakes]
+            .sort((a, b) => a.id.localeCompare(b.id))
+            .map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take } })),
+          ...bundle.referenceReviews.map((review, index) => ({
+            key: `review:${review.ts}:${padded(index)}`,
+            value: { kind: "review", review },
+          })),
+          ...Object.entries(bundle.referenceCandidates).sort(([a], [b]) => a.localeCompare(b)).flatMap(([sheetId, files]) =>
+            files.map((file, index) => ({
+              key: `candidate:${sheetId}:${padded(index)}`,
+              value: { kind: "reference-candidate", sheetId, candidateIndex: index + 1, file },
+            }))),
+          ...bundle.keyArtCandidates.map((file, index) => ({
+            key: `world-image-candidate:${padded(index)}`,
+            value: { kind: "world-image-candidate", candidateIndex: index + 1, file },
+          })),
+          ...bundle.masterLookCandidates.map((file, index) => ({
+            key: `master-look-candidate:${padded(index)}`,
+            value: { kind: "master-look-candidate", candidateIndex: index + 1, file },
+          })),
+          ...Object.entries(bundle.stagedReferences).sort(([a], [b]) => a.localeCompare(b)).map(([key, file]) => ({
+            key: `staged-reference:${key}`,
+            value: { kind: "staged-reference", key, file },
+          })),
+        ];
+        revisionOrDigest = referencesFence(bundle);
         break;
       case "list_artifacts":
         assertArgs(args, []);
         readTarget = target("artifacts", bundle.meta.worldId);
         rows = [...bundle.artifacts].sort((a, b) => a.id.localeCompare(b.id)).map((artifact) => ({ key: artifact.id, value: artifact }));
-        revisionOrDigest = fence(bundle.artifacts);
+        revisionOrDigest = artifactsFence(bundle);
         break;
       case "list_voices": {
         assertArgs(args, []);
@@ -281,14 +359,14 @@ export class WorldChatTargetReads {
           ...bundle.clonedVoices.map((voice) => ({ key: `cloned:${voice.id}`, value: { kind: "cloned", voice } })),
           ...bundle.sheets.filter((sheet) => sheet.voice !== undefined).map((sheet) => ({ key: `sheet:${sheet.id}`, value: { kind: "assignment", sheetId: sheet.id, version: sheet.version, voice: sheet.voice } })),
         ].sort((a, b) => a.key.localeCompare(b.key));
-        revisionOrDigest = fence(rows.map((row) => row.value));
+        revisionOrDigest = voicesFence(bundle);
         break;
       }
       case "list_productions":
         assertArgs(args, []);
         readTarget = target("production-metadata", bundle.meta.worldId);
         rows = [...bundle.productions].sort((a, b) => a.meta.id.localeCompare(b.meta.id)).map((production) => ({ key: production.meta.id, value: production.meta }));
-        revisionOrDigest = fence(rows.map((row) => row.value));
+        revisionOrDigest = productionsFence(bundle);
         break;
       case "list_series":
         assertArgs(args, []);
@@ -302,7 +380,7 @@ export class WorldChatTargetReads {
         const production = productionOf(bundle, productionId);
         readTarget = target("production-metadata", productionId);
         rows = production ? [{ key: "metadata", value: production.meta }] : [];
-        revisionOrDigest = fence(production?.meta ?? null, production?.meta.updated ?? "absent");
+        revisionOrDigest = productionMetadataFence(bundle, productionId);
         break;
       }
       case "get_story": {
@@ -455,12 +533,8 @@ export class WorldChatTargetReads {
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
         readTarget = target("takes", productionId);
-        rows = [
-          ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null } })),
-          ...(production?.reviews ?? []).map((review, index) => ({ key: `review:${review.ts}:${padded(index)}`, value: { kind: "review", review } })),
-          ...Object.entries(production?.selections ?? {}).map(([shotId, selection]) => ({ key: `selection:${shotId}`, value: { kind: "selection", shotId, selection } })),
-        ].sort((a, b) => a.key.localeCompare(b.key));
-        revisionOrDigest = fence(rows.map((row) => row.value));
+        rows = takeRows(production);
+        revisionOrDigest = takesFence(production);
         break;
       }
       case "get_timeline": {

@@ -2225,6 +2225,151 @@ const exampleWorldActions = {
     version: 2,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "artifact-import": {
+    kind: "artifact-import",
+    source: "files",
+    links: ["maren-kest"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-metadata": {
+    kind: "artifact-metadata",
+    change: { operation: "set-owner", artifactId: `ar_${EXAMPLE_ULID}`, productionId: "saltlight" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction": {
+    kind: "artifact-extraction",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction-stop": {
+    kind: "artifact-extraction-stop",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction-review": {
+    kind: "artifact-extraction-review",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    candidateHash: "0123456789abcdef",
+    decision: "accept",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-reference": {
+    kind: "artifact-reference",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    key: "main-photo--maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-import": {
+    kind: "reference-import",
+    change: { operation: "location-view-candidate", sheetId: "the-vigil" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-result-use": {
+    kind: "reference-result-use",
+    change: { operation: "accept-character-look", sheetId: "maren-kest", takeId: `tk_${EXAMPLE_ULID}` },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-review": {
+    kind: "reference-review",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    decision: "reject",
+    field: "identity",
+    note: "The face no longer matches the anchor.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-change": {
+    kind: "reference-change",
+    change: { operation: "attach-look", sheetId: "maren-kest", lookId: `tk_${EXAMPLE_ULID}`, scope: { kind: "production", productionId: "saltlight" } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-tile-lock": {
+    kind: "reference-tile-lock",
+    sheetId: "maren-kest",
+    angle: "head-front",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-compile": {
+    kind: "reference-compile",
+    sheetId: "maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-style": {
+    kind: "reference-style",
+    sheetId: "maren-kest",
+    style: "Salt-air naturalism with restrained colour.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-generation": {
+    kind: "reference-generation",
+    request: { operation: "character-looks", sheetId: "maren-kest", lookKind: "costume", mode: "stay-close", prompt: "A weathered harbour coat.", count: 2 },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-image-import": {
+    kind: "reference-image-import",
+    target: { surface: "staged-reference", key: "main-photo--maren-kest" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-world-image-result-use": {
+    kind: "reference-world-image-result-use",
+    candidateIndex: 1,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-master-look-result-use": {
+    kind: "reference-master-look-result-use",
+    candidateIndex: 1,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-image-discard": {
+    kind: "reference-image-discard",
+    target: { surface: "world-image" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-assignment": {
+    kind: "voice-assignment",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    voice: { provider: "voxa", model: "kokoro-82m", voiceId: "af-heart", label: "Heart" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-audition": {
+    kind: "voice-audition",
+    sheetId: "maren-kest",
+    voice: { provider: "voxa", model: "kokoro-82m", voiceId: "af-heart", label: "Heart" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-clone": {
+    kind: "voice-clone",
+    name: "Maren",
+    description: "Low, measured, and weathered by salt air.",
+    sheetId: "maren-kest",
+    recordingGesture: "required",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-clip-review": {
+    kind: "voice-clip-review",
+    productionId: "saltlight",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    review: {
+      decision: "reject",
+      shotId: "sh_01",
+      citation: { sheet: "maren-kest", field: "Voice", note: "The delivery is too formal." },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "world-archive": {
+    kind: "world-archive",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "world-export": {
+    kind: "world-export",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-style": {
+    kind: "production-style",
+    productionId: "saltlight",
+    style: "Bleached documentary realism.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

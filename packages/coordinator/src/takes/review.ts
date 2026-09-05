@@ -20,7 +20,7 @@ import {
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
 /**
  * Review (SPEC-013 §2.5, §2.6): decisions append to reviews.jsonl; selections are the small
@@ -111,10 +111,13 @@ export async function acceptTake(
   store: WorldStore,
   production: ProductionBundle,
   input: { takeId: string; shotId: string; by: string },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<ReviewDecision> {
   const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
   return store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const current = store
       .getBundle()
       .productions.find((candidate) => candidate.meta.id === production.meta.id);
@@ -134,7 +137,7 @@ export async function acceptTake(
 
     await store.commitUnserialised({
       kind: "take-review",
-      source: `review:${input.by}`,
+      source: options.source ?? `review:${input.by}`,
       files: [
         {
           path: reviewsPath,
@@ -149,6 +152,7 @@ export async function acceptTake(
           baseHash: selections.existed ? sha256(selections.raw) : null,
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return decision;
   });
@@ -215,12 +219,15 @@ export async function rejectTake(
   store: WorldStore,
   production: ProductionBundle,
   input: { takeId: string; shotId?: string; by: string; citation: { sheet: string; field: string; note?: string } },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<ReviewDecision> {
   if (!input.citation.sheet || !input.citation.field) {
     throw new Error("a rejection requires a cited sheet and field (R-10)");
   }
   const reviewsPath = `productions/${production.meta.id}/reviews.jsonl`;
   return store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const reviews = await readOr(store, reviewsPath, "");
     const decision: ReviewDecision = {
       ts: store.now(),
@@ -232,7 +239,7 @@ export async function rejectTake(
     };
     await store.commitUnserialised({
       kind: "take-review",
-      source: `review:${input.by}`,
+      source: options.source ?? `review:${input.by}`,
       files: [
         {
           path: reviewsPath,
@@ -241,6 +248,7 @@ export async function rejectTake(
           baseHash: reviews.existed ? sha256(reviews.raw) : null,
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return decision;
   });

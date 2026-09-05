@@ -14,7 +14,7 @@ import type { ProposalManager } from "../gate/proposals.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { uniqueSlug } from "../world/slug.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
  * Sheet authoring flows over the gate (SPEC-007). One entity, three shapes (D1): every path
@@ -386,6 +386,7 @@ export function guestPromotionContent(content: string): string {
 export async function applyVoiceAssignment(
   store: WorldStore,
   input: { path: string; voice: { provider: string; model: string; voiceId: string; label?: string } | null },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<CommitResult> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
@@ -407,11 +408,16 @@ export async function applyVoiceAssignment(
     };
     doc.setData({ voice: assignment });
   }
-  return store.commit({
-    kind: "sheet-edit",
-    source: "form",
-    files: [{ path: input.path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
-  });
+  return store.commit(
+    {
+      kind: "sheet-edit",
+      source: options.source ?? "form",
+      files: [{ path: input.path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
 }
 
 // ---------------------------------------------------------------------------

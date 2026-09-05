@@ -238,6 +238,7 @@ export async function stageWorldChatSheetAction(
       sections: Object.fromEntries(change.sections.map((section) => [section.heading, section.body])),
       canonRules: change.canonRules,
       links: change.links.filter((id) => id !== slug),
+      ...(change.productionId !== undefined ? { production: change.productionId } : {}),
       extra: {
         ...(change.role !== undefined ? { role: change.role } : {}),
         ...(change.billing !== undefined ? { billing: change.billing } : {}),
@@ -253,6 +254,7 @@ export async function stageWorldChatSheetAction(
         source,
         ...attendedBy(intent),
         targets: [{ path: sheetPath(change.sheetType, slug), content }],
+        ...(change.productionId !== undefined ? { production: change.productionId } : {}),
       },
       precondition,
     );

@@ -70,4 +70,122 @@ describe("World Chat authored action contracts", () => {
       checkReceiptIds: [CHECK],
     }));
   });
+
+  it("keeps host paths, private bytes, and implicit voice consent out of shared-resource intents", () => {
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "artifact-import",
+      source: "files",
+      sourcePath: "C:\\private\\source.txt",
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "artifact-import",
+      source: "files",
+      supersedes: "ar_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      allowLarge: true,
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-import",
+      change: { operation: "main-photo", sheetId: "maren-kest", path: "/private/portrait.png" },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-image-import",
+      target: { surface: "staged-reference", key: "main-photo--maren-kest" },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-image-import",
+      target: { surface: "world-image", sourcePath: "C:\\private\\key-art.png" },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "voice-clone",
+      name: "Maren",
+      description: "Low and measured",
+      recordingGesture: "required",
+      recordingBytes: "private-audio",
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "voice-clone",
+      name: "Maren",
+      description: "Low and measured",
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "world-export",
+      targetPath: "/private/export",
+      checkReceiptIds: [CHECK],
+    }));
+  });
+
+  it("separates generated reference intent from selection of an observed result", () => {
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-generation",
+      request: {
+        operation: "main-photo",
+        sheetId: "maren-kest",
+        prompt: "Salt-lit portrait",
+        count: 2,
+        identityReferenceIds: [],
+      },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-generation",
+      request: {
+        operation: "main-photo",
+        sheetId: "maren-kest",
+        prompt: "Salt-lit portrait",
+        count: 2,
+        identityReferenceIds: [],
+        chooseTakeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-result-use",
+      change: {
+        operation: "choose-anchor",
+        sheetId: "maren-kest",
+        selection: { source: "take", takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC" },
+      },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-result-use",
+      change: {
+        operation: "choose-anchor",
+        sheetId: "maren-kest",
+        selection: { source: "candidate", candidateIndex: 1 },
+      },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-result-use",
+      change: {
+        operation: "choose-anchor",
+        sheetId: "maren-kest",
+        selection: { source: "candidate", file: "private.png" },
+      },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-world-image-result-use",
+      candidateIndex: 2,
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-master-look-result-use",
+      candidateIndex: 1,
+      checkReceiptIds: [CHECK],
+    }));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "reference-image-discard",
+      target: { surface: "master-look" },
+      checkReceiptIds: [CHECK],
+    }));
+  });
 });

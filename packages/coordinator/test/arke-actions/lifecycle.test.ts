@@ -401,6 +401,36 @@ describe("conversation action folding and decisions", () => {
     assert.equal((await loaded(worldPath, conversationId)).seq, seq, "a repeated provider result appends nothing");
   });
 
+  it("writes the terminal receipt where an approved authority moved the world", async () => {
+    const root = await tempDir("arke-actions-move-");
+    const active = join(root, "active");
+    const archived = join(root, "archived");
+    await mkdir(active);
+    const conversationId = await conversation(active);
+    let worldPath = active;
+    const authority = adapter({ executions: 0 });
+    const moving: ConversationActionAuthorityAdapter = {
+      ...authority,
+      execute: async (action) => {
+        await renameWithRetry(active, archived);
+        worldPath = archived;
+        return authority.execute(action);
+      },
+    };
+    const lifecycle = new ConversationActionLifecycle({
+      worldPath: () => worldPath,
+      worldId: WORLD_ID,
+      adapters: [moving],
+      now: NOW,
+    });
+    const action = await prepare(lifecycle, conversationId);
+
+    const result = await lifecycle.decide(decision(action, (await loaded(active, conversationId)).seq));
+
+    assert.equal(result.status, "completed");
+    assert.equal((await loaded(archived, conversationId)).actions[0]!.status, "completed");
+  });
+
   it("records one valid outcome when provider callbacks race", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);

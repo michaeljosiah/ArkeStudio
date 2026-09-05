@@ -43,7 +43,7 @@ import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
 import { CommitStaleError, type CommitFileInput } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
 /**
@@ -1084,6 +1084,29 @@ export async function setProductionAspect(
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
   });
   return canonical;
+}
+
+/** Set or clear the production's scoped rendering style through its existing metadata record. */
+export async function setProductionStyle(
+  store: WorldStore,
+  productionId: string,
+  style: string | null,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  doc.set({ styleOverride: style?.trim() || undefined, updated: store.now() });
+  await store.commit(
+    {
+      kind: "production-edit",
+      source: options.source ?? "form",
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
 }
 
 /**

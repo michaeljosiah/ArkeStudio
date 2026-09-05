@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
@@ -11,6 +11,7 @@ import {
   type ArkeReadRequirement,
   type ConversationActionCard,
   type ConversationId,
+  type Job,
   type MessageId,
   type WorldChangeCandidate,
   type WorldChatContext,
@@ -19,11 +20,17 @@ import {
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
+import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { sceneVersionFor } from "../../src/productions/scene-edits.js";
 import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
-import { prepareWorldChatActions, worldChatActionAdapters, type WorldChatActionTurn } from "../../src/world-chat/actions.js";
+import {
+  prepareWorldChatActions,
+  worldChatActionAdapters,
+  type WorldChatActionAdapterDeps,
+  type WorldChatActionTurn,
+} from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -31,10 +38,16 @@ import { makeTempWorld } from "../world/helpers.js";
 import { assembleStory } from "../productions/assemble.js";
 import {
   artDirectionFence,
+  artifactsFence,
   bibleFence,
   canonFence,
+  productionMetadataFence,
+  productionsFence,
+  referencesFence,
   sheetsFence,
+  takesFence,
   timelineFence,
+  voicesFence,
   worldMetadataFence,
 } from "../../src/world-chat/target-reads.js";
 
@@ -42,7 +55,10 @@ const AT = "2026-09-04T12:00:00.000Z";
 const NOW = () => AT;
 const PRODUCTION = "saltlight";
 
-async function setup(entryContext: WorldChatContext = { kind: "world" }) {
+async function setup(
+  entryContext: WorldChatContext = { kind: "world" },
+  actionDeps: WorldChatActionAdapterDeps = {},
+) {
   const dir = await makeTempWorld();
   const store = await WorldStore.open(dir, { clock: NOW });
   closeOnCleanup(() => store.close());
@@ -54,7 +70,7 @@ async function setup(entryContext: WorldChatContext = { kind: "world" }) {
   const lifecycle = new ConversationActionLifecycle({
     worldPath: dir,
     worldId: store.worldId,
-    adapters: worldChatActionAdapters(store, gate, NOW),
+    adapters: worldChatActionAdapters(store, gate, NOW, actionDeps),
     now: NOW,
   });
   return { store, gate, conversationId, log, lifecycle, entryContext };
@@ -153,7 +169,11 @@ function turn(
 
 function currentReceipt(
   store: WorldStore,
-  requirement: Extract<ArkeReadRequirement, "world-metadata" | "canon" | "sheets" | "art-direction">,
+  requirement: Extract<
+    ArkeReadRequirement,
+    "world-metadata" | "canon" | "sheets" | "art-direction" | "references" | "artifacts" | "voices" | "takes" | "production-metadata"
+  >,
+  target?: string,
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
   const fence = requirement === "world-metadata"
@@ -162,14 +182,27 @@ function currentReceipt(
       ? canonFence(bundle)
       : requirement === "sheets"
         ? sheetsFence(bundle)
-        : artDirectionFence(bundle);
+        : requirement === "art-direction"
+          ? artDirectionFence(bundle)
+          : requirement === "references"
+            ? referencesFence(bundle)
+            : requirement === "artifacts"
+              ? artifactsFence(bundle)
+              : requirement === "voices"
+                ? voicesFence(bundle)
+                : requirement === "takes"
+                  ? takesFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                : target && target !== store.worldId
+                  ? productionMetadataFence(bundle, target)
+                  : productionsFence(bundle);
+  const targetId = target ?? (requirement === "art-direction" ? "art-direction" : store.worldId);
   return {
     id: newId("check"),
     runId: newId("run"),
     tool: "target-read",
     status: "complete",
     consulted: [],
-    target: { requirement, id: requirement === "art-direction" ? "art-direction" : store.worldId },
+    target: { requirement, id: targetId },
     observedRevisionOrDigest: fence,
     complete: true,
     nextCursor: null,
@@ -803,5 +836,344 @@ describe("World Chat authority adapters", () => {
     assert.equal(restoreResult.status, "completed");
     assert.equal(w.store.getBundle().artDirection.description, "Cold-water realism");
     assert.ok(w.store.getBundle().artDirection.version > 5);
+  });
+
+  it("keeps a host-picked artifact path out of the card, receipt, and conversation log", async () => {
+    let selected = "";
+    let pickerCalls = 0;
+    const w = await setup({ kind: "world" }, {
+      pickFiles: async () => {
+        pickerCalls += 1;
+        return [selected];
+      },
+    });
+    await mkdir(join(w.store.dir, ".staging"), { recursive: true });
+    selected = join(w.store.dir, ".staging", "private-host-artifact.txt");
+    await writeFile(selected, "The bells answer at slack water.");
+    const artifacts = currentReceipt(w.store, "artifacts");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [artifacts],
+      actions: [{
+        kind: "artifact-import",
+        source: "files",
+        links: ["CANON-001"],
+        checkReceiptIds: [artifacts.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(pickerCalls, 0, "preparation must not open a host picker");
+    assert.equal(action.shown.body.family, "host-action");
+    assert.equal(JSON.stringify(action).includes("private-host-artifact.txt"), false);
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.status, "completed");
+    assert.equal(pickerCalls, 1);
+    assert.ok(w.store.getBundle().artifacts.some((artifact) => artifact.links.includes("CANON-001")));
+    assert.equal(
+      (await readFile(join(w.store.dir, ".conversations", w.conversationId, "events.jsonl"), "utf8"))
+        .includes("private-host-artifact.txt"),
+      false,
+    );
+  });
+
+  it("defers pending reference image import to a path-free host action", async () => {
+    let imports = 0;
+    const w = await setup({ kind: "world" }, {
+      importReferenceImage: async (target) => {
+        imports += 1;
+        assert.deepEqual(target, { surface: "staged-reference", key: "main-photo--maren-kest" });
+        return { status: "completed", id: "staged-reference:main-photo--maren-kest" };
+      },
+    });
+    const references = currentReceipt(w.store, "references");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [references],
+      actions: [{
+        kind: "reference-image-import",
+        target: { surface: "staged-reference", key: "main-photo--maren-kest" },
+        checkReceiptIds: [references.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "host-action");
+    assert.equal(imports, 0);
+    assert.equal(JSON.stringify(action).includes("sourcePath"), false);
+    assert.equal((await decide(w.lifecycle, w.log, action)).status, "completed");
+    assert.equal(imports, 1);
+  });
+
+  it("selects pending key art through a separate typed result-use action", async () => {
+    let selected = 0;
+    const w = await setup({ kind: "world" }, {
+      useWorldImage: async (candidateIndex) => {
+        selected = candidateIndex;
+        return true;
+      },
+    });
+    await w.store.gateOp(async () => {
+      const dir = join(w.store.dir, "incoming", "world-image");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "candidate.png"), "candidate");
+    });
+    const references = currentReceipt(w.store, "references");
+    const metadata = currentReceipt(w.store, "world-metadata");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [references, metadata],
+      actions: [{
+        kind: "reference-world-image-result-use",
+        candidateIndex: 1,
+        checkReceiptIds: [references.id, metadata.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "take-review");
+    assert.equal(selected, 0);
+    assert.equal((await decide(w.lifecycle, w.log, action)).status, "completed");
+    assert.equal(selected, 1);
+  });
+
+  it("uses the master-look authority and separately discards a staged reference", async () => {
+    let selected = 0;
+    let discarded = "";
+    const w = await setup({ kind: "world" }, {
+      useMasterLook: async (candidateIndex) => {
+        selected = candidateIndex;
+        return true;
+      },
+      discardReferenceImage: async (target) => {
+        discarded = target.surface === "staged-reference" ? target.key : target.surface;
+        return true;
+      },
+    });
+    await w.store.gateOp(async () => {
+      const master = join(w.store.dir, "incoming", "master-look");
+      const staged = join(w.store.dir, "incoming", "staged-refs", "master-look");
+      await mkdir(master, { recursive: true });
+      await mkdir(staged, { recursive: true });
+      await writeFile(join(master, "candidate.png"), "candidate");
+      await writeFile(join(staged, "reference.png"), "reference");
+    });
+    const references = currentReceipt(w.store, "references");
+    const art = currentReceipt(w.store, "art-direction");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [references, art],
+      actions: [
+        {
+          kind: "reference-master-look-result-use",
+          candidateIndex: 1,
+          checkReceiptIds: [references.id, art.id],
+        },
+        {
+          kind: "reference-image-discard",
+          target: { surface: "staged-reference", key: "master-look" },
+          checkReceiptIds: [references.id],
+        },
+      ],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const actions = (await loaded(w.log)).actions;
+    assert.equal(actions[0]!.authority.kind, "proposal-manager");
+    assert.equal(actions[0]!.shown.body.family, "take-review");
+    assert.equal(actions[1]!.shown.body.family, "destructive");
+    assert.equal((await decide(w.lifecycle, w.log, actions[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, actions[1]!)).status, "completed");
+    assert.equal(selected, 1);
+    assert.equal(discarded, "master-look");
+  });
+
+  it("cards voice cloning as a separate consented host gesture without reading a recording", async () => {
+    let pickerCalls = 0;
+    const w = await setup({ kind: "world" }, {
+      pickFiles: async () => {
+        pickerCalls += 1;
+        return ["C:\\private\\speaker-recording.wav"];
+      },
+    });
+    const sheets = currentReceipt(w.store, "sheets");
+    const voices = currentReceipt(w.store, "voices");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [sheets, voices],
+      actions: [{
+        kind: "voice-clone",
+        name: "Consented Speaker",
+        description: "Low and measured",
+        recordingGesture: "required",
+        checkReceiptIds: [sheets.id, voices.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "host-action");
+    assert.match(action.shown.consequence, /biometric-like identity data/i);
+    assert.match(action.shown.consequence, /informed consent/i);
+    assert.equal(JSON.stringify(action).includes("speaker-recording.wav"), false);
+    assert.equal(pickerCalls, 0);
+  });
+
+  it("shows generation intent but blocks approval until the coordinator owns a durable quote", async () => {
+    const w = await setup();
+    const sheets = currentReceipt(w.store, "sheets");
+    const art = currentReceipt(w.store, "art-direction");
+    const references = currentReceipt(w.store, "references");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [sheets, art, references],
+      actions: [{
+        kind: "reference-generation",
+        request: {
+          operation: "main-photo",
+          sheetId: "maren-kest",
+          prompt: "Salt-lit portrait",
+          count: 2,
+          identityReferenceIds: [],
+        },
+        checkReceiptIds: [sheets.id, art.id, references.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "generation");
+    assert.match(action.approvalBlockedReason ?? "", /quote/i);
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.disposition, "refused");
+    assert.equal(result.reason, "adapter-unavailable");
+    assert.equal((await loaded(w.log)).actions[0]!.status, "pending");
+  });
+
+  it("scopes production style to Production Chat and writes it only after approval", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const production = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const art = currentReceipt(w.store, "art-direction");
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [production, art],
+      actions: [{
+        kind: "production-style",
+        productionId: PRODUCTION,
+        style: "Bleached salt print",
+        checkReceiptIds: [production.id, art.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    assert.notEqual(
+      w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride,
+      "Bleached salt print",
+    );
+
+    const result = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
+    assert.equal(result.status, "completed");
+    assert.equal(
+      w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride,
+      "Bleached salt print",
+    );
+
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, {
+      receipts: [currentReceipt(w.store, "production-metadata", PRODUCTION), currentReceipt(w.store, "art-direction")],
+      actions: [{
+        kind: "production-style",
+        productionId: "another-production",
+        style: "Wrong scope",
+        checkReceiptIds: [],
+      }],
+    })), /another production's style/i);
+  });
+
+  it("keeps another production's guest out of Production Chat resource actions", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const path = join(w.store.dir, "characters", "maren-kest.md");
+    const raw = await readFile(path, "utf8");
+    await w.store.ownedWrite(() => writeFile(path, raw.replace("type: character\n", "type: character\nproduction: another-production\n")));
+    const sheets = currentReceipt(w.store, "sheets");
+    const voices = currentReceipt(w.store, "voices");
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, {
+      receipts: [sheets, voices],
+      actions: [{
+        kind: "voice-assignment",
+        sheetType: "character",
+        sheetId: "maren-kest",
+        voice: null,
+        checkReceiptIds: [sheets.id, voices.id],
+      }],
+    })), /another production's cast or references/i);
+  });
+
+  it("reviews an immutable voice clip through the production take authority", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const takeId = "tk_01J8F0000000000000000000V1";
+    const landed = `productions/${PRODUCTION}/incoming/voice-review/voice.wav`;
+    await mkdir(join(w.store.dir, "productions", PRODUCTION, "incoming", "voice-review"), { recursive: true });
+    await writeFile(join(w.store.dir, landed), "voice-bytes");
+    const job: Job = {
+      id: "jb_01J8F0000000000000000000V1",
+      idempotencyKey: "01J8F1000000000000000000V1",
+      worldId: w.store.worldId,
+      productionId: PRODUCTION,
+      target: { kind: "voice-line", id: "sh_12", coversShots: ["sh_12"] },
+      capability: "voice-tts",
+      provider: "local",
+      model: "studio-voice",
+      params: { text: "The bells answer.", voiceId: "vale" },
+      estimatedMicroUsd: 0,
+      status: "succeeded",
+      providerJobId: null,
+      attempt: 1,
+      landing: { dir: `productions/${PRODUCTION}/incoming/voice-review` },
+      landedFiles: [landed],
+      error: null,
+      createdAt: AT,
+      updatedAt: AT,
+    };
+    assert.equal((await recordTakesFromJob(w.store, job, 0))[0]?.id, takeId);
+
+    const takes = currentReceipt(w.store, "takes", PRODUCTION);
+    const sheets = currentReceipt(w.store, "sheets");
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [takes, sheets],
+      actions: [{
+        kind: "voice-clip-review",
+        productionId: PRODUCTION,
+        takeId,
+        review: { decision: "accept", shotId: "sh_12" },
+        checkReceiptIds: [takes.id, sheets.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions[0]!;
+    assert.equal(action.shown.body.family, "take-review");
+    assert.equal(
+      w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.reviews.some((review) => review.takeId === takeId),
+      false,
+    );
+    const result = await decide(w.lifecycle, w.log, action);
+    assert.equal(result.status, "completed");
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    assert.equal(production.reviews.find((review) => review.takeId === takeId)?.decision, "accept");
+    assert.equal(production.selections["sh_12"]?.acceptedTakeId, takeId);
   });
 });

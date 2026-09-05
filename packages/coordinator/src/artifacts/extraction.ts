@@ -15,7 +15,7 @@ import type { ProposalManager } from "../gate/proposals.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import { uniqueSlug } from "../world/slug.js";
-import type { WorldStore } from "../world/store.js";
+import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 
 /**
  * Fact extraction (SPEC-015 §2.7): the highest-risk operation in the product, held to
@@ -152,18 +152,33 @@ export function verifyCandidates(
 // Batch persistence on the sidecar (R-15..R-17)
 // ---------------------------------------------------------------------------
 
-async function updateSidecar(store: WorldStore, artifact: ArtifactSidecar, next: ArtifactSidecar): Promise<void> {
+async function updateSidecar(
+  store: WorldStore,
+  artifact: ArtifactSidecar,
+  next: ArtifactSidecar,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
   const path = `artifacts/${artifact.file}.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, path)), "utf8");
-  await store.commit({
-    kind: "artifact-extraction",
-    source: "import",
-    files: [{ path, action: "replace", content: JSON.stringify(next, null, 2) + "\n", baseHash: sha256(raw) }],
-  });
+  await store.commit(
+    {
+      kind: "artifact-extraction",
+      source: options.source ?? "import",
+      files: [{ path, action: "replace", content: JSON.stringify(next, null, 2) + "\n", baseHash: sha256(raw) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
 }
 
 /** Store the verified batch: ONE needs-you entry, granularity inside it (R-15, D5). */
-export async function storeBatch(store: WorldStore, artifact: ArtifactSidecar, batch: VerifiedBatch): Promise<void> {
+export async function storeBatch(
+  store: WorldStore,
+  artifact: ArtifactSidecar,
+  batch: VerifiedBatch,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
   const existing = artifact.extraction ?? { pending: [], decided: [], droppedCount: 0 };
   await updateSidecar(store, artifact, {
     ...artifact,
@@ -172,7 +187,7 @@ export async function storeBatch(store: WorldStore, artifact: ArtifactSidecar, b
       decided: existing.decided,
       droppedCount: existing.droppedCount + batch.droppedCount,
     },
-  });
+  }, options);
 }
 
 /**
@@ -185,6 +200,7 @@ export async function resolveCandidate(
   artifact: ArtifactSidecar,
   hash: string,
   decision: "accept" | "reject",
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<void> {
   const extraction = artifact.extraction;
   if (!extraction) return;
@@ -205,7 +221,7 @@ export async function resolveCandidate(
         // The accepted fact carries its source and the verified span (R-15).
         statement: `${candidate.body}\n\nSource: ${artifact.file} — "${candidate.quote}"`,
       });
-      const outcome = await gate.accept(staged.id);
+      const outcome = await gate.accept(staged.id, { precondition: options.precondition });
       if (outcome.status !== "accepted") throw new Error(`canon candidate did not land: ${outcome.status}`);
     } else {
       const kind = candidate.kind as SheetKind;
@@ -233,7 +249,7 @@ export async function resolveCandidate(
         targets: [{ path: `${sheetDir(kind)}/${slug}.md`, content }],
         ...(artifact.production !== undefined ? { production: artifact.production } : {}),
       });
-      const outcome = await gate.accept(staged.id);
+      const outcome = await gate.accept(staged.id, { precondition: options.precondition });
       if (outcome.status !== "accepted") throw new Error(`sheet candidate did not land: ${outcome.status}`);
       // The accepted candidate links back to its source (R-15).
       const { addLinks } = await import("./filing.js");
@@ -243,12 +259,17 @@ export async function resolveCandidate(
 
   const fresh = store.getBundle().artifacts.find((a) => a.id === artifact.id) ?? artifact;
   const freshExtraction = fresh.extraction ?? extraction;
-  await updateSidecar(store, fresh, {
-    ...fresh,
-    extraction: {
-      pending: freshExtraction.pending.filter((c) => c.hash !== hash),
-      decided: [...freshExtraction.decided, hash],
-      droppedCount: freshExtraction.droppedCount,
+  await updateSidecar(
+    store,
+    fresh,
+    {
+      ...fresh,
+      extraction: {
+        pending: freshExtraction.pending.filter((c) => c.hash !== hash),
+        decided: [...freshExtraction.decided, hash],
+        droppedCount: freshExtraction.droppedCount,
+      },
     },
-  });
+    options,
+  );
 }

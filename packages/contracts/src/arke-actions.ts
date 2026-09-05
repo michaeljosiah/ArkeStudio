@@ -308,7 +308,7 @@ export const ArkeDestructiveBodySchema = z
 export const ArkeTakeReviewBodySchema = z
   .object({
     family: z.literal("take-review"),
-    mediaKind: z.enum(["image", "video", "audio"]),
+    mediaKind: z.enum(["image", "video", "audio", "document"]),
     mediaId: ConversationActionSemanticIdSchema,
     destination: z.string().min(1).max(500),
     currentSelection: z.string().max(500).nullable(),

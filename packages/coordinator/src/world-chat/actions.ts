@@ -1,5 +1,5 @@
-import { readFile, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, rm, stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -7,22 +7,48 @@ import {
   deriveArtDirectionDescription,
   SheetSchema,
   WorldMetaSchema,
+  ModelWorldChatActionSchema,
   applyBibleEdits,
   sheetDir,
   splitBible,
   WorldChatArtDirectionActionSchema,
   WorldChatArtDirectionRestoreActionSchema,
+  WorldChatArtifactExtractionActionSchema,
+  WorldChatArtifactExtractionReviewActionSchema,
+  WorldChatArtifactExtractionStopActionSchema,
+  WorldChatArtifactImportActionSchema,
+  WorldChatArtifactMetadataActionSchema,
+  WorldChatArtifactReferenceActionSchema,
   WorldChatBibleActionSchema,
   WorldChatCanonActionSchema,
   WorldChatCanonRestoreActionSchema,
   WorldChatCanonRetireActionSchema,
   WorldChatEditorRequestActionSchema,
   WorldChatProposalActionSchema,
+  WorldChatProductionStyleActionSchema,
+  WorldChatReferenceChangeActionSchema,
+  WorldChatReferenceCompileActionSchema,
+  WorldChatReferenceGenerationActionSchema,
+  WorldChatReferenceImageDiscardActionSchema,
+  WorldChatReferenceImageImportActionSchema,
+  WorldChatReferenceImportActionSchema,
+  WorldChatReferenceMasterLookResultUseActionSchema,
+  WorldChatReferenceResultUseActionSchema,
+  WorldChatReferenceReviewActionSchema,
+  WorldChatReferenceStyleActionSchema,
+  WorldChatReferenceTileLockActionSchema,
+  WorldChatReferenceWorldImageResultUseActionSchema,
   WorldChatSceneActionSchema,
   WorldChatSheetActionSchema,
   WorldChatSheetRestoreActionSchema,
   WorldChatSheetRetireActionSchema,
   WorldChatWorldMetadataActionSchema,
+  WorldChatVoiceAssignmentActionSchema,
+  WorldChatVoiceAuditionActionSchema,
+  WorldChatVoiceCloneActionSchema,
+  WorldChatVoiceClipReviewActionSchema,
+  WorldChatWorldArchiveActionSchema,
+  WorldChatWorldExportActionSchema,
   WorldChatPreparedActionSchema,
   type BibleEdit,
   type CandidateId,
@@ -44,6 +70,11 @@ import {
   type WorldChatSheetRestoreAction,
   type WorldChatSheetRetireAction,
   type WorldChatWorldMetadataAction,
+  type WorldChatReferenceImageDiscardAction,
+  type WorldChatReferenceImageImportAction,
+  type WorldChatReferenceImportAction,
+  type WorldChatReferenceResultUseAction,
+  type WorldChatVoiceAssignmentAction,
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
@@ -53,8 +84,17 @@ import {
   type WorldChatCheckReceipt,
   type WorldChatPreparedAction,
 } from "@arke-studio/contracts";
+import { resolveCandidate } from "../artifacts/extraction.js";
+import {
+  ATTACHABLE_EXTENSIONS,
+  addLinks,
+  fileArtifact,
+  importFolder,
+  setOwner,
+} from "../artifacts/filing.js";
 import type {
   ConversationActionAuthorityAdapter,
+  ConversationActionExecutionOutcome,
   PreparedConversationActionAuthority,
 } from "../arke-actions/lifecycle.js";
 import { ConversationActionLifecycle, conversationActionDigest } from "../arke-actions/lifecycle.js";
@@ -74,6 +114,32 @@ import {
   validateEditorRequest,
 } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
+import { setProductionStyle } from "../productions/ops.js";
+import {
+  acceptCharacterLook,
+  acceptCharacterSheet,
+  acceptLocationView,
+  attachCharacterLook,
+  chooseAnchor,
+  compileGrid,
+  designate,
+  landGrid,
+  lockTile,
+  promoteCharacterLook,
+  readKit,
+  setStyleOverride,
+} from "../references/kit.js";
+import { acceptMainPhoto } from "../references/main-photo.js";
+import {
+  pendingReferenceTake,
+  recordReferenceReview,
+  referenceReviewDecision,
+} from "../references/takes.js";
+import { stagedReferenceDir } from "../references/master-look.js";
+import { applyVoiceAssignment } from "../sheets/authoring.js";
+import { acceptTake, rejectTake } from "../takes/review.js";
+import { AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS, cloneVoice } from "../voice/library.js";
+import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
@@ -84,16 +150,23 @@ import {
   type WorldStore,
 } from "../world/store.js";
 import { MarkdownFile } from "../world/text-files.js";
+import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { evaluateReadiness } from "./readiness.js";
 import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 import {
   artDirectionFence,
+  artifactsFence,
   bibleFence,
   canonFence,
+  productionMetadataFence,
+  productionsFence,
+  referencesFence,
   sheetsFence,
   timelineFence,
+  takesFence,
+  voicesFence,
   worldMetadataFence,
 } from "./target-reads.js";
 import {
@@ -124,6 +197,45 @@ export interface WorldChatActionTurn {
   /** Present on live runs; absent only on callers created before complete target receipts. */
   readonly receipts?: readonly WorldChatCheckReceipt[];
   readonly at: string;
+}
+
+export interface WorldChatActionAdapterDeps {
+  readonly pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
+  readonly pickFolder?: () => Promise<string | null>;
+  readonly mediaProbe?: MediaProbe;
+  readonly extractArtifact?: (
+    artifactId: string,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ found: number; dropped: number; outcome: string }>;
+  readonly stopExtraction?: (artifactId: string) => void;
+  readonly importReference?: (
+    change: WorldChatReferenceImportAction["action"]["change"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }>;
+  readonly importReferenceImage?: (
+    target: WorldChatReferenceImageImportAction["action"]["target"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }>;
+  readonly useWorldImage?: (
+    candidateIndex: number,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<boolean>;
+  readonly useMasterLook?: (
+    candidateIndex: number,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<boolean>;
+  readonly useReferenceCandidate?: (
+    change: WorldChatReferenceResultUseAction["action"]["change"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
+  readonly discardReferenceImage?: (
+    target: WorldChatReferenceImageDiscardAction["action"]["target"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<boolean>;
+  readonly archiveWorld?: () => Promise<{ id: string }>;
+  readonly exportWorld?: (actionId: string) => Promise<{ id: string }>;
+  readonly inFlightWorldJobs?: () => number;
+  readonly voiceAvailable?: (voice: NonNullable<WorldChatVoiceAssignmentAction["action"]["voice"]>) => Promise<boolean>;
 }
 
 function completeObservation(
@@ -162,15 +274,58 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "sheet-restore": ["sheets", "canon"],
   "art-direction": ["art-direction"],
   "art-direction-restore": ["art-direction"],
+  "artifact-import": ["artifacts"],
+  "artifact-metadata": ["artifacts", "production-metadata"],
+  "artifact-extraction": ["artifacts", "canon", "sheets"],
+  "artifact-extraction-stop": ["artifacts"],
+  "artifact-extraction-review": ["artifacts", "canon", "sheets"],
+  "artifact-reference": ["artifacts", "references"],
+  "reference-import": ["sheets", "references"],
+  "reference-result-use": ["sheets", "references"],
+  "reference-review": ["sheets", "references"],
+  "reference-change": ["sheets", "references"],
+  "reference-tile-lock": ["sheets", "references"],
+  "reference-compile": ["sheets", "references"],
+  "reference-style": ["sheets", "art-direction", "references"],
+  "reference-generation": ["sheets", "art-direction", "references"],
+  "reference-image-import": ["references"],
+  "reference-world-image-result-use": ["references", "world-metadata"],
+  "reference-master-look-result-use": ["references", "art-direction"],
+  "reference-image-discard": ["references"],
+  "voice-assignment": ["sheets", "voices"],
+  "voice-audition": ["sheets", "voices"],
+  "voice-clone": ["sheets", "voices"],
+  "voice-clip-review": ["takes", "sheets"],
+  "world-archive": ["world-metadata"],
+  "world-export": ["world-metadata", "artifacts"],
+  "production-style": ["production-metadata", "art-direction"],
 };
 
-function currentWorldObservation(store: WorldStore, requirement: ArkeReadRequirement): { target: string; fence: string } | null {
+function currentWorldObservation(
+  store: WorldStore,
+  requirement: ArkeReadRequirement,
+  target?: string,
+): { target: string; fence: string } | null {
   const bundle = store.getBundle();
   switch (requirement) {
     case "world-metadata": return { target: store.worldId, fence: worldMetadataFence(bundle) };
     case "canon": return { target: store.worldId, fence: canonFence(bundle) };
     case "sheets": return { target: store.worldId, fence: sheetsFence(bundle) };
     case "art-direction": return { target: "art-direction", fence: artDirectionFence(bundle) };
+    case "references": return { target: store.worldId, fence: referencesFence(bundle) };
+    case "artifacts": return { target: store.worldId, fence: artifactsFence(bundle) };
+    case "voices": return { target: store.worldId, fence: voicesFence(bundle) };
+    case "production-metadata": {
+      const productionId = target ?? store.worldId;
+      return productionId === store.worldId
+        ? { target: store.worldId, fence: productionsFence(bundle) }
+        : { target: productionId, fence: productionMetadataFence(bundle, productionId) };
+    }
+    case "takes": {
+      const productionId = target ?? store.worldId;
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      return { target: productionId, fence: takesFence(production) };
+    }
     default: return null;
   }
 }
@@ -191,7 +346,7 @@ function worldActionObservations(
       !receipt.target ||
       !receipt.observedRevisionOrDigest
     ) throw new Error("A world action requires the final receipt from a complete target read.");
-    const current = currentWorldObservation(store, receipt.target.requirement);
+    const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id);
     if (
       !current ||
       current.target !== receipt.target.id ||
@@ -211,18 +366,167 @@ function worldActionObservations(
   return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
 }
 
-function preparedWorldPayload(worldId: string, action: ModelWorldChatAction): WorldChatPreparedAction {
+function preparedWorldPayload(
+  worldId: string,
+  action: ModelWorldChatAction,
+  productionId?: string,
+): WorldChatPreparedAction {
+  const common = { worldId, ...(productionId !== undefined ? { productionId } : {}), action };
   switch (action.kind) {
-    case "world-metadata": return WorldChatWorldMetadataActionSchema.parse({ kind: "world-chat-world-metadata", worldId, action });
-    case "canon": return WorldChatCanonActionSchema.parse({ kind: "world-chat-canon", worldId, action });
-    case "canon-retire": return WorldChatCanonRetireActionSchema.parse({ kind: "world-chat-canon-retire", worldId, action });
-    case "canon-restore": return WorldChatCanonRestoreActionSchema.parse({ kind: "world-chat-canon-restore", worldId, action });
-    case "sheet": return WorldChatSheetActionSchema.parse({ kind: "world-chat-sheet", worldId, action });
-    case "sheet-retire": return WorldChatSheetRetireActionSchema.parse({ kind: "world-chat-sheet-retire", worldId, action });
-    case "sheet-restore": return WorldChatSheetRestoreActionSchema.parse({ kind: "world-chat-sheet-restore", worldId, action });
-    case "art-direction": return WorldChatArtDirectionActionSchema.parse({ kind: "world-chat-art-direction", worldId, action });
-    case "art-direction-restore": return WorldChatArtDirectionRestoreActionSchema.parse({ kind: "world-chat-art-direction-restore", worldId, action });
+    case "world-metadata": return WorldChatWorldMetadataActionSchema.parse({ kind: "world-chat-world-metadata", ...common });
+    case "canon": return WorldChatCanonActionSchema.parse({ kind: "world-chat-canon", ...common });
+    case "canon-retire": return WorldChatCanonRetireActionSchema.parse({ kind: "world-chat-canon-retire", ...common });
+    case "canon-restore": return WorldChatCanonRestoreActionSchema.parse({ kind: "world-chat-canon-restore", ...common });
+    case "sheet": return WorldChatSheetActionSchema.parse({ kind: "world-chat-sheet", ...common });
+    case "sheet-retire": return WorldChatSheetRetireActionSchema.parse({ kind: "world-chat-sheet-retire", ...common });
+    case "sheet-restore": return WorldChatSheetRestoreActionSchema.parse({ kind: "world-chat-sheet-restore", ...common });
+    case "art-direction": return WorldChatArtDirectionActionSchema.parse({ kind: "world-chat-art-direction", ...common });
+    case "art-direction-restore": return WorldChatArtDirectionRestoreActionSchema.parse({ kind: "world-chat-art-direction-restore", ...common });
+    case "artifact-import": return WorldChatArtifactImportActionSchema.parse({ kind: "world-chat-artifact-import", ...common });
+    case "artifact-metadata": return WorldChatArtifactMetadataActionSchema.parse({ kind: "world-chat-artifact-metadata", ...common });
+    case "artifact-extraction": return WorldChatArtifactExtractionActionSchema.parse({ kind: "world-chat-artifact-extraction", ...common });
+    case "artifact-extraction-stop": return WorldChatArtifactExtractionStopActionSchema.parse({ kind: "world-chat-artifact-extraction-stop", ...common });
+    case "artifact-extraction-review": return WorldChatArtifactExtractionReviewActionSchema.parse({ kind: "world-chat-artifact-extraction-review", ...common });
+    case "artifact-reference": return WorldChatArtifactReferenceActionSchema.parse({ kind: "world-chat-artifact-reference", ...common });
+    case "reference-import": return WorldChatReferenceImportActionSchema.parse({ kind: "world-chat-reference-import", ...common });
+    case "reference-result-use": return WorldChatReferenceResultUseActionSchema.parse({ kind: "world-chat-reference-result-use", ...common });
+    case "reference-review": return WorldChatReferenceReviewActionSchema.parse({ kind: "world-chat-reference-review", ...common });
+    case "reference-change": return WorldChatReferenceChangeActionSchema.parse({ kind: "world-chat-reference-change", ...common });
+    case "reference-tile-lock": return WorldChatReferenceTileLockActionSchema.parse({ kind: "world-chat-reference-tile-lock", ...common });
+    case "reference-compile": return WorldChatReferenceCompileActionSchema.parse({ kind: "world-chat-reference-compile", ...common });
+    case "reference-style": return WorldChatReferenceStyleActionSchema.parse({ kind: "world-chat-reference-style", ...common });
+    case "reference-generation": return WorldChatReferenceGenerationActionSchema.parse({ kind: "world-chat-reference-generation", ...common });
+    case "reference-image-import": return WorldChatReferenceImageImportActionSchema.parse({ kind: "world-chat-reference-image-import", ...common });
+    case "reference-world-image-result-use": return WorldChatReferenceWorldImageResultUseActionSchema.parse({ kind: "world-chat-reference-world-image-result-use", ...common });
+    case "reference-master-look-result-use": return WorldChatReferenceMasterLookResultUseActionSchema.parse({ kind: "world-chat-reference-master-look-result-use", ...common });
+    case "reference-image-discard": return WorldChatReferenceImageDiscardActionSchema.parse({ kind: "world-chat-reference-image-discard", ...common });
+    case "voice-assignment": return WorldChatVoiceAssignmentActionSchema.parse({ kind: "world-chat-voice-assignment", ...common });
+    case "voice-audition": return WorldChatVoiceAuditionActionSchema.parse({ kind: "world-chat-voice-audition", ...common });
+    case "voice-clone": return WorldChatVoiceCloneActionSchema.parse({ kind: "world-chat-voice-clone", ...common });
+    case "voice-clip-review": return WorldChatVoiceClipReviewActionSchema.parse({ kind: "world-chat-voice-clip-review", ...common });
+    case "world-archive": return WorldChatWorldArchiveActionSchema.parse({ kind: "world-chat-world-archive", ...common });
+    case "world-export": return WorldChatWorldExportActionSchema.parse({ kind: "world-chat-world-export", ...common });
+    case "production-style": return WorldChatProductionStyleActionSchema.parse({ kind: "world-chat-production-style", ...common });
   }
+}
+
+function scopedWorldAction(
+  store: WorldStore,
+  action: ModelWorldChatAction,
+  productionId: string | undefined,
+): ModelWorldChatAction {
+  let sheetIds: Array<string | undefined> = [];
+  if (action.kind === "sheet") {
+    if (action.change.operation === "relationship") {
+      sheetIds = [
+        action.change.from.sheetId,
+        ...(action.change.to.kind === "sheet" ? [action.change.to.sheetId] : []),
+        ...action.change.proseEdits.map((edit) => edit.sheetId),
+      ];
+    } else if (action.change.operation !== "create") {
+      sheetIds = [action.change.sheetId];
+    }
+  } else if (
+    action.kind === "sheet-retire" || action.kind === "sheet-restore" ||
+    action.kind === "reference-tile-lock" || action.kind === "reference-compile" ||
+    action.kind === "reference-style" || action.kind === "voice-assignment" || action.kind === "voice-audition"
+  ) {
+    sheetIds = [action.sheetId];
+  } else if (action.kind === "reference-import" || action.kind === "reference-result-use" || action.kind === "reference-change") {
+    sheetIds = [action.change.sheetId];
+  } else if (action.kind === "reference-generation") {
+    sheetIds = [action.request.sheetId];
+  } else if (action.kind === "reference-review") {
+    sheetIds = [store.getBundle().referenceTakes.find((take) => take.id === action.takeId)?.reference?.sheetId];
+  } else if (action.kind === "voice-clone") {
+    sheetIds = [action.sheetId];
+  }
+  if (productionId) {
+    for (const sheetId of sheetIds) {
+      const sheet = sheetId ? store.getBundle().sheets.find((candidate) => candidate.id === sheetId) : undefined;
+      if (sheet?.production !== undefined && sheet.production !== productionId) {
+        throw new Error("A Production Chat action cannot change another production's cast or references.");
+      }
+    }
+  }
+  const artifactId = action.kind === "artifact-import"
+    ? action.supersedes
+    : action.kind === "artifact-metadata"
+    ? action.change.artifactId
+    : action.kind === "artifact-extraction" || action.kind === "artifact-extraction-stop" ||
+        action.kind === "artifact-extraction-review" || action.kind === "artifact-reference"
+      ? action.artifactId
+      : undefined;
+  if (productionId && artifactId) {
+    const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
+    if (artifact?.production !== undefined && artifact.production !== productionId) {
+      throw new Error("A Production Chat action cannot change another production's artifact.");
+    }
+  }
+  if (productionId) {
+    const stagedKey = (action.kind === "reference-image-import" || action.kind === "reference-image-discard") &&
+      action.target.surface === "staged-reference"
+      ? action.target.key
+      : action.kind === "artifact-reference"
+        ? action.key
+        : undefined;
+    if (stagedKey && store.getBundle().sheets.some((sheet) =>
+      sheet.production !== undefined && sheet.production !== productionId && stagedKey.endsWith(`--${sheet.id}`))) {
+      throw new Error("A Production Chat action cannot stage a reference for another production's cast.");
+    }
+  }
+  if (action.kind === "sheet" && action.change.operation === "create") {
+    if (productionId && action.change.productionId && action.change.productionId !== productionId) {
+      throw new Error("A Production Chat action cannot create cast for another production.");
+    }
+    return productionId && action.change.productionId === undefined
+      ? ModelWorldChatActionSchema.parse({ ...action, change: { ...action.change, productionId } })
+      : action;
+  }
+  if (action.kind === "artifact-import" && productionId) {
+    if (typeof action.productionId === "string" && action.productionId !== productionId) {
+      throw new Error("A Production Chat action cannot file an artifact for another production.");
+    }
+    return action.productionId === undefined
+      ? ModelWorldChatActionSchema.parse({ ...action, productionId })
+      : action;
+  }
+  if (
+    action.kind === "artifact-metadata" &&
+    action.change.operation === "set-owner" &&
+    productionId &&
+    typeof action.change.productionId === "string" &&
+    action.change.productionId !== productionId
+  ) throw new Error("A Production Chat action cannot reassign an artifact to another production.");
+  if (
+    action.kind === "reference-change" &&
+    action.change.operation === "attach-look" &&
+    action.change.scope &&
+    productionId &&
+    action.change.scope.productionId !== productionId
+  ) throw new Error("A Production Chat action cannot attach a look to another production.");
+  if (action.kind === "production-style" && productionId && action.productionId !== productionId) {
+    throw new Error("A Production Chat action cannot change another production's style.");
+  }
+  if (action.kind === "voice-clip-review" && productionId && action.productionId !== productionId) {
+    throw new Error("A Production Chat action cannot review another production's voice clip.");
+  }
+  return action;
+}
+
+function actionProduction(action: ModelWorldChatAction, contextProductionId: string | undefined): string | undefined {
+  if (contextProductionId) return contextProductionId;
+  if (action.kind === "production-style") return action.productionId;
+  if (action.kind === "voice-clip-review") return action.productionId;
+  if (action.kind === "artifact-import" && typeof action.productionId === "string") return action.productionId;
+  if (action.kind === "artifact-metadata" && action.change.operation === "set-owner") {
+    return action.change.productionId ?? undefined;
+  }
+  if (action.kind === "sheet" && action.change.operation === "create") return action.change.productionId;
+  if (action.kind === "reference-change" && action.change.operation === "attach-look") {
+    return action.change.scope?.productionId;
+  }
+  return undefined;
 }
 
 function worldActionTargets(action: ModelWorldChatAction, fallbackId: string): ConversationActionTarget[] {
@@ -251,6 +555,57 @@ function worldActionTargets(action: ModelWorldChatAction, fallbackId: string): C
     }
     case "art-direction":
     case "art-direction-restore": return [{ kind: "art-direction", id: "art-direction", label: "Art direction" }];
+    case "artifact-import": return [
+      { kind: "artifact-import", id: fallbackId, label: action.source === "folder" ? "Artifact folder" : "Artifact files" },
+      ...(action.supersedes ? [{ kind: "artifact", id: action.supersedes, label: action.supersedes }] : []),
+    ];
+    case "artifact-metadata": return [{ kind: "artifact", id: action.change.artifactId, label: action.change.artifactId }];
+    case "artifact-extraction":
+    case "artifact-extraction-stop": return [{ kind: "artifact", id: action.artifactId, label: action.artifactId }];
+    case "artifact-extraction-review": return [{ kind: "extraction-candidate", id: action.candidateHash, label: action.candidateHash }];
+    case "artifact-reference": return [{ kind: "artifact", id: action.artifactId, label: action.artifactId }];
+    case "reference-import": return [{ kind: "sheet", id: action.change.sheetId, label: action.change.sheetId }];
+    case "reference-result-use": {
+      const selection = "selection" in action.change
+        ? action.change.selection
+        : { source: "take" as const, takeId: action.change.takeId };
+      const id = selection.source === "take" ? selection.takeId : `candidate:${selection.candidateIndex}`;
+      return [
+        { kind: "sheet", id: action.change.sheetId, label: action.change.sheetId },
+        { kind: selection.source, id, label: id },
+      ];
+    }
+    case "reference-review": return [{ kind: "take", id: action.takeId, label: action.takeId }];
+    case "reference-change": {
+      const change = action.change;
+      return [{ kind: "sheet", id: change.sheetId, label: change.sheetId }];
+    }
+    case "reference-tile-lock": return [{ kind: "sheet", id: action.sheetId, label: action.sheetId }];
+    case "reference-compile": return [{ kind: "sheet", id: action.sheetId, label: action.sheetId }];
+    case "reference-style": return [{ kind: "sheet", id: action.sheetId, label: action.sheetId }];
+    case "reference-generation": return [{ kind: "sheet", id: action.request.sheetId, label: action.request.sheetId }];
+    case "reference-image-import": return [{
+      kind: action.target.surface,
+      id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
+      label: action.target.surface === "staged-reference" ? action.target.key : action.target.surface,
+    }];
+    case "reference-world-image-result-use": return [{ kind: "world-image", id: `candidate:${action.candidateIndex}`, label: `Key art candidate ${action.candidateIndex}` }];
+    case "reference-master-look-result-use": return [{ kind: "master-look", id: `candidate:${action.candidateIndex}`, label: `Master look candidate ${action.candidateIndex}` }];
+    case "reference-image-discard": return [{
+      kind: action.target.surface,
+      id: action.target.surface === "staged-reference" ? action.target.key : fallbackId,
+      label: action.target.surface === "staged-reference" ? action.target.key : action.target.surface,
+    }];
+    case "voice-assignment": return [{ kind: action.sheetType, id: action.sheetId, label: action.sheetId }];
+    case "voice-audition": return [{ kind: "character", id: action.sheetId, label: action.sheetId }];
+    case "voice-clone": return [{ kind: "voice", id: fallbackId, label: action.name }];
+    case "voice-clip-review": return [
+      { kind: "take", id: action.takeId, label: action.takeId },
+      { kind: "production", id: action.productionId, label: action.productionId },
+    ];
+    case "world-archive":
+    case "world-export": return [{ kind: "world", id: fallbackId, label: action.kind === "world-archive" ? "World archive" : "World export" }];
+    case "production-style": return [{ kind: "production", id: action.productionId, label: action.productionId }];
   }
 }
 
@@ -313,14 +668,18 @@ export function prepareWorldChatActions(
     });
   }
 
-  for (const [index, action] of turn.actions.entries()) {
-    const payload = preparedWorldPayload(store.worldId, action);
+  const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
+  for (const [index, rawAction] of turn.actions.entries()) {
+    const action = scopedWorldAction(store, rawAction, contextProductionId);
+    const productionId = actionProduction(action, contextProductionId);
+    const payload = preparedWorldPayload(store.worldId, action, productionId);
     prepared.push({
       payload,
       intent: lifecycle.createIntent({
         conversationId: turn.conversationId,
         turnId: turn.turnId,
         worldId: store.worldId,
+        ...(productionId !== undefined ? { productionId } : {}),
         actionKind: payload.kind,
         targets: worldActionTargets(action, `${turn.turnId}:${index + 1}`),
         payload,
@@ -483,7 +842,11 @@ async function removePreparation(store: WorldStore, authority: "bible" | "scene"
 
 async function committedAction(store: WorldStore, actionId: string): Promise<{ commitId: string; toVersion?: number } | null> {
   const record = (await readChanges(join(store.dir, "changes.jsonl"))).find(
-    (line) => (line as Record<string, unknown>)["requestId"] === actionId,
+    (line) => {
+      const value = line as Record<string, unknown>;
+      return value["requestId"] === actionId ||
+        (typeof value["source"] === "string" && value["source"].endsWith(`:${actionId}`));
+    },
   ) as (Record<string, unknown> & { toVersion?: number }) | undefined;
   return record && typeof record["commitId"] === "string"
     ? { commitId: record["commitId"], ...(record.toVersion !== undefined ? { toVersion: record.toVersion } : {}) }
@@ -568,7 +931,7 @@ function observationsCurrent(
   action: Pick<ConversationActionPrepareIntent, "baseObservations">,
 ): { ok: true } | { ok: false; reason: "stale"; detail: string } {
   for (const observation of action.baseObservations) {
-    const current = currentWorldObservation(store, observation.requirement);
+    const current = currentWorldObservation(store, observation.requirement, observation.target);
     if (!current) return { ok: false, reason: "stale", detail: `The ${observation.requirement} read can no longer be verified.` };
     if (
       !observation.complete ||
@@ -818,10 +1181,1091 @@ async function restoreProjection(
   };
 }
 
+function semanticVoice(voice: { provider: string; model?: string; voiceId: string; label?: string }): string {
+  return voice.label ?? `${voice.provider} · ${voice.model ?? "default"} · ${voice.voiceId}`;
+}
+
+function generationPrompt(payload: Extract<WorldChatPreparedAction, { kind: "world-chat-reference-generation" }>): string {
+  const request = payload.action.request;
+  if ("prompt" in request && request.prompt) return request.prompt;
+  if (request.operation === "character-sheet" && request.styleOverride) return request.styleOverride;
+  if (request.operation === "location-view") return `${request.name} for ${request.sheetId}`;
+  return `${request.operation.replaceAll("-", " ")} for ${request.sheetId}`;
+}
+
+async function sharedResourceProjection(
+  store: WorldStore,
+  intent: ConversationActionPrepareIntent,
+  payload: WorldChatPreparedAction,
+  deps: WorldChatActionAdapterDeps,
+): Promise<PreparedConversationActionAuthority> {
+  let authority: PreparedConversationActionAuthority["authority"];
+  let authorityRevision = 0;
+  let approvalBlockedReason: string | undefined;
+  let shown: PreparedConversationActionAuthority["shown"];
+  const bundle = store.getBundle();
+
+  switch (payload.kind) {
+    case "world-chat-artifact-import": {
+      const folder = payload.action.source === "folder";
+      if (folder && (payload.action.supersedes !== undefined || payload.action.allowLarge !== undefined)) {
+        throw new Error("Replacement and large-file consent apply to a single selected artifact, not a folder import.");
+      }
+      if (payload.action.supersedes && !bundle.artifacts.some((artifact) => artifact.id === payload.action.supersedes)) {
+        throw new Error("The artifact being replaced is no longer in this world.");
+      }
+      authority = { kind: "artifact-store", id: intent.actionId };
+      if ((folder && !deps.pickFolder) || (!folder && !deps.pickFiles)) {
+        approvalBlockedReason = "This import needs the desktop host's file picker.";
+      }
+      shown = {
+        title: folder ? "Import an artifact folder" : "Import artifact files",
+        consequence: payload.action.supersedes
+          ? "Opens a host-owned picker after approval and files one immutable replacement linked to the artifact it supersedes."
+          : "Opens a host-owned picker after approval and copies only the files selected there into this world.",
+        affectedTargets: [...intent.targets],
+        ripples: [
+          ...(payload.action.productionId ? [`The imported artifacts belong to ${payload.action.productionId}.`] : []),
+          ...(payload.action.allowLarge ? ["This approval includes the existing large-file storage consent."] : []),
+        ],
+        permissionReason: "host-file-access",
+        body: {
+          family: "host-action",
+          action: folder ? "Choose one folder on this device" : "Choose files on this device",
+          effect: "The model, card, and conversation receive artifact IDs only; host paths and file bytes remain inside the coordinator.",
+        },
+      };
+      break;
+    }
+    case "world-chat-artifact-metadata": {
+      const artifact = bundle.artifacts.find((candidate) => candidate.id === payload.action.change.artifactId);
+      if (!artifact) throw new Error("That artifact is no longer in this world.");
+      authority = { kind: "artifact-store", id: intent.actionId };
+      const change = payload.action.change;
+      const fields = change.operation === "add-links"
+        ? [{ label: "Links", before: JSON.stringify(artifact.links), after: JSON.stringify([...new Set([...artifact.links, ...change.links])]) }]
+        : [{ label: "Owner", before: artifact.production ?? "World", after: change.productionId ?? "World" }];
+      shown = {
+        title: change.operation === "add-links" ? "Link the artifact" : "Change artifact ownership",
+        consequence: "Updates the artifact sidecar while keeping its immutable media and provenance unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: change.operation === "set-owner" ? ["Ownership changes where the artifact appears and what extraction may author."] : [],
+        permissionReason: "authored-change",
+        body: { family: "authored-diff", fields, conflicts: [], openChoices: [] },
+      };
+      break;
+    }
+    case "world-chat-artifact-extraction":
+      authority = { kind: "extraction", id: intent.actionId };
+      if (!bundle.artifacts.some((artifact) => artifact.id === payload.action.artifactId)) {
+        throw new Error("That artifact is no longer in this world.");
+      }
+      if (!deps.extractArtifact) approvalBlockedReason = "Artifact extraction is unavailable in this authoring session.";
+      shown = {
+        title: "Extract grounded facts from the artifact",
+        consequence: "Reads the filed document and offers only mechanically verified, quoted candidates for separate review.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "external-network-action",
+        body: {
+          family: "command",
+          commands: [{ label: "Read and verify the filed artifact" }],
+          expectedResult: "A pending extraction batch; no Canon or sheet change lands in this step.",
+          undoAvailable: false,
+        },
+      };
+      break;
+    case "world-chat-artifact-extraction-stop":
+      authority = { kind: "extraction", id: intent.actionId };
+      if (!deps.stopExtraction) approvalBlockedReason = "No active extraction controller is available.";
+      shown = {
+        title: "Stop artifact extraction",
+        consequence: "Stops the in-flight reading and leaves the filed artifact unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "external-network-action",
+        body: {
+          family: "command",
+          commands: [{ label: "Stop reading" }],
+          expectedResult: "The extraction stops without deleting the artifact.",
+          undoAvailable: false,
+        },
+      };
+      break;
+    case "world-chat-artifact-extraction-review": {
+      authority = { kind: "extraction", id: intent.actionId };
+      const artifact = bundle.artifacts.find((candidate) => candidate.id === payload.action.artifactId);
+      const candidate = artifact?.extraction?.pending.find((entry) => entry.hash === payload.action.candidateHash);
+      if (!artifact || !candidate) throw new Error("That extraction candidate is no longer pending.");
+      shown = {
+        title: `${payload.action.decision === "accept" ? "Accept" : "Reject"} extracted ${candidate.kind}`,
+        consequence: payload.action.decision === "accept"
+          ? "Applies this one grounded candidate through the existing Canon or sheet proposal authority."
+          : "Records this candidate as decided and writes no authored record.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "document",
+          mediaId: candidate.hash,
+          destination: candidate.kind === "canon" ? "World Canon" : `${artifact.production ?? "World"} ${candidate.kind} sheets`,
+          currentSelection: null,
+          reason: candidate.name,
+        },
+      };
+      break;
+    }
+    case "world-chat-artifact-reference": {
+      authority = { kind: "world-store", id: intent.actionId };
+      const artifact = bundle.artifacts.find((candidate) => candidate.id === payload.action.artifactId);
+      if (!artifact || (artifact.kind !== "image" && artifact.kind !== "board")) {
+        throw new Error("That artifact cannot be used as an image reference.");
+      }
+      shown = {
+        title: "Stage the artifact as a reference",
+        consequence: "Points the named generation slot at the existing artifact without copying or changing it.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [{ label: `Stage ${artifact.id} for ${payload.action.key}` }],
+          expectedResult: "The reference slot resolves to this artifact until it is cleared or replaced.",
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-import":
+      authority = { kind: "host", id: intent.actionId };
+      if (!deps.importReference) approvalBlockedReason = "This reference import needs the desktop host's image picker.";
+      shown = {
+        title: `Import ${payload.action.change.operation.replaceAll("-", " ")}`,
+        consequence: "Opens a host-owned image picker after approval; no host path or image bytes enter the conversation.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "host-file-access",
+        body: {
+          family: "host-action",
+          action: "Choose one image on this device",
+          effect: payload.action.change.operation.endsWith("candidate")
+            ? "The image lands as an unreviewed take; using it remains a separate action."
+            : "The chosen image is imported through the existing reference authority.",
+        },
+      };
+      break;
+    case "world-chat-reference-result-use": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const selection = "selection" in payload.action.change
+        ? payload.action.change.selection
+        : { source: "take" as const, takeId: payload.action.change.takeId };
+      const take = selection.source === "take"
+        ? bundle.referenceTakes.find((candidate) => candidate.id === selection.takeId)
+        : undefined;
+      const candidate = selection.source === "candidate"
+        ? bundle.referenceCandidates[payload.action.change.sheetId]?.[selection.candidateIndex - 1]
+        : undefined;
+      if (!take && !candidate) throw new Error("That reference result is no longer available.");
+      if (selection.source === "candidate" && !deps.useReferenceCandidate) {
+        approvalBlockedReason = "Raw reference candidate recovery is unavailable.";
+      }
+      const kit = bundle.referenceKits.find((candidate) => candidate.sheetId === payload.action.change.sheetId);
+      const currentSelection = kit?.mainPhoto?.sourceTakeId ??
+        kit?.compilations.find((compilation) => compilation.file === kit.designatedCompilation && compilation.accepted)?.source ??
+        null;
+      shown = {
+        title: payload.action.change.operation.replaceAll("-", " "),
+        consequence: "Uses one already-generated or imported result through the reference kit's existing review and history authority.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Generation approval never selects this result; this card is the separate artistic decision."],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "image",
+          mediaId: take?.id ?? `reference-candidate:${payload.action.change.sheetId}:${selection.source === "candidate" ? selection.candidateIndex : 0}`,
+          destination: `${payload.action.change.sheetId} reference kit`,
+          currentSelection: currentSelection === null ? null : String(currentSelection),
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-review": {
+      authority = { kind: "take-review", id: intent.actionId };
+      const take = bundle.referenceTakes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!take) throw new Error("That reference take is no longer available.");
+      shown = {
+        title: "Reject the reference take",
+        consequence: "Appends the ordinary cited review decision and retains the take and its provenance.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "image",
+          mediaId: take.id,
+          destination: take.reference?.sheetId ?? "Reference review history",
+          currentSelection: null,
+          reason: payload.action.note ?? payload.action.field,
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-change": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const change = payload.action.change;
+      const kit = await readKit(store, change.sheetId);
+      if (!kit) throw new Error("That reference kit is no longer available.");
+      let field: { label: string; before: string | null; after: string | null };
+      let title: string;
+      if (change.operation === "promote-look") {
+        const look = kit.kit.looks?.find((candidate) => candidate.id === change.lookId);
+        if (!look) throw new Error("That accepted look is no longer available.");
+        field = { label: "Identity anchor", before: kit.kit.mainPhoto?.sourceTakeId ?? null, after: look.sourceTakeId ?? null };
+        title = "Promote the character look";
+      } else if (change.operation === "attach-look") {
+        const look = kit.kit.looks?.find((candidate) => candidate.id === change.lookId);
+        if (!look) throw new Error("That accepted look is no longer available.");
+        field = {
+          label: "Attached scope",
+          before: look.attachedTo ? JSON.stringify(look.attachedTo) : null,
+          after: change.scope ? JSON.stringify(change.scope) : null,
+        };
+        title = change.scope ? "Attach the character look" : "Detach the character look";
+      } else {
+        const compilation = kit.kit.compilations.find((candidate) =>
+          candidate.accepted &&
+          candidate.format === change.compilation.format &&
+          candidate.compiledAt === change.compilation.compiledAt);
+        if (!compilation) throw new Error("That accepted compilation is no longer available.");
+        const current = kit.kit.compilations.find((candidate) => candidate.file === kit.kit.designatedCompilation);
+        field = {
+          label: "Designated compilation",
+          before: current ? `${current.format} · ${current.compiledAt}` : null,
+          after: `${compilation.format} · ${compilation.compiledAt}`,
+        };
+        title = "Designate the compilation";
+      }
+      shown = {
+        title,
+        consequence: "Updates the existing reference kit and retains prior takes, compilations, and review history.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: { family: "authored-diff", fields: [field], conflicts: [], openChoices: [] },
+      };
+      break;
+    }
+    case "world-chat-reference-tile-lock": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const kit = await readKit(store, payload.action.sheetId);
+      const tile = kit?.kit.tiles.find((candidate) =>
+        candidate.status === "generated" &&
+        candidate.angle === payload.action.angle &&
+        (payload.action.name === undefined || candidate.name === payload.action.name));
+      if (!tile) throw new Error("That generated reference tile is no longer available.");
+      shown = {
+        title: `Lock the ${payload.action.angle} tile`,
+        consequence: "Accepts this generated tile into the reference set and retains any superseded history.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "image",
+          mediaId: tile.sourceTakeId ?? `tile:${payload.action.angle}:${payload.action.name ?? "unnamed"}`,
+          destination: `${payload.action.sheetId} reference kit`,
+          currentSelection: null,
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-compile": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const sheet = bundle.sheets.find((candidate) => candidate.id === payload.action.sheetId);
+      const kit = await readKit(store, payload.action.sheetId);
+      if (!sheet || !kit?.kit.tiles.some((tile) => tile.status === "locked")) {
+        throw new Error("That sheet has no locked reference tiles to compile.");
+      }
+      authorityRevision = sheet.version;
+      shown = {
+        title: "Compile the reference grid",
+        consequence: "Builds the deterministic local grid from locked tiles and records it in the existing kit.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "command",
+          commands: [{ label: "Compile locked tiles" }],
+          expectedResult: "A local accepted compilation; no provider is called and no money is spent.",
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-style": {
+      authority = { kind: "reference-kit", id: intent.actionId };
+      const kit = await readKit(store, payload.action.sheetId);
+      shown = {
+        title: payload.action.style === null ? "Clear the sheet style" : "Set the sheet style",
+        consequence: "Changes only this sheet's rendering override; world Canon and accepted assets remain unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Future reference generations for this sheet use the resulting style."],
+        permissionReason: "authored-change",
+        body: {
+          family: "setting",
+          setting: "Sheet rendering style",
+          current: kit?.kit.styleOverride ?? null,
+          proposed: payload.action.style,
+          consequences: ["Existing accepted references remain pinned to their recorded provenance."],
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-generation": {
+      authority = { kind: "job-queue", id: intent.actionId };
+      const request = payload.action.request;
+      shown = {
+        title: `Generate ${request.operation.replaceAll("-", " ")}`,
+        consequence: "Describes generation intent only. A coordinator-owned route and durable quote are required before it can run.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Approving generation will not select any result; result use is a separate typed review action."],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "generation",
+          medium: "image",
+          purpose: request.operation.replaceAll("-", " "),
+          prompt: generationPrompt(payload),
+          references: "identityReferenceIds" in request
+            ? request.identityReferenceIds.map((id) => ({ id, role: "identity" }))
+            : [],
+          provider: "Pending coordinator-owned route",
+          model: "Pending coordinator-owned route",
+          quantity: "count" in request ? request.count : 1,
+          output: `${request.sheetId} reference candidates`,
+          cost: "Pending durable quote",
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-image-import": {
+      authority = { kind: "host", id: intent.actionId };
+      if (!deps.importReferenceImage) approvalBlockedReason = "Reference image import is unavailable in this host.";
+      const target = payload.action.target;
+      const label = target.surface === "world-image"
+        ? "key art candidate"
+        : target.surface === "master-look"
+          ? "master look candidate"
+          : `${target.key} staged reference`;
+      shown = {
+        title: `Import a ${label}`,
+        consequence: "Opens the trusted host picker only after approval and copies one validated image into the world's pending reference area.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Import does not accept a key-art or master-look candidate; selection remains a separate card."],
+        permissionReason: "host-file-access",
+        body: {
+          family: "host-action",
+          action: "Choose one image on this device",
+          effect: "The selected path and bytes remain in the trusted host and never enter the model payload, card, or conversation log.",
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-world-image-result-use": {
+      authority = { kind: "world-store", id: intent.actionId };
+      if (!bundle.keyArtCandidates[payload.action.candidateIndex - 1]) {
+        throw new Error("That key art candidate is no longer available.");
+      }
+      if (!deps.useWorldImage) approvalBlockedReason = "Key art selection is unavailable.";
+      shown = {
+        title: `Use key art candidate ${payload.action.candidateIndex}`,
+        consequence: "Promotes the selected pending image to the world's key art and clears the candidate set.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Generation or import never selects this result; this card is the separate artistic decision."],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "image",
+          mediaId: `world-image-candidate:${payload.action.candidateIndex}`,
+          destination: "World key art",
+          currentSelection: bundle.keyArt === null ? null : "Current key art",
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-master-look-result-use": {
+      authority = { kind: "proposal-manager", id: intent.actionId };
+      if (!bundle.masterLookCandidates[payload.action.candidateIndex - 1]) {
+        throw new Error("That master look candidate is no longer available.");
+      }
+      if (!deps.useMasterLook) approvalBlockedReason = "Master look selection is unavailable.";
+      shown = {
+        title: `Use master look candidate ${payload.action.candidateIndex}`,
+        consequence: "Accepts the selected image as a new version of the world look, preserving the prior look and its history.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Future image generation uses the new master look; existing takes retain their recorded provenance."],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "image",
+          mediaId: `master-look-candidate:${payload.action.candidateIndex}`,
+          destination: "World master look",
+          currentSelection: bundle.artDirection.masterLook ? "Current master look" : null,
+        },
+      };
+      break;
+    }
+    case "world-chat-reference-image-discard": {
+      authority = { kind: "world-store", id: intent.actionId };
+      if (!deps.discardReferenceImage) approvalBlockedReason = "Reference image removal is unavailable.";
+      const target = payload.action.target;
+      const available = target.surface === "world-image"
+        ? bundle.keyArtCandidates.length > 0
+        : target.surface === "master-look"
+          ? bundle.masterLookCandidates.length > 0
+          : bundle.stagedReferences[target.key] !== undefined;
+      if (!available) throw new Error("That pending reference image is no longer available.");
+      const label = target.surface === "world-image"
+        ? "pending key art candidates"
+        : target.surface === "master-look"
+          ? "pending master look candidates"
+          : `${target.key} staged reference`;
+      shown = {
+        title: `Discard ${label}`,
+        consequence: "Removes only the pending or staged image; accepted key art, look history, and generated takes remain unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "destructive-change",
+        body: {
+          family: "destructive",
+          removed: [label],
+          retained: ["Accepted reference assets", "Reference and art-direction history"],
+          dependentChanges: [],
+          blockers: [],
+          undoAvailable: false,
+        },
+      };
+      break;
+    }
+    case "world-chat-voice-assignment": {
+      authority = { kind: "voice", id: intent.actionId };
+      const sheet = bundle.sheets.find((candidate) =>
+        candidate.id === payload.action.sheetId && candidate.type === payload.action.sheetType);
+      if (!sheet) throw new Error("That sheet is no longer available.");
+      authorityRevision = sheet.version;
+      if (payload.action.voice && !deps.voiceAvailable) {
+        approvalBlockedReason = "The current voice catalogue cannot validate this assignment.";
+      }
+      shown = {
+        title: payload.action.voice ? "Assign the voice" : "Remove the voice",
+        consequence: "Versions the character sheet through the existing voice-assignment authority and preserves its ripple history.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Future dialogue generation uses the resulting assignment; existing takes stay pinned."],
+        permissionReason: "authored-change",
+        body: {
+          family: "setting",
+          setting: "Character voice",
+          current: sheet.voice ? semanticVoice(sheet.voice) : null,
+          proposed: payload.action.voice ? semanticVoice(payload.action.voice) : null,
+          consequences: ["Existing generated dialogue is not replaced."],
+        },
+      };
+      break;
+    }
+    case "world-chat-voice-audition":
+      authority = { kind: "voice", id: intent.actionId };
+      shown = {
+        title: "Generate a voice audition",
+        consequence: "Describes a privacy-sensitive audio preview only; a coordinator-owned route and quote are required before it can run.",
+        affectedTargets: [...intent.targets],
+        ripples: ["The audition does not assign the voice. Assignment remains a separate typed action."],
+        permissionReason: "privacy-sensitive",
+        body: {
+          family: "generation",
+          medium: "audio",
+          purpose: `Audition ${semanticVoice(payload.action.voice)}`,
+          prompt: payload.action.text ?? "Use the character's coordinator-selected audition line.",
+          references: [],
+          provider: payload.action.voice.provider,
+          model: payload.action.voice.model,
+          quantity: 1,
+          output: "Transient voice audition",
+          cost: "Pending durable quote",
+        },
+      };
+      break;
+    case "world-chat-voice-clone":
+      authority = { kind: "voice", id: intent.actionId };
+      if (!deps.pickFiles) approvalBlockedReason = "Voice cloning needs the desktop host's recording picker.";
+      shown = {
+        title: `Clone the voice “${payload.action.name}”`,
+        consequence: "A voice recording is biometric-like identity data. Approve only with the recorded speaker's informed consent; the recording is copied into this world and may be sent to the selected voice provider when used.",
+        affectedTargets: [...intent.targets],
+        ripples: payload.action.sheetId ? [`The clone records ${payload.action.sheetId} as provenance, not ownership.`] : [],
+        permissionReason: "privacy-sensitive",
+        body: {
+          family: "host-action",
+          action: "Choose the consented speaker recording after approval",
+          effect: "The required host gesture keeps its path and bytes out of the model, card, and conversation log; cancelling creates no voice.",
+        },
+      };
+      break;
+    case "world-chat-voice-clip-review": {
+      authority = { kind: "take-review", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const take = production?.takes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!production || !take || take.kind !== "voice") {
+        throw new Error("That voice clip is no longer available for review.");
+      }
+      if (production.reviews.some((review) => review.takeId === take.id)) {
+        throw new Error("That voice clip has already been reviewed.");
+      }
+      shown = {
+        title: `${payload.action.review.decision === "accept" ? "Accept" : "Reject"} the voice clip`,
+        consequence: payload.action.review.decision === "accept"
+          ? "Records the review and selects this immutable voice take for the named shot in one commit."
+          : "Appends the cited rejection while leaving the current shot selection unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind: "audio",
+          mediaId: take.id,
+          destination: payload.action.review.shotId ?? production.meta.id,
+          currentSelection: payload.action.review.shotId
+            ? production.selections[payload.action.review.shotId]?.acceptedTakeId ?? null
+            : null,
+          ...(payload.action.review.decision === "reject"
+            ? { reason: `${payload.action.review.citation.sheet} · ${payload.action.review.citation.field}${payload.action.review.citation.note ? ` · ${payload.action.review.citation.note}` : ""}` }
+            : {}),
+        },
+      };
+      break;
+    }
+    case "world-chat-world-archive": {
+      authority = { kind: "world-store", id: intent.actionId };
+      const inFlight = deps.inFlightWorldJobs?.() ?? 0;
+      const blockers = inFlight > 0 ? [`${inFlight} world job${inFlight === 1 ? " is" : "s are"} still running.`] : [];
+      if (!deps.archiveWorld) approvalBlockedReason = "World archiving is unavailable in this host.";
+      else if (blockers[0]) approvalBlockedReason = blockers[0];
+      shown = {
+        title: `Archive ${bundle.meta.name}`,
+        consequence: "Moves the whole world out of the active library. Its files, identities, conversations, and history are retained.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "world-administration",
+        body: {
+          family: "destructive",
+          removed: ["The world from the active library"],
+          retained: ["All world files", "Version history", "Conversation cards and receipts"],
+          dependentChanges: ["No creative record is deleted or rewritten."],
+          blockers,
+          undoAvailable: false,
+        },
+      };
+      break;
+    }
+    case "world-chat-world-export":
+      authority = { kind: "export", id: intent.actionId };
+      if (!deps.exportWorld) approvalBlockedReason = "World export is unavailable in this host.";
+      shown = {
+        title: `Export ${bundle.meta.name}`,
+        consequence: "Copies a portable world with authored history while excluding caches, locks, staging, and private conversation working files.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "export",
+        body: {
+          family: "host-action",
+          action: "Create a portable world export",
+          effect: "The destination is chosen by the trusted host and is never written into the model payload, card, or conversation log.",
+        },
+      };
+      break;
+    case "world-chat-production-style": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      shown = {
+        title: payload.action.style === null ? "Clear the production style" : "Set the production style",
+        consequence: "Updates the production's scoped style through its world-owned production metadata authority.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Future production generations inherit this style; accepted assets remain pinned."],
+        permissionReason: "authored-change",
+        body: {
+          family: "setting",
+          setting: "Production style",
+          current: production.meta.styleOverride ?? null,
+          proposed: payload.action.style,
+          consequences: ["The world art direction is not copied or changed."],
+        },
+      };
+      break;
+    }
+    default:
+      throw new Error("That shared-resource action cannot be projected.");
+  }
+
+  await writePreparation(store, "world", intent.actionId, payload);
+  return {
+    authority,
+    authorityRevision,
+    shown,
+    ...(approvalBlockedReason !== undefined ? { approvalBlockedReason } : {}),
+  };
+}
+
+function referenceMutationOptions(
+  action: ConversationActionCard,
+  precondition: WorldStatePrecondition,
+) {
+  return {
+    source: `world-chat:${action.conversationId}:${action.actionId}`,
+    requestId: action.actionId,
+    precondition,
+  };
+}
+
+async function useReferenceResult(
+  store: WorldStore,
+  payload: WorldChatReferenceResultUseAction,
+  action: ConversationActionCard,
+  precondition: WorldStatePrecondition,
+): Promise<void> {
+  const change = payload.action.change;
+  const bundle = store.getBundle();
+  const sheet = bundle.sheets.find((candidate) => candidate.id === change.sheetId);
+  if (!sheet) throw new Error("That sheet is no longer available.");
+  const options = referenceMutationOptions(action, precondition);
+
+  if (change.operation === "choose-anchor") {
+    if (change.selection.source !== "take") throw new Error("That raw candidate requires its recovery authority.");
+    const result = await acceptMainPhoto(
+      store,
+      sheet,
+      bundle,
+      change.selection,
+      null,
+      { commitAnchor: (owned, sheetId, input) => chooseAnchor(owned, sheetId, input, options) },
+    );
+    if (result.status === "failed") throw new Error(result.error);
+    return;
+  }
+
+  let takeId: string;
+  if (change.operation === "accept-location-view") {
+    if (change.selection.source !== "take") throw new Error("That raw candidate requires its recovery authority.");
+    takeId = change.selection.takeId;
+  } else {
+    takeId = change.takeId;
+  }
+  const expectedKind = change.operation === "accept-location-view"
+    ? "location-view"
+    : change.operation === "accept-character-sheet"
+      ? "sheet"
+      : "look";
+  const take = pendingReferenceTake(
+    bundle.referenceTakes,
+    bundle.referenceReviews,
+    takeId,
+    change.sheetId,
+    expectedKind,
+  );
+  if (!take?.media || basename(take.media) !== take.media) throw new Error("That reference take is unavailable or already decided.");
+  const media = `references/${change.sheetId}/takes/${take.id}/${take.media}`;
+  if (!(await stat(toExtendedLength(join(store.dir, media))).catch(() => null))) {
+    throw new Error("That reference take's media is unavailable.");
+  }
+  const review = referenceReviewDecision(store.now(), take, "accept");
+
+  if (change.operation === "accept-location-view") {
+    if (sheet.type !== "location") throw new Error("A location view can only be accepted for a location.");
+    const frozen = take.params["provenance"] as { sheets?: Record<string, number> } | undefined;
+    const sheetVersion = frozen?.sheets?.[change.sheetId] ?? take.provenance.sheets[change.sheetId];
+    if (sheetVersion === undefined) throw new Error("That take does not record the location version it depicts.");
+    await acceptLocationView(store, sheet, {
+      id: `lv_${take.id.slice(3)}`,
+      name: change.name,
+      file: `takes/${take.id}/${take.media}`,
+      takeId: take.id,
+      sheetVersion,
+      artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+      ...(change.establishing !== undefined ? { establishing: change.establishing } : {}),
+      ...(change.replaceExistingName !== undefined ? { replaceExistingName: change.replaceExistingName } : {}),
+      review,
+    }, options);
+    return;
+  }
+
+  if (change.operation === "accept-character-sheet") {
+    const frozen = take.params["provenance"] as { sheets?: Record<string, number>; anchorFile?: string } | undefined;
+    const sheetVersion = frozen?.sheets?.[change.sheetId] ?? take.provenance.sheets[change.sheetId];
+    if (sheetVersion === undefined || (take.provider !== "user" && !frozen?.anchorFile)) {
+      throw new Error("That take does not record the character identity it was generated from.");
+    }
+    await acceptCharacterSheet(store, sheet, {
+      file: `takes/${take.id}/${take.media}`,
+      takeId: take.id,
+      sheetVersion,
+      ...(frozen?.anchorFile ? { anchorFile: frozen.anchorFile } : {}),
+      artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+      review,
+    }, options);
+    return;
+  }
+
+  const lookKind = take.params["lookKind"];
+  const lookPrompt = take.params["lookPrompt"];
+  if (
+    (lookKind !== "costume" && lookKind !== "pose-expression" && lookKind !== "condition-age") ||
+    typeof lookPrompt !== "string" ||
+    lookPrompt.trim() === ""
+  ) throw new Error("That take does not record the look it was generated for.");
+  await acceptCharacterLook(store, change.sheetId, {
+    id: take.id,
+    file: `takes/${take.id}/${take.media}`,
+    kind: lookKind,
+    prompt: lookPrompt.trim(),
+    ...(take.jobId ? { jobId: take.jobId } : {}),
+    takeId: take.id,
+    artDirectionVersion: take.provenance.artDirectionVersion ?? bundle.artDirection.version,
+    review,
+  }, options);
+}
+
+async function executeSharedResource(
+  store: WorldStore,
+  gate: ProposalManager | null,
+  payload: WorldChatPreparedAction,
+  action: ConversationActionCard,
+  precondition: WorldStatePrecondition,
+  now: () => string,
+  deps: WorldChatActionAdapterDeps,
+): Promise<ConversationActionExecutionOutcome> {
+  const options = referenceMutationOptions(action, precondition);
+  switch (payload.kind) {
+    case "world-chat-artifact-import": {
+      if (payload.action.source === "folder") {
+        const folder = await deps.pickFolder?.();
+        if (!folder) return { status: "cancelled", detail: "No folder was selected." };
+        const stale = precondition();
+        if (stale) throw new WorldStateStaleError(stale);
+        const report = await importFolder(store, folder, deps.mediaProbe, () => store.isClosed());
+        await store.commit({ kind: "world-chat-artifact-import", source: options.source, files: [], requestId: action.actionId });
+        return {
+          status: "completed",
+          receipt: {
+            kind: "artifact-import",
+            id: action.actionId,
+            summary: `Imported ${report.filed.length} and reused ${report.deduplicated.length} artifact files; ${report.excluded.length} were excluded.`,
+          },
+        };
+      }
+      const selected = await deps.pickFiles?.({ accept: ATTACHABLE_EXTENSIONS }) ?? [];
+      if (selected.length === 0) return { status: "cancelled", detail: "No files were selected." };
+      if (payload.action.supersedes !== undefined && selected.length !== 1) {
+        return { status: "failed", detail: "Choose one file for an artifact replacement." };
+      }
+      const artifactIds: string[] = [];
+      let refused = 0;
+      for (const [index, sourcePath] of selected.entries()) {
+        const filed = await fileArtifact(store, {
+          sourcePath,
+          links: payload.action.links,
+          ...(payload.action.allowLarge !== undefined ? { allowLarge: payload.action.allowLarge } : {}),
+          ...(payload.action.supersedes !== undefined ? { supersedes: payload.action.supersedes } : {}),
+          ...(payload.action.productionId !== undefined ? { production: payload.action.productionId } : {}),
+          ...(deps.mediaProbe !== undefined ? { mediaProbe: deps.mediaProbe } : {}),
+          mutation: index === 0
+            ? { ...options, requestId: `${action.actionId}:${index + 1}` }
+            : { source: options.source, requestId: `${action.actionId}:${index + 1}` },
+        });
+        if (filed.outcome === "filed" || filed.outcome === "deduplicated") artifactIds.push(filed.artifact.id);
+        else refused += 1;
+      }
+      if (artifactIds.length === 0) return { status: "failed", detail: "None of the selected files could be filed." };
+      await store.commit({ kind: "world-chat-artifact-import", source: options.source, files: [], requestId: action.actionId });
+      return {
+        status: "completed",
+        receipt: {
+          kind: "artifact-import",
+          id: artifactIds[0]!,
+          summary: `Filed ${artifactIds.length} artifact${artifactIds.length === 1 ? "" : "s"}${refused > 0 ? `; ${refused} were refused` : ""}.`,
+        },
+      };
+    }
+    case "world-chat-artifact-metadata": {
+      const change = payload.action.change;
+      const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === change.artifactId);
+      if (!artifact) throw new Error("That artifact is no longer in this world.");
+      if (
+        change.operation === "set-owner" &&
+        change.productionId !== null &&
+        !store.getBundle().productions.some((production) => production.meta.id === change.productionId)
+      ) throw new Error("That production is no longer in this world.");
+      const updated = change.operation === "add-links"
+        ? await addLinks(store, artifact, change.links, options)
+        : await setOwner(store, artifact, change.productionId, options);
+      return {
+        status: "completed",
+        receipt: { kind: "artifact", id: updated.id, summary: "The artifact metadata was updated." },
+      };
+    }
+    case "world-chat-artifact-extraction": {
+      if (!deps.extractArtifact) return { status: "failed", detail: "Artifact extraction is unavailable." };
+      const result = await deps.extractArtifact(payload.action.artifactId, options);
+      if (result.outcome === "no-text" || result.outcome === "unavailable") {
+        return { status: "failed", detail: result.outcome === "no-text" ? "That artifact has no readable text." : "Artifact extraction is unavailable." };
+      }
+      return {
+        status: "completed",
+        receipt: {
+          kind: "extraction",
+          id: payload.action.artifactId,
+          summary: `Extraction finished with ${result.found} candidate${result.found === 1 ? "" : "s"} and ${result.dropped} dropped claim${result.dropped === 1 ? "" : "s"}.`,
+        },
+      };
+    }
+    case "world-chat-artifact-extraction-stop":
+      deps.stopExtraction?.(payload.action.artifactId);
+      return { status: "completed", receipt: { kind: "extraction", id: payload.action.artifactId, summary: "The extraction stop was requested." } };
+    case "world-chat-artifact-extraction-review": {
+      if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
+      const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === payload.action.artifactId);
+      if (!artifact) throw new Error("That artifact is no longer in this world.");
+      await resolveCandidate(
+        store,
+        gate,
+        artifact,
+        payload.action.candidateHash,
+        payload.action.decision,
+        options,
+      );
+      return {
+        status: "completed",
+        receipt: {
+          kind: "extraction-review",
+          id: payload.action.candidateHash,
+          summary: `The extraction candidate was ${payload.action.decision === "accept" ? "accepted" : "rejected"}.`,
+        },
+      };
+    }
+    case "world-chat-artifact-reference": {
+      const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === payload.action.artifactId);
+      if (!artifact || (artifact.kind !== "image" && artifact.kind !== "board")) {
+        throw new Error("That artifact cannot be used as an image reference.");
+      }
+      await store.gateOp(async () => {
+        const stale = precondition();
+        if (stale) throw new WorldStateStaleError(stale);
+        await rm(toExtendedLength(join(store.dir, stagedReferenceDir(payload.action.key))), { recursive: true, force: true });
+        await atomicWriteFile(
+          join(store.dir, stagedReferenceDir(payload.action.key), "artifact.json"),
+          Buffer.from(JSON.stringify({ file: artifact.file }), "utf8"),
+        );
+      });
+      return { status: "completed", receipt: { kind: "staged-reference", id: artifact.id, summary: "The artifact was staged as a reference." } };
+    }
+    case "world-chat-reference-import": {
+      if (!deps.importReference) return { status: "failed", detail: "Reference import is unavailable." };
+      const result = await deps.importReference(payload.action.change, options);
+      if (result.status !== "completed") return { status: result.status, detail: result.detail };
+      return {
+        status: "completed",
+        receipt: { kind: "reference-import", id: result.id ?? action.actionId, summary: "The reference image was imported." },
+      };
+    }
+    case "world-chat-reference-result-use": {
+      const change = payload.action.change;
+      if ("selection" in change && change.selection.source === "candidate") {
+        if (!deps.useReferenceCandidate) return { status: "failed", detail: "Raw reference candidate recovery is unavailable." };
+        const result = await deps.useReferenceCandidate(change, options);
+        if (result.status === "failed") return { status: "failed", detail: result.detail };
+        return {
+          status: "completed",
+          receipt: { kind: "reference-result", id: result.id ?? action.actionId, summary: "The selected reference result was accepted." },
+        };
+      }
+      await useReferenceResult(store, payload, action, precondition);
+      const takeId = "selection" in change
+        ? change.selection.source === "take"
+          ? change.selection.takeId
+          : action.actionId
+        : change.takeId;
+      return {
+        status: "completed",
+        receipt: {
+          kind: "reference-result",
+          id: takeId,
+          summary: "The selected reference result was accepted.",
+        },
+      };
+    }
+    case "world-chat-reference-review": {
+      const take = store.getBundle().referenceTakes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!take) throw new Error("That reference take is no longer available.");
+      await recordReferenceReview(
+        store,
+        take,
+        "reject",
+        { field: payload.action.field, ...(payload.action.note ? { note: payload.action.note } : {}) },
+        options,
+      );
+      return { status: "completed", receipt: { kind: "reference-review", id: take.id, summary: "The reference take was rejected with its citation retained." } };
+    }
+    case "world-chat-reference-change": {
+      const change = payload.action.change;
+      const sheet = store.getBundle().sheets.find((candidate) => candidate.id === change.sheetId);
+      if (!sheet) throw new Error("That sheet is no longer available.");
+      if (change.operation === "promote-look") {
+        await promoteCharacterLook(store, sheet, change.lookId, options);
+      } else if (change.operation === "attach-look") {
+        if (
+          change.scope &&
+          !store.getBundle().productions.some((production) => production.meta.id === change.scope!.productionId)
+        ) throw new Error("That production is no longer in this world.");
+        await attachCharacterLook(store, change.sheetId, change.lookId, change.scope, options);
+      } else {
+        const kit = await readKit(store, change.sheetId);
+        const compilation = kit?.kit.compilations.find((candidate) =>
+          candidate.accepted &&
+          candidate.format === change.compilation.format &&
+          candidate.compiledAt === change.compilation.compiledAt);
+        if (!compilation) throw new Error("That accepted compilation is no longer available.");
+        await designate(store, change.sheetId, compilation.file, options);
+      }
+      return { status: "completed", receipt: { kind: "reference-kit", id: change.sheetId, summary: "The reference kit was updated." } };
+    }
+    case "world-chat-reference-tile-lock":
+      await lockTile(store, payload.action.sheetId, payload.action.angle, payload.action.name, options);
+      return { status: "completed", receipt: { kind: "reference-kit", id: payload.action.sheetId, summary: "The generated tile was locked into the reference set." } };
+    case "world-chat-reference-compile": {
+      const sheet = store.getBundle().sheets.find((candidate) => candidate.id === payload.action.sheetId);
+      if (!sheet) throw new Error("That sheet is no longer available.");
+      const result = await compileGrid(store, sheet, now);
+      await landGrid(store, sheet, result, options);
+      return { status: "completed", receipt: { kind: "reference-compilation", id: payload.action.sheetId, summary: "The deterministic reference grid was compiled." } };
+    }
+    case "world-chat-reference-style":
+      await setStyleOverride(store, payload.action.sheetId, payload.action.style, options);
+      return { status: "completed", receipt: { kind: "reference-kit", id: payload.action.sheetId, summary: "The sheet style was updated." } };
+    case "world-chat-reference-image-import": {
+      if (!deps.importReferenceImage) return { status: "failed", detail: "Reference image import is unavailable." };
+      const result = await deps.importReferenceImage(payload.action.target, options);
+      if (result.status !== "completed") return { status: result.status, detail: result.detail };
+      return {
+        status: "completed",
+        receipt: { kind: "reference-image-import", id: result.id ?? action.actionId, summary: "The image was imported into the pending reference area." },
+      };
+    }
+    case "world-chat-reference-world-image-result-use": {
+      if (!await deps.useWorldImage?.(payload.action.candidateIndex, options)) {
+        return { status: "failed", detail: "That key art candidate could not be selected." };
+      }
+      return { status: "completed", receipt: { kind: "world-image", id: action.actionId, summary: "The selected candidate became the world's key art." } };
+    }
+    case "world-chat-reference-master-look-result-use": {
+      if (!await deps.useMasterLook?.(payload.action.candidateIndex, options)) {
+        return { status: "failed", detail: "That master look candidate could not be selected." };
+      }
+      return { status: "completed", receipt: { kind: "master-look", id: action.actionId, summary: "The selected candidate became a new master look version." } };
+    }
+    case "world-chat-reference-image-discard": {
+      if (!await deps.discardReferenceImage?.(payload.action.target, options)) {
+        return { status: "failed", detail: "That pending reference image could not be removed." };
+      }
+      return { status: "completed", receipt: { kind: "reference-image-discard", id: action.actionId, summary: "The pending reference image was removed." } };
+    }
+    case "world-chat-reference-generation":
+    case "world-chat-voice-audition":
+      return { status: "failed", detail: "A durable coordinator-owned generation quote is required." };
+    case "world-chat-voice-assignment": {
+      if (payload.action.voice && !(await deps.voiceAvailable?.(payload.action.voice))) {
+        return { status: "failed", detail: "That voice is no longer available." };
+      }
+      const result = await applyVoiceAssignment(
+        store,
+        {
+          path: `${sheetDir(payload.action.sheetType)}/${payload.action.sheetId}.md`,
+          voice: payload.action.voice,
+        },
+        options,
+      );
+      return { status: "completed", receipt: { kind: "sheet-version", id: result.commitId, summary: payload.action.voice ? "The voice was assigned." : "The voice assignment was removed." } };
+    }
+    case "world-chat-voice-clone": {
+      const selected = await deps.pickFiles?.({ accept: [...CLONEABLE_AUDIO_EXTENSIONS] }) ?? [];
+      if (selected.length === 0) return { status: "cancelled", detail: "No recording was selected." };
+      if (selected.length !== 1) return { status: "failed", detail: "Choose one consented speaker recording." };
+      const result = await cloneVoice(store, store.getBundle().clonedVoices, {
+        sourcePath: selected[0]!,
+        name: payload.action.name,
+        description: payload.action.description,
+        consent: true,
+        ...(payload.action.sheetId !== undefined ? { sheetId: payload.action.sheetId } : {}),
+        mutation: options,
+      });
+      if (!result.ok) return { status: "failed", detail: result.reason };
+      return { status: "completed", receipt: { kind: "voice", id: result.voice.id, summary: "The consented recording was cloned into the world's voice library." } };
+    }
+    case "world-chat-voice-clip-review": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const take = production?.takes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!production || !take || take.kind !== "voice") throw new Error("That voice clip is no longer available for review.");
+      if (payload.action.review.decision === "accept") {
+        await acceptTake(store, production, {
+          takeId: take.id,
+          shotId: payload.action.review.shotId,
+          by: "user",
+        }, options);
+      } else {
+        await rejectTake(store, production, {
+          takeId: take.id,
+          ...(payload.action.review.shotId !== undefined ? { shotId: payload.action.review.shotId } : {}),
+          by: "user",
+          citation: payload.action.review.citation,
+        }, options);
+      }
+      return {
+        status: "completed",
+        receipt: {
+          kind: "voice-review",
+          id: take.id,
+          summary: `The voice clip was ${payload.action.review.decision === "accept" ? "accepted" : "rejected"}.`,
+        },
+      };
+    }
+    case "world-chat-world-archive": {
+      const inFlight = deps.inFlightWorldJobs?.() ?? 0;
+      if (inFlight > 0) return { status: "failed", detail: "World jobs are still running." };
+      if (!deps.archiveWorld) return { status: "failed", detail: "World archiving is unavailable." };
+      const archived = await deps.archiveWorld();
+      return { status: "completed", receipt: { kind: "world-archive", id: archived.id, summary: "The world was archived with its history retained." } };
+    }
+    case "world-chat-world-export": {
+      if (!deps.exportWorld) return { status: "failed", detail: "World export is unavailable." };
+      const exported = await deps.exportWorld(action.actionId);
+      await store.commit({ kind: "world-chat-world-export", source: options.source, files: [], requestId: action.actionId });
+      return { status: "completed", receipt: { kind: "world-export", id: exported.id, summary: "The portable world export completed." } };
+    }
+    case "world-chat-production-style":
+      await setProductionStyle(
+        store,
+        payload.action.productionId,
+        payload.action.style,
+        options,
+      );
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The production style was updated." } };
+    default:
+      return { status: "failed", detail: "That shared-resource action cannot execute." };
+  }
+}
+
 export function worldChatActionAdapters(
   store: WorldStore,
   gate: ProposalManager | null,
   now: () => string,
+  deps: WorldChatActionAdapterDeps = {},
 ): ConversationActionAuthorityAdapter[] {
   const proposal: ConversationActionAuthorityAdapter = {
     actionKind: "world-chat-proposal",
@@ -1299,6 +2743,114 @@ export function worldChatActionAdapters(
     ...(undo ? { undo } : {}),
   });
 
+  const sharedResource = (actionKind: WorldChatPreparedAction["kind"]): ConversationActionAuthorityAdapter => {
+    const parse = (value: unknown): WorldChatPreparedAction => {
+      const payload = WorldChatPreparedActionSchema.parse(value);
+      if (payload.kind !== actionKind) throw new Error("The prepared shared-resource action has the wrong kind.");
+      return payload;
+    };
+    return {
+      actionKind,
+      prepare: async ({ intent, payload }) => {
+        const current = observationsCurrent(store, intent);
+        if (!current.ok) throw new Error(current.detail);
+        return sharedResourceProjection(store, intent, parse(payload), deps);
+      },
+      recoverPreparation: async (intent) => {
+        const payload = await readPreparation(store, "world", intent);
+        if (!payload) return null;
+        const current = observationsCurrent(store, intent);
+        if (!current.ok) throw new Error(current.detail);
+        return sharedResourceProjection(store, intent, parse(payload), deps);
+      },
+      abandonPreparation: (intent) => removePreparation(store, "world", intent.actionId),
+      validate: async (action) => {
+        const payload = await readPreparation(store, "world", action);
+        if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };
+        const current = observationsCurrent(store, action);
+        if (!current.ok) {
+          await removePreparation(store, "world", action.actionId);
+          return current;
+        }
+        let projection: PreparedConversationActionAuthority;
+        try {
+          projection = await sharedResourceProjection(store, action, parse(payload), deps);
+        } catch {
+          await removePreparation(store, "world", action.actionId);
+          return { ok: false, reason: "stale", detail: "The shared resource changed after this card was prepared." };
+        }
+        if (projection.approvalBlockedReason) {
+          return { ok: false, reason: "blocked", detail: projection.approvalBlockedReason };
+        }
+        if (conversationActionDigest(projection.shown) !== action.previewDigest) {
+          await removePreparation(store, "world", action.actionId);
+          return { ok: false, reason: "stale", detail: "The action preview changed after this card was prepared." };
+        }
+        return { ok: true };
+      },
+      execute: async (action) => {
+        const payload = parse(await readPreparation(store, "world", action));
+        try {
+          const outcome = await executeSharedResource(
+            store,
+            gate,
+            payload,
+            action,
+            observationPrecondition(store, action),
+            now,
+            deps,
+          );
+          await removePreparation(store, "world", action.actionId);
+          return outcome;
+        } catch (error) {
+          if (error instanceof WorldStateStaleError) {
+            await removePreparation(store, "world", action.actionId);
+            return { status: "stale", detail: error.detail };
+          }
+          throw error;
+        }
+      },
+      deny: (action) => removePreparation(store, "world", action.actionId),
+      reconcile: async (action) => {
+        const committed = await committedAction(store, action.actionId);
+        return committed
+          ? {
+              status: "completed",
+              receipt: { kind: action.authority.kind, id: committed.commitId, summary: "The shared-resource action completed." },
+            }
+          : null;
+      },
+    };
+  };
+
+  const sharedResources = [
+    "world-chat-artifact-import",
+    "world-chat-artifact-metadata",
+    "world-chat-artifact-extraction",
+    "world-chat-artifact-extraction-stop",
+    "world-chat-artifact-extraction-review",
+    "world-chat-artifact-reference",
+    "world-chat-reference-import",
+    "world-chat-reference-result-use",
+    "world-chat-reference-review",
+    "world-chat-reference-change",
+    "world-chat-reference-tile-lock",
+    "world-chat-reference-compile",
+    "world-chat-reference-style",
+    "world-chat-reference-generation",
+    "world-chat-reference-image-import",
+    "world-chat-reference-world-image-result-use",
+    "world-chat-reference-master-look-result-use",
+    "world-chat-reference-image-discard",
+    "world-chat-voice-assignment",
+    "world-chat-voice-audition",
+    "world-chat-voice-clone",
+    "world-chat-voice-clip-review",
+    "world-chat-world-archive",
+    "world-chat-world-export",
+    "world-chat-production-style",
+  ] satisfies readonly WorldChatPreparedAction["kind"][];
+
   const canonAction = proposalBacked(
     "world-chat-canon",
     (value) => WorldChatCanonActionSchema.parse(value),
@@ -1382,6 +2934,7 @@ export function worldChatActionAdapters(
     sheetRestore,
     artDirectionAction,
     artDirectionRestore,
+    ...sharedResources.map(sharedResource),
   ];
 }
 
