@@ -3352,9 +3352,16 @@ export function ActivityScreen() {
   // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
   // The build holds the join, so read it: dropping those entries would underreport every world
   // that was founded from a paid preview.
-  const genesisForActiveWorld = new Set(
-    (state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
-  );
+  // The build is pruned from the snapshot once every item has landed, which is exactly when
+  // the founding went well — so the coordinator also keeps the pair it harvested before pruning
+  // (issue 531). Both are read: the build for a founding in this session, the map after any
+  // restart. Neither ever names another world's genesis as this one's.
+  const genesisForActiveWorld = new Set([
+    ...(state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
+    ...Object.entries(state?.app.worldGenesis ?? {})
+      .filter(([worldId]) => worldId === activeWorldId)
+      .map(([, genesisId]) => genesisId),
+  ]);
   const inScope = (entry: LedgerEntry): boolean =>
     scope === "all" ||
     activeWorldId === null ||

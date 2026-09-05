@@ -127,3 +127,33 @@ describe("Activity spend obeys the screen's world scope (issue 305 §8)", () => 
     assert.ok(html.includes("$0.00"), "a genesis with no build for this world is not this world's");
   });
 });
+
+describe("the founding preview survives the build being forgotten (issue 531)", () => {
+  const renderWith = (ledger: LedgerEntry[], worldGenesis: Record<string, string>): string => {
+    const state: ClientState = { ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, ledger, builds: [], worldGenesis } };
+    __setStateForTest(state);
+    return renderToString(
+      <MemoryRouter>
+        <ActivityScreen />
+      </MemoryRouter>,
+    ).replace(/<!-- -->/g, "");
+  };
+
+  it("counts this world's founding preview from the world→genesis mapping when no build is left in the snapshot", () => {
+    // A fully-landed build is pruned at the next startup; the money it was spent under is still in
+    // window, and the mapping the coordinator harvests before pruning is what keeps it this world's.
+    const html = renderWith(
+      [entry({ jobId: "jb_01J8E0000000000000000000K3", worldId: GENESIS_ID, actualMicroUsd: 1_000_000 })],
+      { [FIXTURE_WORLD_ID]: GENESIS_ID },
+    );
+    assert.match(html, /\$1\.00/);
+  });
+
+  it("still never claims another world's founding preview through the mapping", () => {
+    const html = renderWith(
+      [entry({ jobId: "jb_01J8E0000000000000000000K4", worldId: OTHER_GENESIS_ID, actualMicroUsd: 1_000_000 })],
+      { [FIXTURE_WORLD_ID]: GENESIS_ID, [OTHER_WORLD_ID]: OTHER_GENESIS_ID },
+    );
+    assert.doesNotMatch(html, /\$1\.00/);
+  });
+});
