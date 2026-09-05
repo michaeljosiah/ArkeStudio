@@ -15,7 +15,7 @@ import { writeFile, readFile, rename, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, resolvePerformanceLine, performanceLineKey, ulid } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
-import { reviewPerformance } from "../../src/audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
 import { keepPerformanceRecording } from "../../src/audio/performances.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -212,5 +212,17 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   const pairRender = buildRenderPlan({ production: afterPair, timeline: afterPair.timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" });
   assert.ok(pairRender.ok, pairRender.ok ? "" : pairRender.reason);
   assert.deepEqual(pairRender.plan.audio.filter(a => a.role === "dialogue").map(a => [a.startSec, a.endSec]).sort((a,b) => a[0]!-b[0]!), [[0.25,1.25],[1,1.5]]);
+
+  const clear = { kind: "clear-performance-selection" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    lineKey: performanceLineKey(next.target), expectedSelectionHash: afterPair.performanceReview.selectionHash };
+  await assert.rejects(clearPerformanceSelection(store, { ...clear, expectedSelectionHash: "stale" }), /selection changed/);
+  const missingMedia = join(dir, `productions/${production.meta.id}/performances/${next.id}/${next.file}`);
+  await rename(missingMedia, `${missingMedia}.missing`);
+  try { await clearPerformanceSelection(store, clear); await clearPerformanceSelection(store, clear); }
+  finally { await rename(`${missingMedia}.missing`, missingMedia); }
+  const cleared = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(cleared.performanceReview.selections[clear.lineKey]!.performanceId, null);
+  assert.deepEqual(cleared.performanceReview.reviews, afterPair.performanceReview.reviews);
+  assert.deepEqual(cleared.timeline, afterPair.timeline, "clearing selection leaves already placed audio alone");
 
 });

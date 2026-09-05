@@ -47,3 +47,21 @@ export async function reviewPerformance(store: WorldStore, request: Extract<Clie
     ] });
   });
 }
+
+/** Clearing repairs a broken selection without requiring its missing performance bytes. */
+export async function clearPerformanceSelection(store: WorldStore, request: Extract<ClientMessage, { kind: "clear-performance-selection" }>) {
+  return store.gateOp(async () => {
+    if (!store.getBundle().productions.some(p => p.meta.id === request.productionId)) throw new Error("This production is unavailable.");
+    const path = `productions/${request.productionId}/performance-selections.json`;
+    const raw = await readFile(await audioWorldPath(store.dir, path, true), "utf8").catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error;
+    });
+    const selections = PerformanceSelectionsSchema.parse(JSON.parse(raw ?? "{}"));
+    const selection = selections[request.lineKey];
+    if (!selection?.performanceId) return;
+    if (sha256(raw!) !== request.expectedSelectionHash) throw new Error("Performance selection changed. Refresh before clearing it.");
+    selections[request.lineKey] = { ...selection, performanceId: null, selectedAt: store.now(), selectedBy: "user" };
+    await store.commitUnserialised({ kind: "clear-performance-selection", source: "user", requestId: request.requestId,
+      files: [{ path, action: "replace", baseHash: request.expectedSelectionHash, content: JSON.stringify(selections, null, 2) + "\n" }] });
+  });
+}

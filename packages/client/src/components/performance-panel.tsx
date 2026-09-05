@@ -79,6 +79,13 @@ export function PerformancePanel({ world, production, scene, shotId }: {
     {blocks.length > 1 && <label>Authored line <select disabled={busy} value={blockId ?? ""} onChange={e => { discard(); setBlockId(e.target.value || undefined); }}>
       <option value="">Choose one dialogue block…</option>{blocks.map(b => <option key={b.id} value={b.id}>{b.speaker ?? "Unnamed speaker"}: {b.text}</option>)}</select></label>}
     {line.ok ? <><p>{sheet?.name ?? line.speakerSheetId} · {sheet?.voice ? `TTS assignment: ${sheet.voice.label ?? sheet.voice.voiceId}` : "No TTS assignment"}</p><blockquote>{line.text}</blockquote></> : <p>{line.reason}</p>}
+    {Object.entries(production.performanceReview.selections).filter(([, selection]) => selection.performanceId && selection.target.sceneId === scene.id &&
+      selection.target.shotId === shotId && (!blockId || selection.target.blockId === blockId)).map(([lineKey, selection]) =>
+      <p key={lineKey} style={{ overflowWrap: "anywhere" }}>Selected: {selection.performanceId}{" "}<Button variant="ghost" onClick={() => {
+        const requestId = ulid(); pending.current = requestId;
+        if (!send({ kind: "clear-performance-selection", worldId: world.meta.worldId, productionId: production.meta.id, requestId,
+          lineKey, expectedSelectionHash: production.performanceReview.selectionHash })) { pending.current = null; setNotice("Reconnect before clearing the selection."); }
+      }}>Clear selection</Button></p>)}
     {line.ok && sheet && <PerformanceGenerationPanel key={`${scene.id}/${shotId}/${line.blockId ?? "legacy"}`} worldId={world.meta.worldId}
       production={production} scene={scene} shotId={shotId} blockId={line.blockId} text={line.text} sheet={sheet} />}
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>

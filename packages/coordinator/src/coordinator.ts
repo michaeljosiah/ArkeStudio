@@ -6,7 +6,7 @@ import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
   finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
-import { reviewPerformance } from "./audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
@@ -11831,17 +11831,19 @@ export class Coordinator {
         }
         return;
       }
+      case "clear-performance-selection":
       case "review-performance": {
         const store = this.opts.provider.openStore?.();
         try {
           if (!store || store.worldId !== msg.worldId) throw new Error("Open the performance world first.");
-          await reviewPerformance(store, msg);
+          if (msg.kind === "clear-performance-selection") await clearPerformanceSelection(store, msg);
+          else await reviewPerformance(store, msg);
           await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "reviewed", reason: msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged." });
+            productionId: msg.productionId, status: "reviewed", reason: msg.kind === "clear-performance-selection" ? "Performance selection cleared. Existing timeline audio is unchanged." : msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged." });
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: "Review refused. Refresh the line, voice assignment and selection; verify the performance audio." });
+            productionId: msg.productionId, status: "refused", reason: msg.kind === "clear-performance-selection" ? "Clearing refused. Refresh the current performance selection." : "Review refused. Refresh the line, voice assignment and selection; verify the performance audio." });
         }
         return;
       }
