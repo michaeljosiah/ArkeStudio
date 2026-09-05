@@ -2594,6 +2594,18 @@ const exampleWorldActions = {
     exportId: `ex_${EXAMPLE_ULID}`,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "bench-generation": {
+    kind: "bench-generation",
+    sessionId: `sess_${EXAMPLE_ULID}`,
+    composer: {
+      mode: "image",
+      provider: "fal",
+      model: "fal-ai/flux/dev",
+      params: { kind: "image", aspect: "16:9", count: 2 },
+      brief: "Two salt-stained ledger studies on a black quay.",
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

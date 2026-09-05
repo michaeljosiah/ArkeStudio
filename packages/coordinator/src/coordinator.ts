@@ -62,6 +62,7 @@ import {
   type WorldChatProductionTakeImportAction,
   type WorldChatProductionTakeGenerationAction,
   type WorldChatProductionCutExportAction,
+  type WorldChatBenchGenerationAction,
   type ConversationActionCard,
   type Job,
   type FrameRunQuote,
@@ -434,6 +435,7 @@ import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js"
 import { projectWorkspace } from "./world-chat/project.js";
 import {
   ConversationActionLifecycle,
+  conversationActionDigest,
   recoverConversationActions,
   type ConversationActionAuthorityAdapter,
 } from "./arke-actions/lifecycle.js";
@@ -12712,6 +12714,182 @@ export class Coordinator {
     return true;
   }
 
+  private async quoteBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatBenchGenerationAction["action"],
+    createdAt: string,
+  ) {
+    const bench = await this.benchFor(store.worldId, action.sessionId);
+    if (!bench) throw new Error("That Bench session is no longer available.");
+    const model = this.opts.manifest?.models.find((candidate) =>
+      candidate.provider === action.composer.provider && candidate.id === action.composer.model) ?? null;
+    const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
+    const session = {
+      ...bench.session,
+      composer: {
+        ...action.composer,
+        activeTokens: subjectRouting?.activeTokens ?? bench.session.composer.activeTokens,
+        keyframeTokens: subjectRouting?.keyframeTokens ?? bench.session.composer.keyframeTokens,
+      },
+    };
+    const revision = (await bench.store.read()).length;
+    const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
+      worldId: store.worldId,
+      requestId: `quote-${createdAt}`,
+      at: createdAt,
+      recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
+    const snapshot = plan.reserved[0]!.request;
+    const references = [...snapshot.references, ...snapshot.keyframes]
+      .filter((reference, index, all) => all.findIndex((candidate) => candidate.token === reference.token) === index)
+      .map((reference) => ({ id: reference.token, role: reference.label ?? reference.subjectRole ?? reference.kind }));
+    const params = action.composer.params;
+    const quantity = "count" in params ? params.count : 1;
+    const localCharge = estimatedMicroUsd === 0 && PROVIDERS[action.composer.provider as ProviderId]?.local === true;
+    const quoteExpiresAt = new Date(Date.parse(createdAt) + 15 * 60_000).toISOString();
+    const quoteDigest = conversationActionDigest({
+      sessionId: action.sessionId,
+      revision,
+      composer: action.composer,
+      activeTokens: session.composer.activeTokens,
+      keyframeTokens: session.composer.keyframeTokens,
+      estimatedMicroUsd,
+      quoteExpiresAt,
+      inputs: plan.inputs.map((input) => ({
+        capability: input.capability,
+        provider: input.provider,
+        model: input.model,
+        params: input.params,
+        estimatedMicroUsd: input.estimatedMicroUsd,
+      })),
+    });
+    const medium = action.composer.mode === "image" ? "image" as const
+      : action.composer.mode === "video" ? "video" as const
+        : "audio" as const;
+    const dimensions = params.kind === "image"
+      ? [params.aspect, params.tier].filter(Boolean).join(" · ") || undefined
+      : params.kind === "video"
+        ? [params.aspect, params.resolution].filter(Boolean).join(" · ") || undefined
+        : undefined;
+    const durationSec = params.kind === "video" ? params.durationSec : undefined;
+    const audioPolicy = params.kind === "video"
+      ? params.sound === true ? "Generate picture with provider audio" : params.sound === false ? "Silent output" : "Provider default"
+      : action.composer.mode === "voice" ? "Spoken audio" : action.composer.mode === "music" ? "Music audio" : undefined;
+    return {
+      authorityRevision: revision,
+      body: {
+        family: "generation" as const,
+        medium,
+        purpose: bench.session.subject ? "Production Bench take" : "Bench exploration",
+        prompt: action.composer.brief || "No creative brief",
+        exclusions: [],
+        references,
+        provider: action.composer.provider,
+        model: action.composer.model,
+        options: Object.entries(params)
+          .filter(([label]) => label !== "kind" && label !== "count")
+          .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) })),
+        quantity,
+        output: bench.session.subject ? "Immutable unselected production takes" : "Immutable Bench takes",
+        ...(dimensions ? { dimensions } : {}),
+        ...(durationSec ? { durationSec } : {}),
+        ...(audioPolicy ? { audioPolicy } : {}),
+        privacy: references.length > 0
+          ? [`${references.length} attached reference${references.length === 1 ? "" : "s"} will be sent to the configured provider runtime.`]
+          : ["The complete creative brief will be sent to the configured provider runtime."],
+        cost: localCharge
+          ? "No provider charge"
+          : `$${(estimatedMicroUsd / 1_000_000).toFixed(4)} estimated; actual cost may differ`,
+        quoteDigest,
+        quoteExpiresAt,
+        estimatedMicroUsd,
+        currency: "USD" as const,
+        estimateMayVary: !localCharge,
+        deterministicInputs: [
+          `Bench revision ${revision}`,
+          ...(references.length > 0 ? ["Attached references are content-hash pinned"] : []),
+          ...(bench.session.subject ? ["Production subject and provenance are frozen at dispatch"] : []),
+        ],
+        cancellationSupported: true,
+      },
+    };
+  }
+
+  private async dispatchBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatBenchGenerationAction["action"],
+    actionId: string,
+  ) {
+    await this.handleClientMessage({
+      kind: "bench-dispatch",
+      worldId: store.worldId,
+      sessionId: action.sessionId,
+      requestId: actionId,
+      composer: action.composer,
+    });
+    const bench = await this.benchFor(store.worldId, action.sessionId);
+    const takes = bench?.session.takes.filter((take) =>
+      take.requestId === actionId || take.requestId.startsWith(`${actionId}/`)) ?? [];
+    return takes.length > 0
+      ? { status: "queued" as const, detail: `${takes.length} Bench item${takes.length === 1 ? "" : "s"} reserved and queued.` }
+      : { status: "failed" as const, detail: "Bench did not reserve any work for this approval." };
+  }
+
+  private async reconcileBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: ConversationActionCard,
+  ) {
+    const bench = await this.benchFor(store.worldId, action.authority.id as SessionId);
+    const takes = bench?.session.takes.filter((take) =>
+      take.requestId === action.actionId || take.requestId.startsWith(`${action.actionId}/`)) ?? [];
+    if (takes.length === 0) return null;
+    const active = takes.filter((take) => !["succeeded", "failed", "cancelled"].includes(take.status));
+    if (active.length > 0) {
+      return action.status === "approved" || action.status === "queued"
+        ? { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` }
+        : null;
+    }
+    const completed = takes.filter((take) => take.status === "succeeded" && take.media).length;
+    const failed = takes.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
+    const cancelled = takes.filter((take) => take.status === "cancelled").length;
+    if (completed === 0) {
+      return cancelled === takes.length
+        ? { status: "cancelled" as const, detail: `All ${cancelled} generation items were cancelled.` }
+        : { status: "failed" as const, detail: `${failed} failed and ${cancelled} were cancelled; no result completed.` };
+    }
+    const knownActualCosts = takes.map((take) => take.cost?.actualMicroUsd);
+    const actualMicroUsd = knownActualCosts.every((cost) => cost !== undefined && cost !== null)
+      ? knownActualCosts.reduce<number>((total, cost) => total + (cost ?? 0), 0)
+      : null;
+    return {
+      status: "completed" as const,
+      receipt: {
+        kind: "bench-generation",
+        id: action.authority.id,
+        summary: `${completed} completed, ${failed} failed, and ${cancelled} cancelled. Results remain unselected.`,
+        generation: {
+          authorized: takes.length,
+          completed,
+          failed,
+          cancelled,
+          unattempted: 0,
+          actualMicroUsd,
+          results: takes.map((take) => ({
+            id: take.id,
+            medium: take.request.mode === "image" ? "image" as const : take.request.mode === "video" ? "video" as const : "audio" as const,
+            status: take.status === "succeeded" && take.media ? "completed" as const
+              : take.status === "cancelled" ? "cancelled" as const : "failed" as const,
+            description: `${take.request.mode} Bench take ${take.n}`,
+            ...(take.media ? { mediaPath: `${sessionMediaDir(action.authority.id as SessionId, take.id)}/${take.media.file}` } : {}),
+            ...(take.error ? { detail: take.error } : {}),
+          })),
+        },
+      },
+    };
+  }
+
   /**
    * The runner for the open world, built once and kept (#70 §8).
    *
@@ -12801,6 +12979,13 @@ export class Coordinator {
       openProductionTakeGeneration: (action, mutation) =>
         this.openProductionTakeGenerationForConversationAction(store, action, mutation),
       getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      getJobs: () => this.jobQueue?.listJobs() ?? [],
+      quoteBenchGeneration: (action, createdAt) =>
+        this.quoteBenchGenerationForConversationAction(store, action, createdAt),
+      dispatchBenchGeneration: (action, actionId) =>
+        this.dispatchBenchGenerationForConversationAction(store, action, actionId),
+      reconcileBenchGeneration: (action) =>
+        this.reconcileBenchGenerationForConversationAction(store, action),
       startProductionExport: (action, card) =>
         this.startProductionExportForConversationAction(store, action, card),
       cancelExport: (exportId) => {

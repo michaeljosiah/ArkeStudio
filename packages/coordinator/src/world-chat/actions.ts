@@ -82,6 +82,7 @@ import {
   WorldChatSheetRetireActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatAudioSpineActionSchema,
+  WorldChatBenchGenerationActionSchema,
   WorldChatVoiceAssignmentActionSchema,
   WorldChatVoiceAuditionActionSchema,
   WorldChatVoiceCloneActionSchema,
@@ -99,6 +100,7 @@ import {
   type ConversationId,
   type ArkeReadObservation,
   type ArkeReadRequirement,
+  type ArkeGenerationBody,
   type ModelWorldChatAction,
   type WorldChatArtDirectionRestoreAction,
   type WorldChatCanonRestoreAction,
@@ -114,6 +116,7 @@ import {
   type WorldChatProductionTakeImportAction,
   type WorldChatProductionTakeGenerationAction,
   type WorldChatProductionCutExportAction,
+  type WorldChatBenchGenerationAction,
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
@@ -251,6 +254,7 @@ import {
   voicesFence,
   worldMetadataFence,
   exportsFence,
+  jobsFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
 import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
@@ -332,6 +336,16 @@ export interface WorldChatActionAdapterDeps {
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
   ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
   readonly getExports?: () => readonly ArkeExportReadRecord[];
+  readonly getJobs?: () => readonly import("@arke-studio/contracts").Job[];
+  readonly quoteBenchGeneration?: (
+    action: WorldChatBenchGenerationAction["action"],
+    createdAt: string,
+  ) => Promise<{ body: ArkeGenerationBody; authorityRevision: number }>;
+  readonly dispatchBenchGeneration?: (
+    action: WorldChatBenchGenerationAction["action"],
+    actionId: string,
+  ) => Promise<ConversationActionExecutionOutcome>;
+  readonly reconcileBenchGeneration?: (action: ConversationActionCard) => Promise<ConversationActionExecutionOutcome | null>;
   readonly startProductionExport?: (
     action: WorldChatProductionCutExportAction["action"],
     card: ConversationActionCard,
@@ -429,6 +443,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-interactive-export": ["routing", "scenes", "takes", "exports"],
   "production-cut-export": ["timeline", "episodes", "exports"],
   "production-export-cancel": ["exports"],
+  "bench-generation": ["jobs"],
 };
 
 function currentWorldObservation(
@@ -500,6 +515,14 @@ function currentWorldObservation(
       return {
         target: targetId,
         fence: exportsFence(deps.getExports(), store.worldId, targetId === store.worldId ? undefined : targetId),
+      };
+    }
+    case "jobs": {
+      if (!deps.getJobs) return null;
+      const targetId = target ?? store.worldId;
+      return {
+        target: targetId,
+        fence: jobsFence(deps.getJobs(), store.worldId, targetId === store.worldId ? undefined : targetId),
       };
     }
     default: return null;
@@ -616,6 +639,7 @@ function productionActionTargets(
       { requirement: "exports", target: action.productionId },
     ];
     case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
+    case "bench-generation": return [{ requirement: "jobs", target: worldId }];
     default: return [];
   }
 }
@@ -740,6 +764,7 @@ function preparedWorldPayload(
     case "production-interactive-export": return WorldChatProductionInteractiveExportActionSchema.parse({ kind: "world-chat-production-interactive-export", ...common });
     case "production-cut-export": return WorldChatProductionCutExportActionSchema.parse({ kind: "world-chat-production-cut-export", ...common });
     case "production-export-cancel": return WorldChatProductionExportCancelActionSchema.parse({ kind: "world-chat-production-export-cancel", ...common });
+    case "bench-generation": return WorldChatBenchGenerationActionSchema.parse({ kind: "world-chat-bench-generation", ...common });
   }
 }
 
@@ -1026,6 +1051,7 @@ function worldActionTargets(
     case "production-interactive-export":
     case "production-cut-export": return [{ kind: "production", id: action.productionId, label: action.productionId }];
     case "production-export-cancel": return [{ kind: "export", id: action.exportId, label: action.exportId }];
+    case "bench-generation": return [{ kind: "bench-session", id: action.sessionId, label: "Bench session" }];
   }
 }
 
@@ -2833,6 +2859,47 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-bench-generation": {
+      authority = { kind: "bench", id: payload.action.sessionId };
+      if (!deps.quoteBenchGeneration) {
+        approvalBlockedReason = "The coordinator cannot quote this Bench generation.";
+        shown = {
+          title: "Generate in Bench",
+          consequence: "No work can dispatch until the coordinator prepares an immutable quote.",
+          affectedTargets: [...intent.targets],
+          ripples: ["No result is selected or filed by generation alone."],
+          permissionReason: "spend-and-compute",
+          body: {
+            family: "generation",
+            medium: payload.action.composer.mode === "image" ? "image" : payload.action.composer.mode === "video" ? "video" : "audio",
+            purpose: "Bench generation",
+            prompt: payload.action.composer.brief || "No creative brief",
+            references: [],
+            provider: payload.action.composer.provider,
+            model: payload.action.composer.model,
+            quantity: "count" in payload.action.composer.params ? payload.action.composer.params.count : 1,
+            output: "Immutable Bench takes",
+            cost: "Quote unavailable",
+          },
+        };
+        break;
+      }
+      const quote = await deps.quoteBenchGeneration(payload.action, intent.createdAt);
+      authorityRevision = quote.authorityRevision;
+      if (!deps.dispatchBenchGeneration) approvalBlockedReason = "Bench dispatch is unavailable.";
+      if (quote.body.quoteExpiresAt && Date.parse(quote.body.quoteExpiresAt) <= Date.parse(store.now())) {
+        approvalBlockedReason = "This generation quote expired. Prepare a fresh card.";
+      }
+      shown = {
+        title: `Generate ${quote.body.quantity} ${quote.body.medium} ${quote.body.quantity === 1 ? "result" : "results"}`,
+        consequence: "Approving durably reserves Bench takes before the existing queue may contact the provider.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Results remain immutable and unselected; using one elsewhere requires its own typed action."],
+        permissionReason: "spend-and-compute",
+        body: quote.body,
+      };
+      break;
+    }
     case "world-chat-audio-spine-command": {
       authority = { kind: "audio-spine", id: intent.actionId };
       const preview = previewAudioSpineCommand(bundle, payload.action, store.now());
@@ -3236,6 +3303,11 @@ async function executeSharedResource(
     case "world-chat-reference-generation":
     case "world-chat-voice-audition":
       return { status: "failed", detail: "A durable coordinator-owned generation quote is required." };
+    case "world-chat-bench-generation":
+      return deps.dispatchBenchGeneration?.(payload.action, action.actionId) ?? {
+        status: "failed",
+        detail: "Bench dispatch is unavailable.",
+      };
     case "world-chat-voice-assignment": {
       if (payload.action.voice && !(await deps.voiceAvailable?.(payload.action.voice))) {
         return { status: "failed", detail: "That voice is no longer available." };
@@ -4163,6 +4235,9 @@ export function worldChatActionAdapters(
             return { status: "stale", detail: "The export finished before cancellation could be reconciled." };
           }
         }
+        if (action.actionKind === "world-chat-bench-generation") {
+          return deps.reconcileBenchGeneration?.(action) ?? null;
+        }
         const committed = await committedAction(store, action.actionId);
         if (committed) await removePreparation(store, "world", action.actionId);
         return committed
@@ -4326,6 +4401,7 @@ export function worldChatActionAdapters(
     "world-chat-production-interactive-export",
     "world-chat-production-cut-export",
     "world-chat-production-export-cancel",
+    "world-chat-bench-generation",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(

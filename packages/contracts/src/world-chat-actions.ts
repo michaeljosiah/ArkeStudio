@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ConversationActionSemanticIdSchema } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
+import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
 import { BibleEditSchema } from "./bible.js";
 import { ExportPresetSchema } from "./cut.js";
 import { ModelEditorRequestSchema, ModelSceneEditSchema } from "./editor-request.js";
@@ -11,6 +12,7 @@ import {
   CheckReceiptIdSchema,
   EpisodeIdSchema,
   SceneIdSchema,
+  SessionIdSchema,
   SlugSchema,
   ShotIdSchema,
   TakeIdSchema,
@@ -978,6 +980,22 @@ export const ProductionExportCancelModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+export const BenchGenerationModelActionSchema = z
+  .object({
+    kind: z.literal("bench-generation"),
+    sessionId: SessionIdSchema,
+    composer: z
+      .object({
+        mode: BenchModeSchema,
+        provider: z.string().trim().min(1).max(200),
+        model: z.string().trim().min(1).max(300),
+        params: BenchParamsSchema,
+        brief: z.string().max(100_000),
+      })
+      .strict(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
 
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
@@ -1086,6 +1104,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionInteractiveExportModelActionSchema,
   ProductionCutExportModelActionSchema,
   ProductionExportCancelModelActionSchema,
+  BenchGenerationModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1179,6 +1198,7 @@ export const WorldChatProductionBranchCanonActionSchema = preparedAction("world-
 export const WorldChatProductionInteractiveExportActionSchema = preparedAction("world-chat-production-interactive-export", ProductionInteractiveExportModelActionSchema);
 export const WorldChatProductionCutExportActionSchema = preparedAction("world-chat-production-cut-export", ProductionCutExportModelActionSchema);
 export const WorldChatProductionExportCancelActionSchema = preparedAction("world-chat-production-export-cancel", ProductionExportCancelModelActionSchema);
+export const WorldChatBenchGenerationActionSchema = preparedAction("world-chat-bench-generation", BenchGenerationModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1243,6 +1263,7 @@ export type WorldChatProductionBranchCanonAction = z.infer<typeof WorldChatProdu
 export type WorldChatProductionInteractiveExportAction = z.infer<typeof WorldChatProductionInteractiveExportActionSchema>;
 export type WorldChatProductionCutExportAction = z.infer<typeof WorldChatProductionCutExportActionSchema>;
 export type WorldChatProductionExportCancelAction = z.infer<typeof WorldChatProductionExportCancelActionSchema>;
+export type WorldChatBenchGenerationAction = z.infer<typeof WorldChatBenchGenerationActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1355,5 +1376,6 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionInteractiveExportActionSchema,
   WorldChatProductionCutExportActionSchema,
   WorldChatProductionExportCancelActionSchema,
+  WorldChatBenchGenerationActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

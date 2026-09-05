@@ -67,6 +67,7 @@ import {
   voicesFence,
   worldMetadataFence,
   exportsFence,
+  jobsFence,
   type ArkeExportReadRecord,
 } from "../../src/world-chat/target-reads.js";
 
@@ -239,6 +240,8 @@ function currentReceipt(
                                 ? routingFence(bundle.productions.find((candidate) => candidate.meta.id === target))
                                 : requirement === "exports"
                                   ? exportsFence(exportRecords, store.worldId, target === store.worldId ? undefined : target)
+                                  : requirement === "jobs"
+                                    ? jobsFence([], store.worldId, target && target !== store.worldId ? target : undefined)
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
@@ -1969,5 +1972,69 @@ describe("World Chat authority adapters", () => {
       destinationPath: "C:\\private\\delivery.mp4",
       checkReceiptIds: [newId("check")],
     }));
+  });
+
+  it("binds a durable Bench quote before dispatch", async () => {
+    let dispatched = 0;
+    const w = await setup({ kind: "world" }, {
+      getJobs: () => [],
+      quoteBenchGeneration: async () => ({
+        authorityRevision: 7,
+        body: {
+          family: "generation",
+          medium: "image",
+          purpose: "Bench exploration",
+          prompt: "Salt-stained ledger studies",
+          exclusions: ["No lettering"],
+          references: [],
+          provider: "fal",
+          model: "flux",
+          options: [{ label: "aspect", value: "16:9" }],
+          quantity: 2,
+          output: "Immutable Bench takes",
+          dimensions: "16:9",
+          privacy: ["The brief is sent to the provider."],
+          cost: "$0.0200 estimated; actual cost may differ",
+          quoteDigest: `sha256:${"b".repeat(64)}`,
+          quoteExpiresAt: "2026-09-04T12:15:00.000Z",
+          estimatedMicroUsd: 20_000,
+          currency: "USD",
+          estimateMayVary: true,
+          deterministicInputs: ["Bench revision 7"],
+          cancellationSupported: true,
+        },
+      }),
+      dispatchBenchGeneration: async () => {
+        dispatched += 1;
+        return { status: "queued", detail: "2 Bench items reserved and queued." };
+      },
+    });
+    const receipt = currentReceipt(w.store, "jobs");
+    const oneTurn = turn(w.conversationId, { kind: "world" }, {
+      receipts: [receipt],
+      actions: [{
+        kind: "bench-generation",
+        sessionId: `sess_${"0".repeat(26)}`,
+        composer: {
+          mode: "image",
+          provider: "fal",
+          model: "flux",
+          params: { kind: "image", aspect: "16:9", count: 2 },
+          brief: "Salt-stained ledger studies",
+        },
+        checkReceiptIds: [receipt.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(dispatched, 0);
+    assert.equal(card.shown.body.family, "generation");
+    if (card.shown.body.family !== "generation") return;
+    assert.equal(card.shown.body.quoteDigest, `sha256:${"b".repeat(64)}`);
+    assert.equal(card.shown.body.estimateMayVary, true);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "queued");
+    assert.equal(dispatched, 1);
   });
 });

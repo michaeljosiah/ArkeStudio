@@ -336,18 +336,68 @@ export const ArkeGenerationBodySchema = z
     family: z.literal("generation"),
     medium: z.enum(["image", "video", "audio", "document", "board"]),
     purpose: z.string().min(1).max(300),
-    prompt: z.string().min(1).max(20_000),
+    prompt: z.string().min(1).max(100_000),
+    exclusions: z.array(z.string().min(1).max(2_000)).optional(),
     references: z
       .array(z.object({ id: ConversationActionSemanticIdSchema, role: z.string().min(1).max(200) }).strict())
       .default([]),
     provider: z.string().min(1).max(200),
     model: z.string().min(1).max(300),
+    options: z.array(z.object({ label: z.string().min(1).max(200), value: z.string().max(20_000) }).strict()).optional(),
     quantity: z.number().int().min(1),
     output: z.string().min(1).max(500),
+    dimensions: z.string().min(1).max(200).optional(),
+    durationSec: z.number().positive().optional(),
+    audioPolicy: z.string().min(1).max(1_000).optional(),
+    privacy: z.array(z.string().min(1).max(1_000)).optional(),
     cost: z.string().min(1).max(500),
     quoteDigest: Sha256Schema.optional(),
+    quoteExpiresAt: IsoDateTimeSchema.optional(),
+    estimatedMicroUsd: z.number().int().min(0).optional(),
+    currency: z.literal("USD").optional(),
+    enforceableCapMicroUsd: z.number().int().min(0).optional(),
+    estimateMayVary: z.boolean().optional(),
+    deterministicInputs: z.array(z.string().min(1).max(1_000)).optional(),
+    cancellationSupported: z.boolean().optional(),
   })
   .strict();
+export type ArkeGenerationBody = z.infer<typeof ArkeGenerationBodySchema>;
+
+export const ArkeGenerationResultSchema = z
+  .object({
+    id: ConversationActionSemanticIdSchema,
+    medium: z.enum(["image", "video", "audio", "document", "board"]),
+    status: z.enum(["completed", "failed", "cancelled", "unattempted"]),
+    description: z.string().min(1).max(1_000),
+    mediaPath: z.string().min(1).max(1_000)
+      .refine((value) => !value.startsWith("/") && !value.includes("\\") && !value.includes("://") && !/^[a-zA-Z]:/.test(value) && !value.split("/").includes(".."), "expected a world-relative media path")
+      .optional(),
+    posterPath: z.string().min(1).max(1_000)
+      .refine((value) => !value.startsWith("/") && !value.includes("\\") && !value.includes("://") && !/^[a-zA-Z]:/.test(value) && !value.split("/").includes(".."), "expected a world-relative poster path")
+      .optional(),
+    detail: z.string().min(1).max(1_000).optional(),
+  })
+  .strict();
+
+export const ArkeGenerationReceiptDetailSchema = z
+  .object({
+    authorized: z.number().int().min(1),
+    completed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    cancelled: z.number().int().min(0),
+    unattempted: z.number().int().min(0),
+    actualMicroUsd: z.number().int().min(0).nullable(),
+    results: z.array(ArkeGenerationResultSchema).max(100),
+  })
+  .strict()
+  .superRefine((detail, ctx) => {
+    if (detail.completed + detail.failed + detail.cancelled + detail.unattempted !== detail.authorized) {
+      ctx.addIssue({ code: "custom", message: "generation outcome counts must equal the authorized count" });
+    }
+    if (detail.results.length !== detail.completed + detail.failed + detail.cancelled) {
+      ctx.addIssue({ code: "custom", path: ["results"], message: "generation results must describe every attempted item" });
+    }
+  });
 
 export const ArkeHostActionBodySchema = z
   .object({
@@ -459,12 +509,13 @@ export const ConversationActionReceiptSchema = z
     id: ConversationActionSemanticIdSchema,
     summary: z.string().min(1).max(2_000),
     digest: Sha256Schema.optional(),
+    generation: ArkeGenerationReceiptDetailSchema.optional(),
   })
   .strict();
 export type ConversationActionReceipt = z.infer<typeof ConversationActionReceiptSchema>;
 
 /** Deletion retains the durable pointer, not receipt prose that may name a host path. */
-export const ConversationActionTombstoneReceiptSchema = ConversationActionReceiptSchema.omit({ summary: true });
+export const ConversationActionTombstoneReceiptSchema = ConversationActionReceiptSchema.omit({ summary: true, generation: true });
 export type ConversationActionTombstoneReceipt = z.infer<typeof ConversationActionTombstoneReceiptSchema>;
 
 export const ConversationActionUndoLinkSchema = z

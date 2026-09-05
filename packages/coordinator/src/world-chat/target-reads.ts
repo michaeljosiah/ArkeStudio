@@ -135,6 +135,12 @@ export function voicesFence(bundle: WorldBundle): string {
   });
 }
 
+export function jobsFence(jobs: readonly Job[], worldId: string, productionId?: string): string {
+  return fence(jobs
+    .filter((job) => job.worldId === worldId && (productionId === undefined || job.productionId === productionId))
+    .map(safeJob));
+}
+
 export function productionMetadataFence(bundle: WorldBundle, productionId: string): string {
   const production = productionOf(bundle, productionId);
   return fence(production?.meta ?? null, production?.meta.updated ?? "absent");
@@ -786,7 +792,7 @@ export class WorldChatTargetReads {
           job.worldId === lease.worldId && (productionId === undefined || job.productionId === productionId));
         readTarget = target("jobs", productionId ?? lease.worldId);
         rows = [...jobs].sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id)).map((job) => ({ key: `${job.createdAt}:${job.id}`, value: safeJob(job) }));
-        revisionOrDigest = fence(rows.map((row) => row.value));
+        revisionOrDigest = jobsFence(jobs, lease.worldId, productionId);
         break;
       }
       case "list_exports": {

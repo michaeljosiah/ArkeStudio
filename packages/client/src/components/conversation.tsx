@@ -328,6 +328,33 @@ export function ConversationPermissionCard({
         <div className="fy-actioncard__receipt">
           <strong>Result</strong>
           <span>{action.receipt.summary}</span>
+          {action.receipt.generation && state?.world ? (
+            <div className="fy-actioncard__body">
+              <p>
+                {action.receipt.generation.completed} completed · {action.receipt.generation.failed} failed · {action.receipt.generation.cancelled} cancelled · {action.receipt.generation.unattempted} unattempted
+              </p>
+              <p>Actual cost: {action.receipt.generation.actualMicroUsd === null ? "Not reported" : `$${(action.receipt.generation.actualMicroUsd / 1_000_000).toFixed(4)}`}</p>
+              {action.receipt.generation.results.map((result) => (
+                <div key={result.id} className="fy-actioncard__line">
+                  {result.status === "completed" && result.mediaPath ? (
+                    result.medium === "image" ? (
+                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)} aria-label={`Open ${result.description}`}>
+                        <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
+                      </a>
+                    ) : result.medium === "video" ? (
+                      <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
+                    ) : result.medium === "audio" ? (
+                      <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
+                    ) : (
+                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)}>Open {result.medium}</a>
+                    )
+                  ) : null}
+                  <strong>{result.description}</strong>
+                  <span>{result.status}{result.detail ? ` · ${result.detail}` : ""}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {action.receipt.kind === "bench-session" && state?.world ? (
             <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.receipt!.id}`)}>
               Open Bench
@@ -354,6 +381,13 @@ export function ConversationPermissionCard({
           </Button>
         </div>
       )}
+      {(action.status === "queued" || action.status === "running") && action.shown.body.family === "generation" && action.shown.body.cancellationSupported && state?.world ? (
+        <div className="fy-actioncard__actions">
+          <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.authority.id}`)}>
+            Manage or cancel in Bench
+          </Button>
+        </div>
+      ) : null}
       {!supported && (
         <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
       )}
@@ -427,10 +461,21 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
     case "generation":
       return <div className="fy-actioncard__body">
         <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
+        <p><strong>Destination</strong> · {body.output}</p>
         <p>{body.prompt}</p>
+        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
         {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
         <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
-        <p>{body.output} · {body.cost}</p>
+        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
+        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
+        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
+        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
+        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+        <p>{body.cost}</p>
+        {body.quoteDigest && <p>Quote digest: {body.quoteDigest}</p>}
+        {body.quoteExpiresAt && <p>Quote expires: {body.quoteExpiresAt}</p>}
+        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
+        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
       </div>;
   }
 }

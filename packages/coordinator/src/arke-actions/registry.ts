@@ -1,5 +1,6 @@
 import {
   ClientMessageSchema,
+  BenchGenerationModelActionSchema,
   AudioSpineModelActionSchema,
   WorldChatBibleActionSchema,
   WorldChatEditorRequestActionSchema,
@@ -68,6 +69,7 @@ import {
   WorldChatWorldExportActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatAudioSpineActionSchema,
+  WorldChatBenchGenerationActionSchema,
   ProductionRoutingModelActionSchema,
   ProductionTraversalModelActionSchema,
   ProductionBranchCanonModelActionSchema,
@@ -826,6 +828,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionExportCancelActionSchema,
     ...action("production", "command", "export", "external-network-action", ["exports"]),
   },
+  "world-chat-bench-generation": {
+    kind: "world-chat-bench-generation",
+    schema: WorldChatBenchGenerationActionSchema,
+    ...action("world", "generation", "bench", "spend-and-compute", ["jobs"]),
+  },
 } as const;
 
 export interface ArkeBlockedAuthoritySeam {
@@ -840,6 +847,11 @@ export interface ArkeBlockedAuthoritySeam {
 
 /** Typed authorities that do not have a ClientMessage command to classify (SPEC-041 R-52). */
 export const ARKE_AUTHORITY_ACTION_REGISTRY = {
+  "bench-generation": {
+    kind: "bench-generation",
+    schema: BenchGenerationModelActionSchema,
+    ...action("world", "generation", "bench", "spend-and-compute", ["jobs"]),
+  },
   "audio-spine-command": {
     kind: "audio-spine-command",
     schema: AudioSpineModelActionSchema,
