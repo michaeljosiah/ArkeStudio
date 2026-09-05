@@ -8501,8 +8501,10 @@ export class Coordinator {
       case "editor-request-decide": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
-        const request = await readEditorRequest(store, msg.productionId, msg.requestId);
+        let actionConversation: ConversationId | undefined;
         try {
+          const request = await readEditorRequest(store, msg.productionId, msg.requestId);
+          if (request?.actionId) actionConversation = request.conversationId;
           await decideEditorRequest(store, {
             productionId: msg.productionId,
             requestId: msg.requestId,
@@ -8524,9 +8526,9 @@ export class Coordinator {
             reason: reason.slice(0, 500),
           });
         }
-        if (request?.actionId) {
-          await this.conversationActionLifecycle(store).recoverConversation(request.conversationId);
-          await this.refreshConversationOutcome(store, request.conversationId);
+        if (actionConversation) {
+          await this.conversationActionLifecycle(store).recoverConversation(actionConversation);
+          await this.refreshConversationOutcome(store, actionConversation);
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;

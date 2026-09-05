@@ -109,4 +109,13 @@ describe("PR 815 coordinator regressions", () => {
     assert.ok(failure?.type === "export.progress");
     assert.match(failure.error!, /export needs ffmpeg/);
   });
+
+  it("still reports an invalid editor-request file through the Timeline refusal", async () => {
+    const w = await setup();
+    await writeFile(join(w.worldDir, "productions/saltlight/editor-requests.json"), "{broken");
+    await w.internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: "req_01ARZ3NDEKTSV4RRFFQ69G5FAV", decision: "accept" });
+    const refusal = w.events.find((event) => event.type === "timeline.command-refused");
+    assert.ok(refusal?.type === "timeline.command-refused");
+    assert.match(refusal.reason, /editor-requests.json is invalid/);
+  });
 });
