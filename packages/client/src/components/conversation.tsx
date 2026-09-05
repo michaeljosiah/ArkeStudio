@@ -41,6 +41,7 @@ import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Pin } from "./icons.js";
+import { ReadAloud } from "./read-aloud.js";
 import { mediaUrl } from "../lib/media.js";
 
 /**
@@ -118,7 +119,14 @@ export function ConversationTranscript({
         return (
         <div
           key={m.id}
-          className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`, actions.length > 0 && "fy-chat__turn--action")}
+          className={cx(
+            "fy-chat__turn",
+            `fy-chat__turn--${m.role}`,
+            actions.length > 0 && "fy-chat__turn--action",
+            // Arke's replies are long and are prose somebody may want read back rather than read
+            // (issue 857). The host is the turn, so the speaker appears under the whole reply.
+            m.role === "studio" && "fy-texthost",
+          )}
         >
           <div className="fy-chat__bubble">
             {m.text}
@@ -134,6 +142,14 @@ export function ConversationTranscript({
               <div className="fy-chat__refusals">{`✕ Refused: ${m.refusals.join(" · ")}`}</div>
             )}
           </div>
+          {/* Only Arke's replies: nobody needs their own sentence spoken back to them. */}
+          {m.role === "studio" && workspace !== null && (
+            <ReadAloud
+              source={{ of: "reply", conversationId: workspace.conversationId, messageId: m.id }}
+              title="Arke"
+              text={m.text}
+            />
+          )}
           {/*
             Outside the bubble, because it is not something the Studio said — it is something it
             did, to a file, already. The rail beside this transcript holds what is waiting for a
