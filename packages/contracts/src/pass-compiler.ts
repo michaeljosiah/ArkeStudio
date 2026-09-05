@@ -1,3 +1,7 @@
+import { assessDialogueShot, dialogueShotFacts, type DialogueDispatchAssessment } from "./dialogue-assessment.js";
+import { referenceAudioAsset, type CharacterAudioPlan } from "./audio-reference.js";
+import type { ModelManifest } from "./manifest.js";
+import { parseMentions } from "./planning.js";
 import type { PropStateProvenance } from "./prop.js";
 import type { ShotPropResolution } from "./planning.js";
 import { resolvedAuthoredDuration } from "./scene.js";
@@ -220,6 +224,9 @@ function droppedOf(
 }
 
 export interface CompilePassesInput {
+  manifest?: ModelManifest;
+  assessedAt?: string;
+  acknowledgedRecommendationIds?: string[];
   productionId: string;
   scene: SceneRecord;
   plan: ScenePlan;
@@ -246,6 +253,27 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   if (input.chainWholeSceneFrames && plan.mode === "whole-scene" && audioPlans.slice(1).some(a => a?.references.length)) {
     throw new Error("Chained frame routes cannot carry character audio references. Use independent referenced passes or explicitly disable audio references.");
   }
+  const assessments = (shots: readonly import("./scene.js").Shot[], route: CompiledRoute, audio?: CharacterAudioPlan) => {
+    if (model.capability !== "video") return undefined;
+    const endpoint = route.kind === "frame" || route.kind === "continuation" ? route.endpoint
+      : route.kind === "reference" ? model.dispatchEndpoints?.reference : model.dispatchEndpoints?.text;
+    // Routes without an explicit adapter revision have no quality evidence to match.
+    const providerRoute = audio?.route ?? endpoint ?? `${model.provider}/${model.id}`;
+    return Object.fromEntries(shots.map(shot => {
+      const references = (audio?.disabled ? [] : audio?.references ?? []).filter(ref =>
+        "master" in ref ? ref.master.shotId === shot.id : "performance" in ref ? ref.performance.target.shotId === shot.id : ref.sheetId === shot.audio?.speaker);
+      const durations = references.map(ref => referenceAudioAsset(ref).provenance.outputTechnical.durationSec);
+      const facts = dialogueShotFacts(shot, parseMentions(shot.description).filter(id => world.sheets.some(sheet => sheet.id === id && sheet.type === "character")), {
+        frameMode: route.kind === "frame" ? "exact-start-frame" : route.kind === "reference" ? "reference-image" : "none",
+        audioIntent: references.length ? references[0]!.intent : "none",
+        shotDurationSec: resolvedAuthoredDuration(shot), audioDurationSec: durations.length && durations.every(d => d !== undefined) ? Math.max(...durations as number[]) : null,
+      });
+      return [shot.id, assessDialogueShot({ engineVersion: 1, manifestVersion: input.manifest?.manifestVersion ?? 1,
+        modelId: model.id, providerRoute, endpointVersion: model.dispatchEndpoints?.version ?? "unreviewed",
+        now: input.assessedAt ?? `${input.manifest?.generated ?? "2026-09-05"}T00:00:00.000Z`, facts,
+        guidance: input.manifest?.dialogueGuidance ?? [], hardBlocks: [], acknowledgedRecommendationIds: input.acknowledgedRecommendationIds ?? [] }).assessment];
+    }));
+  };
   const styleSource = (overridden: boolean) =>
     overridden
       ? { version: world.artDirection.version, source: "generation", transport: "text" }
@@ -265,6 +293,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
     sheets: Record<string, number>;
     artDirectionVersion: number;
     propStates?: PropStateProvenance[];
+    dialogueAssessments?: Record<string, DialogueDispatchAssessment>;
   } => ({
     canonRevision: world.meta.canonRevision,
     artDirectionVersion: world.artDirection.version,
@@ -350,6 +379,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             ? askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, route)
             : undefined;
       const provenance = provenanceFor(entry.budget.carried.map((c) => c.sheetId), entry.propStates);
+      provenance.dialogueAssessments = assessments([entry.shot], route, entry.audioReferences);
       return {
         target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
         model: {
@@ -468,6 +498,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       .filter((block) => block.length > 0)
       .join("\n\n");
     const provenance = provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId), passReferencePlan.propStates);
+    provenance.dialogueAssessments = assessments(shotsInPass.map(entry => entry.shot), route, passReferencePlan.audioReferences);
     return {
       target: { kind: "scene-pass" as const, id: scene.id, coversShots: pass.plan.map((p) => p.shotId) },
       model: {

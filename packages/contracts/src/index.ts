@@ -88,3 +88,8 @@ export * from "./performance-bible.js";
 export * from "./dialogue-timing.js";
 
 export * from "./prompt-review.js";
+
+export * from "./shot-visual-facts.js";
+export * from "./provider-guidance.js";
+export * from "./dialogue-assessment.js";
+export * from "./take-feedback.js";

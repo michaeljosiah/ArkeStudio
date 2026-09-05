@@ -347,6 +347,9 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
+const dialogueListeners = new Set<(result: DialogueResult) => void>();
+export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
 export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
 const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
 export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
@@ -932,6 +935,7 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
     if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
     if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
@@ -3156,6 +3160,7 @@ export function dispatchScenePlanned(
   audioReferencesDisabled?: boolean,
   performanceAudio?: PerformanceAudioRequest[],
   masterAudio?: MasterAudioRequest[],
+  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
   send({
@@ -3169,6 +3174,7 @@ export function dispatchScenePlanned(
     policy,
     ...(performanceAudio?.length ? { performanceAudio } : {}),
     ...(masterAudio?.length ? { masterAudio } : {}),
+    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
     ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),

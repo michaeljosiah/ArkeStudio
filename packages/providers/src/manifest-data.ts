@@ -1,6 +1,6 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
-import { FAL_MODELS } from "./fal-catalogue.generated.js";
+import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
  * The shipped model manifest (SPEC-008 §2.5, D9): read at start, never fetched at run time.
@@ -14,7 +14,8 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 21,
+  manifestVersion: 22,
+  dialogueGuidance: [],
   generated: "2026-09-05",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
@@ -42,6 +43,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
+      dispatchEndpoints: { text: FAL_ENDPOINTS[model.id]!, ...(FAL_EDIT_ENDPOINTS[model.id] ? { reference: FAL_EDIT_ENDPOINTS[model.id] } : {}), version: "arke-fal-payload-v1" },
       accepts: { ...model.accepts, referenceRoles: false },
     })),
     // ---- comfyui: projected from the shipped recipe catalogue (SPEC-021 R-3) ----

@@ -1,3 +1,4 @@
+import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
@@ -166,6 +167,7 @@ export const ProductionBundleSchema = z
     episodeFiles: z.record(EpisodeIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
+    feedback: z.array(TakeDialogueFeedbackSchema).optional(),
     selections: SelectionsSchema,
     /** `spine.json`, or null for every production that is not cut to a track (#253). */
     spine: ProductionSpineSchema.nullable().default(null),

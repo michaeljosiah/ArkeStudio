@@ -531,6 +531,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict()),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("dialogue.result"), requestId: UlidSchema, worldId: UlidSchema, status: z.enum(["saved", "proposed", "refused"]), reason: z.string() }).strict(),
   z.object({ ...base, type: z.literal("rehearsal.result"), plan: TableReadPlanSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
     status: z.enum(["saved", "planned", "refused"]), reason: z.string() }).strict(),
   z.object({ ...base, type: z.literal("performance.result"), audioReference: PreparedPerformanceAudioReviewSchema.optional(), masterAudioReference: MasterAudioReviewSchema.optional(), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,

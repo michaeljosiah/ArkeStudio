@@ -362,6 +362,11 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // The camera is spoken once: if it has been raised into its own anchor block, it does not also
   // trail the description.
   const directionParts: string[] = [];
+  if (shot.visualFacts) {
+    directionParts.push(`Authored on-screen composition: ${shot.visualFacts.composition}.`);
+    const castFacts = shot.visualFacts.onScreenCharacters.map(c => `${sheets.find(s => s.id === c.characterId)?.name ?? c.characterId}: ${c.presentation}, ${c.depth}`);
+    directionParts.push(castFacts.length ? `Authored on-screen cast: ${castFacts.join("; ")}.` : "No characters are authored on screen.");
+  }
   const cinematicIntent = shot.intent?.trim() ?? "";
   if (cinematicIntent.length > 0) {
     directionParts.push(

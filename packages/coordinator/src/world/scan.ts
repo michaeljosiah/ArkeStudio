@@ -1,3 +1,4 @@
+import { TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
@@ -699,6 +700,17 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       const ids = scene ? new Set(deriveRehearsalLines(scene, sheets).map(line => line.id)) : new Set<string>();
       if (Object.keys(rehearsal.notes).some(key => !ids.has(key))) problems.push({ path, message: "This rehearsal has an orphaned line note. Remove it explicitly in the table read." });
     }
+    const feedbackPath = `productions/${id}/take-feedback.jsonl`;
+    const feedback: TakeDialogueFeedback[] = [];
+    if (await exists(join(pdir, "take-feedback.jsonl"))) await tryParse(feedbackPath, raw => {
+      raw.split("\n").forEach((line, index) => {
+        if (!line.trim()) return;
+        try { feedback.push(TakeDialogueFeedbackSchema.parse(JSON.parse(line))); }
+        catch { problems.push({ path: feedbackPath, message: `Malformed dialogue feedback at line ${index + 1}. Valid records remain available.` }); }
+      });
+      if (raw && !raw.endsWith("\n")) problems.push({ path: feedbackPath, message: "Incomplete dialogue feedback tail. Repair before adding feedback." });
+      return feedback;
+    });
     const performanceReviewPath = `productions/${id}/performance-reviews.jsonl`;
     const performanceSelectionPath = `productions/${id}/performance-selections.json`;
     const performanceReviews = (await exists(join(pdir, "performance-reviews.jsonl"))) ? await tryParse(performanceReviewPath, raw => {
@@ -707,7 +719,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     }) : [];
     const performanceSelections = (await exists(join(pdir, "performance-selections.json"))) ? await tryParse(performanceSelectionPath, raw => PerformanceSelectionsSchema.parse(JSON.parse(raw))) : {};
     productions.push({
-      rehearsals, rehearsalHashes,
+      rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },
       performances,

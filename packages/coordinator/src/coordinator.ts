@@ -1,3 +1,5 @@
+import { recordDialogueFeedback } from "./takes/feedback.js";
+import { proposeShotVisualFacts } from "./productions/visual-facts.js";
 import { KeyArtPromptReviews, keyArtReviewContext } from "./references/prompt-review.js";
 import { reviewPrompt } from "@arke-studio/contracts";
 import { placeSelectedPerformance, validatePlacedPerformanceBytes, proposePerformanceDuration } from "./audio/performance-placement.js";
@@ -7104,6 +7106,7 @@ export class Coordinator {
         this.creatingPlans.add(msg.requestId);
         try {
           const aggregate = await createDispatchPlan(store, {
+            manifest: this.opts.manifest, acknowledgedRecommendationIds: msg.acknowledgedRecommendationIds,
             worldId: msg.worldId,
             productionId: production.meta.id,
             scene,
@@ -7658,7 +7661,7 @@ export class Coordinator {
         // the dialog waited for a job that never arrived, and the process was entitled to exit.
         let dispatches;
         try {
-          dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle);
+          dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle, this.opts.manifest, msg.acknowledgedRecommendationIds, this.nowIso());
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           void this.appLog?.append({
@@ -11732,6 +11735,26 @@ export class Coordinator {
           } else this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan, reason: "Review missing lines and the aggregate estimate." });
         } catch {
           this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused", reason: "Table read preparation could not complete. Refresh the authored lines, voices and provider readiness. Existing work is retained." });
+        }
+        return;
+      }
+      case "record-dialogue-feedback":
+      case "propose-shot-visual-facts": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open this world first.");
+          if (msg.kind === "record-dialogue-feedback") await recordDialogueFeedback(store, msg);
+          else {
+            const proposal = await proposeShotVisualFacts(store, msg);
+            this.emit({ type: "proposal.staged", at: this.nowIso(), worldId: msg.worldId, proposalId: proposal.id });
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "dialogue.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            status: msg.kind === "record-dialogue-feedback" ? "saved" : "proposed",
+            reason: msg.kind === "record-dialogue-feedback" ? "Diagnostic feedback saved." : "Review the staged scene proposal before these facts change." });
+        } catch (error) {
+          this.emit({ type: "dialogue.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused",
+            reason: error instanceof Error ? error.message : "Dialogue update refused." });
         }
         return;
       }

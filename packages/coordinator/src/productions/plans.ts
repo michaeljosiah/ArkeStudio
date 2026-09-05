@@ -101,6 +101,8 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
 }
 
 export interface CreatePlanInput {
+  manifest?: import("@arke-studio/contracts").ModelManifest;
+  acknowledgedRecommendationIds?: string[];
   worldId: string;
   productionId: string;
   scene: SceneRecord;
@@ -131,6 +133,7 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
     model: input.model,
     world: input.world,
     chainWholeSceneFrames: chainFrames,
+    manifest: input.manifest, acknowledgedRecommendationIds: input.acknowledgedRecommendationIds, assessedAt: input.clock(),
   });
   for (const pass of compiled) {
     if (pass.params.audioReferences !== undefined) await readCharacterAudioInputs(store, {

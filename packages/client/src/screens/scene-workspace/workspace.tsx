@@ -1,3 +1,4 @@
+import { DialogueGuidance } from "../../components/dialogue-guidance.js";
 import { MasterAudioPicker } from "../../components/master-audio-picker.js";
 import { PerformanceAudioPicker } from "../../components/performance-audio-picker.js";
 import { type MasterAudioChoice, type PerformanceAudioChoice } from "../../lib/scene-plan.js";
@@ -92,6 +93,7 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [dialogueAcknowledgements, setDialogueAcknowledgements] = useState<string[]>([]);
   const [masterAudio, setMasterAudio] = useState<MasterAudioChoice[]>([]);
   const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioChoice[]>([]);
   const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
@@ -410,7 +412,7 @@ export function SceneWorkspace({
       "whole-scene",
       videoModel.id,
       "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio.map(({ preview: _preview, ...request }) => request),
-      audioReferencesDisabled ? [] : masterAudio.map(({ preview: _preview, ...request }) => request),
+      audioReferencesDisabled ? [] : masterAudio.map(({ preview: _preview, ...request }) => request), dialogueAcknowledgements,
     );
     setPlanError(null);
   };
@@ -470,6 +472,7 @@ export function SceneWorkspace({
               {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
             </div>}
             <MasterAudioPicker key={`${sceneKey}/master`} world={world} production={production} sceneId={scene.id} value={masterAudio} onChange={setMasterAudio} />
+            <DialogueGuidance world={world} production={production} scene={scene} plan={videoPlan} model={videoModel ?? null} manifest={state?.app.manifest ?? null} acknowledged={dialogueAcknowledgements} onAcknowledge={setDialogueAcknowledgements} />
             <PerformanceAudioPicker key={sceneKey} world={world} production={production} sceneId={scene.id} value={performanceAudio} onChange={setPerformanceAudio} />
             <SceneSynopsis
               scene={legacySceneView(scene)}

@@ -1,3 +1,4 @@
+import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
 import { resolvedAuthoredDuration } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -2629,6 +2630,7 @@ function TakesView({
           </button>
         </div>
       </div>
+      {picked && worldId && shotId && <TakeDialogueFeedbackPanel key={`${picked.id}/${shotId}`} worldId={worldId} production={production} take={picked} shotId={shotId} />}
       {/* Layer two, in the same column it holds everywhere else (turns 99, 100, 102). */}
       <ProductionConversation
         worldId={worldId}

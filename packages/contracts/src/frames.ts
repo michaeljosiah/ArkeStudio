@@ -1,3 +1,5 @@
+import { DialogueFailureTagSchema } from "./take-feedback.js";
+import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
@@ -1324,6 +1326,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
     confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
     warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("record-dialogue-feedback"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeId: TakeIdSchema, shotId: ShotIdSchema, tags: z.array(DialogueFailureTagSchema).min(1), recommendationIds: z.array(z.string().min(1)), note: z.string().max(1000).optional() }).strict(),
+  z.object({ kind: z.literal("propose-shot-visual-facts"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, shotId: ShotIdSchema, expectedSceneVersion: z.number().int().positive(), visualFacts: ShotVisualFactsSchema.nullable() }).strict(),
   z.object({ kind: z.literal("plan-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
   z.object({ kind: z.literal("prepare-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema,
     confirmationToken: FullSha256Schema, confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
@@ -1991,6 +1997,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
       audioReferencesDisabled: z.boolean().optional(),
       performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
       masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
@@ -2113,6 +2120,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
       audioReferencesDisabled: z.boolean().optional(),
       performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
       masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),

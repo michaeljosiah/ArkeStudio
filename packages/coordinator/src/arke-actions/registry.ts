@@ -487,6 +487,8 @@ const CLIENT_COMMAND_METADATA = {
   "prepare-master-audio-reference": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "prepare-performance-audio-reference": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "cancel-key-art-prompt": humanOnly(HUMAN_DECISION),
+  "record-dialogue-feedback": humanOnly(HUMAN_DECISION),
+  "propose-shot-visual-facts": humanOnly("The user confirms authored on-screen facts; citations and generated inference cannot establish them."),
 } as const satisfies Record<ClientMessageKind, CommandMetadata>;
 
 export type ArkeClientCommandRegistry = {
