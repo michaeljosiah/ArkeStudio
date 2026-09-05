@@ -4287,3 +4287,8 @@ export function acceptPropState(
 ): void {
   send({ kind: "accept-prop-state", worldId, propId, stateId, selection, ...(replace ? { replace: true } : {}) });
 }
+
+/** The Logs control on a spawned engine's row (SPEC-033 R-70; issue 585): the host opens the file. */
+export function openEngineLog(engine: "comfyui" | "voxa"): void {
+  send({ kind: "open-engine-log", engine });
+}

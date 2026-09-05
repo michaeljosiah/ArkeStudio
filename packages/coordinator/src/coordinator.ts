@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
+import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -6153,6 +6154,25 @@ export class Coordinator {
       }
       case "open-model-folder": {
         if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
+        return;
+      }
+      case "open-engine-log": {
+        // Host-owned end to end (SPEC-028 R-4, SPEC-033 R-70): the renderer names the engine and
+        // the path never leaves here. Before the engine has said anything there is no file, and
+        // opening the folder it will land in is honest about that; the app's own journal is not.
+        if (!this.opts.appRoot) return;
+        const folder = join(this.opts.appRoot, "logs", "engines");
+        const file = join(folder, `${msg.engine}.log`);
+        if (existsSync(file)) {
+          this.opts.openPath?.(file);
+        } else {
+          try {
+            mkdirSync(folder, { recursive: true });
+          } catch {
+            /* the open below reports the folder as missing, which is the truth */
+          }
+          this.opts.openPath?.(folder);
+        }
         return;
       }
       case "test-local-voice": {

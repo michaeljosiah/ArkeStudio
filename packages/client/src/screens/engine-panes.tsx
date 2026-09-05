@@ -29,6 +29,7 @@ import {
   clearComfyUiEngine,
   clearComfyUiModelsDir,
   clearVoxaExecutable,
+  openEngineLog,
   openModelFolder,
   refreshComfyUi,
   restartComfyUi,
@@ -53,7 +54,9 @@ import {
  * Most people never open one. The ones who do are troubleshooting, and abridging it for them
  * would be the wrong kindness — so the detail is unabridged, and R-5 moves it into a provider
  * pane without taking anything out: version, state, port, model directory, executable, logs,
- * restart, re-verify, repair.
+ * restart, re-verify, repair. Logs opens what the child supervisor kept for an engine Arke
+ * spawned (issue 585); for Ollama and a URL ComfyUI, which it never spawns, the row names where
+ * that engine keeps its own instead.
  *
  * It absorbs Components. A component is a thing that must be on this machine — an engine's own
  * concern — so it is stated under the engine that requires it, and the link is declared on the
@@ -261,6 +264,9 @@ export function VoxaDetail({
         </button>
         <button type="button" className="fy-set__link" onClick={() => openModelFolder()}>
           Open folder
+        </button>
+        <button type="button" className="fy-set__link" onClick={() => openEngineLog("voxa")}>
+          Logs
         </button>
         <span style={{ flex: 1 }} />
         <HealthDot label="Voxa local speech" health={health} />
@@ -571,6 +577,14 @@ export function ComfyUiDetail() {
             Restart
           </button>
         )}
+        {/* Logs only where Arke spawned the process (SPEC-033 R-70). A URL engine's log belongs
+            to whoever runs it, and a control that opened nothing would be the lie R-70 forbids. */}
+        {(engine?.source === "managed" || engine?.source === "user-path") && (
+          <button type="button" className="fy-set__link" onClick={() => openEngineLog("comfyui")}>
+            Logs
+          </button>
+        )}
+        {engine?.source === "user-url" && <span className="fy-set__caps">Logs · kept by whoever runs it</span>}
         <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
           {engine === null || engine.source === "absent"
             ? "Re-detect"
@@ -637,6 +651,10 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
           <span>{refusal}</span>
         </div>
       )}
+      {/* Ollama is handed to the operating system by its installer and answers on its own port:
+          there is no child of ours to keep a log for, so the row names where it keeps its own
+          (SPEC-033 R-70) rather than offering a file this application never wrote. */}
+      <div className="fy-set__caps">Logs · Ollama keeps its own · server.log in its data folder (%LOCALAPPDATA%\Ollama on Windows, ~/.ollama/logs elsewhere)</div>
       <RuntimeSection label="COMPONENTS" />
       <ComponentRows components={components} />
     </>
