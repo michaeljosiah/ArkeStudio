@@ -77,6 +77,15 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
+## Character audio foundation (issue #117)
+
+Shared audio contracts live in `packages/contracts/src/audio.ts`; local preparation, QC, rights,
+transcript comparison and clearance live in coordinator `src/audio/`. Reuse them for #255/#111;
+do not introduce performance persistence as a prerequisite for a character sample. Desktop audio
+and video QC share the bounded process runner. Consumer UI and automatic route transport are
+separate work. Read [the integration/recovery notes](docs/architecture/character-audio-foundation.md)
+before adding a consumer, particularly frozen candidates, current rights and conservative cleanup.
+
 ## Harness dependencies (issue #828)
 
 Harness dependencies (issue #828): concrete adapter imports under coordinator/src belong only in

@@ -6,7 +6,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { parseSceneRecord } from "./scene-record.js";
 import { stemOrThrow } from "./scene-commands.js";
 
@@ -39,11 +39,17 @@ export type PlayblastOutcome =
 
 const refused = (reason: string): PlayblastOutcome => ({ outcome: "refused", reason });
 
-export async function filePlayblast(store: WorldStore, input: PlayblastFiling): Promise<PlayblastOutcome> {
+export async function filePlayblast(
+  store: WorldStore,
+  input: PlayblastFiling,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<PlayblastOutcome> {
   const stem = stemOrThrow(input.sceneFile);
   const path = `productions/${input.productionId}/scenes/${stem}.json`;
   const absolute = toExtendedLength(join(store.dir, fromPortable(path)));
   return store.gateOp<PlayblastOutcome>(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const raw = await readFile(absolute, "utf8").catch(() => null);
     if (raw === null) return refused("the scene is no longer on disk");
     const record = parseSceneRecord(raw);
@@ -119,12 +125,13 @@ export async function filePlayblast(store: WorldStore, input: PlayblastFiling): 
     ]);
     await store.commitUnserialised({
       kind: "scene-command",
-      source: "stage-playblast",
+      source: options.source ?? "stage-playblast",
       files: [
         { path, action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(raw) },
         { path: `artifacts/${file}.json`, action: "create", content: `${JSON.stringify(artifact, null, 2)}\n`, baseHash: null },
         { path: `artifacts/${openingFrameFile}.json`, action: "create", content: `${JSON.stringify(openingFrameArtifact, null, 2)}\n`, baseHash: null },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
     return { outcome: "filed", artifacts: [artifact, openingFrameArtifact] };
   });

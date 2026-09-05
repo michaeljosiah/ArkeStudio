@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
+  ConversationActionCard,
   FrameRunState,
   ManifestModel,
   StagedProposal,
@@ -15,6 +16,7 @@ import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
   createWorldChat,
+  decideConversationAction,
   frameRunCommand,
   listHarnessModels,
   rejectWorldChatPoint,
@@ -26,10 +28,12 @@ import {
   sendWorldChat,
   setProductionModel,
   subscribeWorldChatMediaOpened,
+  subscribeConversationActionDecision,
   useStore,
   useWorldChatProgress,
   useWorldChatWrapUpRefusal,
   worldChatAttachFiles,
+  promoteWorldChatAttachment,
   wrapUpWorldChat,
 } from "../lib/store.js";
 import { eligibilityInputs, productionModel } from "./dispatch-bar.js";
@@ -37,6 +41,7 @@ import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Pin } from "./icons.js";
+import { mediaUrl } from "../lib/media.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -84,7 +89,13 @@ export function ConversationTranscript({
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
   const messages = workspace?.messages ?? [];
-  if (messages.length === 0 && !running && !failure && empty) {
+  const visibleTurns = new Set(messages.filter((message) => message.role === "studio").map((message) => message.turnId));
+  // The message window is bounded; outstanding decisions and running work must stay reachable.
+  const olderActions = (workspace?.actions ?? []).filter((action) =>
+    !visibleTurns.has(action.turnId) &&
+    ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
+  );
+  if (messages.length === 0 && olderActions.length === 0 && !running && !failure && empty) {
     return (
       <div className="fy-chat__transcript" aria-live="polite">
         {empty}
@@ -93,8 +104,22 @@ export function ConversationTranscript({
   }
   return (
     <div className="fy-chat__transcript" aria-live="polite">
-      {messages.map((m) => (
-        <div key={m.id} className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`)}>
+      {olderActions.length > 0 && (
+        <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
+          {olderActions.map((action) => (
+            <ConversationPermissionCard key={action.actionId} action={action} conversationSeq={workspace?.seq ?? 0} />
+          ))}
+        </div>
+      )}
+      {messages.map((m) => {
+        const actions = m.role !== "studio" || m.turnId === undefined
+          ? []
+          : (workspace?.actions ?? []).filter((action) => action.turnId === m.turnId);
+        return (
+        <div
+          key={m.id}
+          className={cx("fy-chat__turn", `fy-chat__turn--${m.role}`, actions.length > 0 && "fy-chat__turn--action")}
+        >
           <div className="fy-chat__bubble">
             {m.text}
             {m.role === "studio" && m.receipts.length > 0 && (
@@ -169,8 +194,16 @@ export function ConversationTranscript({
               {...(shotLabel === undefined ? {} : { shotLabel })}
             />
           )}
+          {actions.map((action) => (
+            <ConversationPermissionCard
+              key={action.actionId}
+              action={action}
+              conversationSeq={workspace?.seq ?? 0}
+            />
+          ))}
         </div>
-      ))}
+        );
+      })}
       {/*
         The turn in flight, where its reply will be. In the transcript rather than on the composer
         because that is where the answer is going to appear, and it is where the eye already is
@@ -194,6 +227,274 @@ export function ConversationTranscript({
       )}
     </div>
   );
+}
+
+const ACTION_STATUS: Record<ConversationActionCard["status"], string> = {
+  pending: "Needs your decision",
+  approved: "Approved",
+  "awaiting-host": "Waiting for you",
+  queued: "Queued",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+  denied: "Denied",
+  stale: "Needs a fresh review",
+  superseded: "Replaced",
+};
+
+const DECIDABLE_CARD_FAMILIES = new Set([
+  "authored-diff",
+  "command",
+  "destructive",
+  "take-review",
+  "generation",
+  "host-action",
+  "setting",
+]);
+
+export function ConversationPermissionCard({
+  action,
+  conversationSeq,
+}: {
+  action: ConversationActionCard;
+  conversationSeq: number;
+}) {
+  const { state } = useStore();
+  const navigate = useNavigate();
+  const card = useRef<HTMLElement>(null);
+  const request = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const supported = DECIDABLE_CARD_FAMILIES.has(action.shown.body.family);
+  const terminal = ["completed", "failed", "cancelled", "denied", "stale", "superseded"].includes(action.status);
+
+  useEffect(
+    () => subscribeConversationActionDecision((answer) => {
+      if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
+      request.current = null;
+      setBusy(false);
+      setAnnouncement(
+        answer.disposition === "recorded"
+          ? `${action.shown.title}: ${answer.decision === "approve" ? "approved" : "denied"}.`
+          : answer.detail ?? `${action.shown.title} could not be decided.`,
+      );
+      requestAnimationFrame(() => card.current?.focus());
+    }),
+    [action.actionId, action.shown.title],
+  );
+
+  const decide = (decision: "approve" | "deny") => {
+    const expectedStatus = action.status === "stale" ? "stale" : "pending";
+    const sent = decideConversationAction(
+      action.worldId,
+      action.conversationId,
+      action.actionId,
+      conversationSeq,
+      expectedStatus,
+      decision,
+    );
+    if (sent === null) {
+      setAnnouncement("The decision could not be sent.");
+      return;
+    }
+    request.current = sent;
+    setBusy(true);
+    setAnnouncement("");
+  };
+
+  const body = <ConversationActionBody action={action} supported={supported} />;
+  const consequences = action.shown.ripples.length > 0 ? (
+    <div className="fy-actioncard__body">
+      <strong>Consequences</strong>
+      <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
+    </div>
+  ) : null;
+  return (
+    <article
+      ref={card}
+      tabIndex={-1}
+      className="fy-actioncard"
+      data-status={action.status}
+      aria-label={`${action.shown.title}, ${ACTION_STATUS[action.status]}`}
+    >
+      <div className="fy-actioncard__head">
+        <div>
+          <div className="fy-actioncard__reason">{action.shown.permissionReason.replaceAll("-", " ")}</div>
+          <h3>{action.shown.title}</h3>
+        </div>
+        <span className="fy-actioncard__status">{ACTION_STATUS[action.status]}</span>
+      </div>
+      <p className="fy-actioncard__consequence">{action.shown.consequence}</p>
+      {terminal ? (
+        <details className="fy-actioncard__details">
+          <summary>Review details</summary>
+          {body}
+          {consequences}
+        </details>
+      ) : <>{body}{consequences}</>}
+      {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
+      {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {action.decision && (
+        <div className="fy-actioncard__audit">
+          {action.decision.actorId === "local-user" ? "You" : action.decision.actorId}
+          {` · ${action.decision.decision === "approve" ? "approved" : "denied"} · ${action.decision.decidedAt}`}
+        </div>
+      )}
+      {action.receipt && (
+        <div className="fy-actioncard__receipt">
+          <strong>Result</strong>
+          <span>{action.receipt.summary}</span>
+          {action.receipt.generation && state?.world ? (
+            <div className="fy-actioncard__body">
+              <p>
+                {action.receipt.generation.completed} completed · {action.receipt.generation.failed} failed · {action.receipt.generation.cancelled} cancelled · {action.receipt.generation.unattempted} unattempted
+              </p>
+              <p>Actual cost: {action.receipt.generation.actualMicroUsd === null ? "Not reported" : `$${(action.receipt.generation.actualMicroUsd / 1_000_000).toFixed(4)}`}</p>
+              {action.receipt.generation.results.map((result) => (
+                <div key={result.id} className="fy-actioncard__line">
+                  {result.status === "completed" && result.mediaPath ? (
+                    result.medium === "image" ? (
+                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)} aria-label={`Open ${result.description}`}>
+                        <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
+                      </a>
+                    ) : result.medium === "video" ? (
+                      <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
+                    ) : result.medium === "audio" ? (
+                      <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
+                    ) : (
+                      <a href={mediaUrl(state.world!.meta.slug, result.mediaPath)}>Open {result.medium}</a>
+                    )
+                  ) : null}
+                  <strong>{result.description}</strong>
+                  <span>{result.status}{result.detail ? ` · ${result.detail}` : ""}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {action.receipt.kind === "bench-session" && state?.world ? (
+            <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.receipt!.id}`)}>
+              Open Bench
+            </Button>
+          ) : null}
+        </div>
+      )}
+      {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
+      {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
+        <div className="fy-actioncard__actions">
+          {action.status === "pending" && <Button
+            variant="primary"
+            disabled={busy || !action.availableDecisions.includes("approve")}
+            onClick={() => decide("approve")}
+          >
+            {busy ? "Deciding…" : "Approve"}
+          </Button>}
+          {action.availableDecisions.includes("deny") && <Button
+            variant="ghost"
+            disabled={busy || !action.availableDecisions.includes("deny")}
+            onClick={() => decide("deny")}
+          >
+            Deny
+          </Button>}
+        </div>
+      )}
+      {(action.status === "queued" || action.status === "running") && action.shown.body.family === "generation" && action.shown.body.cancellationSupported && state?.world ? (
+        <div className="fy-actioncard__actions">
+          <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.authority.id}`)}>
+            Manage or cancel in Bench
+          </Button>
+        </div>
+      ) : null}
+      {!supported && (
+        <p className="fy-actioncard__unsupported">This card type is not available in this version. Nothing can be approved.</p>
+      )}
+      <div className="fy-actioncard__live" aria-live="assertive" role="status">{announcement}</div>
+    </article>
+  );
+}
+
+function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+  const { state } = useStore();
+  const body = action.shown.body;
+  if (!supported) return null;
+  switch (body.family) {
+    case "authored-diff":
+      return <div className="fy-actioncard__body">
+        {body.fields.map((field) => <div key={field.label} className="fy-actioncard__change">
+          <strong>{field.label}</strong>
+          <span className="fy-actioncard__before">{field.before ?? "Not set"}</span>
+          <span aria-hidden="true">→</span>
+          <span>{field.after ?? "Removed"}</span>
+        </div>)}
+        {[...body.conflicts, ...body.openChoices].map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+      </div>;
+    case "command":
+      return <div className="fy-actioncard__body">
+        {body.commands.map((command) => <div key={`${command.label}:${command.detail ?? ""}`} className="fy-actioncard__line"><strong>{command.label}</strong>{command.detail && <span>{command.detail}</span>}</div>)}
+        <p>{body.expectedResult}</p>
+      </div>;
+    case "destructive":
+      return <div className="fy-actioncard__body">
+        <strong>Will remove</strong>
+        <ul>{body.removed.map((item) => <li key={item}>{item}</li>)}</ul>
+        {body.retained.length > 0 && <p>Retained: {body.retained.join(" · ")}</p>}
+        {body.dependentChanges.length > 0 && <p>Dependent changes: {body.dependentChanges.join(" · ")}</p>}
+        {body.blockers.map((line) => <p key={line} className="fy-actioncard__notice">{line}</p>)}
+        <p>Undo {body.undoAvailable ? "available" : "not available"}</p>
+      </div>;
+    case "take-review":
+      return <div className="fy-actioncard__body">
+        {body.mediaPath && state?.world ? (
+          body.mediaKind === "video" ? (
+            <video
+              className="fy-actioncard__media"
+              controls
+              preload="metadata"
+              src={mediaUrl(state.world.meta.slug, body.mediaPath)}
+              {...(body.posterPath ? { poster: mediaUrl(state.world.meta.slug, body.posterPath) } : {})}
+            />
+          ) : body.mediaKind === "audio" ? (
+            <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world.meta.slug, body.mediaPath)} />
+          ) : body.mediaKind === "image" ? (
+            <img className="fy-actioncard__media" src={mediaUrl(state.world.meta.slug, body.mediaPath)} alt={`Take ${body.mediaId}`} />
+          ) : (
+            <a href={mediaUrl(state.world.meta.slug, body.mediaPath)}>Open source document</a>
+          )
+        ) : null}
+        <p>{body.mediaKind} · {body.destination}</p>
+        {body.scene && <p>Scene: {body.scene}</p>}
+        {body.shot && <p>Shot: {body.shot}</p>}
+        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.reason && <p>{body.reason}</p>}
+        {body.rejectionCitation && (
+          <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
+        )}
+        {(body.reviewHistory ?? []).length > 0 && <><strong>Review history</strong><ul>{(body.reviewHistory ?? []).map((line) => <li key={line}>{line}</li>)}</ul></>}
+      </div>;
+    case "host-action":
+      return <div className="fy-actioncard__body"><strong>{body.action}</strong><p>{body.effect}</p></div>;
+    case "setting":
+      return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
+    case "generation":
+      return <div className="fy-actioncard__body">
+        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
+        <p><strong>Destination</strong> · {body.output}</p>
+        <p>{body.prompt}</p>
+        {(body.exclusions ?? []).length > 0 && <p>Exclusions: {(body.exclusions ?? []).join(" · ")}</p>}
+        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
+        {(body.options ?? []).length > 0 && <p>Options: {(body.options ?? []).map((option) => `${option.label}: ${option.value}`).join(" · ")}</p>}
+        {(body.dimensions || body.durationSec) && <p>{[body.dimensions, body.durationSec ? `${body.durationSec}s` : null].filter(Boolean).join(" · ")}</p>}
+        {body.audioPolicy && <p>Audio: {body.audioPolicy}</p>}
+        {(body.deterministicInputs ?? []).length > 0 && <p>Frozen inputs: {(body.deterministicInputs ?? []).join(" · ")}</p>}
+        {(body.privacy ?? []).map((line) => <p key={line}>{line}</p>)}
+        <p>{body.cost}</p>
+        {body.quoteDigest && <p>Quote digest: {body.quoteDigest}</p>}
+        {body.quoteExpiresAt && <p>Quote expires: {body.quoteExpiresAt}</p>}
+        {body.enforceableCapMicroUsd !== undefined && <p>Enforceable cap: ${(body.enforceableCapMicroUsd / 1_000_000).toFixed(4)}</p>}
+        {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}
+      </div>;
+  }
 }
 
 const REPORT_FAILURE_STATUSES = new Set(["failed", "missing", "needs-reconciliation"]);
@@ -334,10 +635,13 @@ export function failureLine(failure: { status: string; detail?: string }): strin
  * file says "text only": the words came through and the pictures, tables and layout did not,
  * which somebody who attached a deck for its images needs to know before they ask about one.
  */
-export function attachmentChipLabel(attachment: { fileName: string; readability: string }): string {
-  if (attachment.readability === "not-readable") return `${attachment.fileName} · not readable in chat`;
-  if (attachment.readability === "extracted-text-available") return `${attachment.fileName} · text only`;
-  return attachment.fileName;
+export function attachmentChipLabel(attachment: { fileName: string; readability: string; promoted?: boolean }): string {
+  const state = [
+    ...(attachment.readability === "not-readable" ? ["not readable in chat"] : []),
+    ...(attachment.readability === "extracted-text-available" ? ["text only"] : []),
+    ...(attachment.promoted === true ? ["filed in world"] : []),
+  ];
+  return state.length > 0 ? `${attachment.fileName} · ${state.join(" · ")}` : attachment.fileName;
 }
 
 /**
@@ -687,11 +991,15 @@ export function ProductionConversation({
     id: a.id,
     file: attachmentChipLabel(a),
     kind: a.kind,
+    promoted: a.promoted,
   }));
   const attachProps = {
     attachments: attachChips,
     ...(worldId && conversationId
       ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+      : {}),
+    ...(worldId && conversationId
+      ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }
       : {}),
   };
   const languageControl = productionId ? (

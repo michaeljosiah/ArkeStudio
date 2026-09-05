@@ -24,6 +24,7 @@ interface Connection {
   socket: WebSocket;
   seq: number;
   helloed: boolean;
+  initialising: boolean;
   refused: boolean;
 }
 
@@ -38,6 +39,8 @@ export interface TransportOptions {
   getSnapshot(): ClientState;
   /** Transient state that must be replayed after a fresh snapshot, such as held permissions. */
   getInitialEvents?(): DomainEvent[];
+  /** Reconcile durable state before a new or reconnecting renderer receives its snapshot. */
+  beforeInitialSnapshot?(): Promise<void>;
   /** Client → coordinator messages, after the hello. */
   onMessage?: (msg: ClientMessage) => void;
   /** Somewhere for the transport to say what it dropped; silence is the default, not the goal. */
@@ -83,6 +86,7 @@ export class Transport {
   private wss: WebSocketServer | null = null;
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
+  private readonly initialisations = new Set<Promise<void>>();
 
   constructor(private readonly opts: TransportOptions) {
     if (!/^[a-f0-9]{64}$/.test(opts.auth.token)) throw new Error("transport requires a 32-byte session capability");
@@ -175,7 +179,7 @@ export class Transport {
   }
 
   private accept(socket: WebSocket, origin: string | undefined): void {
-    const conn: Connection = { socket, seq: 0, helloed: false, refused: false };
+    const conn: Connection = { socket, seq: 0, helloed: false, initialising: false, refused: false };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
@@ -203,7 +207,7 @@ export class Transport {
       // Check before schema parsing: a missing/invalid capability must close, not be treated
       // as harmless version skew. No pipelined command may follow a refused hello.
       const candidate = parsedJson as { kind?: unknown; token?: unknown } | null;
-      if (!conn.helloed || candidate?.kind === "hello") {
+      if ((!conn.helloed && !conn.initialising) || candidate?.kind === "hello") {
         if (candidate?.kind !== "hello" || !this.authenticated(candidate.token)) {
           refuse();
           return;
@@ -222,11 +226,30 @@ export class Transport {
         return;
       }
       if (msg.kind === "hello") {
-        // Whatever lastSeq the client saw, the answer is a fresh snapshot (D4).
-        conn.helloed = true;
-        this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state: this.opts.getSnapshot() });
-        for (const event of this.opts.getInitialEvents?.() ?? []) {
-          this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+        if (conn.initialising) return;
+        const sendInitialState = () => {
+          if (!this.connections.has(conn)) return;
+          // Whatever lastSeq the client saw, the answer is a fresh snapshot (D4).
+          conn.helloed = true;
+          conn.initialising = false;
+          this.sendFrame(conn, { kind: "snapshot", seq: ++conn.seq, state: this.opts.getSnapshot() });
+          for (const event of this.opts.getInitialEvents?.() ?? []) {
+            this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
+          }
+        };
+        if (this.opts.beforeInitialSnapshot && !conn.helloed) {
+          conn.helloed = false;
+          conn.initialising = true;
+          const initialising = this.opts.beforeInitialSnapshot()
+            .then(sendInitialState)
+            .catch(() => {
+              this.opts.log?.("initial snapshot reconciliation failed");
+              if (this.connections.has(conn)) socket.close(1011, "initial state unavailable");
+            })
+            .finally(() => this.initialisations.delete(initialising));
+          this.initialisations.add(initialising);
+        } else {
+          sendInitialState();
         }
         return;
       }
@@ -275,6 +298,7 @@ export class Transport {
     this.http = null;
     for (const conn of this.connections) conn.socket.close(1001, "coordinator stopping");
     this.connections.clear();
+    await Promise.allSettled(this.initialisations);
     await new Promise<void>((resolve) => wss.close(() => resolve()));
     if (http) await new Promise<void>((resolve) => http.close(() => resolve()));
   }

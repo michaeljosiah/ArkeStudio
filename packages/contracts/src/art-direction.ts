@@ -33,12 +33,26 @@ export const DEFAULT_AUDIO_POLICY: AudioPolicy = {
  */
 export const FailureModesSchema = z.array(z.string().trim().min(1).max(300)).max(20).default([]);
 
+/** What the world's one representative image should contain, separate from how it should look. */
+export const KeyArtIntentSchema = z
+  .object({
+    subject: z.string().min(1).max(500).optional(),
+    moment: z.string().min(1).max(500).optional(),
+    stakes: z.string().min(1).max(500).optional(),
+    characters: z.array(z.string().min(1).max(120)).max(8).default([]),
+    location: z.string().min(1).max(120).optional(),
+  })
+  .strict();
+export type KeyArtIntent = z.infer<typeof KeyArtIntentSchema>;
+
 /** One accepted look that is no longer current. Its image remains where that version put it. */
 export const ArtDirectionHistoryEntrySchema = z
   .object({
     version: z.number().int().min(1),
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
+    /** Absent predates authored intent; null explicitly suppresses the legacy build brief. */
+    keyArtIntent: KeyArtIntentSchema.nullable().optional(),
     acceptedAt: IsoDateTimeSchema,
     // On history too, not only on the current record: a take made under v3 was made under v3's
     // policy, and answering "why does this clip have music in it" a month later means being able
@@ -64,6 +78,8 @@ export const ArtDirectionRecordSchema = z
     version: z.number().int().min(1),
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
+    /** Absent falls back to a founding brief; null means the author deliberately cleared it. */
+    keyArtIntent: KeyArtIntentSchema.nullable().optional(),
     acceptedAt: IsoDateTimeSchema,
     /**
      * Defaults are the read-compatibility policy, not a migration. A record written before this
@@ -137,6 +153,7 @@ export const ResolvedArtDirectionSchema = z
     version: z.number().int().min(1),
     description: z.string().trim().min(1),
     masterLook: z.string().min(1).optional(),
+    keyArtIntent: KeyArtIntentSchema.nullable().optional(),
     acceptedAt: IsoDateTimeSchema.optional(),
     audio: AudioPolicySchema.default(DEFAULT_AUDIO_POLICY),
     failureModes: FailureModesSchema,

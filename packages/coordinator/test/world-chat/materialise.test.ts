@@ -157,8 +157,11 @@ describe("a relationship change touches one section of one sheet", () => {
       id: "cand_rel",
       classification: "relationship.change",
       draft: {
+        from: { kind: "sheet", sheetId: "corvin-sabato" },
+        to: { kind: "sheet", sheetId: "blackfeather-covenant" },
+        linkAction: "unchanged",
         proseEdits: [
-          { sheet: { sheetId: "corvin-sabato" }, sectionHeading: "Essence", body: "Bound to the Covenant." },
+          { sheet: { kind: "sheet", sheetId: "corvin-sabato" }, sectionHeading: "Essence", body: "Bound to the Covenant." },
         ],
       },
     } as unknown as WorldChangeCandidate;
@@ -167,6 +170,85 @@ describe("a relationship change touches one section of one sheet", () => {
     assert.deepEqual(data["canonRules"], ["CANON-004", "CANON-011"]);
     assert.equal(data["role"], "Blackfeather founder");
     assert.equal(data["production"], "the-long-fall");
+  });
+
+  it("materialises a link action and a prose edit into one target", () => {
+    const other = fullSheet({ id: "maren-kest", name: "Maren Kest", links: [] });
+    const candidate = {
+      id: "cand_rel",
+      classification: "relationship.change",
+      draft: {
+        from: { kind: "sheet", sheetId: sheet.id },
+        to: { kind: "sheet", sheetId: other.id },
+        linkAction: "add",
+        proseEdits: [
+          { sheet: { kind: "sheet", sheetId: sheet.id }, sectionHeading: "Essence", body: "Maren is his heir." },
+        ],
+      },
+    } as unknown as WorldChangeCandidate;
+
+    const built = materialiseCandidate(
+      candidate,
+      IDENTITIES,
+      { sheets: [sheet, other], canon: [] } as unknown as WorldBundle,
+      AT,
+    );
+    assert.equal(built.targets.length, 1);
+    const doc = MarkdownFile.parse(built.targets[0]!.content);
+    assert.deepEqual(doc.data["links"], ["blackfeather-covenant", "maren-kest"]);
+    assert.match(doc.body, /Maren is his heir\./);
+  });
+});
+
+describe("fields carried only by new World Chat records", () => {
+  it("writes billing and region on a new sheet", () => {
+    const candidate = {
+      id: "cand_new",
+      classification: "sheet.create",
+      draft: {
+        type: "character",
+        name: "Maren Kest",
+        role: "Bell keeper",
+        billing: "lead",
+        region: "Slackwater",
+        canonRules: [],
+        links: [],
+        sections: [],
+      },
+    } as unknown as WorldChangeCandidate;
+    const built = materialiseCandidate(
+      candidate,
+      { ...IDENTITIES, slugBy: new Map([[candidate.id, "maren-kest"]]) },
+      { sheets: [], canon: [] } as unknown as WorldBundle,
+      AT,
+    );
+    const data = MarkdownFile.parse(built.targets[0]!.content).data;
+    assert.equal(data["billing"], "lead");
+    assert.equal(data["region"], "Slackwater");
+  });
+
+  it("records the Canon ids considered before opening a thread", () => {
+    const candidate = {
+      id: "cand_thread",
+      classification: "canon.thread",
+      draft: {
+        title: "Who rings the bells?",
+        question: "Who rings the bells at slack water?",
+        consideredEntryIds: ["CANON-004", "CANON-011"],
+      },
+    } as unknown as WorldChangeCandidate;
+    const built = materialiseCandidate(
+      candidate,
+      {
+        canonIds: ["CANON-012"],
+        slugBy: new Map(),
+        canonIdBy: new Map([[candidate.id, "CANON-012"]]),
+      },
+      { sheets: [], canon: [] } as unknown as WorldBundle,
+      AT,
+    );
+    assert.match(built.targets[0]!.content, /Considered when this was asked: CANON-004, CANON-011/);
+    assert.deepEqual(MarkdownFile.parse(built.targets[0]!.content).data["links"], ["CANON-004", "CANON-011"]);
   });
 });
 

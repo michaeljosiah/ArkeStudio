@@ -113,6 +113,7 @@ describe("key validation probes what the key unlocks (R-3, D5, §3.2)", () => {
           status: 200,
           body: { character_count: 10, character_limit: 10000, can_use_instant_voice_cloning: true },
         },
+        { match: /\/v1\/models$/, status: 200, body: [{ model_id: "eleven_multilingual_sts_v2", can_do_voice_conversion: true }] },
       ]),
     );
     assert.ok((await fine.validateKey("xi-y")).every((p) => p.available));

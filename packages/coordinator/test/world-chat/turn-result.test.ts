@@ -339,6 +339,42 @@ describe("rejecting a turn", () => {
     if (!outcome.ok) assert.ok(outcome.problems.some((p) => p.code === "foreign-receipt"));
   });
 
+  it("stores only cited final-page target receipts as whole-target evidence", async () => {
+    const input = await baseInput();
+    const complete: WorldChatCheckReceipt = {
+      id: newId("check"),
+      runId: newId("run"),
+      tool: "target-read",
+      status: "complete",
+      consulted: [],
+      target: { requirement: "scenes", id: "saltlight:sc_04:script" },
+      observedRevisionOrDigest: `v1:sha256:${"a".repeat(64)}`,
+      complete: true,
+      nextCursor: null,
+      at: AT,
+    };
+    const partial: WorldChatCheckReceipt = {
+      ...complete,
+      id: newId("check"),
+      complete: false,
+      nextCursor: "more-pages",
+    };
+    const draft = canonCreateDraft(input.message);
+    draft.checkReceiptIds = [partial.id, complete.id];
+    const outcome = validateTurnResult({
+      ...input,
+      receiptsThisRun: [partial, complete],
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }] }),
+    });
+
+    assert.ok(outcome.ok);
+    assert.deepEqual(outcome.turn.candidates[0]!.checks.targetReads, [{
+      checkId: complete.id,
+      target: complete.target,
+      observedRevisionOrDigest: complete.observedRevisionOrDigest,
+    }]);
+  });
+
   it("refuses an operation based on an out-of-date proposition", async () => {
     const input = await baseInput();
     const created = validateTurnResult({
@@ -603,8 +639,43 @@ describe("groups", () => {
     assert.equal(group.atomic, true);
     assert.equal(group.members.length, 2);
     for (const member of group.members) {
-      assert.ok(outcome.turn.candidates.some((c) => c.id === member.candidateId));
+      const bound: WorldChangeCandidate | undefined = outcome.turn.candidates.find((c) => c.id === member.candidateId);
+      assert.ok(bound);
+      assert.equal(bound.groupId, group.id, "the candidate snapshot binds the atomic membership");
     }
+  });
+
+  it("versions an existing proposition when new atomic membership is bound", async () => {
+    const input = await baseInput();
+    const first = validateTurnResult({
+      ...input,
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "old", candidate: canonCreateDraft(input.message) }] }),
+    });
+    assert.ok(first.ok);
+    const existing = first.turn.candidates[0]!;
+    const bells = canonCreateDraft(input.message, "the bells only ring at slack water");
+    bells.draft = { ...bells.draft, title: "The bells at slack water" } as never;
+
+    const outcome = validateTurnResult({
+      ...(await baseInput({ messages: [input.message], existing: [existing] })),
+      raw: turn({
+        candidateOperations: [{ op: "create", temporaryId: "new", candidate: bells }],
+        groupOperations: [{
+          op: "create",
+          temporaryId: "group",
+          title: "Maren's household",
+          rationale: "These only make sense together.",
+          members: [{ candidateId: existing.id, revision: existing.revision }, { temporaryId: "new" }],
+        }],
+      }),
+    });
+
+    assert.ok(outcome.ok);
+    const group = outcome.turn.groups[0]!;
+    const rebound = outcome.turn.candidates.find((candidate) => candidate.id === existing.id)!;
+    assert.equal(rebound.revision, existing.revision + 1);
+    assert.equal(rebound.groupId, group.id);
+    assert.equal(group.members.find((member) => member.candidateId === existing.id)!.revision, rebound.revision);
   });
 
   it("refuses a group naming a proposition that does not exist", async () => {
@@ -626,5 +697,73 @@ describe("groups", () => {
     });
     assert.equal(outcome.ok, false);
     if (!outcome.ok) assert.ok(outcome.problems.some((p) => p.code === "unknown-group-member"));
+  });
+});
+
+describe("same-turn entity references", () => {
+  it("resolves a grouped temporary reference even when it points at a later create", async () => {
+    const input = await baseInput();
+    const first = canonCreateDraft(input.message) as Extract<ModelCandidateDraft, { classification: "canon.create" }>;
+    first.draft.links = [{ kind: "pending-entity", ref: { temporaryId: "t2" } }] as never;
+    const second = canonCreateDraft(input.message, "the bells only ring at slack water") as Extract<ModelCandidateDraft, { classification: "canon.create" }>;
+    second.title = "The bells ring at slack water";
+    second.draft = { ...second.draft, title: "Slack-water bells", statement: "The bells ring only at slack water." };
+
+    const outcome = validateTurnResult({
+      ...input,
+      raw: turn({
+        candidateOperations: [
+          { op: "create", temporaryId: "t1", candidate: first },
+          { op: "create", temporaryId: "t2", candidate: second },
+        ],
+        groupOperations: [{
+          op: "create",
+          temporaryId: "g1",
+          title: "The answering bells",
+          rationale: "The first cites the second.",
+          members: [{ temporaryId: "t1" }, { temporaryId: "t2" }],
+        }],
+      }),
+    });
+
+    assert.ok(outcome.ok);
+    const linked = outcome.turn.candidates.find((candidate) => candidate.title === first.title)!;
+    const target = outcome.turn.candidates.find((candidate) => candidate.title === second.title)!;
+    assert.deepEqual((linked.draft as { links: unknown[] }).links, [
+      { kind: "pending-entity", ref: { candidateId: target.id, revision: target.revision } },
+    ]);
+  });
+
+  it("refuses a temporary reference that is not in one atomic group", async () => {
+    const input = await baseInput();
+    const first = canonCreateDraft(input.message) as Extract<ModelCandidateDraft, { classification: "canon.create" }>;
+    first.draft.links = [{ kind: "pending-entity", ref: { temporaryId: "t2" } }] as never;
+    const second = canonCreateDraft(input.message, "the bells only ring at slack water");
+    second.title = "The bells ring at slack water";
+
+    const outcome = validateTurnResult({
+      ...input,
+      raw: turn({
+        candidateOperations: [
+          { op: "create", temporaryId: "t1", candidate: first },
+          { op: "create", temporaryId: "t2", candidate: second },
+        ],
+      }),
+    });
+
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.ok(outcome.problems.some((entry) => entry.code === "unbound-pending-reference"));
+  });
+
+  it("refuses a temporary reference with no create", async () => {
+    const input = await baseInput();
+    const draft = canonCreateDraft(input.message) as Extract<ModelCandidateDraft, { classification: "canon.create" }>;
+    draft.draft.links = [{ kind: "pending-entity", ref: { temporaryId: "missing" } }] as never;
+    const outcome = validateTurnResult({
+      ...input,
+      raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: draft }] }),
+    });
+    assert.equal(outcome.ok, false);
+    if (!outcome.ok) assert.ok(outcome.problems.some((entry) => entry.code === "unknown-temporary-reference"));
   });
 });

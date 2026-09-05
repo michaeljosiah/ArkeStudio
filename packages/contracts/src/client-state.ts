@@ -1,3 +1,7 @@
+import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
+import { RehearsalSessionSchema } from "./rehearsal.js";
+import { PerformanceBibleStateSchema } from "./performance-bible.js";
+import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
 import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
@@ -131,6 +135,10 @@ export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 /** A production with everything its screens render. */
 export const ProductionBundleSchema = z
   .object({
+    rehearsals: z.array(RehearsalSessionSchema).default([]),
+    rehearsalHashes: z.record(z.string(), z.string()).optional(),
+    performances: z.array(PerformanceRecordSchema).default([]),
+    performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
@@ -159,6 +167,7 @@ export const ProductionBundleSchema = z
     episodeFiles: z.record(EpisodeIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
+    feedback: z.array(TakeDialogueFeedbackSchema).optional(),
     selections: SelectionsSchema,
     /** `spine.json`, or null for every production that is not cut to a track (#253). */
     spine: ProductionSpineSchema.nullable().default(null),
@@ -258,6 +267,7 @@ export const WorldBundleSchema = z
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),
+    performanceBibles: z.array(PerformanceBibleStateSchema).optional(),
     /** Prop records, references/<propId>/prop.json (design turn 105; issue 535). Defaulted: a read path. */
     props: z.array(PropSchema).default([]),
     referenceTakes: z.array(TakeSchema).default([]),
@@ -308,6 +318,15 @@ export const WorldBundleSchema = z
      * and a file named for a format it is not is the one thing every other import path refuses.
      */
     keyArt: z.string().nullable().default(null),
+    /**
+     * When those bytes last changed, as an mtime — null when there is no key art.
+     *
+     * Carried because the path cannot answer it: an uploaded PNG replacing a PNG keeps the same
+     * name, and a picture already on screen at that URL is never re-requested, so the frame goes
+     * on showing what was replaced. The renderer puts this in the media URL, which makes a new
+     * picture a new URL.
+     */
+    keyArtVersion: z.number().nullable().default(null),
     /**
      * Master looks waiting for a yes, world-relative, by name. Generated or uploaded, the same
      * offer either way: accepting one is a look change, so it lands as the next version's image.
@@ -542,6 +561,15 @@ export const ClientStateSchema = z
      * it — the same reason the world snapshot carries conversation rows and not their contents.
      */
     worldChat: WorldChatWorkspaceSchema.nullable().default(null),
+    /** Approved Stage handoffs survive closing their source conversation during navigation. */
+    stagePlayblastRequests: z.array(z.object({
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      actionId: z.string().min(1),
+      productionId: z.string().min(1),
+      sceneId: z.string().min(1),
+      shotId: z.string().min(1),
+    }).strict()).optional(),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),
     /**

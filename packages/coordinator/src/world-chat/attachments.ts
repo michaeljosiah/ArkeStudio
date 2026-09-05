@@ -10,16 +10,16 @@ import {
   type WorldChatAttachment,
   type WorldChatLoaded,
 } from "@arke-studio/contracts";
-import { kindForFile } from "../artifacts/filing.js";
+import { ATTACHABLE_EXTENSIONS, kindForFile } from "../artifacts/filing.js";
 import { spoolName } from "../artifacts/spool.js";
 import {
-  EXTRACTED_EXTENSIONS,
   extractDocumentText,
   extractionRefusal,
   isExtractable,
 } from "./document-text.js";
 import { toExtendedLength } from "../world/paths.js";
 import { conversationDir, WorldChatStore } from "./store.js";
+import { safeWebGet, type ResolveWebHost, type WebRequest } from "./safe-web.js";
 
 /**
  * Private conversation attachments (#70 §10.1.1, §13).
@@ -136,6 +136,18 @@ export function attachmentDir(
   return join(attachmentsDir(worldPath, conversationId), attachmentId);
 }
 
+function attachmentPath(worldPath: string, attachment: WorldChatAttachment): string {
+  const dir = resolve(attachmentDir(worldPath, attachment.conversationId, attachment.id));
+  if (attachmentFileName(attachment.fileName) !== attachment.fileName) {
+    throw new AttachmentError("escapes-conversation", "That attachment name is no longer safe.");
+  }
+  const path = resolve(dir, attachment.fileName);
+  if (path !== dir && !path.startsWith(dir + sep)) {
+    throw new AttachmentError("escapes-conversation", "That attachment escapes its conversation.");
+  }
+  return path;
+}
+
 /**
  * A name safe to write.
  *
@@ -195,23 +207,16 @@ function digest(bytes: Uint8Array): string {
 }
 
 /**
- * What the picker offers World Chat, and why it is narrower than the artifact path's list.
+ * What the picker offers World Chat.
  *
- * A conversation may only be handed what it can honestly read (§13.2). Images, audio and video
- * would arrive as a chip the Studio could name but never open — multimodal understanding is
- * explicitly deferred (§23.2) — and a chip that looks attached while the reply cannot see it is
- * worse than a refusal, because the person goes on talking as though it had been read.
- *
- * PDF and Word were out for the same reason and are in now for the reason the refusal named:
- * there is an extraction step. The rule has not moved. What can be read is still decided by the
- * file rather than by its name, only now that decision has two ways of coming out true — the
- * bytes are text, or text can be got out of them — and a file that satisfies neither is refused
- * as plainly as before.
+ * Unsupported media still belongs in the conversation: its identity and unreadable capability
+ * are explicit prompt context, so the model can acknowledge the file without inventing its
+ * contents. This is the same set the artifact path can safely retain if the user later promotes it.
  */
-export const CHAT_DOCUMENT_EXTENSIONS: readonly string[] = ["md", "txt", ...EXTRACTED_EXTENSIONS];
+export const CHAT_ATTACHMENT_EXTENSIONS: readonly string[] = ATTACHABLE_EXTENSIONS;
 
 /**
- * Whether this file can be handed to a conversation, or the sentence explaining why not.
+ * Whether this file can be retained by a conversation, or the sentence explaining why not.
  *
  * Checked before anything is written, so a refused file leaves nothing behind to clean up.
  *
@@ -222,9 +227,8 @@ export const CHAT_DOCUMENT_EXTENSIONS: readonly string[] = ["md", "txt", ...EXTR
  */
 export function refuseUnreadable(fileName: string, bytes: Uint8Array): string | null {
   const kind = chatKind(fileName);
-  if (kind !== "document") {
-    return `World Chat can only read text for now, and ${fileName} is ${kind === "other" ? "not a document" : `${kind === "image" ? "an" : "a"} ${kind} file`}.`;
-  }
+  if (kind === "other") return `${fileName} is not a supported attachment type.`;
+  if (kind !== "document") return null;
   if (isExtractable(fileName)) return null;
   if (detectReadability(kind, bytes) !== "text-readable") {
     return `${fileName} is not readable as text — World Chat cannot open it yet.`;
@@ -398,52 +402,38 @@ export class WorldChatAttachmentStore {
    * would pass today and fail next month for reasons that have nothing to do with the writing.
    * Stored, the quote is checked against what was actually read, forever.
    *
-   * Only http and https, only a page the person's own machine can reach, and only when research
-   * is turned on. Nothing here follows a link it was not given.
+   * Each address, including every redirect, is resolved and connected through that exact public
+   * address. This keeps an allowed hostname from changing its DNS answer between validation and
+   * connection, and keeps a public page from redirecting into the local machine.
    */
   async fetchPage(
     conversationId: ConversationId,
     url: string,
-    deps: { fetch?: typeof globalThis.fetch } = {},
+    deps: { resolveHost?: ResolveWebHost; request?: WebRequest } = {},
   ): Promise<WorldChatAttachment> {
-    let parsed: URL;
+    let response: Awaited<ReturnType<typeof safeWebGet>>;
     try {
-      parsed = new URL(url);
-    } catch {
-      throw new FetchRefused(`"${url}" is not an address this can read.`);
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new FetchRefused(`${parsed.protocol} is not a protocol this reads — http and https only.`);
-    }
-    const doFetch = deps.fetch ?? globalThis.fetch;
-    let response: Response;
-    try {
-      response = await doFetch(parsed.toString(), {
-        redirect: "follow",
-        headers: { accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
-      });
+      response = await safeWebGet(url, MAX_PAGE_BYTES, deps);
     } catch (err) {
-      throw new FetchRefused(`that page could not be reached: ${err instanceof Error ? err.message : "no answer"}`);
+      throw new FetchRefused(err instanceof Error ? err.message : "that page could not be reached");
     }
-    if (!response.ok) throw new FetchRefused(`that page answered ${response.status}.`);
-    const type = response.headers.get("content-type") ?? "";
+    if (response.status < 200 || response.status >= 300) throw new FetchRefused(`that page answered ${response.status}.`);
+    const type = response.contentType ?? "";
     if (!/text\/html|text\/plain|application\/xhtml/i.test(type)) {
       throw new FetchRefused(`that address is ${type || "not text"}, and this reads pages, not files.`);
     }
-    const raw = new Uint8Array(await response.arrayBuffer());
-    if (raw.byteLength > MAX_PAGE_BYTES) throw new FetchRefused("that page is larger than this will keep.");
-    const html = new TextDecoder("utf-8", { fatal: false }).decode(raw);
+    const html = new TextDecoder("utf-8", { fatal: false }).decode(response.bytes);
     const text = /text\/plain/i.test(type) ? html.trim() : readableText(html);
     if (text === "") throw new FetchRefused("there was no readable text on that page.");
 
     const fetchedAt = this.now();
     return this.ingest(conversationId, {
       // The address is the name, so the attachment says where it came from before it is opened.
-      fileName: `${parsed.hostname}${parsed.pathname}`.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) + ".txt",
-      bytes: new TextEncoder().encode(`${parsed.toString()}
+      fileName: `${response.url.hostname}${response.url.pathname}`.replace(/[^A-Za-z0-9._-]+/g, "-").slice(0, 80) + ".txt",
+      bytes: new TextEncoder().encode(`${response.url.toString()}
 
 ${text}`),
-      source: { url: parsed.toString(), fetchedAt },
+      source: { url: response.url.toString(), fetchedAt },
     });
   }
 
@@ -464,12 +454,8 @@ ${text}`),
   }
 
   async readBytes(attachment: WorldChatAttachment): Promise<Uint8Array> {
-    const path = join(
-      attachmentDir(this.worldPath, attachment.conversationId, attachment.id),
-      attachment.fileName,
-    );
     try {
-      return await readFile(toExtendedLength(path));
+      return await readFile(toExtendedLength(attachmentPath(this.worldPath, attachment)));
     } catch {
       throw new AttachmentError("not-found", "That attachment is no longer on disk.");
     }
@@ -554,14 +540,22 @@ ${text}`),
   async promote(
     conversationId: ConversationId,
     attachment: WorldChatAttachment,
-    fileIntoWorld: (input: { fileName: string; bytes: Uint8Array }) => Promise<string>,
+    requestId: string,
+    fileIntoWorld: (input: { fileName: string; bytes: Uint8Array; sourcePath: string }) => Promise<string>,
   ): Promise<string> {
+    if (attachment.conversationId !== conversationId) {
+      throw new AttachmentError("escapes-conversation", "That attachment belongs to a different conversation.");
+    }
     if (attachment.promotedArtifactId !== undefined) return attachment.promotedArtifactId;
+    const sourcePath = attachmentPath(this.worldPath, attachment);
     const bytes = await this.readBytes(attachment);
-    const artifactId = await fileIntoWorld({ fileName: attachment.fileName, bytes });
+    if (bytes.byteLength !== attachment.byteLength || digest(bytes) !== attachment.contentHash) {
+      throw new AttachmentError("not-found", "That attachment changed after it was added to the conversation.");
+    }
+    const artifactId = await fileIntoWorld({ fileName: attachment.fileName, bytes, sourcePath });
     await this.store(conversationId).append(
       { type: "attachment.promoted", attachmentId: attachment.id, artifactId },
-      { at: this.now() },
+      { at: this.now(), requestId },
     );
     return artifactId;
   }

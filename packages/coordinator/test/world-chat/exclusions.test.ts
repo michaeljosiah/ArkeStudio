@@ -48,6 +48,7 @@ describe("conversations are operational state, not world content", () => {
   it("really is absent from an exported copy", async () => {
     const dir = await worldWith({
       ".conversations/cv_x/events.jsonl": '{"seq":1}\n',
+      ".history/conversation-actions.jsonl": '{"actionId":"act_audit"}\n',
       "canon/CANON-001.md": "---\nid: CANON-001\n---\n",
     });
     const target = join(await tempDir("arke-export-"), "out");
@@ -56,6 +57,11 @@ describe("conversations are operational state, not world content", () => {
     await assert.rejects(
       () => readFile(join(target, ".conversations", "cv_x", "events.jsonl"), "utf8"),
       "the conversation directory should not have been copied",
+    );
+    assert.equal(
+      await readFile(join(target, ".history", "conversation-actions.jsonl"), "utf8"),
+      '{"actionId":"act_audit"}\n',
+      "the action audit remains part of the exported world history",
     );
     // The world itself still arrives, or the exclusion has taken too much with it.
     assert.ok(await readFile(join(target, "world.json"), "utf8"));

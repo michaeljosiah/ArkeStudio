@@ -1,6 +1,7 @@
 import {
   newId,
   type CanonEntry,
+  type ArkeTargetReadTool,
   type CheckReceiptId,
   type Sheet,
   type WorldBundle,
@@ -17,6 +18,9 @@ import {
   type WorldChatAttachmentStore,
 } from "./attachments.js";
 import type { WorldChatAttachment } from "@arke-studio/contracts";
+import { isTargetReadTool, TARGET_READ_TOOL_NAMES } from "./target-tool-catalog.js";
+import { WorldChatTargetReads, type TargetReadDeps } from "./target-reads.js";
+import type { ResolveWebHost, WebRequest } from "./safe-web.js";
 
 /**
  * The read-only surface a World Chat run may reach, and the record of what it read
@@ -49,6 +53,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   get_attachment_text: "get-attachment-text",
   fetch_url: "fetch-url",
   get_production: "get-production",
+  ...Object.fromEntries(TARGET_READ_TOOL_NAMES.map((name) => [name, "target-read" as const])),
 };
 
 export class RetrievalError extends Error {
@@ -82,7 +87,7 @@ function summarise(text: string): string {
   return collapsed.length > 120 ? `${collapsed.slice(0, 117)}…` : collapsed;
 }
 
-export interface RetrievalDeps {
+export interface RetrievalDeps extends TargetReadDeps {
   leases: QueryLeaseRegistry;
   getBundle: () => WorldBundle | null;
   getIndex: () => WorldIndex | null;
@@ -101,8 +106,9 @@ export interface RetrievalDeps {
    * default, so silence is the safe answer rather than the permissive one.
    */
   researchAllowed?: () => boolean | Promise<boolean>;
-  /** Injectable so a test can serve a page without a network. */
-  fetch?: typeof globalThis.fetch;
+  /** Injectable socket-boundary seams so tests can serve a page without opening the network. */
+  resolveWebHost?: ResolveWebHost;
+  webRequest?: WebRequest;
   now?: () => string;
 }
 
@@ -110,6 +116,7 @@ const NO_RANGES: ReadonlyMap<string, readonly AttachmentRange[]> = new Map();
 
 export class WorldChatRetrieval {
   private readonly now: () => string;
+  private readonly targetReads: WorldChatTargetReads;
   /** Text read per run, so one run cannot pull a whole library through a bounded tool (§19). */
   private readonly textSpentByRun = new Map<string, number>();
   /**
@@ -129,6 +136,7 @@ export class WorldChatRetrieval {
 
   constructor(private readonly deps: RetrievalDeps) {
     this.now = deps.now ?? (() => new Date().toISOString());
+    this.targetReads = new WorldChatTargetReads(deps);
   }
 
   /**
@@ -176,6 +184,21 @@ export class WorldChatRetrieval {
     const bundle = this.deps.getBundle();
     if (!bundle) throw new RetrievalError("unavailable", "no world is open");
     const index = this.deps.getIndex();
+
+    if (isTargetReadTool(toolName)) {
+      const read = await this.targetReads.call(lease, bundle, toolName as ArkeTargetReadTool, args);
+      return {
+        result: read.result,
+        receipt: receipt(read.status, {
+          querySummary: summarise(read.result.target.id),
+          searchedCount: read.result.total,
+          target: read.result.target,
+          observedRevisionOrDigest: read.result.observedRevisionOrDigest,
+          complete: read.result.complete,
+          nextCursor: read.result.nextCursor,
+        }),
+      };
+    }
 
     switch (toolName) {
       case "search_canon": {
@@ -327,7 +350,10 @@ export class WorldChatRetrieval {
           const attachment = await this.deps.attachments.fetchPage(
             lease.conversationId,
             url,
-            this.deps.fetch ? { fetch: this.deps.fetch } : {},
+            {
+              ...(this.deps.resolveWebHost ? { resolveHost: this.deps.resolveWebHost } : {}),
+              ...(this.deps.webRequest ? { request: this.deps.webRequest } : {}),
+            },
           );
           // Readable by this run from here on, the same as a document handed over by hand.
           this.deps.leases.allowAttachment(lease, attachment.id);

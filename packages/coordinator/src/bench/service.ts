@@ -1,3 +1,4 @@
+import { planSubjectCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -823,12 +824,18 @@ export function planBenchDispatch(
     });
   }
   const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
-  const wirePrompt = preamble === null ? body : `${preamble}\n\n${body}`;
+  const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
+    world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length,
+    taskMode, disabled: params.audioReferencesDisabled })) : undefined;
+  const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
+  if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
+  const wirePrompt = [preamble, body, audioReferences ? characterAudioInstructions(audioReferences) : null].filter(Boolean).join("\n\n");
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
   const recipeVersion = options.fromTake?.request.recipeVersion ?? options.recipeVersionOf?.(model.id);
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
+    ...(audioReferences ? { audioReferences } : {}),
     mode: composer.mode,
     brief: composer.brief,
     references,
@@ -985,6 +992,7 @@ export function planBenchDispatch(
         model: model.id,
         params: {
           prompt: wirePrompt,
+          ...(audioReferences ? { audioReferences } : {}),
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the

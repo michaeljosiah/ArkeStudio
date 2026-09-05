@@ -1,3 +1,5 @@
+import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
+import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
@@ -139,6 +141,7 @@ interface StoreState {
     {
       requestId: string;
       prompt: string;
+      promptReviewId?:string; modelId?:string; fixedConstraints?:string; candidate?:string; review?:PromptReview; reason?:string; sources?:PromptSourceSnapshot[];
       carried: Array<{ name: string; role: string }>;
       dropped: Array<{ name: string; reason: string }>;
     }
@@ -344,6 +347,25 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
+const dialogueListeners = new Set<(result: DialogueResult) => void>();
+export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
+export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
+const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
+export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
+export type PerformanceResult = Extract<DomainEvent, { type: "performance.result" }>;
+const performanceListeners = new Set<(result: PerformanceResult) => void>();
+export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { performanceListeners.add(listener); return () => { performanceListeners.delete(listener); }; }
+export type VoiceSampleResult = Extract<DomainEvent, { type: "voice.sample-result" }>;
+const voiceSampleListeners = new Set<(result: VoiceSampleResult) => void>();
+export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void {
+  voiceSampleListeners.add(listener); return () => { voiceSampleListeners.delete(listener); };
+}
+export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, { kind: "generate-character-voice-sample" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-character-voice-sample");
+  if (!send({ kind: "generate-character-voice-sample", ...input, requestId })) { pendingQueueRequests.delete(requestId); return null; }
+  return requestId;
+}
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
@@ -381,6 +403,18 @@ const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>(
 export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
   worldChatMediaListeners.add(listener);
   return () => worldChatMediaListeners.delete(listener);
+}
+
+export type ConversationActionDecisionResult = Extract<
+  DomainEvent,
+  { type: "conversation-action.decision-result" }
+>;
+const conversationActionDecisionListeners = new Set<(answer: ConversationActionDecisionResult) => void>();
+export function subscribeConversationActionDecision(
+  listener: (answer: ConversationActionDecisionResult) => void,
+): () => void {
+  conversationActionDecisionListeners.add(listener);
+  return () => conversationActionDecisionListeners.delete(listener);
 }
 
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
@@ -901,6 +935,10 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
+    if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
+    if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
+    if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
@@ -975,6 +1013,9 @@ function handleFrame(json: string): void {
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
     }
+    if (event.type === "conversation-action.decision-result") {
+      for (const listener of conversationActionDecisionListeners) listener(event);
+    }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
     }
@@ -1035,6 +1076,7 @@ function handleFrame(json: string): void {
         [event.worldId]: {
           requestId: event.requestId,
           prompt: event.prompt,
+          promptReviewId:event.promptReviewId,modelId:event.modelId,fixedConstraints:event.fixedConstraints,candidate:event.candidate,review:event.review,reason:event.reason,sources:event.sources,
           carried: event.carried,
           dropped: event.dropped,
         },
@@ -1620,17 +1662,23 @@ export function genesisAttachFiles(genesisId: string): void {
  * the coordinator reads a present prompt as "the author has decided", and would then skip the
  * art-director rewrite for every generation whose box was merely opened and closed.
  */
-export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string } = {}): void {
+export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string; promptReviewId?:string; count?:number } = {}): void {
   send({
     kind: "generate-world-image",
     worldId,
     requestId: queueRequest("generate-world-image"),
     ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
     ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
+    ...(opts.promptReviewId?{promptReviewId:opts.promptReviewId}:{}),
+    ...(opts.count!==undefined?{count:opts.count}:{}),
   });
 }
 
-/** Or bring your own key art: the host opens the picker, and the renderer never sees the bytes. */
+/**
+ * Or bring your own: the host opens the picker, and the renderer never sees the bytes. The file
+ * chosen becomes the world's key art — a picture picked by name is a decision, not an offer, and
+ * landing it as one more candidate to be asked about read as the button doing nothing.
+ */
 export function uploadWorldImage(worldId: string): void {
   send({ kind: "upload-world-image", worldId, requestId: queueRequest("upload-world-image") });
 }
@@ -1946,8 +1994,8 @@ export function generateLookPreview(genesisId: string): void {
 }
 
 /** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
-export function planKeyArt(worldId: string): void {
-  send({ kind: "plan-key-art", worldId, requestId: ulid() });
+export function planKeyArt(worldId: string, opts: {modelId?:string;draftAlternative?:boolean} = {}): string {
+  const requestId=ulid();send({ kind: "plan-key-art", worldId, requestId, ...opts });return requestId;
 }
 
 export function useKeyArtPlans(): StoreState["keyArtPlans"] {
@@ -3109,6 +3157,10 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
+  performanceAudio?: PerformanceAudioRequest[],
+  masterAudio?: MasterAudioRequest[],
+  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
   send({
@@ -3120,8 +3172,12 @@ export function dispatchScenePlanned(
     mode,
     modelId,
     policy,
+    ...(performanceAudio?.length ? { performanceAudio } : {}),
+    ...(masterAudio?.length ? { masterAudio } : {}),
+    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
@@ -3206,6 +3262,7 @@ export function dispatchScene(
   modelId: string,
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
 ): void {
   send({
     kind: "dispatch-scene",
@@ -3217,6 +3274,7 @@ export function dispatchScene(
     requestId: queueRequest("dispatch-scene"),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
 }
 
@@ -3250,7 +3308,7 @@ export async function cancelStageExport(jobId: string): Promise<void> {
 }
 
 export async function stagePlayblast(
-  target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+  target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -3262,6 +3320,22 @@ export async function stagePlayblast(
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
   }
+}
+
+export function failStagePlayblastAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  detail: string,
+): void {
+  send({
+    kind: "conversation-action-stage-playblast-complete",
+    worldId,
+    conversationId,
+    actionId,
+    status: "failed",
+    detail: detail.slice(0, 1_000) || "The Stage recording failed.",
+  });
 }
 
 export function importShotFrame(worldId: string, productionId: string, shotId: string): void {
@@ -3781,6 +3855,28 @@ export function sendWorldChat(
   });
 }
 
+/** Decide exactly the card and conversation revision currently on screen. */
+export function decideConversationAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  expectedConversationSeq: number,
+  expectedStatus: "pending" | "stale",
+  decision: "approve" | "deny",
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "conversation-action-decide",
+    worldId,
+    conversationId,
+    actionId,
+    expectedConversationSeq,
+    expectedStatus,
+    decision,
+    requestId,
+  }) ? requestId : null;
+}
+
 /** Accept or reject one of Arke's editor requests (SPEC-039 R-29): the only boundary that lands or discards it. */
 export function decideEditorRequest(worldId: string, productionId: string, requestId: string, decision: "accept" | "reject"): void {
   send({ kind: "editor-request-decide", worldId, productionId, requestId, decision });
@@ -3944,6 +4040,17 @@ export function deleteWorldChat(worldId: string, conversationId: string): void {
 /** Ask the host's picker for documents to hand to this conversation, privately. */
 export function worldChatAttachFiles(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-attach-files", worldId, conversationId });
+}
+
+/** Explicitly file one private conversation attachment into the world's artifact shelf. */
+export function promoteWorldChatAttachment(worldId: string, conversationId: string, attachmentId: string): void {
+  send({
+    kind: "world-chat-promote-attachment",
+    worldId,
+    conversationId,
+    attachmentId,
+    requestId: crypto.randomUUID(),
+  });
 }
 
 /**
@@ -4296,4 +4403,9 @@ export function openEngineLog(engine: "comfyui" | "voxa"): void {
 /** Replace the Arke-managed ComfyUI tree with the pinned version — an explicit choice, never automatic (SPEC-021 R-20). */
 export function updateComfyUiRuntime(): void {
   send({ kind: "comfyui-update-runtime" });
+}
+
+export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "convert-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("convert-performance");
+  return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
 }

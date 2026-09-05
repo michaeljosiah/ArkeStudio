@@ -16,7 +16,7 @@ import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
 /**
  * Artifact filing (SPEC-015 §2.3): copy in, never reference (D8); dedupe by content hash (D9);
@@ -25,6 +25,12 @@ import type { WorldStore } from "../world/store.js";
  */
 
 const NEWLINE = String.fromCharCode(10);
+
+export interface ArtifactMutationOptions {
+  readonly source?: string;
+  readonly requestId?: string;
+  readonly precondition?: WorldStatePrecondition;
+}
 
 const KIND_BY_EXT: Record<string, ArtifactKind> = {
   ".wav": "audio",
@@ -76,10 +82,11 @@ async function writeSidecar(
   store: WorldStore,
   sidecar: ArtifactSidecar,
   baseRaw: string | null,
+  options: ArtifactMutationOptions = {},
 ): Promise<void> {
   await store.commitUnserialised({
     kind: "artifact-file",
-    source: "form",
+    source: options.source ?? "form",
     files: [
       {
         path: `artifacts/${sidecar.file}.json`,
@@ -88,6 +95,7 @@ async function writeSidecar(
         baseHash: baseRaw === null ? null : sha256(baseRaw),
       },
     ],
+    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
   });
 }
 
@@ -147,6 +155,7 @@ export async function addLinks(
   store: WorldStore,
   artifact: ArtifactSidecar,
   links: string[],
+  options: ArtifactMutationOptions = {},
 ): Promise<ArtifactSidecar> {
   const merged = [...new Set([...artifact.links, ...links])];
   if (merged.length === artifact.links.length) return artifact;
@@ -155,12 +164,14 @@ export async function addLinks(
   // meant the write succeeded and silently dropped anything added meanwhile -- a measurement the
   // backfill had just recorded, erased by somebody adding a link.
   return await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const current = await currentSidecar(store, artifact);
     // Malformed on disk: the scan already reports it, and adding a link is not worth rewriting a
     // file whose id, hash and origin this would replace with whatever happened to parse.
     if (current === null) return artifact;
     const next = { ...current.sidecar, links: [...new Set([...current.sidecar.links, ...links])] };
-    await writeSidecar(store, next, current.raw);
+    await writeSidecar(store, next, current.raw, options);
     return next;
   });
 }
@@ -177,18 +188,21 @@ export async function setOwner(
   store: WorldStore,
   artifact: ArtifactSidecar,
   production: string | null | undefined,
+  options: ArtifactMutationOptions = {},
 ): Promise<ArtifactSidecar> {
   if (production === undefined) return artifact;
   const current = artifact.production ?? null;
   if (current === production) return artifact;
   // Same merge-inside-the-gate rule as addLinks: ownership is one field, not a whole record.
   return await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const base = await currentSidecar(store, artifact);
     if (base === null) return artifact;
     const next = { ...base.sidecar };
     if (production === null) delete next.production;
     else next.production = production as ArtifactSidecar["production"];
-    await writeSidecar(store, next, base.raw);
+    await writeSidecar(store, next, base.raw, options);
     return next;
   });
 }
@@ -231,6 +245,8 @@ export interface FileInput {
    * exercising the escape hatch (§2.5) and must not be read as having no opinion.
    */
   production?: string | null;
+  /** Correlation and stale guard supplied by a conversation action; direct controls omit them. */
+  mutation?: ArtifactMutationOptions;
 }
 
 export async function fileArtifact(store: WorldStore, input: FileInput): Promise<FileOutcome> {
@@ -239,7 +255,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   try {
     size = (await stat(input.sourcePath)).size;
   } catch {
-    return { outcome: "refused", reason: `${input.sourcePath} is not readable` };
+    return { outcome: "refused", reason: `${basename(input.sourcePath)} is not readable` };
   }
   if (size > LARGE_FILE_BYTES && input.allowLarge !== true) {
     return {
@@ -269,6 +285,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
   const stem = slugify(original.slice(0, original.length - ext.length)) || "artifact";
   const kind = kindForFile(original);
   const outcome = await store.gateOp<FileOutcome>(async () => {
+    const stale = input.mutation?.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     // Dedup and allocation happen after this filing owns the same world mutation gate as clone
     // provenance. Neither writer may choose from a bundle that predates the other's media copy.
     const candidates = store.getBundle().artifacts.filter((artifact) => artifact.hash === hash);
@@ -290,7 +308,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
           if (input.production === null) delete next.production;
           else next.production = input.production as ArtifactSidecar["production"];
         }
-        if (changed) await writeSidecar(store, next, current.raw);
+        if (changed) await writeSidecar(store, next, current.raw, input.mutation);
         return { outcome: "deduplicated", artifact: next };
       }
     }
@@ -329,7 +347,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     };
     // Stage the bytes that were hashed, not a second read of a source that may have changed.
     await atomicWriteFile(join(store.dir, "artifacts", file), bytes);
-    await writeSidecar(store, sidecar, null);
+    await writeSidecar(store, sidecar, null, input.mutation);
     return { outcome: "filed", artifact: sidecar };
   });
   /*

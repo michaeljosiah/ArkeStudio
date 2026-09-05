@@ -100,6 +100,7 @@ export const CharacterReferenceWorkflowSchema = z.enum([
   "main-photo-candidate",
   "establish-candidate",
   "character-sheet",
+  "character-voice-sample",
   "character-look",
   "reference-tile",
 ]);

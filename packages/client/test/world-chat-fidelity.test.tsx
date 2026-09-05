@@ -68,6 +68,7 @@ function stateWithConversation(): ClientState {
       retrievalUnavailable: false,
       attachments: [],
       seq: 4,
+      actions: [],
       messages: [
         {
           id: "msg_01J8F3K2QW9VZX4N7M0RTYB6HC" as never,
@@ -167,6 +168,90 @@ function renderMediaConversation(): string {
   );
 }
 
+function renderActionConversation(
+  family: "authored-diff" | "generation" | "take-review" = "authored-diff",
+  options: { status?: "pending" | "stale" | "running" | "completed"; older?: boolean } = {},
+): string {
+  const state = stateWithConversation();
+  const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
+  state.worldChat!.messages[0]!.turnId = turnId as never;
+  state.worldChat!.messages[1]!.turnId = turnId as never;
+  state.worldChat!.actions = [{
+    actionId: "act_01J8F3K2QW9VZX4N7M0RTYB6HC",
+    conversationId: CONVERSATION_ID,
+    turnId,
+    worldId: FIXTURE_WORLD_ID,
+    actorId: "local-user",
+    scope: "world",
+    actionKind: "rename-world",
+    authorityKind: "world-store",
+    cardFamily: family,
+    targets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
+    payloadDigest: `sha256:${"a".repeat(64)}`,
+    baseObservations: [{ requirement: "world-metadata", target: FIXTURE_WORLD_ID, revisionOrDigest: "v1", complete: true }],
+    dependencies: [],
+    createdAt: "2026-08-06T10:00:01Z",
+    authority: { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` },
+    authorityRevision: 1,
+    previewDigest: `sha256:${"b".repeat(64)}`,
+    shown: {
+      title: "Rename this world",
+      consequence: "Changes the world name everywhere it appears.",
+      affectedTargets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
+      ripples: ["Existing links keep working."],
+      permissionReason: "authored-change",
+      body: family === "authored-diff"
+        ? {
+            family,
+            fields: [{ label: "Name", before: "Old name", after: "New name" }],
+            conflicts: [],
+            openChoices: [],
+          }
+        : family === "generation" ? {
+            family,
+            medium: "image",
+            purpose: "World cover",
+            prompt: "Private prompt content",
+            references: [],
+            provider: "provider",
+            model: "model",
+            quantity: 1,
+            output: "One image",
+            cost: "Estimate unavailable",
+          }
+        : {
+            family,
+            mediaKind: "video",
+            mediaId: "tk_01J8F0000000000000000000B2",
+            destination: "The verse rises · Maren at the rail, listening",
+            currentSelection: "tk_01J8A0000000000000000000A1",
+            mediaPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4",
+            posterPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png",
+            scene: "4 · The verse rises",
+            shot: "12 · Maren at the rail, listening",
+            reviewHistory: ["2026-08-06 · reject · local-user"],
+            rejectionCitation: { sheet: "maren-kest", field: "appearance", note: "The coat drifted." },
+          },
+    },
+    status: options.status ?? "pending",
+    preparedAt: "2026-08-06T10:00:01Z",
+    availableDecisions: options.status === "stale" ? ["deny"] : options.status && options.status !== "pending" ? [] : ["approve", "deny"],
+  }] as never;
+  if (options.older) {
+    state.worldChat!.messages = Array.from({ length: 50 }, (_, index) => ({
+      ...state.worldChat!.messages[1]!,
+      id: `msg_${index}` as never,
+      turnId: `turn_${index}` as never,
+    }));
+  }
+  __setStateForTest(state);
+  return renderToString(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
+      <App />
+    </MemoryRouter>,
+  );
+}
+
 /** The markup between the rail's opening tag and the end of the document. */
 function railHtml(html: string): string {
   const start = html.indexOf('class="fy-gate__side"');
@@ -210,6 +295,64 @@ describe("World Chat is built on the Genesis split", () => {
     const side = /\.fy-chat__wrap \.fy-gate__side\s*\{[^}]*padding-top:\s*52px/s;
     assert.match(CSS, head, "the conversation column clears the nav at 52px");
     assert.match(CSS, side, "and the rail clears it by exactly as much");
+  });
+});
+
+describe("conversation permission cards", () => {
+  it("keeps unresolved older cards reachable without duplicating visible cards", () => {
+    for (const status of ["pending", "stale", "running"] as const) {
+      const html = renderActionConversation("authored-diff", { older: true, status });
+      assert.match(html, /aria-label="Earlier actions"/);
+      assert.equal((html.match(/class="fy-actioncard"/g) ?? []).length, 1);
+      if (status !== "running") assert.match(html, /<button[^>]*>Deny<\/button>/);
+    }
+    assert.equal((renderActionConversation().match(/class="fy-actioncard"/g) ?? []).length, 1);
+    assert.doesNotMatch(renderActionConversation("authored-diff", { older: true, status: "completed" }), /class="fy-actioncard"/);
+  });
+
+  it("offers denial but never approval for stale cards", () => {
+    const html = renderActionConversation("authored-diff", { status: "stale" });
+    assert.match(html, /<button[^>]*>Deny<\/button>/);
+    assert.doesNotMatch(html, /<button[^>]*>Approve<\/button>/);
+  });
+
+  it("places a coordinator-owned review beside its producing turn with native decisions", () => {
+    const html = renderActionConversation();
+    assert.match(html, /Rename this world/);
+    assert.match(html, /Changes the world name everywhere it appears/);
+    assert.match(html, /Consequences/);
+    assert.match(html, /Existing links keep working/);
+    assert.match(html, /Old name/);
+    assert.match(html, /New name/);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
+    assert.match(html, /<button[^>]*>Deny<\/button>/);
+    assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
+  });
+
+  it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
+    const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
+    assert.match(html, /Private prompt content/);
+    assert.match(html, /provider.*model.*1 output/s);
+    assert.match(html, /Estimate unavailable/);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
+    assert.doesNotMatch(html, /This card type is not available in this version/);
+  });
+
+  it("renders playable take evidence, destination, history, and rejection citation", () => {
+    const html = renderActionConversation("take-review");
+    assert.match(html, /<video[^>]*controls=""/);
+    assert.match(html, /clip\.mp4/);
+    assert.match(html, /Maren at the rail, listening/);
+    assert.match(html, /tk_01J8A0000000000000000000A1/);
+    assert.match(html, /Review history/);
+    assert.match(html, /maren-kest.*appearance.*The coat drifted/s);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
+  });
+
+  it("keeps cards fluid at narrow widths and exposes text status alongside colour", () => {
+    assert.match(CSS, /\.fy-chat__turn--action \{[^}]*max-width:\s*min\(620px, 100%\)/);
+    assert.match(CSS, /@media \(max-width: 520px\)/);
+    assert.match(renderActionConversation(), /Needs your decision/);
   });
 });
 

@@ -221,6 +221,31 @@ describe("Transport", () => {
     }
   });
 
+  it("reconciles durable state before taking a reconnect snapshot", async () => {
+    let reconciled = false;
+    const transport = new Transport({
+      auth: AUTH,
+      getSnapshot: () => ({ ...STATE, worldOpenFailure: reconciled ? { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", reason: "reconciled" } : null }),
+      beforeInitialSnapshot: async () => {
+        await Promise.resolve();
+        reconciled = true;
+      },
+    });
+    const port = await transport.start(0);
+    try {
+      const client = new TestClient(port);
+      await client.open();
+      client.send({ kind: "hello", token: TOKEN, lastSeq: 4 });
+      await client.nextFrame(1);
+
+      const first = client.frames[0]!;
+      assert.equal(first.kind === "snapshot" && first.state.worldOpenFailure?.reason, "reconciled");
+      client.close();
+    } finally {
+      await transport.stop();
+    }
+  });
+
   it("replays held transient prompts immediately after the fresh snapshot", async () => {
     const pending = {
       at: "2026-08-01T10:00:00Z",

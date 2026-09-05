@@ -228,6 +228,21 @@ Respond with ONLY a JSON object: {"title": "..."}
   words rather than inventing something for them.`,
   },
   {
+    name: "conversation-summarizer",
+    description: "Condense older conversation turns into bounded, non-authoritative context",
+    needsProposal: false,
+    readOnly: true,
+    brief: `You condense a fictional-world conversation so its older turns remain useful as context.
+
+Respond with ONLY a JSON object: {"summary": "..."}
+
+- Incorporate the existing summary when one is supplied, then the new messages in order.
+- Preserve decisions, corrections, unresolved questions, names and the author's intent.
+- Do not turn a suggestion, tentative idea, Studio reply or proposed action into an established fact.
+- Do not invent details, ids, outcomes or decisions. Do not cite the summary as evidence.
+- Keep it compact and under 8,000 characters.`,
+  },
+  {
     name: "canon-qa",
     description: "Answer questions from retrieved canon",
     needsProposal: false,
@@ -304,14 +319,16 @@ Rules that are not yours to break:
   recording it is the one outcome to avoid: it reads as done and nothing was written down.
 - Say what a sheet is bound by. canonRules takes the ids of Canon entries that govern it, and
   links the entities it belongs with — including ones you are proposing in the same turn, by
-  {"kind":"pending-entity","ref":{"candidateId":"...","revision":N}}. Reference only what you have
-  looked up or are creating here; anything else cannot be written.
+  {"kind":"pending-entity","ref":{"temporaryId":"t1"}}, where t1 is that create operation's
+  temporaryId. An existing candidate uses its shown candidateId and revision. Pending references
+  and their targets must be members of the same atomic group. Reference only what you have looked
+  up or are creating here; anything else cannot be written.
 - A character's role is at most ${CHARACTER_ROLE_MAX} characters — a label, not a sentence.
   "Tide-caller", "Salvage diver", "Keeper of the drowned verse". Everything that does not fit
   belongs in the Essence section instead. A longer one cannot be written, so the proposition is
   held back and the person has to ask you again for the same character.
-- Nothing you say writes to the world. The conversation becomes proposals later and a person
-  accepts them, so never tell them a change has been made.`,
+- Nothing you say writes to the world. Typed changes become permission cards, and only the
+  person's Approve writes them, so never tell them a change has been made.`,
     postscript: worldChatResultShapeGuide(),
   },
 ];

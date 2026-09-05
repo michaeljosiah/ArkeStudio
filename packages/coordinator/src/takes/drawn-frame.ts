@@ -10,11 +10,11 @@ import {
   type Take,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import { decodePng } from "../references/png.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { BoundaryFrameMaker } from "./boundary.js";
-import type { WorldStore } from "../world/store.js";
 
 /**
  * The picture a shot was *given* to open on (SPEC-036 R-20, R-21).
@@ -118,12 +118,20 @@ export async function recordUploadedShotFrameTake(
   shotId: string,
   media: string,
   data: Uint8Array,
+  options: {
+    takeId?: Take["id"];
+    source?: string;
+    requestId?: string;
+    precondition?: WorldStatePrecondition;
+  } = {},
 ): Promise<Take> {
   if (basename(media) !== media || media === "." || media === "..") throw new Error(`unsafe media name ${media}`);
   if (!IMAGE_EXTENSIONS.has(extname(media).toLowerCase())) throw new Error("the uploaded frame is not an image");
   if (data.byteLength === 0) throw new Error("the uploaded frame is empty");
 
   return store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const bundle = store.getBundle();
     const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new Error(`no production ${productionId}`);
@@ -131,7 +139,14 @@ export async function recordUploadedShotFrameTake(
       throw new Error(`no shot ${shotId} in production ${productionId}`);
     }
 
-    const id = `tk_${ulid()}` as Take["id"];
+    const id = options.takeId ?? (`tk_${ulid()}` as Take["id"]);
+    const existing = production.takes.find((take) => take.id === id);
+    if (existing) {
+      if (existing.provider !== "user" || existing.model !== "upload" || !existing.coversShots.includes(shotId)) {
+        throw new Error(`take ${id} already records different work`);
+      }
+      return existing;
+    }
     const now = store.now();
     const take: Take = {
       id,
@@ -152,13 +167,20 @@ export async function recordUploadedShotFrameTake(
       media,
     };
     const dir = join(store.dir, "productions", productionId, "takes", id);
-    try {
-      await atomicWriteFile(join(dir, media), data);
-      await atomicWriteFile(join(dir, "take.json"), JSON.stringify(take, null, 2) + "\n");
-    } catch (error) {
-      await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
-      throw error;
-    }
+    await atomicWriteFile(join(dir, media), data);
+    // A rejected commit may have landed before its rescan failed. Keep the deterministic media
+    // in place so request-id recovery cannot delete the bytes belonging to a durable take.
+    await store.commitUnserialised({
+      kind: "take-upload",
+      source: options.source ?? "user",
+      files: [{
+        path: `productions/${productionId}/takes/${id}/take.json`,
+        action: "create",
+        content: JSON.stringify(take, null, 2) + "\n",
+        baseHash: null,
+      }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
     return take;
   });
 }
@@ -217,6 +239,9 @@ export async function fileDrawnFrame(
     requirePng?: boolean;
     /** An already-filed artifact for this take; restoring it moves the selection pointer only. */
     reuseArtifactId?: string;
+    source?: string;
+    requestId?: string;
+    precondition?: WorldStatePrecondition;
   },
 ): Promise<DrawnFrameOutcome> {
   const { take, shotId } = input;
@@ -305,6 +330,8 @@ export async function fileDrawnFrame(
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
   try {
     return await store.gateOp(async () => {
+      const stale = input.precondition?.();
+      if (stale) throw new WorldStateStaleError(stale);
       const currentProduction = store
         .getBundle()
         .productions.find((candidate) => candidate.meta.id === production.meta.id);
@@ -383,7 +410,7 @@ export async function fileDrawnFrame(
       };
       await store.commitUnserialised({
         kind: "drawn-frame",
-        source: input.producedBy,
+        source: input.source ?? input.producedBy,
         files: [
           // The accept's review append rides here, so a still's decision and its frame are one
           // commit and cannot diverge across a crash (SPEC-013 R-9, D6).
@@ -407,6 +434,7 @@ export async function fileDrawnFrame(
         // raise: an older build's strict schemas would drop the selection map rather than refuse
         // the world by name.
         raiseSchemaVersion: 2,
+        ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
       });
       return { ok: true as const, artifactId, shotId };
     });
@@ -467,6 +495,9 @@ export async function acceptStill(
     expectedTakeId?: string | null;
     toPng?: BoundaryFrameMaker;
     requirePng?: boolean;
+    source?: string;
+    requestId?: string;
+    precondition?: WorldStatePrecondition;
   },
 ): Promise<{ decision: ReviewDecision; outcome: DrawnFrameOutcome }> {
   const take = production.takes.find((candidate) => candidate.id === input.takeId);
@@ -495,6 +526,9 @@ export async function acceptStill(
     toPng: input.toPng,
     requirePng: input.requirePng === true || (take.provider === "user" && take.model === "upload"),
     ...(reusable === undefined ? {} : { reuseArtifactId: reusable.id }),
+    ...(input.source !== undefined ? { source: input.source } : {}),
+    ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+    ...(input.precondition !== undefined ? { precondition: input.precondition } : {}),
     alsoCommit: async () => [await reviewAppendFor(store, production.meta.id, decision)],
   });
   return { decision, outcome };

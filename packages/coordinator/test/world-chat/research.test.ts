@@ -3,6 +3,12 @@ import { describe, it } from "node:test";
 import { newId, type ChatAttachmentId, type ConversationId, type RunId } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { readableText, WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
+import {
+  isPublicWebAddress,
+  safeWebGet,
+  type ResolveWebHost,
+  type WebRequest,
+} from "../../src/world-chat/safe-web.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -28,7 +34,14 @@ const PAGE = `<!doctype html><html><head><title>Lagos</title>
 <p>Eleven and a half kilometres over the lagoon &mdash; the longest in the city.</p>
 <p>Opened in 1990.</p></body></html>`;
 
-async function harness(options: { allowed?: boolean | (() => boolean); fetch?: typeof globalThis.fetch } = {}) {
+const PUBLIC_ADDRESS = { address: "93.184.216.34", family: 4 as const };
+
+async function harness(options: {
+  allowed?: boolean | (() => boolean);
+  fetch?: typeof globalThis.fetch;
+  resolveWebHost?: ResolveWebHost;
+  webRequest?: WebRequest;
+} = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
   const index = WorldIndex.open(worldDir, bundle);
@@ -50,7 +63,20 @@ async function harness(options: { allowed?: boolean | (() => boolean); fetch?: t
       (await new (await import("../../src/world-chat/service.js")).WorldChatService(worldPath).load(lease.conversationId))
         ?.attachments.find((a) => a.id === id) ?? null,
     researchAllowed: () => (typeof options.allowed === "function" ? options.allowed() : options.allowed === true),
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    ...(options.fetch || options.webRequest ? {
+      resolveWebHost: options.resolveWebHost ?? (async () => [PUBLIC_ADDRESS]),
+      webRequest: options.webRequest ?? (async (url: URL) => {
+        const response = await options.fetch!(url, { redirect: "manual" });
+        const location = response.headers.get("location");
+        const contentType = response.headers.get("content-type");
+        return {
+          status: response.status,
+          ...(location ? { location } : {}),
+          ...(contentType ? { contentType } : {}),
+          bytes: new Uint8Array(await response.arrayBuffer()),
+        };
+      }),
+    } : {}),
     now: NOW,
   });
   const token = leases.mint({ worldId: bundle.meta.worldId, conversationId, runId, allowedAttachmentIds: [] as ChatAttachmentId[] }).token;
@@ -132,6 +158,97 @@ describe("turning a page into text", () => {
   it("decodes the entities a quotation would otherwise never match", () => {
     assert.equal(readableText("<p>salt &amp; light</p>"), "salt & light");
     assert.equal(readableText("<p>&quot;quoted&quot;</p>"), '"quoted"');
+  });
+});
+
+describe("research network boundary", () => {
+  it("rejects private, link-local, loopback and reserved address forms before making a request", async () => {
+    for (const address of [
+      "127.0.0.1",
+      "169.254.169.254",
+      "10.0.0.1",
+      "192.168.1.1",
+      "[::1]",
+      "[fc00::1]",
+      "[::ffff:7f00:1]",
+    ]) {
+      let requested = false;
+      await assert.rejects(
+        safeWebGet(`http://${address}/secret`, 1_000, {
+          request: async () => {
+            requested = true;
+            return { status: 200, contentType: "text/plain", bytes: new Uint8Array() };
+          },
+        }),
+        /private or reserved|inside this machine/,
+      );
+      assert.equal(requested, false, address);
+    }
+    assert.equal(isPublicWebAddress("93.184.216.34"), true);
+  });
+
+  it("rejects a hostname when any DNS answer is private", async () => {
+    let requested = false;
+    await assert.rejects(
+      safeWebGet("https://mixed.example/page", 1_000, {
+        resolveHost: async () => [PUBLIC_ADDRESS, { address: "127.0.0.1", family: 4 }],
+        request: async () => {
+          requested = true;
+          return { status: 200, contentType: "text/plain", bytes: new Uint8Array() };
+        },
+      }),
+      /private or reserved/,
+    );
+    assert.equal(requested, false);
+  });
+
+  it("pins the validated DNS answer into the request", async () => {
+    const seen: { host?: string; address?: string } = {};
+    const result = await safeWebGet("https://page.example/read", 1_000, {
+      resolveHost: async (hostname) => {
+        seen.host = hostname;
+        return [PUBLIC_ADDRESS];
+      },
+      request: async (_url, address) => {
+        seen.address = address.address;
+        return { status: 200, contentType: "text/plain", bytes: new TextEncoder().encode("safe") };
+      },
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual(seen, { host: "page.example", address: PUBLIC_ADDRESS.address });
+  });
+
+  it("validates each redirect and refuses a public page that points into the machine", async () => {
+    let requests = 0;
+    await assert.rejects(
+      safeWebGet("https://page.example/start", 1_000, {
+        resolveHost: async () => [PUBLIC_ADDRESS],
+        request: async () => {
+          requests++;
+          return {
+            status: 302,
+            location: "http://169.254.169.254/latest/meta-data",
+            bytes: new Uint8Array(),
+          };
+        },
+      }),
+      /private or reserved/,
+    );
+    assert.equal(requests, 1, "the redirected address is rejected before a second connection");
+  });
+
+  it("bounds an injected transport even if it returns an oversized response", async () => {
+    await assert.rejects(
+      safeWebGet("https://page.example/large", 8, {
+        resolveHost: async () => [PUBLIC_ADDRESS],
+        request: async () => ({
+          status: 200,
+          contentType: "text/plain",
+          bytes: new Uint8Array(9),
+        }),
+      }),
+      /larger than this will keep/,
+    );
   });
 });
 

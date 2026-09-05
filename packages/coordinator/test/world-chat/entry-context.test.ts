@@ -287,7 +287,7 @@ describe("a scene thread is told it may name the scene (SPEC-036 R-38)", () => {
     const text = await sceneText("Untitled");
     assert.match(text, /called Untitled/);
     assert.match(text, /sceneEdits rename/, "the field it must use, by name");
-    assert.match(text, /lands at once/, "and that no card stands between");
+    assert.match(text, /changes only after they Approve/, "and that the rename waits for permission");
   });
 
   it("a named scene is renamed only when asked", async () => {

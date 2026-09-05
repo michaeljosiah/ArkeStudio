@@ -372,6 +372,7 @@ export function previewLineFor(sheet: Sheet, productions: ProductionBundle[]): P
 // ---------------------------------------------------------------------------
 
 export const DeliverySchema = z.enum(["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
+export const PerformanceDeliverySchema = DeliverySchema;
 export const DELIVERIES = DeliverySchema.options;
 export type Delivery = z.infer<typeof DeliverySchema>;
 

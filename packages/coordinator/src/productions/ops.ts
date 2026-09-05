@@ -15,13 +15,16 @@ import {
   type ArtifactSidecar,
   type ManifestModel,
   type ProductionBundle,
+  type ProductionCreationPlan,
   type FrameRate,
   type ProductionFormat,
   type ProductionMedium,
   type ProposalSkill,
   EpisodeSchema,
+  ProductionSchema,
   SceneRecordSchema,
   SeasonSchema,
+  SeriesSchema,
   StoryOverviewSchema,
   type Episode,
   type Scene,
@@ -41,9 +44,9 @@ import { readChanges } from "../world/change-writer.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
-import { CommitStaleError, type CommitFileInput } from "../world/commit.js";
+import { CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
 /**
@@ -71,6 +74,162 @@ export interface CreateProductionInput {
   logline?: string;
   /** Stamped on the commit's change lines so a redelivered request finds its commit (#384). */
   requestId?: string;
+}
+
+/** Fix every byte-affecting creation choice before a conversation card can be approved. */
+export function planProductionCreation(
+  bundle: WorldBundle,
+  input: CreateProductionInput,
+  at: string,
+): ProductionCreationPlan {
+  const productionId = uniqueSlug(input.title, "production", bundle.productions.map((production) => production.meta.id));
+  const canonicalAspect = input.aspect !== undefined ? normalizeAspect(input.aspect) : undefined;
+  if (input.aspect !== undefined && canonicalAspect === null) {
+    throw new Error(`"${input.aspect}" is not an aspect — two numbers around a colon, like 9:16`);
+  }
+  const medium = resolveMedium({
+    format: input.format ?? legacyFormatFor(input.medium ?? "video"),
+    ...(input.medium !== undefined ? { medium: input.medium } : {}),
+  });
+  const format = legacyFormatFor(medium);
+  const defaultShape = productionShape({ format });
+  const productionKind = input.productionKind ?? (input.medium === "interactive-video" ? "interactive" : undefined);
+  const carriesNewModel = medium !== defaultShape.medium ||
+    (productionKind !== undefined && productionKind !== defaultShape.kind);
+  const production = ProductionSchema.parse({
+    id: productionId,
+    format,
+    ...(carriesNewModel ? { medium } : {}),
+    ...(carriesNewModel && productionKind !== undefined ? { kind: productionKind } : {}),
+    title: input.title,
+    ...(input.logline !== undefined ? { logline: input.logline } : {}),
+    status: "in-progress",
+    ...(canonicalAspect ? { aspect: canonicalAspect } : {}),
+    ...(input.frameRate !== undefined ? { frameRate: input.frameRate } : {}),
+    created: at,
+    updated: at,
+  });
+  const shape = productionShape(production);
+  if (!shape.isEpisodic) {
+    return { production, initialSeason: null, series: { operation: "none" } };
+  }
+  const initialSeason = SeasonSchema.parse({ version: 1, ...(input.defaults ? { defaults: input.defaults } : {}) });
+  const seriesTitle = input.seriesTitle ?? input.title;
+  const existing = bundle.series.find((series) => series.title === seriesTitle || series.id === slugify(seriesTitle));
+  if (existing) {
+    return {
+      production,
+      initialSeason,
+      series: {
+        operation: "join",
+        record: SeriesSchema.parse({
+          ...existing,
+          seasons: [...existing.seasons.filter((id) => id !== productionId), productionId],
+          updated: at,
+        }),
+      },
+    };
+  }
+  const seriesId = uniqueSlug(seriesTitle, "series", bundle.series.map((series) => series.id));
+  return {
+    production,
+    initialSeason,
+    series: {
+      operation: "create",
+      record: SeriesSchema.parse({
+        id: seriesId,
+        version: 1,
+        title: seriesTitle,
+        seasons: [productionId],
+        created: at,
+        updated: at,
+      }),
+    },
+  };
+}
+
+/** Apply a prepared creation once, without the direct form path's stale retry/replanning loop. */
+export async function createProductionFromPlan(
+  store: WorldStore,
+  plan: ProductionCreationPlan,
+  options: { source: string; requestId: string; precondition: WorldStatePrecondition },
+): Promise<CommitResult> {
+  if (store.getBundle().productions.some((production) => production.meta.id === plan.production.id)) {
+    throw new CommitStaleError([{
+      path: `productions/${plan.production.id}/production.json`,
+      expected: null,
+      found: "present",
+    }]);
+  }
+  const shape = productionShape(plan.production);
+  if (shape.isEpisodic !== (plan.initialSeason !== null) || shape.isEpisodic !== (plan.series.operation !== "none")) {
+    throw new Error("The prepared production plan has inconsistent episodic records.");
+  }
+  const files: CommitFileInput[] = [
+    {
+      path: `productions/${plan.production.id}/production.json`,
+      action: "create",
+      content: `${JSON.stringify(plan.production, null, 2)}\n`,
+      baseHash: null,
+    },
+  ];
+  if (plan.initialSeason) {
+    files.push({
+      path: `productions/${plan.production.id}/season.json`,
+      action: "create",
+      content: `${JSON.stringify(plan.initialSeason, null, 2)}\n`,
+      baseHash: null,
+    });
+  }
+  if (plan.series.operation === "create") {
+    const record = plan.series.record;
+    if (store.getBundle().series.some((series) => series.id === record.id)) {
+      throw new CommitStaleError([{
+        path: `series/${record.id}.json`,
+        expected: null,
+        found: "present",
+      }]);
+    }
+    files.push({
+      path: `series/${record.id}.json`,
+      action: "create",
+      content: `${JSON.stringify(record, null, 2)}\n`,
+      baseHash: null,
+    });
+  } else if (plan.series.operation === "join") {
+    const record = plan.series.record;
+    const current = store.getBundle().series.find((series) => series.id === record.id);
+    if (!current || current.version !== record.version) {
+      throw new CommitStaleError([{
+        path: `series/${record.id}.json`,
+        expected: `v${record.version}`,
+        found: current ? `v${current.version}` : null,
+      }]);
+    }
+    const path = `series/${record.id}.json`;
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    files.push({
+      path,
+      action: "replace",
+      content: `${JSON.stringify(record, null, 2)}\n`,
+      baseHash: sha256(raw),
+    });
+  }
+  return store.commit(
+    {
+      kind: "production-create",
+      source: options.source,
+      files,
+      requestId: options.requestId,
+      ...(plan.production.frameRate !== undefined
+        ? { raiseSchemaVersion: 5 }
+        : shape.isEpisodic || plan.production.medium !== undefined || plan.production.kind !== undefined
+          ? { raiseSchemaVersion: 2 }
+          : {}),
+    },
+    undefined,
+    options.precondition,
+  );
 }
 
 export async function createProduction(store: WorldStore, input: CreateProductionInput): Promise<string> {
@@ -436,7 +595,12 @@ export function episodeFormContent(
 }
 
 /** Reorder episodes: order fields only — no rename, no version cut (SPEC-023 R-12). */
-export async function reorderEpisodes(store: WorldStore, productionId: string, orderedIds: string[]): Promise<void> {
+export async function reorderEpisodes(
+  store: WorldStore,
+  productionId: string,
+  orderedIds: string[],
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) return;
   const files: CommitFileInput[] = [];
@@ -450,8 +614,23 @@ export async function reorderEpisodes(store: WorldStore, productionId: string, o
     doc.set({ order: index + 1 });
     files.push({ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
   }
-  if (files.length === 0) return;
-  await store.commit({ kind: "episode-reorder", source: "form", files });
+  if (files.length === 0) {
+    if (options.precondition) {
+      await store.commit({
+        kind: "episode-reorder",
+        source: options.source ?? "form",
+        files: [],
+        ...(options.requestId ? { requestId: options.requestId } : {}),
+      }, undefined, options.precondition);
+    }
+    return;
+  }
+  await store.commit({
+    kind: "episode-reorder",
+    source: options.source ?? "form",
+    files,
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  }, undefined, options.precondition);
 }
 
 // ---------------------------------------------------------------------------
@@ -516,6 +695,7 @@ export async function reorderChapters(
   store: WorldStore,
   productionId: string,
   orderedFiles: string[],
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<void> {
   const files = [];
   for (const [index, file] of orderedFiles.entries()) {
@@ -526,9 +706,25 @@ export async function reorderChapters(
     doc.setData({ order: index + 1 });
     files.push({ path, action: "replace" as const, content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
   }
-  if (files.length === 0) return;
+  if (files.length === 0) {
+    if (options.precondition) {
+      await store.commit({
+        kind: "chapter-reorder",
+        source: options.source ?? "form",
+        files: [],
+        ...(options.requestId ? { requestId: options.requestId } : {}),
+      }, undefined, options.precondition);
+    }
+    return;
+  }
   // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
-  await store.commit({ kind: "chapter-reorder", source: "form", files, raiseSchemaVersion: 2 });
+  await store.commit({
+    kind: "chapter-reorder",
+    source: options.source ?? "form",
+    files,
+    raiseSchemaVersion: 2,
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  }, undefined, options.precondition);
 }
 
 /**
@@ -545,7 +741,12 @@ export async function reorderChapters(
  * which is the eager migration D6 exists to avoid. The scene migrates on the first write that
  * is actually about its shots, and until then a schema-3 world simply holds it as it is (R-14).
  */
-export async function reorderScenes(store: WorldStore, productionId: string, orderedIds: string[]): Promise<void> {
+export async function reorderScenes(
+  store: WorldStore,
+  productionId: string,
+  orderedIds: string[],
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) return;
   const files: CommitFileInput[] = [];
@@ -559,9 +760,25 @@ export async function reorderScenes(store: WorldStore, productionId: string, ord
     doc.set({ order: index + 1 });
     files.push({ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
   }
-  if (files.length === 0) return;
+  if (files.length === 0) {
+    if (options.precondition) {
+      await store.commit({
+        kind: "scene-reorder",
+        source: options.source ?? "form",
+        files: [],
+        ...(options.requestId ? { requestId: options.requestId } : {}),
+      }, undefined, options.precondition);
+    }
+    return;
+  }
   // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
-  await store.commit({ kind: "scene-reorder", source: "form", files, raiseSchemaVersion: 2 });
+  await store.commit({
+    kind: "scene-reorder",
+    source: options.source ?? "form",
+    files,
+    raiseSchemaVersion: 2,
+    ...(options.requestId ? { requestId: options.requestId } : {}),
+  }, undefined, options.precondition);
 }
 
 // ---------------------------------------------------------------------------
@@ -866,7 +1083,13 @@ export class SceneDeleteRefused extends Error {
  */
 export async function deleteScene(
   store: WorldStore,
-  input: { productionId: string; sceneFile: string },
+  input: {
+    productionId: string;
+    sceneFile: string;
+    source?: string;
+    requestId?: string;
+    precondition?: WorldStatePrecondition;
+  },
 ): Promise<void> {
   const stem = sceneStemOrThrow(input.sceneFile);
   const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
@@ -906,18 +1129,32 @@ export async function deleteScene(
     });
   }
 
-  await store.commit({ kind: "scene-delete", source: "editor", files });
+  await store.commit({
+    kind: "scene-delete",
+    source: input.source ?? "editor",
+    files,
+    ...(input.requestId ? { requestId: input.requestId } : {}),
+  }, undefined, input.precondition);
 }
 
 /** Undo (turn 97): v<n> back as a new version; everything between it and now stays in history. */
 export async function restoreScene(
   store: WorldStore,
-  input: { productionId: string; sceneFile: string; version: number },
+  input: {
+    productionId: string;
+    sceneFile: string;
+    version: number;
+    source?: string;
+    requestId?: string;
+    precondition?: WorldStatePrecondition;
+  },
 ): Promise<void> {
   await store.restoreVersion(
     `productions/${input.productionId}/scenes/${sceneStemOrThrow(input.sceneFile)}.json`,
     input.version,
-    "editor",
+    input.source ?? "editor",
+    input.requestId,
+    input.precondition,
   );
 }
 
@@ -985,17 +1222,25 @@ export async function landBoard(
   sceneFile: string,
   png: Uint8Array,
   clock: () => string,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition; sceneId?: string; baseVersion?: number } = {},
 ): Promise<void> {
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const { scene, raw, path } = await readScene(store, productionId, sceneFile);
+    if (options.sceneId !== undefined && scene.id !== options.sceneId) throw new Error("the scene at that path was replaced");
+    if (options.baseVersion !== undefined && scene.version !== options.baseVersion) {
+      throw new WorldStateStaleError(`the scene moved to v${scene.version} before its board was compiled`);
+    }
     const image = `boards/scene-${scene.number}.png`;
     await atomicWriteFile(join(store.dir, "productions", productionId, fromPortable(image)), png);
     const doc = JsonFile.parse(raw);
     doc.set({ board: { version: scene.version, compiledAt: clock(), image } });
     await store.commitUnserialised({
       kind: "board-compile",
-      source: "form",
+      source: options.source ?? "form",
       files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw), preserveVersion: true }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
 }
@@ -1007,9 +1252,13 @@ export async function exportBoard(
   scene: SceneRecord,
   png: Uint8Array,
   clock: () => string,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<string> {
   const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
-  const file = `board-${productionId}-scene-${scene.number}-v${scene.version}-${stamp}.png`;
+  const actionId = options.requestId && /^act_[0-9A-HJKMNP-TV-Z]{26}$/.test(options.requestId)
+    ? options.requestId
+    : stamp;
+  const file = `board-${productionId}-scene-${scene.number}-v${scene.version}-${actionId}.png`;
   const sidecar: ArtifactSidecar = {
     id: `ar_${ulid()}`,
     kind: "board",
@@ -1020,10 +1269,12 @@ export async function exportBoard(
     created: clock(),
   };
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     await atomicWriteFile(join(store.dir, "artifacts", file), png);
     await store.commitUnserialised({
       kind: "board-export",
-      source: "form",
+      source: options.source ?? "form",
       files: [
         {
           path: `artifacts/${file}.json`,
@@ -1032,6 +1283,7 @@ export async function exportBoard(
           baseHash: null,
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
   return file;
@@ -1057,6 +1309,139 @@ export async function referenceByteSizes(store: WorldStore, files: readonly stri
 }
 
 export { productionAspect, DEFAULT_PRODUCTION_ASPECT } from "@arke-studio/contracts";
+
+export interface ProductionMetadataChanges {
+  title?: string;
+  medium?: ProductionMedium;
+  productionKind?: string | null;
+  seriesId?: string | null;
+  status?: string;
+  aspect?: string;
+  frameRate?: FrameRate;
+}
+
+export function validateProductionMetadataChanges(
+  production: ProductionBundle,
+  changes: ProductionMetadataChanges,
+) {
+  const currentShape = productionShape(production.meta);
+  const requestedMedium = changes.medium === undefined
+    ? currentShape.medium
+    : resolveMedium({ format: legacyFormatFor(changes.medium), medium: changes.medium });
+  const defaultKind = changes.medium === "interactive-video"
+    ? "interactive"
+    : productionShape({ format: legacyFormatFor(requestedMedium), medium: requestedMedium }).kind;
+  const requestedKind = changes.productionKind !== undefined
+    ? changes.productionKind ?? defaultKind
+    : changes.medium !== undefined
+      ? defaultKind
+      : currentShape.kind;
+  const nextShape = productionShape({
+    format: legacyFormatFor(requestedMedium),
+    medium: requestedMedium,
+    kind: requestedKind,
+  });
+  if (currentShape.isEpisodic !== nextShape.isEpisodic) {
+    throw new Error("Changing whether a production is episodic requires a new production so its Season and Series identities stay coherent.");
+  }
+  if (currentShape.hasChapters !== nextShape.hasChapters && production.chapters.length > 0) {
+    throw new Error("The production medium cannot change while it has chapters.");
+  }
+  if (currentShape.hasScenes !== nextShape.hasScenes && production.scenes.length > 0) {
+    throw new Error("The production medium cannot change while it has scenes.");
+  }
+  if (
+    changes.frameRate !== undefined &&
+    changes.frameRate !== (production.meta.frameRate ?? 24) &&
+    production.timeline !== undefined &&
+    production.timeline.status !== "absent"
+  ) {
+    throw new Error("The frame rate is fixed after the production timeline is materialised.");
+  }
+  const canonicalAspect = changes.aspect === undefined ? undefined : normalizeAspect(changes.aspect);
+  if (changes.aspect !== undefined && canonicalAspect === null) {
+    throw new Error(`"${changes.aspect}" is not an aspect — two numbers around a colon, like 9:16`);
+  }
+  return { requestedMedium, requestedKind, nextShape, canonicalAspect };
+}
+
+/** Apply carded production metadata through production.json and the versioned Series records it names. */
+export async function updateProductionMetadata(
+  store: WorldStore,
+  productionId: string,
+  changes: ProductionMetadataChanges,
+  options: { source: string; requestId: string; precondition: WorldStatePrecondition },
+): Promise<CommitResult> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) throw new Error(`production ${productionId} is not in this world`);
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  const { requestedMedium, requestedKind, nextShape, canonicalAspect } =
+    validateProductionMetadataChanges(production, changes);
+  const plainShape = productionShape({ format: legacyFormatFor(requestedMedium) });
+  const carriesNewModel = requestedMedium !== plainShape.medium || requestedKind !== plainShape.kind;
+  doc.set({
+    ...(changes.title !== undefined ? { title: changes.title } : {}),
+    ...(changes.status !== undefined ? { status: changes.status } : {}),
+    ...(changes.medium !== undefined || changes.productionKind !== undefined
+      ? {
+          format: legacyFormatFor(requestedMedium),
+          medium: carriesNewModel ? requestedMedium : undefined,
+          kind: carriesNewModel ? requestedKind : undefined,
+        }
+      : {}),
+    ...(canonicalAspect ? { aspect: canonicalAspect } : {}),
+    ...(changes.frameRate !== undefined ? { frameRate: changes.frameRate } : {}),
+    updated: store.now(),
+  });
+  ProductionSchema.parse(doc.value);
+
+  const files: CommitFileInput[] = [
+    { path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) },
+  ];
+  if (changes.seriesId !== undefined) {
+    if (!nextShape.isEpisodic && changes.seriesId !== null) {
+      throw new Error("Only an episodic production can belong to a Series.");
+    }
+    const target = changes.seriesId === null
+      ? undefined
+      : store.getBundle().series.find((series) => series.id === changes.seriesId);
+    if (changes.seriesId !== null && !target) throw new Error(`series ${changes.seriesId} is not in this world`);
+    for (const series of store.getBundle().series) {
+      const belongs = series.seasons.includes(productionId);
+      const shouldBelong = series.id === changes.seriesId;
+      if (belongs === shouldBelong) continue;
+      const seriesPath = `series/${series.id}.json`;
+      const seriesRaw = await readFile(toExtendedLength(join(store.dir, fromPortable(seriesPath))), "utf8");
+      const seriesDoc = JsonFile.parse(seriesRaw);
+      seriesDoc.set({
+        seasons: shouldBelong
+          ? [...series.seasons.filter((id) => id !== productionId), productionId]
+          : series.seasons.filter((id) => id !== productionId),
+        updated: store.now(),
+      });
+      SeriesSchema.parse(seriesDoc.value);
+      files.push({
+        path: seriesPath,
+        action: "replace",
+        content: seriesDoc.serialize(),
+        baseHash: sha256(seriesRaw),
+      });
+    }
+  }
+  return store.commit(
+    {
+      kind: "production-edit",
+      source: options.source,
+      files,
+      requestId: options.requestId,
+      ...(changes.frameRate !== undefined ? { raiseSchemaVersion: 5 } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
+}
 
 /**
  * Change the aspect a production delivers in (issue 389) — the one editable delivery-profile
@@ -1086,6 +1471,29 @@ export async function setProductionAspect(
   return canonical;
 }
 
+/** Set or clear the production's scoped rendering style through its existing metadata record. */
+export async function setProductionStyle(
+  store: WorldStore,
+  productionId: string,
+  style: string | null,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  doc.set({ styleOverride: style?.trim() || undefined, updated: store.now() });
+  await store.commit(
+    {
+      kind: "production-edit",
+      source: options.source ?? "form",
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
+}
+
 /**
  * Which model this production reaches for, for one capability (SPEC-033 R-74..R-76).
  *
@@ -1104,6 +1512,7 @@ export async function setProductionModel(
   productionId: string,
   capability: Capability,
   modelId: string | null,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<void> {
   const path = `productions/${productionId}/production.json`;
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
@@ -1121,15 +1530,16 @@ export async function setProductionModel(
   doc.set({ models: Object.keys(next).length > 0 ? next : undefined, updated: store.now() });
   await store.commit({
     kind: "production-edit",
-    source: "form",
+    source: options.source ?? "form",
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+    ...(options.requestId ? { requestId: options.requestId } : {}),
     // No schema raise, and deliberately. `aspect` (issue 389) is the precedent this follows
     // exactly: an optional production field written only when somebody asks for it, on a
     // production they were looking at. Raising the boundary would make every world this build
     // touches unreadable by the previous release, which is a far larger promise than one
     // optional key is worth — and it is the reason the eager migration went, because *that*
     // would have written the field into every production of every world on open.
-  });
+  }, undefined, options.precondition);
 }
 
 // ---------------------------------------------------------------------------
@@ -1149,8 +1559,11 @@ export function composeDispatches(
   plan: ScenePlan,
   model: ManifestModel,
   world: WorldBundle,
+  manifest?: import("@arke-studio/contracts").ModelManifest,
+  acknowledgedRecommendationIds?: string[],
+  assessedAt?: string,
 ): EnqueueInput[] {
-  return compilePasses({ productionId, scene, plan, model, world }).map((pass) => ({
+  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt }).map((pass) => ({
     worldId,
     productionId,
     target: pass.target,

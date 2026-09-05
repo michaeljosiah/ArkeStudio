@@ -1,6 +1,6 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { WorldChatSummary } from "@arke-studio/contracts";
+import type { ConversationActionCard, WorldChatSummary } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { readCheckpoint } from "./checkpoint.js";
 import { foldConversation, summarise } from "./fold.js";
@@ -19,6 +19,8 @@ import { conversationsDir, WorldChatStore } from "./store.js";
 
 export interface DiscoveredConversations {
   summaries: WorldChatSummary[];
+  /** Authority bindings for live work, without publishing other conversations' transcripts. */
+  activeActions: ConversationActionCard[];
 }
 
 const DELETED_DIR = ".deleted";
@@ -29,20 +31,24 @@ export async function discoverConversations(worldPath: string): Promise<Discover
   try {
     entries = await readdir(toExtendedLength(root));
   } catch {
-    return { summaries: [] }; // no conversations yet is the ordinary case, not a problem
+    return { summaries: [], activeActions: [] }; // no conversations yet is the ordinary case, not a problem
   }
 
   const summaries: WorldChatSummary[] = [];
+  const activeActions: ConversationActionCard[] = [];
   for (const entry of entries) {
     // Tombstoned directories are mid-deletion; a startup sweep removes them.
     if (entry === DELETED_DIR || entry.startsWith(".")) continue;
-    const summary = await summariseOne(join(root, entry));
-    if (summary) summaries.push(summary);
+    const found = await summariseOne(join(root, entry));
+    if (found) {
+      summaries.push(found.summary);
+      activeActions.push(...found.activeActions);
+    }
   }
-  return { summaries: sortByPendingConsequence(summaries) };
+  return { summaries: sortByPendingConsequence(summaries), activeActions };
 }
 
-async function summariseOne(dir: string): Promise<WorldChatSummary | null> {
+async function summariseOne(dir: string): Promise<{ summary: WorldChatSummary; activeActions: ConversationActionCard[] } | null> {
   const store = new WorldChatStore(dir);
   const meta = await store.readMeta();
   if (!meta) return null; // a directory without a header is not a conversation
@@ -51,13 +57,13 @@ async function summariseOne(dir: string): Promise<WorldChatSummary | null> {
   const tailSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
 
   const { checkpoint } = await readCheckpoint(dir, tailSeq);
-  if (checkpoint && checkpoint.throughSeq === tailSeq) {
-    // Exactly current: the row can be taken without folding anything.
-    return summarise(checkpoint.view);
-  }
-
-  const folded = foldConversation(meta.id, meta.createdAt, events);
-  return summarise(folded.view);
+  const view = checkpoint && checkpoint.throughSeq === tailSeq
+    ? checkpoint.view
+    : foldConversation(meta.id, meta.createdAt, events).view;
+  return {
+    summary: summarise(view),
+    activeActions: view.actions.filter((action) => ["approved", "queued", "running", "awaiting-host"].includes(action.status)),
+  };
 }
 
 /**

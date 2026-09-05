@@ -451,16 +451,17 @@ describe("a Bench dispatch refused for a lost mention", () => {
   });
 
   it("takes its notification with it, rather than leaving one to ride to other screens", async () => {
+    const reason = `${LOST} This request was not queued.`;
     const bench = await openBench(benchSession("a face lit by @Image 1", []));
-    await refusedPress(bench);
-    assert.ok(notifications().some((text) => text.includes("which is not attached")));
+    await refusedPress(bench, reason);
+    assert.ok(notifications().some((text) => text.includes(reason)));
 
     await act(async () => __setStateForTest(stateWith(benchSession("a face lit by @Image 1", ["Image 1"]))));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
     assert.deepEqual(
-      notifications().filter((text) => text.includes("which is not attached")),
+      notifications().filter((text) => text.includes(reason)),
       [],
       "nothing left standing says it",
     );

@@ -43,6 +43,8 @@ export const GenesisIdSchema = z
 /** Record-kind prefixes used across the world model and the app-level logs. */
 export const ID_PREFIXES = {
   take: "tk",
+  performance: "pf",
+  rehearsal: "rh",
   job: "jb",
   pass: "ps",
   proposal: "pr",
@@ -65,6 +67,8 @@ export const ID_PREFIXES = {
   candidateGroup: "grp",
   chatAttachment: "wca",
   chatEvent: "wce",
+  /** One durable permission boundary proposed by Arke (SPEC-041 R-11). */
+  conversationAction: "act",
   /** One in-place proposal edit, as recorded in its draft journal (#70 §11.4.1). */
   draftOperation: "dop",
   /** One section or lyric marker on a production's spine (#253). */
@@ -119,6 +123,7 @@ export const CandidateIdSchema = prefixedIdSchema("cand");
 export const CandidateGroupIdSchema = prefixedIdSchema("grp");
 export const ChatAttachmentIdSchema = prefixedIdSchema("wca");
 export const ChatEventIdSchema = prefixedIdSchema("wce");
+export const ConversationActionIdSchema = prefixedIdSchema("act");
 
 /** The World Chat ids all carry their type; this one predates them and had only a schema. */
 export type ProposalId = z.infer<typeof ProposalIdSchema>;
@@ -134,6 +139,7 @@ export type CandidateId = z.infer<typeof CandidateIdSchema>;
 export type CandidateGroupId = z.infer<typeof CandidateGroupIdSchema>;
 export type ChatAttachmentId = z.infer<typeof ChatAttachmentIdSchema>;
 export type FrameRunId = z.infer<typeof FrameRunIdSchema>;
+export type ConversationActionId = z.infer<typeof ConversationActionIdSchema>;
 
 /**
  * Entity slugs are filenames (master spec §2.2): lowercase kebab-case, no spaces. Kept

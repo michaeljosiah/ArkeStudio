@@ -1,3 +1,7 @@
+import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
+import type { ProductionBundle } from "./client-state.js";
+import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
+import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio, masterPerformanceShotIds } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -358,6 +362,11 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // The camera is spoken once: if it has been raised into its own anchor block, it does not also
   // trail the description.
   const directionParts: string[] = [];
+  if (shot.visualFacts) {
+    directionParts.push(`Authored on-screen composition: ${shot.visualFacts.composition}.`);
+    const castFacts = shot.visualFacts.onScreenCharacters.map(c => `${sheets.find(s => s.id === c.characterId)?.name ?? c.characterId}: ${c.presentation}, ${c.depth}`);
+    directionParts.push(castFacts.length ? `Authored on-screen cast: ${castFacts.join("; ")}.` : "No characters are authored on screen.");
+  }
   const cinematicIntent = shot.intent?.trim() ?? "";
   if (cinematicIntent.length > 0) {
     directionParts.push(
@@ -625,7 +634,7 @@ export type PackResult =
   | { ok: true; passes: Pass[]; totalSec: number }
   | { ok: false; oversizeShot: { shotId: string; number: number; durationSec: number; capSec: number } };
 
-export const DEFAULT_SHOT_SEC = 4;
+
 
 /**
  * Greedy, order-preserving; a shot is never split (D9). Oversize disables whole-scene (D10).
@@ -667,7 +676,7 @@ export function packScene(
     currentHasReferences = false;
   };
   for (const shot of shots) {
-    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+    const duration = resolvedAuthoredDuration(shot);
     const shotRefs = carries(shot.id);
     const shotCap = shotRefs ? referenceCap : capSec;
     if (duration > shotCap) {
@@ -1115,9 +1124,8 @@ export function composePrompt(parts: PromptParts): string {
  * "14 seconds" as a parameter and says nothing in the prompt is a request to compose 14 seconds
  * however it likes, and the cuts then land on whatever it happened to do.
  *
- * The seconds are the seconds actually asked for, not the seconds planned — a pass snapped up to
- * the route's next length is longer than its shots, and the last one absorbs the difference
- * (`coverPlan`), so that is the clip being described.
+ * These are the content seconds. Provider step padding remains unused source handle after
+ * the last boundary; it must not expand a shot or claim authored time.
  */
 export function passStructure(input: {
   shotCount: number;
@@ -1404,6 +1412,11 @@ export function skillFamilyMismatch(
 }
 
 export interface ScenePlanInput {
+  timingProduction?: ProductionBundle;
+  /** Explicit bypass applies only to this dispatch. */
+  audioReferencesDisabled?: boolean;
+  performanceReferences?: readonly FrozenPerformanceAudio[];
+  masterReferences?: readonly FrozenMasterAudio[];
   world: WorldMeta;
   sheets: Sheet[];
   kits: ReferenceKit[];
@@ -1479,6 +1492,9 @@ export interface BoundaryFramePlan {
 }
 
 export interface ShotDispatchPlan {
+  slot?: DialogueSlot;
+  authoredDurationSec?: number;
+  audioReferences?: CharacterAudioPlan;
   shot: Shot;
   prompt: { text: string; overridden: boolean };
   references: AttachmentDecision[];
@@ -1508,6 +1524,8 @@ export interface ShotDispatchPlan {
 }
 
 export interface ScenePlan {
+  timingProblems?: string[];
+  timingWarnings?: string[];
   mode: "per-shot" | "whole-scene";
   /** The effective production/world visual language frozen into every assembled prompt. */
   effectiveStyle: string;
@@ -1515,6 +1533,7 @@ export interface ScenePlan {
   productionStyleOverride?: string;
   shots: ShotDispatchPlan[];
   passReferences: Array<{
+    audioReferences?: CharacterAudioPlan;
     passIndex: number;
     references: AttachmentDecision[];
     budget: BudgetResult;
@@ -1856,7 +1875,38 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
-  const ordered = orderedShots(scene);
+  const authored = orderedShots(scene);
+  const timingProduction = input.timingProduction;
+  const hasClock = timingProduction !== undefined && (timingProduction.spine !== null || timingProduction.timeline?.status === "ready" || timingProduction.timeline?.status === "invalid");
+  const slots = hasClock ? dialogueSlots(timingProduction!) : [];
+  const byShot = new Map<string, DialogueSlot>();
+  const timingProblems: string[] = [], timingWarnings: string[] = [];
+  for (const slot of slots) {
+    if (byShot.has(slot.shotId)) timingProblems.push(`${slot.shotId}: multiple picture placements make generation timing ambiguous.`);
+    byShot.set(slot.shotId,slot);
+  }
+  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("Repair the invalid production timeline before generation.");
+  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timingWarnings.push(`${shot.id}: unanchored; per-shot generation uses authored fallback and whole-scene packing excludes it.`);
+  const ordered = authored.filter(shot => mode !== "whole-scene" || !hasClock || byShot.has(shot.id)).map(shot => {
+    const slot = byShot.get(shot.id);
+    return slot ? { ...shot, durationSec: slot.endSec-slot.startSec } : shot;
+  });
+  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("Place at least one scene shot on the timeline before whole-scene generation.");
+  if (mode === "whole-scene" && hasClock) ordered.sort((a,b)=>byShot.get(a.id)!.startSec-byShot.get(b.id)!.startSec);
+  const chronologicalSlots = [...slots].sort((a,b) => a.startSec-b.startSec);
+  const sceneShotIds = new Set(authored.map(shot => shot.id));
+  let furthest = chronologicalSlots[0];
+  for (const slot of chronologicalSlots.slice(1)) {
+    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${slot.shotId} / ${furthest.shotId}: picture slots overlap across the production.`);
+    if (!furthest || slot.endSec > furthest.endSec) furthest = slot;
+  }
+  const timingBreaks = new Set<string>();
+  if (hasClock) for (let i=1;i<ordered.length;i++) {
+    const previous=byShot.get(ordered[i-1]!.id), next=byShot.get(ordered[i]!.id);
+    if (!previous || !next || previous.endSec!==next.startSec) timingBreaks.add(ordered[i]!.id);
+    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${ordered[i]!.id}: picture slots overlap; repair the timing before dispatch.`);
+  }
+
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
   const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
@@ -1893,7 +1943,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
     // route offers keeps its own seconds here and is refused by name in the warnings.
-    const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+    const duration = pricedDuration(model, resolvedAuthoredDuration(shot), {
       taskMode: taskModeForShot(shot.id),
       withReferences: bound.length > 0,
     });
@@ -1948,6 +1998,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     };
     return {
       shot,
+      ...(byShot.has(shot.id) ? { slot: byShot.get(shot.id)!, authoredDurationSec: resolvedAuthoredDuration(authored.find(s=>s.id===shot.id)!) } : {}),
       prompt,
       references,
       bound,
@@ -2021,10 +2072,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
-    forceBreakBefore: boardBoundaries,
+    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks]),
   });
 
-  const passReferences = pack.ok
+  const passReferences: ScenePlan["passReferences"] = pack.ok
     ? pack.passes.map((pass) => {
         const seen = new Map<string, ResolvedCast["cast"][number]>();
         for (const entry of pass.plan) {
@@ -2101,7 +2152,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const overlongShots = ordered
     .map((shot) => ({
       shot,
-      choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+      choice: dispatchDuration(model, resolvedAuthoredDuration(shot), {
         taskMode: taskModeForShot(shot.id),
         // The route the shot will actually take (issue #390): a 12-second shot with references
         // is over-cap on a 15s-text/10s-reference model, and saying so here is the difference
@@ -2117,7 +2168,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     .map((entry) => ({
       shotId: entry.shot.id,
       number: entry.shot.number,
-      durationSec: entry.shot.durationSec ?? DEFAULT_SHOT_SEC,
+      durationSec: resolvedAuthoredDuration(entry.shot),
       longestSec: entry.choice.longest,
       becauseReferences: entry.choice.becauseReferences,
     }));
@@ -2266,8 +2317,23 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     })(),
   };
 
+  for (const entry of shots) {
+    entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
+      imageCount: entry.bound.length, taskMode: entry.continuation ? "continue" : entry.frame ? "first-frame" : "generate",
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
+    const audioText = characterAudioInstructions(entry.audioReferences);
+    if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
+  }
+  for (const reference of passReferences) {
+    const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
+    const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
+    reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
+  }
+
   return {
     mode,
+    ...(hasClock ? { timingProblems, timingWarnings } : {}),
     effectiveStyle,
     ...(productionStyleOverride !== undefined ? { productionStyleOverride } : {}),
     shots,
@@ -2286,3 +2352,5 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     warnings,
   };
 }
+
+export { DEFAULT_SHOT_SEC } from "./scene.js";

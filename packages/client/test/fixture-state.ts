@@ -347,6 +347,7 @@ const state: ClientState = {
     clonedVoices: [],
     productions: [
       {
+        rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
         meta: {
           id: "saltlight",
           format: "video",
@@ -500,6 +501,7 @@ const state: ClientState = {
     problems: [],
     keyArtCandidates: [],
     keyArt: "world-art.png",
+    keyArtVersion: null,
     masterLookCandidates: [],
     stagedReferences: {},
     externalEdits: [],

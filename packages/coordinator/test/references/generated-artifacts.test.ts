@@ -125,6 +125,29 @@ function generatedFor(all: ArtifactSidecar[], jobId: string): ArtifactSidecar[] 
 }
 
 describe("generated character references become artifacts (issue 475)", () => {
+  it("retains a speaking video exactly once without assigning a sample or selecting picture", async t => {
+    const { worldDir, provider, coordinator, sheetVersion } = await openWorld();
+    t.after(() => provider.close());
+    const landed = `references/${SHEET}/incoming/speaking.mp4`;
+    await mkdir(join(worldDir, `references/${SHEET}/incoming`), { recursive: true });
+    const bytes = Buffer.from("test speaking video transport bytes");
+    await writeFile(join(worldDir, landed), bytes);
+    const before = await readFile(join(worldDir, `references/${SHEET}/kit.json`), "utf8");
+    const job = generatedJob({ id: jobId("V01"), kind: "character-voice-sample", targetId: `${SHEET}/sample`,
+      landed, sheetVersion, model: "seedance-2.0", params: { referenceScript: "A new voice.", generate_audio: true } });
+    job.capability = "video";
+    await finalize(coordinator, job);
+    await finalize(coordinator, job);
+    const filed = generatedFor(await sidecars(worldDir), job.id);
+    assert.equal(filed.length, 1);
+    assert.equal(filed[0]!.kind, "video");
+    const generation = filed[0]!.generation!;
+    assert.equal(generation.source, "character-reference");
+    if (generation.source !== "character-reference") throw new Error("unexpected generation authority");
+    assert.equal(generation.params.referenceScript, "A new voice.");
+    assert.deepEqual(await readFile(join(worldDir, "artifacts", filed[0]!.file)), bytes);
+    assert.equal(await readFile(join(worldDir, `references/${SHEET}/kit.json`), "utf8"), before);
+  });
   it("files a main-photo candidate with a system origin and its whole request", async () => {
     const { worldDir, provider, coordinator, sheetVersion } = await openWorld();
     const landed = `references/${SHEET}/candidates/main-photo-g1-1.png`;

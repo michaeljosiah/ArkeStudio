@@ -132,6 +132,8 @@ export interface SceneCommandInput {
   /** The version the caller composed against. Refused if the file has moved past it (R-62). */
   baseVersion: number;
   command: SceneCommand;
+  /** Stable delivery key for a conversation action, when this command came from one. */
+  requestId?: string;
 }
 
 /**
@@ -194,7 +196,12 @@ export async function applySceneCommand(
       content: `${JSON.stringify(next, null, 2)}\n`,
       baseHash: sha256(raw),
     });
-    await store.commitUnserialised({ kind: "scene-command", source: input.command.kind, files });
+    await store.commitUnserialised({
+      kind: "scene-command",
+      source: input.command.kind,
+      files,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
   });
 }
 

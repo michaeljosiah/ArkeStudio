@@ -134,6 +134,186 @@ export const SpineMarkerImportSchema = z
   .strict();
 export type SpineMarkerImport = z.infer<typeof SpineMarkerImportSchema>;
 
+// ---------------------------------------------------------------------------
+// Semantic commands (SPEC-041 R-68)
+// ---------------------------------------------------------------------------
+
+const SpineMarkerEditSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("section"),
+      label: z.string().trim().min(1).optional(),
+      atSec: z.number().min(0).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("lyric"),
+      text: z.string().trim().min(1).optional(),
+      atSec: z.number().min(0).optional(),
+    })
+    .strict(),
+]).superRefine((change, context) => {
+  if ((change.kind === "section" && change.label === undefined && change.atSec === undefined) ||
+      (change.kind === "lyric" && change.text === undefined && change.atSec === undefined)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "a marker edit must change its text or time" });
+  }
+});
+
+const AudioSpineCommandBaseSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("create"), trackArtifactId: ArtifactIdSchema }).strict(),
+  z.object({ kind: z.literal("assign-track"), trackArtifactId: ArtifactIdSchema }).strict(),
+  z.object({ kind: z.literal("add-marker"), marker: SpineMarkerSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("import-markers"),
+      format: z.enum(["json", "lrc"]),
+      markers: z.array(SpineMarkerSchema).max(10_000),
+    })
+    .strict(),
+  z.object({ kind: z.literal("edit-marker"), markerId: SpineMarkerIdSchema, change: SpineMarkerEditSchema }).strict(),
+  z.object({ kind: z.literal("delete-marker"), markerId: SpineMarkerIdSchema }).strict(),
+  z.object({ kind: z.literal("set-anchor"), shotId: ShotIdSchema, anchor: SpineAnchorSchema }).strict(),
+  z.object({ kind: z.literal("set-anchor-audio"), shotId: ShotIdSchema, clipAudio: ClipAudioPolicySchema }).strict(),
+  z.object({ kind: z.literal("delete-anchor"), shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("delete-spine") }).strict(),
+]);
+
+/** Every authored spine change. Revision, schema version and update time remain authority-owned. */
+export const AudioSpineCommandSchema = AudioSpineCommandBaseSchema.superRefine((command, context) => {
+  if (command.kind === "add-marker" && command.marker.source !== "manual") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["marker", "source"], message: "a directly added marker has manual provenance" });
+  }
+  if (command.kind !== "import-markers") return;
+  for (const [index, marker] of command.markers.entries()) {
+    if (command.format === "lrc" && (marker.kind !== "lyric" || marker.source !== "lrc")) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["markers", index], message: "an LRC import contains only LRC lyric markers" });
+    }
+    if (command.format === "json" && marker.source !== "json") {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["markers", index, "source"], message: "a JSON import contains JSON markers" });
+    }
+  }
+});
+export type AudioSpineCommand = z.infer<typeof AudioSpineCommandSchema>;
+
+export class AudioSpineOperationRefused extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = "AudioSpineOperationRefused";
+  }
+}
+
+function authoredSpine(spine: ProductionSpine): Omit<ProductionSpine, "revision" | "updatedAt"> {
+  const { revision: _revision, updatedAt: _updatedAt, ...authored } = spine;
+  return authored;
+}
+
+/** Apply one command in memory. Cross-record artifact, duration and shot checks stay with the coordinator authority. */
+export function applyAudioSpineCommand(
+  current: ProductionSpine | null,
+  command: AudioSpineCommand,
+  updatedAt: string,
+): ProductionSpine | null {
+  if (command.kind === "create") {
+    if (current !== null) throw new AudioSpineOperationRefused("the production already has an audio spine");
+    return ProductionSpineSchema.parse({
+      schemaVersion: 1,
+      revision: 1,
+      trackArtifactId: command.trackArtifactId,
+      markers: [],
+      anchors: {},
+      updatedAt,
+    });
+  }
+  if (current === null) throw new AudioSpineOperationRefused("the production has no audio spine");
+  if (command.kind === "delete-spine") return null;
+  if (current.revision >= Number.MAX_SAFE_INTEGER) throw new AudioSpineOperationRefused("the audio spine revision is exhausted");
+
+  let next: ProductionSpine = { ...current, revision: current.revision + 1, updatedAt };
+  switch (command.kind) {
+    case "assign-track":
+      next = { ...next, trackArtifactId: command.trackArtifactId };
+      break;
+    case "add-marker":
+      if (current.markers.some((marker) => marker.id === command.marker.id)) {
+        throw new AudioSpineOperationRefused(`marker ${command.marker.id} already exists`);
+      }
+      next = { ...next, markers: orderedMarkers([...current.markers, command.marker]) };
+      break;
+    case "import-markers": {
+      const ids = new Set<string>();
+      for (const marker of command.markers) {
+        if (ids.has(marker.id)) throw new AudioSpineOperationRefused(`marker ${marker.id} appears twice in the import`);
+        ids.add(marker.id);
+      }
+      const markers = applyMarkerImport(
+        current.markers,
+        command.markers,
+        command.format === "lrc" ? "lyrics-only" : "sections-and-lyrics",
+      );
+      if (new Set(markers.map((marker) => marker.id)).size !== markers.length) {
+        throw new AudioSpineOperationRefused("the imported marker ids conflict with retained markers");
+      }
+      next = { ...next, markers };
+      break;
+    }
+    case "edit-marker": {
+      const marker = current.markers.find((candidate) => candidate.id === command.markerId);
+      if (marker === undefined) throw new AudioSpineOperationRefused(`marker ${command.markerId} is not on the spine`);
+      if (marker.kind !== command.change.kind) throw new AudioSpineOperationRefused(`marker ${command.markerId} is not a ${command.change.kind} marker`);
+      const changed: SpineMarker = marker.kind === "section" && command.change.kind === "section"
+        ? { ...marker, ...command.change, kind: "section" }
+        : marker.kind === "lyric" && command.change.kind === "lyric"
+          ? { ...marker, ...command.change, kind: "lyric" }
+          : marker;
+      next = { ...next, markers: orderedMarkers(current.markers.map((candidate) => candidate.id === marker.id ? changed : candidate)) };
+      break;
+    }
+    case "delete-marker":
+      if (!current.markers.some((marker) => marker.id === command.markerId)) {
+        throw new AudioSpineOperationRefused(`marker ${command.markerId} is not on the spine`);
+      }
+      next = { ...next, markers: current.markers.filter((marker) => marker.id !== command.markerId) };
+      break;
+    case "set-anchor":
+      next = { ...next, anchors: { ...current.anchors, [command.shotId]: command.anchor } };
+      break;
+    case "set-anchor-audio": {
+      const anchor = current.anchors[command.shotId];
+      if (anchor === undefined) throw new AudioSpineOperationRefused(`shot ${command.shotId} is not anchored`);
+      next = { ...next, anchors: { ...current.anchors, [command.shotId]: { ...anchor, clipAudio: command.clipAudio } } };
+      break;
+    }
+    case "delete-anchor": {
+      if (current.anchors[command.shotId] === undefined) throw new AudioSpineOperationRefused(`shot ${command.shotId} is not anchored`);
+      const anchors = { ...current.anchors };
+      delete anchors[command.shotId];
+      next = { ...next, anchors };
+      break;
+    }
+  }
+  const parsed = ProductionSpineSchema.parse(next);
+  if (JSON.stringify(authoredSpine(current)) === JSON.stringify(authoredSpine(parsed))) {
+    throw new AudioSpineOperationRefused("the command changes nothing");
+  }
+  return parsed;
+}
+
+export function describeAudioSpineCommand(command: AudioSpineCommand): string {
+  switch (command.kind) {
+    case "create": return `Create the audio spine with ${command.trackArtifactId}`;
+    case "assign-track": return `Assign ${command.trackArtifactId} as the master track`;
+    case "add-marker": return `Add marker ${command.marker.id}`;
+    case "import-markers": return `Import ${command.markers.length} ${command.format.toUpperCase()} marker${command.markers.length === 1 ? "" : "s"}`;
+    case "edit-marker": return `Edit marker ${command.markerId}`;
+    case "delete-marker": return `Delete marker ${command.markerId}`;
+    case "set-anchor": return `Anchor ${command.shotId} from ${command.anchor.startSec}s to ${command.anchor.endSec}s`;
+    case "set-anchor-audio": return `Set ${command.shotId} clip audio to ${command.clipAudio.mode}`;
+    case "delete-anchor": return `Delete the anchor for ${command.shotId}`;
+    case "delete-spine": return "Delete the audio spine";
+  }
+}
+
 /**
  * Markers in the order they are stored and shown: ascending time, insertion order preserved on a
  * tie. Sorted on every write rather than on every read — a file a person opens by hand should

@@ -2,6 +2,8 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   GenesisKeyArtBriefSchema,
+  ART_DIRECTION_PATH,
+  ArtDirectionRecordSchema,
   keyArtBriefProse,
   keyArtBriefSettled,
   orderedLocationViews,
@@ -52,6 +54,15 @@ export interface KeyArtAssembly {
  * copy R-62's regeneration reads. Null for a world founded before builds existed, or by hand.
  */
 export async function readKeyArtBrief(worldDir: string): Promise<GenesisKeyArtBrief | null> {
+  try {
+    const raw = await readFile(toExtendedLength(join(worldDir, ...ART_DIRECTION_PATH.split("/"))), "utf8");
+    const record = ArtDirectionRecordSchema.parse(JSON.parse(raw));
+    if ("keyArtIntent" in record) {
+      return record.keyArtIntent && keyArtBriefSettled(record.keyArtIntent) ? record.keyArtIntent : null;
+    }
+  } catch {
+    // Worlds founded before this field existed keep their brief in the build record below.
+  }
   try {
     const raw = await readFile(toExtendedLength(join(worldDir, "build", "build.json")), "utf8");
     const record = JSON.parse(raw) as { blueprint?: { keyArt?: unknown } };

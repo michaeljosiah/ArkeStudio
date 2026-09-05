@@ -169,6 +169,7 @@ export async function applyTimelineCommand(
   store: WorldStore,
   productionId: string,
   write: TimelineWrite,
+  validate?: (production: ProductionBundle) => Promise<void>,
 ): Promise<{ dropped: string[] }> {
   const timelinePath = `productions/${productionId}/timeline.json`;
   const reviewsPath = `productions/${productionId}/reviews.jsonl`;
@@ -187,6 +188,10 @@ export async function applyTimelineCommand(
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new TimelineCommandRefused(`production ${productionId} is not in this world`);
 
+    if (!validate && command.kind === "commands" && command.commands.some(c => c.kind === "place" && c.clip.source.kind === "performance")) {
+      throw new TimelineCommandRefused("Use the reviewed selected-performance placement action for exact dialogue.");
+    }
+    await validate?.(production);
     const raw = await readOptional(store, timelinePath);
     let dropped: string[] = [];
 
@@ -417,6 +422,9 @@ export function refuseUnrenderablePlacements(
       const segment = take?.segment;
       const media = take === undefined ? undefined : segment === undefined ? take.media : takesById.get(segment.passTakeId)?.media;
       if (media === undefined) refuse(`${command.clip.id} cites take ${source.takeId}, which has no media`);
+    } else if (source.kind === "performance") {
+      const performance = production.performances.find(p => p.id === source.performanceId);
+      if (kind !== "dialogue" || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
     } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
       refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
     }

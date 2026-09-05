@@ -1,3 +1,4 @@
+import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { z } from "zod";
 import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
@@ -209,6 +210,7 @@ export type ShotStaging = z.infer<typeof ShotStagingSchema>;
 
 export const ShotSchema = z
   .object({
+    visualFacts: ShotVisualFactsSchema.optional(),
     id: ShotIdSchema,
     number: z.number().int().min(1),
     title: z.string().min(1),
@@ -609,4 +611,10 @@ export function hasOwnFrame(
     artifact.boundaryExtraction === undefined &&
     !artifacts.some((candidate) => candidate.supersedes === artifactId)
   );
+}
+
+/** One authored fallback for planning, pricing, picture slots and display. */
+export const DEFAULT_SHOT_SEC = 4;
+export function resolvedAuthoredDuration(shot: { durationSec?: number }): number {
+  return shot.durationSec ?? DEFAULT_SHOT_SEC;
 }

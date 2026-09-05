@@ -4,7 +4,7 @@ import { ulid, type Job, type LedgerEntry, type ReviewDecision, type Take } from
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
-import type { WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
 /**
  * Put the take's own copy in place, once (issue 231).
@@ -106,6 +106,7 @@ async function discardStagingCopyForRecorded(
 function kindFor(job: Job): Take["kind"] | null {
   if (job.target.kind === "main-photo-candidate" || job.target.kind === "establish-candidate") return "main-photo";
   if (job.target.kind === "character-sheet") return "sheet";
+  if (job.target.kind === "character-voice-sample") return "voice";
   if (job.target.kind === "character-look") return "look";
   if (job.target.kind === "location-view-candidate") return "location-view";
   return null;
@@ -235,26 +236,33 @@ export async function recordUploadedReferenceTake(
   store: WorldStore,
   sheetId: string,
   candidatePath: string,
+  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<Take> {
   const existing = store
     .getBundle()
     .referenceTakes.find(
       (take) =>
-        take.kind === "main-photo" &&
-        take.reference?.sheetId === sheetId &&
-        take.provider === "user" &&
-        take.params["uploadedCandidate"] === candidatePath,
+        (options.requestId !== undefined && take.params["requestId"] === options.requestId) ||
+        (take.kind === "main-photo" &&
+          take.reference?.sheetId === sheetId &&
+          take.provider === "user" &&
+          take.params["uploadedCandidate"] === candidatePath),
     );
   if (existing) return existing;
   const media = basename(candidatePath);
-  const take = uploadedTake(store, sheetId, "main-photo", media, { uploadedCandidate: candidatePath });
-  await store.gateOp(() =>
-    writeTakeDirectory(store, sheetId, take, async (dir) => {
+  const take = uploadedTake(store, sheetId, "main-photo", media, {
+    uploadedCandidate: candidatePath,
+    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+  });
+  await store.gateOp(() => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
+    return writeTakeDirectory(store, sheetId, take, async (dir) => {
       // An upload keeps its candidate: the user put that file there, and `uploadedCandidate`
       // points back at it. Only a staging copy this code made is this code's to remove.
       await placeMedia(join(store.dir, candidatePath), join(dir, media));
-    }),
-  );
+    });
+  });
   return take;
 }
 
@@ -306,8 +314,19 @@ export async function recordUploadedCharacterSheetTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
+  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<Take> {
-  return recordUploadedImageTake(store, sheetId, "sheet", media, data);
+  return recordUploadedImageTake(store, sheetId, "sheet", media, data, options);
+}
+
+export async function recordUploadedMainPhotoTake(
+  store: WorldStore,
+  sheetId: string,
+  media: string,
+  data: Uint8Array,
+  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<Take> {
+  return recordUploadedImageTake(store, sheetId, "main-photo", media, data, options);
 }
 
 /**
@@ -321,8 +340,9 @@ export async function recordUploadedLocationViewTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
+  options: { requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<Take> {
-  return recordUploadedImageTake(store, sheetId, "location-view", media, data);
+  return recordUploadedImageTake(store, sheetId, "location-view", media, data, options);
 }
 
 async function recordUploadedImageTake(
@@ -331,6 +351,7 @@ async function recordUploadedImageTake(
   kind: Take["kind"],
   media: string,
   data: Uint8Array,
+  options: { requestId?: string; precondition?: WorldStatePrecondition },
 ): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
   // is ".." — and both name a directory that already exists, so the write would land on something
@@ -338,14 +359,23 @@ async function recordUploadedImageTake(
   if (basename(media) !== media || media === "." || media === "..") {
     throw new Error(`unsafe media name ${media}`);
   }
-  const take = uploadedTake(store, sheetId, kind, media, { uploadedFile: media });
-  await store.gateOp(() =>
-    writeTakeDirectory(store, sheetId, take, async (dir) => {
+  const existing = options.requestId === undefined
+    ? undefined
+    : store.getBundle().referenceTakes.find((take) => take.params["requestId"] === options.requestId);
+  if (existing) return existing;
+  const take = uploadedTake(store, sheetId, kind, media, {
+    uploadedFile: media,
+    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+  });
+  await store.gateOp(() => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
+    return writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
       // mistaken for a finished one (SPEC-002 R-13).
       await atomicWriteFile(join(dir, media), data);
-    }),
-  );
+    });
+  });
   return take;
 }
 
@@ -354,10 +384,13 @@ export async function recordReferenceReview(
   take: Take,
   decision: "accept" | "reject",
   input: { field?: string; note?: string } = {},
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<ReviewDecision> {
   const review = referenceReviewDecision(store.now(), take, decision, input);
   const path = "references/reviews.jsonl";
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     let raw = "";
     let existed = false;
     try {
@@ -368,7 +401,7 @@ export async function recordReferenceReview(
     }
     await store.commitUnserialised({
       kind: "reference-review",
-      source: "review:user",
+      source: options.source ?? "review:user",
       files: [
         {
           path,
@@ -377,6 +410,7 @@ export async function recordReferenceReview(
           baseHash: existed ? sha256(raw) : null,
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
   return review;

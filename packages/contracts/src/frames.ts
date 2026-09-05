@@ -1,3 +1,14 @@
+import { DialogueFailureTagSchema } from "./take-feedback.js";
+import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
+import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
+import { DialogueTimingIntentSchema } from "./cut.js";
+import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
+import { RehearsalIdSchema } from "./rehearsal.js";
+import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
+import { PerformanceDeliverySchema } from "./voice.js";
+import { CadencePlanSchema } from "./cadence.js";
+import { PerformanceIdSchema } from "./performance.js";
+import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
@@ -13,27 +24,9 @@ import {
 import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
-import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
-import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema } from "./scene.js";
-
-/**
- * The shot fields an edit may clear (SPEC-029 R-36). Identity and the required text are absent
- * deliberately: a shot with no id, number, title or description is not a shot, and clearing one
- * would be a deletion wearing an edit's name.
- */
-export const CLEARABLE_SHOT_FIELDS = [
-  "camera",
-  "audio",
-  "durationSec",
-  "intent",
-  "beats",
-  "framing",
-  "continuity",
-  "covers",
-  "promptOverride",
-] as const;
-import { ShotAnchorSchema } from "./scene-operations.js";
+import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -44,6 +37,7 @@ import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, Production
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
+import { DecideConversationActionSchema } from "./arke-actions.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
@@ -157,7 +151,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * that would be the studio's taste in front of theirs. The standing constraint suffix is
        * still appended either way; it is not the author's to drop.
        */
-      prompt: z.string().min(1).optional(),
+      prompt: z.string().min(1).max(20000).optional(),
+      promptReviewId: z.string().uuid().optional(),
       /**
        * How many to make, 1–4 (design 65). Absent is one, so every caller written before the
        * count still asks for exactly what it used to.
@@ -397,6 +392,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema.nullable(),
     })
     .strict(),
+  DecideConversationActionSchema,
   /**
    * #70 §10.1.1: say something, and take a turn.
    *
@@ -614,6 +610,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
     })
     .strict(),
+  /** #70 §13.1: explicitly copy private conversation evidence into the world's artifact shelf. */
+  z
+    .object({
+      kind: z.literal("world-chat-promote-attachment"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      attachmentId: ChatAttachmentIdSchema,
+      requestId: z.string().min(1),
+    })
+    .strict(),
   /** SPEC-005: stage a proposal and run an authoring agent inside it. */
   z
     .object({
@@ -703,7 +709,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * box with the words the dispatch would actually compose. Answered by a world-image.plan
    * event; nothing is created.
    */
-  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema, modelId: z.string().min(1).optional(), draftAlternative: z.boolean().optional() }).strict(),
+  z.object({kind:z.literal("cancel-key-art-prompt"),worldId:UlidSchema}).strict(),
   /**
    * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
    * The agent proposes; a person presses — the estimate is on the control, and the prompt is
@@ -1314,6 +1321,67 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       identityReferences: z.array(z.string().min(1)).max(4),
     })
     .strict(),
+  z.object({ kind: z.literal("convert-performance"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    performanceId: PerformanceIdSchema, expectedHash: z.string().min(1), expectedVoiceId: z.string().min(1),
+    modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
+    confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("record-dialogue-feedback"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeId: TakeIdSchema, shotId: ShotIdSchema, tags: z.array(DialogueFailureTagSchema).min(1), recommendationIds: z.array(z.string().min(1)), note: z.string().max(1000).optional() }).strict(),
+  z.object({ kind: z.literal("propose-shot-visual-facts"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, shotId: ShotIdSchema, expectedSceneVersion: z.number().int().positive(), visualFacts: ShotVisualFactsSchema.nullable() }).strict(),
+  z.object({ kind: z.literal("plan-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("prepare-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema,
+    confirmationToken: FullSha256Schema, confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("save-rehearsal-note"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, rehearsalId: RehearsalIdSchema, expectedHash: z.string().nullable(), lineId: z.string().min(1).max(300), body: z.string().trim().min(1).max(4000).nullable() }).strict(),
+  z.object({ kind: z.literal("designate-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative(), label: z.string().trim().min(1).max(80),
+    delivery: PerformanceDeliverySchema, role: PerformanceReferenceRoleSchema, productionId: SlugSchema, performanceId: PerformanceIdSchema,
+    expectedPerformanceHash: FullSha256Schema, acceptedReviewAt: z.string(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), noMusic: z.boolean() }).strict(),
+  z.object({ kind: z.literal("clear-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("prepare-performance-generation"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),
+  z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("propose-performance-duration"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedSceneVersion: z.number().int().positive(),
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ kind: z.literal("place-selected-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedTimelineRevision: z.number().int().nonnegative(),
+    expectedTimelineHash: z.string().min(1), expectedSelectionHash: z.string().nullable(),
+    partner: z.object({ performanceId: PerformanceIdSchema, leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict().optional(),
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ kind: z.literal("clear-performance-selection"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, lineKey: z.string().min(1).max(300), expectedSelectionHash: z.string().nullable() }).strict(),
+  z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
+    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),
+  z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
+  z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
+  z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, source: VoiceSampleSourceSchema }).strict(),
+  z.object({ kind: z.literal("accept-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid(), warningCodes: z.array(z.string()).max(20),
+    singleSpeaker: z.boolean(), noMusic: z.boolean(),
+    rightsBasis: z.enum(["self", "authorized", "licensed"]).nullable() }).strict(),
+  z.object({ kind: z.literal("clear-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("withdraw-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("generate-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, modelId: z.string().min(1), script: z.string().trim().min(1).max(2000),
+    durationSec: z.number().int().min(5).max(10), confirmedMicroUsd: z.number().int().min(0) }).strict(),
   /** SPEC-017: one composite generation, conditioned on the accepted main photo. */
   z
     .object({
@@ -1725,95 +1793,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sceneId: SceneIdSchema,
       baseVersion: z.number().int().min(1),
-      command: z.discriminatedUnion("kind", [
-        z
-          .object({
-            kind: z.literal("edit-scene"),
-            /** The name in the header. Whitespace is not a name, so it is trimmed before the check. */
-            title: z.string().trim().min(1).max(200).optional(),
-            /** Null explicitly clears the optional synopsis; omission leaves it as it is. */
-            synopsis: z.string().min(1).nullable().optional(),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("insert-shot"),
-            at: ShotAnchorSchema,
-            /** The beat, without identity: the coordinator mints the id past the whole production. */
-            shot: ShotSchema.omit({ id: true, number: true }),
-          })
-          .strict(),
-        z.object({ kind: z.literal("move-shot"), shotId: ShotIdSchema, to: ShotAnchorSchema }).strict(),
-        z.object({ kind: z.literal("duplicate-shot"), shotId: ShotIdSchema }).strict(),
-        z
-          .object({
-            kind: z.literal("edit-shot"),
-            shotId: ShotIdSchema,
-            /** A patch: a field the change omits is left exactly as the shot has it. */
-            change: ShotSchema.omit({ id: true, number: true, staging: true }).partial(),
-            /**
-             * Fields to remove, named rather than sent as a value.
-             *
-             * JSON cannot carry `undefined`, and an omitted key means "leave it" — so without
-             * this there is no way to clear an optional field at all: no way to drop a hand-
-             * tuned prompt override, a camera line, or a continuity flag once written.
-             */
-            clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("edit-stage"),
-            shotId: ShotIdSchema,
-            /** Omission leaves this half untouched; null clears shared scene blocking. */
-            blocking: SceneBlockingSchema.omit({ version: true }).nullable().optional(),
-            /** Null removes the camera; omission leaves it untouched. */
-            staging: ShotStageEditSchema.nullable().optional(),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("set-prompt-override"),
-            shotId: ShotIdSchema,
-            text: z.string().max(4000).nullable(),
-          })
-          .strict(),
-        z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),
-        z
-          .object({
-            kind: z.literal("set-board-override"),
-            shotId: ShotIdSchema,
-            override: z.enum(["split", "merge"]),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("clear-board-override"),
-            shotId: ShotIdSchema,
-            override: z.enum(["split", "merge"]),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("move-board-boundary"),
-            fromShotId: ShotIdSchema,
-            toShotId: ShotIdSchema,
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("set-board-prompt"),
-            members: z.array(ShotIdSchema).min(1),
-            text: z.string().min(1),
-          })
-          .strict(),
-        z
-          .object({
-            kind: z.literal("clear-board-prompt"),
-            members: z.array(ShotIdSchema).min(1),
-          })
-          .strict(),
-      ]),
+      command: SceneCommandSchema,
     })
     .strict(),
   z
@@ -2010,9 +1990,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z.object({ kind: z.literal("prepare-master-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
+  z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
+      audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2132,6 +2120,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
+      audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2201,6 +2193,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
+    })
+    .strict(),
+  /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
+  z
+    .object({
+      kind: z.literal("conversation-action-stage-playblast-complete"),
+      worldId: UlidSchema,
+      conversationId: ConversationIdSchema,
+      actionId: z.string().regex(/^act_[0-9A-HJKMNP-TV-Z]{26}$/),
+      status: z.enum(["completed", "failed", "cancelled"]),
+      detail: z.string().min(1).max(1_000).optional(),
+      productionId: SlugSchema.optional(),
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/).optional(),
+      sceneId: SceneIdSchema.optional(),
+      baseVersion: z.number().int().min(1).optional(),
+      shotId: ShotIdSchema.optional(),
+      stagingVersion: z.number().int().min(1).optional(),
+      durationSec: z.number().positive().optional(),
+      aspect: z.string().min(1).max(20).optional(),
+      lens: z.string().max(80).optional(),
+      sourcePath: z.string().min(1).optional(),
+      openingFrameSourcePath: z.string().min(1).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */

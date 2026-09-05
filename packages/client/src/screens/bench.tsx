@@ -1,3 +1,4 @@
+import { planSubjectCharacterAudio } from "@arke-studio/contracts";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
@@ -900,6 +901,9 @@ function BenchWorkspace({
    */
   const withReferences = session.composer.activeTokens.length > 0;
   const taskMode = model === null ? "generate" : taskModeForKeyframes(model, session.composer.keyframeTokens.length);
+  const characterAudio = world && model && subject && draft.params.kind === "video" ? planSubjectCharacterAudio({
+    world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.length,
+    taskMode, disabled: draft.params.audioReferencesDisabled }) : null;
   // The track's geometry and its states, worked out in one place so the fill, the ends, the
   // handle and the pill cannot drift apart. See lib/duration.ts for why it has two extra stops.
   const track =
@@ -2104,11 +2108,19 @@ function BenchWorkspace({
                 {subject === undefined ? estimateCopy : `${estimateCopy} a take`}
               </span>
             )}
+            {characterAudio && <div aria-label="Character audio references" style={{ flexBasis: "100%" }}>
+              <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
+                params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use assigned character voice references for this dispatch</label>
+              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
+              {characterAudio.references.length > 0 && <p>The model generates synchronized audio. Voice identity and cadence are guidance, not guaranteed reproduction.</p>}
+              {characterAudio.problems.map((problem, i) => <p key={i} role="alert">{problem}</p>)}
+            </div>}
             <Button
               variant="primary"
               size={subject === undefined ? "default" : "sm"}
               data-testid="bench-generate"
               disabled={
+                (characterAudio?.problems.length ?? 0) > 0 ||
                 model === null ||
                 draft.brief.trim().length === 0 ||
                 // A song needs both halves. The coordinator refuses this too — it is the

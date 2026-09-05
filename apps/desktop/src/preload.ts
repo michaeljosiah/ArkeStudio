@@ -61,6 +61,22 @@ type AttachTarget =
       durationSec: number;
       aspect: string;
       lens?: string;
+    }
+  | {
+      kind: "conversation-action-stage-playblast-complete";
+      worldId: string;
+      conversationId: string;
+      actionId: string;
+      status: "completed";
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      shotId: string;
+      stagingVersion: number;
+      durationSec: number;
+      aspect: string;
+      lens?: string;
     };
 
 type FrameListener = (frameJson: string) => void;
@@ -112,6 +128,10 @@ async function spoolBytes(name: string, bytes: Uint8Array): Promise<{ path: stri
 }
 
 const bridge = {
+  stagePerformanceAudio(input: { name: string; contentType: string; bytes: Uint8Array }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }> {
+    return ipcRenderer.invoke("arke:performance-stage", input);
+  },
+  discardPerformanceAudio(spoolId: string): Promise<void> { return ipcRenderer.invoke("arke:performance-discard", spoolId); },
   appVersion,
   platform: process.platform as string,
   coordinatorHttpBase: () => httpBase,
@@ -276,7 +296,7 @@ const bridge = {
   },
 
   async finishStageExport(
-    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+    target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }> {

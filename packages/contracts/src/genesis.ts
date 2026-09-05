@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { KeyArtIntentSchema } from "./art-direction.js";
 
 /**
  * The blueprint a founding conversation maintains in its sandbox (SPEC-031 §1.3).
@@ -52,15 +53,7 @@ export type GenesisLocationBrief = z.infer<typeof GenesisLocationBriefSchema>;
  * names the cast members the image should carry, in the order the surplus is dropped when a
  * route offers fewer identity slots than the brief names (R-60).
  */
-export const GenesisKeyArtBriefSchema = z
-  .object({
-    subject: z.string().min(1).max(500).optional(),
-    moment: z.string().min(1).max(500).optional(),
-    stakes: z.string().min(1).max(500).optional(),
-    characters: z.array(z.string().min(1).max(120)).max(8).default([]),
-    location: z.string().min(1).max(120).optional(),
-  })
-  .strip();
+export const GenesisKeyArtBriefSchema = KeyArtIntentSchema.strip();
 export type GenesisKeyArtBrief = z.infer<typeof GenesisKeyArtBriefSchema>;
 
 /** A key-art brief that settles nothing is no brief: the item is not dispatched (R-5). */

@@ -234,22 +234,29 @@ async function fileOutsideTheWorld(name: string, bytes: Uint8Array | string = pn
  * uploaded, and what the world actually has is read off the disk and carried to the picker.
  */
 describe("bringing key art in by hand", () => {
-  it("offers the picked file, then accepts it under the format its bytes carry", async () => {
+  /*
+   * The picked file becomes the key art, and does not wait to be asked about again.
+   *
+   * Reported as "nothing happens": it used to land as a candidate, exactly as a generation does,
+   * and the only sign was a line of small type in the other column while the frame under the
+   * Upload button went on showing the old picture. A generation is offered because a model may
+   * return something nobody wanted; a file chosen by name in the host's picker has already been
+   * chosen, and was on screen while it was.
+   */
+  it("makes the picked file the key art, under the format its bytes carry", async () => {
     const jpeg = Uint8Array.from([0xff, 0xd8, ...Array.from({ length: 32 }, () => 0x00), 0xff, 0xd9]);
     const picked = await fileOutsideTheWorld("my-key-art.png", jpeg);
     const { provider, worldDir, send } = await harness(() => [picked]);
     try {
       await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62A" });
-      const offered = provider.openStore()!.getBundle();
-      assert.deepEqual(offered.keyArtCandidates, ["incoming/world-image/candidate.jpg"]);
-      assert.equal(offered.keyArt, "world-art.png", "an upload is an offer — the world keeps what it has");
-
-      await send({ kind: "use-world-image", worldId: WORLD_ID });
       const after = provider.openStore()!.getBundle();
       // Named for the format it is. A JPEG written as world-art.png would be served as
       // image/png by a media route that reads the extension.
       assert.equal(after.keyArt, "world-art.jpg");
-      assert.deepEqual(after.keyArtCandidates, []);
+      assert.deepEqual(after.keyArtCandidates, [], "nothing is left waiting on a second yes");
+      // And the frame can tell the new picture from the one it replaced, which a path that keeps
+      // its name cannot say on its own.
+      assert.ok(typeof after.keyArtVersion === "number");
       // One key art, not two: the PNG it replaces goes, or the scan picks between them by sort.
       const names = await readdir(worldDir);
       assert.deepEqual(names.filter((name) => name.startsWith("world-art")), ["world-art.jpg"]);
@@ -264,7 +271,6 @@ describe("bringing key art in by hand", () => {
     const { provider, send } = await harness(() => [picked]);
     try {
       await send({ kind: "upload-world-image", worldId: WORLD_ID, requestId: "01J8F3K2QW9VZX4N7M0RTYB62B" });
-      await send({ kind: "use-world-image", worldId: WORLD_ID });
       // The registry row, which is all the picker has for a closed world. Read without closing
       // the world: the card that sent you to the art page has to change while you are still on
       // it, not once the world is put away.
@@ -362,7 +368,7 @@ function directorAdapter(reply: string | null) {
         },
       };
     },
-  } as never;
+  } as import("@arke-studio/contracts").HarnessAdapter;
 }
 
 describe("the art director", () => {
@@ -383,6 +389,16 @@ describe("the art director", () => {
     const fenced = ["Here you go:", "```json", '{"prompt": "A drowned harbour at dusk, wet basalt, sodium light"}', "```"].join("\n");
     const run = await director(fenced);
     assert.equal(await run("brief"), "A drowned harbour at dusk, wet basalt, sodium light");
+  });
+
+  it("cleans only its scratch directory after success, timeout and session-creation failure",async()=>{
+    const root=await tempDir("art-cleanup-");await writeFile(join(root,"keep.txt"),"unrelated");
+    const run=makeArtDirector(directorAdapter('{"prompt":"A harbour"}'),()=>buildSessionConfig({}),root);
+    assert.equal(await run("brief"),"A harbour");assert.deepEqual(await readdir(root),["keep.txt"]);
+    const timed=makeArtDirector(directorAdapter(null),()=>buildSessionConfig({}),root,{timeoutMs:5});
+    await assert.rejects(timed("brief"),/stopped/);assert.deepEqual(await readdir(root),["keep.txt"]);
+    const failing={...directorAdapter(null),async createSession(){throw new Error("create failed");}};
+    await assert.rejects(makeArtDirector(failing,()=>buildSessionConfig({}),root)("brief"),/create failed/);assert.deepEqual(await readdir(root),["keep.txt"]);
   });
 
   it("returns null rather than nonsense when the answer is not a prompt", async () => {

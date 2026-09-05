@@ -2,6 +2,39 @@ export { AppLog } from "./app-log.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
+export {
+  ARKE_ACTION_REGISTRY,
+  ARKE_BLOCKED_AUTHORITY_SEAMS,
+  ARKE_CLIENT_COMMAND_COMPILE_TIME_PARITY,
+  ARKE_CLIENT_COMMAND_REGISTRY,
+  arkeClientCommand,
+  findArkeClientCommand,
+  modelActionCatalogue,
+  modelActionCatalogueText,
+  type ArkeBlockedAuthoritySeam,
+  type ArkeClientCommandRegistry,
+  type ModelActionCatalogueEntry,
+  type ModelActionField,
+  type RegisteredClientAction,
+} from "./arke-actions/registry.js";
+export {
+  ConversationActionLifecycle,
+  ConversationActionPreparationError,
+  conversationActionDigest,
+  recoverConversationActions,
+  type ConversationActionAuthorityAdapter,
+  type ConversationActionExecutionOutcome,
+  type ConversationActionLifecycleOptions,
+  type ConversationActionRecoveryOutcome,
+  type ConversationActionValidation,
+  type PrepareConversationActionInput,
+  type PreparedConversationActionAuthority,
+} from "./arke-actions/lifecycle.js";
+export {
+  appendConversationActionTombstones,
+  preserveConversationActionTombstones,
+  readConversationActionTombstones,
+} from "./arke-actions/tombstones.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
 export {
   assembleHarness,
@@ -323,3 +356,10 @@ export {
 } from "./index-db/queries.js";
 export { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./index-db/sqlite.js";
 export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
+
+export * from "./audio/media-tools.js";
+export * from "./audio/qc.js";
+export * from "./audio/storage.js";
+export * from "./audio/rights.js";
+export * from "./audio/dispatch-gate.js";
+export * from "./audio/transcript-comparison.js";

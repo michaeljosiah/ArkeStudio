@@ -126,11 +126,10 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const named = scene ? `"${scene.title}" (${context.sceneId})` : context.sceneId;
       const lines = [
         `This is the scene thread for ${named} in the production ${context.productionId}. Its script is ordered blocks that shots cite; propose the whole block list as it should read, keeping an existing block's id when only its text changes. Read the season and the episode this scene serves with get_production(${context.productionId}) before deciding against them.`,
-        // The name is theirs to ask for and the model's to land at once (SPEC-036 R-38): said here
-        // because an Untitled scene is the ordinary way a scene now begins, and the thread is
-        // where it gets one.
+        // An Untitled scene is the ordinary way a scene now begins, and the thread is where a
+        // person can ask for the rename that will be shown on a permission card.
         scene?.title === "Untitled"
-          ? "The scene has no name yet — it is called Untitled. When they ask for a name, or what they say makes one plain, rename it with a sceneEdits rename; it lands at once."
+          ? "The scene has no name yet — it is called Untitled. When they ask for a name, or what they say makes one plain, propose it with a sceneEdits rename; it changes only after they Approve its permission card."
           : `Its name is "${scene?.title ?? ""}". Rename it with a sceneEdits rename only when they ask.`,
       ];
       if (scene?.script && scene.script.blocks.length > 0) {

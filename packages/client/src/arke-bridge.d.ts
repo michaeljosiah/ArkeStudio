@@ -1,5 +1,7 @@
 /** The typed preload bridge (SPEC-001 R-9). Mirrors apps/desktop/src/preload.ts. */
 export interface ArkeBridge {
+  stagePerformanceAudio?(input: { name: string; contentType: string; bytes: Uint8Array }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }>;
+  discardPerformanceAudio?(spoolId: string): Promise<void>;
   appVersion: string;
   platform: string;
   coordinatorHttpBase?(): string | null;
@@ -48,7 +50,7 @@ export interface ArkeBridge {
     bytes: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
   finishStageExport?(
-    target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+    target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
   ): Promise<{ ok: true } | { ok: false; reason: string }>;
@@ -90,6 +92,22 @@ export type AttachTarget =
   | {
       kind: "stage-playblast";
       worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      shotId: string;
+      stagingVersion: number;
+      durationSec: number;
+      aspect: string;
+      lens?: string;
+    }
+  | {
+      kind: "conversation-action-stage-playblast-complete";
+      worldId: string;
+      conversationId: string;
+      actionId: string;
+      status: "completed";
       productionId: string;
       sceneFile: string;
       sceneId: string;

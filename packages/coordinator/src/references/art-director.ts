@@ -1,6 +1,7 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
-import { join } from "node:path";
+import { join, resolve, relative, isAbsolute } from "node:path";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { HarnessAdapter, WorldMeta } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
@@ -79,53 +80,50 @@ export function makeArtDirector(
      * nothing is improved by holding a list refresh open for two minutes to relabel one row.
      */
     timeoutMs?: number;
+    signal?: AbortSignal;
   } = {},
 ): (brief: string) => Promise<string | null> {
   const key = options.answerKey ?? "prompt";
   const PromptSchema = z.object({ [key]: z.string().min(1).max(options.maxChars ?? 2000) });
   return async (brief) => {
-    const sandbox = join(scratchRoot, `art-${Date.now().toString(36)}`);
-    await mkdir(toExtendedLength(sandbox), { recursive: true });
-    const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
-      purpose: "art-prompt",
-      agent: options.agent ?? "art-director",
-    });
-
-    let finalText = "";
-    const abort = new AbortController();
-    const events = adapter.streamEvents(abort.signal);
-    const collected = (async () => {
-      for await (const event of events) {
-        if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-        if (event.type === "message.completed") {
-          finalText = event.text ?? "";
-          return;
+    const root=resolve(scratchRoot), sandbox=join(root,`art-${randomUUID()}`);
+    let created=false, deadline:ReturnType<typeof setTimeout>|undefined;
+    const abort=new AbortController();
+    const cancelled=()=>abort.abort(options.signal?.reason);
+    options.signal?.addEventListener("abort",cancelled,{once:true});
+    try {
+      options.signal?.throwIfAborted();
+      await mkdir(toExtendedLength(root),{recursive:true});
+      await mkdir(toExtendedLength(sandbox));created=true;
+      const session=await createPreparedSession(adapter,sandbox,sessionInput({}),{purpose:"art-prompt",agent:options.agent??"art-director"});
+      options.signal?.throwIfAborted();
+      let finalText="";
+      const collected=(async()=>{
+        for await(const event of adapter.streamEvents(abort.signal)) {
+          if (!("sessionId" in event)||event.sessionId!==session.sessionId)continue;
+          if(event.type==="message.completed"){finalText=event.text??"";return;}
+          if(event.type==="session.error")throw new Error("The drafting harness reported a failure.");
         }
-        if (event.type === "session.error") throw new Error(event.message);
-      }
-    })();
-    await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: brief }] });
-
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-      deadline = setTimeout(
-        () => reject(new Error("the art director took too long")),
-        options.timeoutMs ?? WALL_CLOCK_MS,
-      );
-    });
-    try {
-      await Promise.race([collected, timeout]);
+        abort.signal.throwIfAborted();
+      })();
+      // Attach rejection handling before dispatch, whose receipt can itself be delayed.
+      const outcome=collected.then(()=>({ok:true as const}),()=>({ok:false as const}));
+      const stopped=new Promise<never>((_,reject)=>{
+        abort.signal.addEventListener("abort",()=>reject(new Error("Prompt drafting stopped.")),{once:true});
+        deadline=setTimeout(()=>abort.abort(),options.timeoutMs??WALL_CLOCK_MS);
+      });
+      const work=(async()=>{
+        await adapter.dispatchAsync({sessionId:session.sessionId,parts:[{type:"text",text:brief}]});
+        return outcome;
+      })();
+      const result=await Promise.race([work,stopped]);
+      if(!result.ok)return null;
+      try {const parsed=PromptSchema.safeParse(extractJson(finalText));return parsed.success?String(parsed.data[key]).trim():null;} catch{return null;}
     } finally {
-      clearTimeout(deadline);
-      abort.abort();
-    }
-    // extractJson throws when there is no object at all — prose, an apology, an empty reply.
-    // All of those are the same answer here: no prompt, use the plain assembly instead.
-    try {
-      const parsed = PromptSchema.safeParse(extractJson(finalText));
-      return parsed.success ? String(parsed.data[key]).trim() : null;
-    } catch {
-      return null;
+      clearTimeout(deadline);abort.abort();options.signal?.removeEventListener("abort",cancelled);
+      // Only this invocation's UUID directory is ours. Never sweep the shared scratch root.
+      const child=relative(root,resolve(sandbox));
+      if(created&&!isAbsolute(child)&&!child.startsWith("..")&&/^art-[0-9a-f-]+$/.test(child))await rm(toExtendedLength(sandbox),{recursive:true,force:true}).catch(()=>{});
     }
   };
 }

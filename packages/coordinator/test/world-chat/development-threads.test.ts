@@ -20,6 +20,13 @@ import {
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { evaluateReadiness } from "../../src/world-chat/readiness.js";
+import {
+  episodesFence,
+  sceneScriptFence,
+  sceneScriptTargetId,
+  seasonFence,
+  storyFence,
+} from "../../src/world-chat/target-reads.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { wrapUp } from "../../src/world-chat/wrapup.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -746,6 +753,97 @@ describe("production-scoped threads (issue 400)", () => {
       draft: { title: shot.title, camera: "WIDE · handheld, from the water" },
     } as Partial<WorldChangeCandidate>);
     assert.equal(evaluateReadiness([moved], w.store.getBundle()).carried.length, 1);
+  });
+
+  it("refuses a whole scene-script replacement without a complete current target receipt", async () => {
+    const w = await world();
+    const production = w.store.getBundle().productions.find((entry) => entry.meta.id === "saltlight")!;
+    const scene = production.scenes[0]!;
+    const replacement = candidate({
+      classification: "development.scene-script",
+      target: { kind: "scene", productionId: "saltlight", sceneId: scene.id },
+      draft: { blocks: [{ id: "blk_replacement", kind: "action", text: "A different opening." }] },
+    } as Partial<WorldChangeCandidate>);
+    replacement.checks = { ...replacement.checks, targetReads: [] };
+
+    assert.equal(
+      evaluateReadiness([replacement], w.store.getBundle()).notCarried[0]?.reason,
+      "incomplete-read",
+    );
+
+    replacement.checks = {
+      ...replacement.checks,
+      targetReads: [{
+        checkId: newId("check"),
+        target: { requirement: "scenes", id: sceneScriptTargetId("saltlight", scene.id) },
+        observedRevisionOrDigest: sceneScriptFence(production, scene.id),
+      }],
+    };
+    assert.equal(evaluateReadiness([replacement], w.store.getBundle()).carried.length, 1);
+
+    replacement.checks.targetReads![0]!.observedRevisionOrDigest = `v${scene.version}:sha256:${"0".repeat(64)}`;
+    assert.equal(
+      evaluateReadiness([replacement], w.store.getBundle()).notCarried[0]?.reason,
+      "incomplete-read",
+      "a receipt for an older script cannot authorize replacing the current one",
+    );
+  });
+
+  it("requires complete reads before replacing overview, season or episode member lists", async () => {
+    const w = await world();
+    const bundle = w.store.getBundle();
+    const production = bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const episode = {
+      id: "ep_receipt",
+      version: 1,
+      order: 1,
+      title: "Receipt episode",
+      scenes: [production.scenes[0]!.id],
+    };
+    production.episodes.push(episode);
+    const replacements = [
+      {
+        candidate: candidate({
+          classification: "development.overview",
+          target: { kind: "production", productionId: "saltlight" },
+          draft: { acts: [{ title: "A newly ordered act" }] },
+        } as Partial<WorldChangeCandidate>),
+        target: { requirement: "story" as const, id: "saltlight" },
+        observedRevisionOrDigest: storyFence(production),
+      },
+      {
+        candidate: candidate({
+          classification: "development.season",
+          target: { kind: "production", productionId: "saltlight" },
+          draft: { arcs: [{ id: "arc_receipt", title: "A newly ordered arc" }] },
+        } as Partial<WorldChangeCandidate>),
+        target: { requirement: "seasons" as const, id: "saltlight" },
+        observedRevisionOrDigest: seasonFence(production),
+      },
+      {
+        candidate: candidate({
+          classification: "development.episode",
+          target: { kind: "episode", productionId: "saltlight", episodeId: episode.id },
+          draft: { scenes: episode.scenes.length > 0 ? [] : [production.scenes[0]!.id] },
+        } as Partial<WorldChangeCandidate>),
+        target: { requirement: "episodes" as const, id: "saltlight" },
+        observedRevisionOrDigest: episodesFence(production),
+      },
+    ];
+
+    for (const replacement of replacements) {
+      replacement.candidate.checks = { ...replacement.candidate.checks, targetReads: [] };
+      assert.equal(evaluateReadiness([replacement.candidate], bundle).notCarried[0]?.reason, "incomplete-read");
+      replacement.candidate.checks = {
+        ...replacement.candidate.checks,
+        targetReads: [{
+          checkId: newId("check"),
+          target: replacement.target,
+          observedRevisionOrDigest: replacement.observedRevisionOrDigest,
+        }],
+      };
+      assert.equal(evaluateReadiness([replacement.candidate], bundle).carried.length, 1);
+    }
   });
 
   it("never holds back a new shot or a new episode — a creation always writes", async () => {

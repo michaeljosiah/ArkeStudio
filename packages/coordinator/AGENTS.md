@@ -2,7 +2,7 @@
 
 Read the root guidance and [code map](../../docs/development/code-map.md). Paths below are relative to this package.
 
-`src/coordinator.ts` composes application services, routes wire commands and publishes state. Search the exact message `kind` from contracts to find a handler, then follow its domain imports. Place domain behavior beside its existing owner (`gate/`, `world/`, `productions/`, `queue/`, `voice/`, `world-chat/`, `bench/`) and keep shared pure calculations in contracts.
+`src/coordinator.ts` composes application services, routes wire commands and publishes state. Search the exact message `kind` from contracts to find a handler, then follow its domain imports. Place domain behavior beside its existing owner (`gate/`, `world/`, `productions/`, `queue/`, `audio/`, `world-chat/`, `bench/`) and keep shared pure calculations in contracts.
 
 `src/world-provider.ts` is the interface; `src/world/provider.ts` is the filesystem implementation. Read `world/store.ts`, `world/commit.ts` and the relevant gate operation before changing writes. Authored acceptance, production edits, operational journals and derived caches have different rules. Consult [filesystem operations](../../docs/filesystem-operations.md), SPEC-002 and SPEC-004 rather than routing every write through an invented common gate.
 

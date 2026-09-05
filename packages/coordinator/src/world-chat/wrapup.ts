@@ -189,9 +189,19 @@ async function buildAndStage(input: {
     needed > 0 ? await input.store.allocateCanonIds(needed, `world-chat:${input.conversationId}`) : [];
   const identities = planIdentities(carried, reserved, bundle);
 
+  // Group before materialisation because members may intentionally rewrite one sheet together.
+  const candidateBuckets: Array<{ key: string; candidates: WorldChangeCandidate[] }> = [];
+  for (const candidate of carried) {
+    const key = candidate.groupId ?? `solo:${candidate.id}`;
+    const existing = candidateBuckets.find((bucket) => bucket.key === key);
+    if (existing) existing.candidates.push(candidate);
+    else candidateBuckets.push({ key, candidates: [candidate] });
+  }
+
   // Everything is built and validated before a single proposal directory exists, so a malformed
   // candidate fails without leaving one behind (§11.2).
-  const built = [];
+  const built: ReturnType<typeof materialiseCandidate>[] = [];
+  const buckets: Array<{ key: string; items: ReturnType<typeof materialiseCandidate>[] }> = [];
   // Sibling identities, shared across the batch: the scanned bundle cannot see what this same
   // wrap-up is about to create (issue #400 round 2).
   const claimed = {
@@ -201,8 +211,54 @@ async function buildAndStage(input: {
     shotIds: new Set<string>(),
   };
   try {
-    for (const candidate of carried) {
-      built.push(materialiseCandidate(candidate, identities, bundle, at, claimed));
+    for (const bucket of candidateBuckets) {
+      const members = new Map(bucket.candidates.map((candidate) => [candidate.id, candidate]));
+      for (const candidate of bucket.candidates) {
+        const pending: Array<{ candidateId: string; revision: number }> = [];
+        const visit = (value: unknown): void => {
+          if (Array.isArray(value)) {
+            for (const item of value) visit(item);
+            return;
+          }
+          if (value === null || typeof value !== "object") return;
+          const record = value as Record<string, unknown>;
+          if (record["kind"] === "pending-entity") {
+            const ref = record["ref"] as { candidateId?: string; revision?: number } | undefined;
+            if (typeof ref?.candidateId === "string" && typeof ref.revision === "number") {
+              pending.push({ candidateId: ref.candidateId, revision: ref.revision });
+            }
+          }
+          for (const child of Object.values(record)) visit(child);
+        };
+        visit(candidate.draft);
+        for (const ref of pending) {
+          const target = members.get(ref.candidateId);
+          if (!target || target.revision !== ref.revision) {
+            throw new MaterialiseError(
+              candidate.id,
+              "a same-turn reference is no longer pinned to this atomic group",
+            );
+          }
+        }
+      }
+
+      let projectedBundle: WorldBundle = { ...bundle, sheets: [...bundle.sheets] };
+      const items: ReturnType<typeof materialiseCandidate>[] = [];
+      // Creates establish the virtual records that a relationship in the same group may edit.
+      const ordered = [...bucket.candidates].sort((left, right) =>
+        Number(right.classification === "sheet.create") - Number(left.classification === "sheet.create"));
+      for (const candidate of ordered) {
+        const item = materialiseCandidate(candidate, identities, projectedBundle, at, claimed);
+        items.push(item);
+        built.push(item);
+        for (const sheet of item.projectedSheets ?? []) {
+          projectedBundle = {
+            ...projectedBundle,
+            sheets: [...projectedBundle.sheets.filter((current) => current.id !== sheet.id), sheet],
+          };
+        }
+      }
+      buckets.push({ key: bucket.key, items });
     }
   } catch (err) {
     // Nothing was staged yet — this fails before the first gate call — so there is nothing that
@@ -243,26 +299,11 @@ async function buildAndStage(input: {
    *
    * Ungrouped propositions are groups of one, so there is a single path.
    */
-  const buckets: Array<{ key: string; items: typeof built }> = [];
-  for (const item of built) {
-    const key = item.candidate.groupId ?? `solo:${item.candidate.id}`;
-    const existing = buckets.find((b) => b.key === key);
-    if (existing) existing.items.push(item);
-    else buckets.push({ key, items: [item] });
-  }
-
   try {
     for (const bucket of buckets) {
       const lead = bucket.items[0]!;
-      /*
-       * Two members of a group writing the same file cannot be flattened into one proposal.
-       *
-       * Each was materialised as a whole file from the same base, so handing both to the gate
-       * writes one over the other and calls both origins resolved — the earlier edit gone, with
-       * nothing anywhere saying so. Merging them properly means materialising the second against
-       * the first rather than against the world, which this does not do yet; until it does, the
-       * honest answer is to refuse rather than to write half of what was asked for.
-       */
+      /* Same-sheet members were composed against the preceding projection above. Only that
+       * allowlisted sheet path may collapse to its final content; other duplicate targets refuse. */
       /*
        * A look change cannot travel in a group with anything else.
        *
@@ -304,12 +345,19 @@ async function buildAndStage(input: {
 
       const paths = bucket.items.flatMap((item) => item.targets.map((t) => t.path));
       const collision = paths.find((path, index) => paths.indexOf(path) !== index);
-      if (collision !== undefined) {
+      if (
+        collision !== undefined &&
+        bucket.items.some((item) =>
+          item.targets.some((target) => target.path === collision) && item.projectedSheets === undefined)
+      ) {
         throw new WrapUpError(
           "materialise",
           `These land together and two of them rewrite ${collision}, which cannot be written as one change yet. Say which one you want and the other can follow.`,
         );
       }
+      const proposalTargets = [...new Map(
+        bucket.items.flatMap((item) => item.targets).map((target) => [target.path, target]),
+      ).values()];
       const choices = bucket.items.flatMap((item) => {
         const choice = openChoiceFor(item.candidate);
         return choice ? [choice] : [];
@@ -336,7 +384,7 @@ async function buildAndStage(input: {
           mode: "attended",
           owner: { kind: "world-chat", conversationId: input.conversationId },
         },
-        targets: bucket.items.flatMap((item) => item.targets),
+        targets: proposalTargets,
         preReservedCanonIds: bucket.items.flatMap((item) => item.reservedCanonIds),
         worldChatOrigins: bucket.items.map((item) => ({
           requestId: input.requestId,

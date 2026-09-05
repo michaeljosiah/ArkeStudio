@@ -20,6 +20,8 @@ export interface Clip {
   url: string;
   title: string;
   sub?: string;
+  /** Physical source coordinates for an explicitly reviewed excerpt. */
+  range?: { inSec: number; outSec: number };
 }
 
 export interface PlaybackState {
@@ -34,7 +36,7 @@ export interface PlaybackState {
 type AudioLike = Pick<
   HTMLAudioElement,
   "src" | "currentTime" | "duration" | "play" | "pause" | "load" | "removeAttribute" | "addEventListener" | "removeEventListener"
->;
+> & { playbackRate?: number };
 
 const IDLE: PlaybackState = { clip: null, status: "idle", currentTime: 0, duration: 0, error: null };
 
@@ -63,6 +65,7 @@ function handle(event: Event): void {
       if (state.status !== "ended") publish({ ...state, status: "paused" });
       return;
     case "ended":
+      if (playlist && state.clip.id === playlist.items[playlist.index]?.id) { nextPlaylistLine(); return; }
       /*
        * A queued read walks to its next piece here rather than stopping.
        *
@@ -82,9 +85,18 @@ function handle(event: Event): void {
       publish({ ...state, status: "ended", currentTime: state.duration });
       return;
     case "timeupdate":
+      if (state.clip.range && audio.currentTime >= state.clip.range.outSec) {
+        audio.pause();
+        publish({ ...state, status: "ended", currentTime: state.clip.range.outSec });
+        if (playlist && state.clip?.id === playlist.items[playlist.index]?.id) nextPlaylistLine();
+        return;
+      }
       publish({ ...state, currentTime: audio.currentTime });
       return;
     case "loadedmetadata":
+      if (state.clip.range) audio.currentTime = state.clip.range.inSec;
+      publish({ ...state, currentTime: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
+      return;
     case "durationchange":
       publish({ ...state, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
       return;
@@ -101,16 +113,18 @@ function ensureAudio(): AudioLike {
 }
 
 /** Load and play a clip, replacing whatever was sounding. Re-playing the current clip resumes. */
-export async function playClip(clip: Clip): Promise<void> {
+export async function playClip(clip: Clip, playlistOwned = false): Promise<void> {
+  if (!playlistOwned && playlist) { playlist = null; publish({ ...state }); }
   const generation = ++playGeneration;
   const element = ensureAudio();
-  if (state.clip?.url !== clip.url) {
+  element.playbackRate = playlistOwned ? playlist?.rate ?? 1 : 1;
+  if (state.clip?.url !== clip.url || JSON.stringify(state.clip?.range) !== JSON.stringify(clip.range)) {
     element.pause();
     element.currentTime = 0;
     element.src = clip.url;
     publish({ clip, status: "loading", currentTime: 0, duration: 0, error: null });
   } else {
-    if (state.status === "ended") element.currentTime = 0;
+    if (state.status === "ended") element.currentTime = clip.range?.inSec ?? 0;
     publish({ ...state, clip, error: null });
   }
   try {
@@ -173,18 +187,20 @@ export function togglePlayback(): void {
     audio?.pause();
     return;
   }
-  void playClip(state.clip);
+  void playClip(state.clip, playlist !== null);
 }
 
 export function seekTo(seconds: number): void {
   if (!audio || !state.clip) return;
-  const bounded = Math.max(0, state.duration > 0 ? Math.min(seconds, state.duration) : seconds);
+  const end = state.clip.range?.outSec ?? state.duration;
+  const bounded = Math.max(state.clip.range?.inSec ?? 0, end > 0 ? Math.min(seconds, end) : seconds);
   audio.currentTime = bounded;
   publish({ ...state, currentTime: bounded, status: state.status === "ended" ? "paused" : state.status });
 }
 
 /** Stop, detach the source and take the dock down. */
 export function dismissPlayback(): void {
+  playlist = null;
   playGeneration += 1;
   const element = audio;
   publish(IDLE);
@@ -224,4 +240,57 @@ export function setAudioFactoryForTest(next: (() => AudioLike) | null): void {
 /** Drive the store from a test's fake element without going through the DOM. */
 export function emitForTest(type: (typeof EVENTS)[number]): void {
   handle({ type } as Event);
+}
+
+
+export interface PlaylistItem extends Clip { lineId: string; speakerSheetId: string }
+export interface PlaylistState { items: PlaylistItem[]; index: number; rate: 0.75 | 1 | 1.25 | 1.5; soloSheetId: string | null; notice: string }
+let playlist: PlaylistState | null = null;
+export function playlistSnapshot(): PlaylistState | null { return playlist; }
+export function usePlaylist(): PlaylistState | null {
+  return useSyncExternalStore(listener => { listeners.add(listener); return () => listeners.delete(listener); }, () => playlist, () => playlist);
+}
+function updatePlaylist(next: PlaylistState | null) { playlist = next; publish({ ...state }); }
+export function loadPlaylist(items: PlaylistItem[]): void {
+  dismissPlayback(); clearQueue();
+  updatePlaylist({ items: [...items], index: 0, rate: 1, soloSheetId: null, notice: items.length ? "Table read ready." : "No playable lines." });
+}
+export function clearPlaylist(): void {
+  const owns = playlist?.items[playlist.index]?.id === state.clip?.id;
+  updatePlaylist(null);
+  if (owns) dismissPlayback();
+}
+export async function playPlaylistLine(index = playlist?.index ?? 0): Promise<void> {
+  const current = playlist;
+  const item = current?.items[index];
+  if (!current || !item || (current.soloSheetId && item.speakerSheetId !== current.soloSheetId)) return;
+  updatePlaylist({ ...current, index, notice: `${state.status === "error" ? "Skipped the line that could not be decoded. " : ""}Playing ${item.title}` });
+  await playClip(item, true);
+}
+export function nextPlaylistLine(direction: 1 | -1 = 1): void {
+  if (!playlist) return;
+  let index = playlist.index + direction;
+  while (index >= 0 && index < playlist.items.length && playlist.soloSheetId && playlist.items[index]?.speakerSheetId !== playlist.soloSheetId) index += direction;
+  if (index < 0 || index >= playlist.items.length) {
+    audio?.pause(); updatePlaylist({ ...playlist, notice: "End of table read." });
+    publish({ ...state, status: "ended" }); return;
+  }
+  updatePlaylist({ ...playlist, notice: state.status === "error" ? "Skipped the line that could not be decoded." : "Moving to the next line." });
+  void playPlaylistLine(index);
+}
+export function restartPlaylistLine(): void {
+  if (!playlist) return;
+  seekTo(playlist.items[playlist.index]?.range?.inSec ?? 0); void playPlaylistLine();
+}
+export function setPlaylistRate(rate: PlaylistState["rate"]): void {
+  if (!playlist || ![0.75, 1, 1.25, 1.5].includes(rate)) return;
+  updatePlaylist({ ...playlist, rate }); if (audio) audio.playbackRate = rate;
+}
+export function setPlaylistSolo(sheetId: string | null): void {
+  if (!playlist) return;
+  updatePlaylist({ ...playlist, soloSheetId: sheetId });
+  if (!sheetId || playlist.items[playlist.index]?.speakerSheetId === sheetId) return;
+  const index = playlist.items.findIndex(item => item.speakerSheetId === sheetId);
+  if (index === -1) { audio?.pause(); updatePlaylist({ ...playlist, notice: "This character has no playable lines." }); return; }
+  void playPlaylistLine(index);
 }

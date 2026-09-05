@@ -80,6 +80,8 @@ export interface Materialised {
   /** Which fields this proposition actually changes, for the origin record. */
   fields: string[];
   reservedCanonIds: string[];
+  /** Sheet records projected by these targets, for composing same-file changes in one atomic group. */
+  projectedSheets?: Sheet[];
 }
 
 export interface ChoiceMaterialised extends Materialised {
@@ -277,6 +279,7 @@ function resolveReferences(
   }
 
   links.delete(selfId ?? "");
+  canonRules.delete(selfId ?? "");
   return { canonRules: [...canonRules], links: [...links] };
 }
 
@@ -407,12 +410,14 @@ export function materialiseCandidate(
   switch (candidate.classification) {
     case "canon.create": {
       const id = nextCanonId();
+      const refs = resolveReferences(candidate, draft, identities, bundle, id);
       const content = entryContent({
         id,
         type: String(draft["type"]),
         title: String(draft["title"]),
         status: "settled",
         statement: String(draft["statement"]),
+        links: [...refs.canonRules, ...refs.links],
       });
       validateCanon(candidate.id, content, id);
       return {
@@ -425,6 +430,7 @@ export function materialiseCandidate(
 
     case "canon.thread": {
       const id = nextCanonId();
+      const considered = (draft["consideredEntryIds"] as string[]) ?? [];
       // A thread asserts nothing, so it is created open rather than settled: retrieving one would
       // answer a question with the same question.
       const content = entryContent({
@@ -432,7 +438,13 @@ export function materialiseCandidate(
         type: "thread",
         title: String(draft["title"]),
         status: "open",
-        statement: String(draft["question"]),
+        statement: [
+          String(draft["question"]).trim(),
+          considered.length > 0
+            ? `\nConsidered when this was asked: ${considered.join(", ")} — none of them decides it.`
+            : "",
+        ].join("\n").trim(),
+        links: considered,
       });
       validateCanon(candidate.id, content, id);
       return {
@@ -446,6 +458,9 @@ export function materialiseCandidate(
     case "canon.amend": {
       const target = (candidate as unknown as { target: { entryId: string } }).target;
       const entry = requireEntry(bundle, target.entryId, candidate.id);
+      const refs = draft["links"] === undefined
+        ? null
+        : resolveReferences(candidate, draft, identities, bundle, entry.id);
       const content = entryContent({
         id: entry.id,
         type: String(draft["type"] ?? entry.type),
@@ -455,6 +470,7 @@ export function materialiseCandidate(
         // than carrying a status the entry writer has no way to express.
         status: entry.status === "open" ? "open" : "settled",
         statement: String(draft["statement"] ?? entry.body),
+        links: refs ? [...refs.canonRules, ...refs.links] : entry.links,
       });
       validateCanon(candidate.id, content, entry.id);
       return {
@@ -484,14 +500,25 @@ export function materialiseCandidate(
         date,
         canonRules: refs.canonRules,
         links: refs.links,
-        ...(draft["role"] !== undefined ? { extra: { role: draft["role"] } } : {}),
+        ...(
+          draft["role"] !== undefined || draft["billing"] !== undefined || draft["region"] !== undefined
+            ? {
+                extra: {
+                  ...(draft["role"] !== undefined ? { role: draft["role"] } : {}),
+                  ...(draft["billing"] !== undefined ? { billing: draft["billing"] } : {}),
+                  ...(draft["region"] !== undefined ? { region: draft["region"] } : {}),
+                },
+              }
+            : {}
+        ),
       });
-      assertSheetParses(candidate.id, content, draft["type"] as Sheet["type"]);
+      const projected = assertSheetParses(candidate.id, content, draft["type"] as Sheet["type"]);
       return {
         candidate,
         targets: [{ path: `${folderFor(draft["type"] as Sheet["type"])}/${slug}.md`, content }],
         fields: ["name", ...Object.keys(sections)],
         reservedCanonIds: [],
+        projectedSheets: [projected],
       };
     }
 
@@ -523,38 +550,88 @@ export function materialiseCandidate(
         ...(draft["region"] !== undefined ? { region: draft["region"] as string | null } : {}),
         date,
       });
-      assertSheetParses(candidate.id, content, sheet.type);
+      const projected = assertSheetParses(candidate.id, content, sheet.type);
       return {
         candidate,
         targets: [{ path: `${folderFor(sheet.type)}/${sheet.id}.md`, content }],
         fields: Object.keys(draft),
         reservedCanonIds: [],
+        projectedSheets: [projected],
       };
     }
 
     case "relationship.change": {
-      // The minimum necessary target: a one-sided link changes one sheet, and changing both
-      // would put an edit in front of somebody for a file they did not agree to touch.
-      const edits = (draft["proseEdits"] as Array<{ sheet: { sheetId?: string }; sectionHeading: string; body: string }>) ?? [];
-      const targets: MaterialisedTarget[] = [];
-      const fields: string[] = [];
-      for (const edit of edits) {
-        const sheetId = edit.sheet.sheetId;
-        if (!sheetId) continue;
+      // Links are directional: `from` owns the edge. Prose may touch either endpoint, but each
+      // sheet is rebuilt once so a link and a paragraph on the same sheet cannot overwrite one another.
+      const edits = (draft["proseEdits"] as Array<{ sheet: WorldChatLinkRef; sectionHeading: string; body: string }>) ?? [];
+      const changes = new Map<string, {
+        sheet: Sheet;
+        sections: Record<string, string>;
+        canonRules: Set<string>;
+        links: Set<string>;
+        fields: Set<string>;
+      }>();
+      const changeFor = (ref: WorldChatLinkRef) => {
+        const sheetId = ref.kind === "sheet"
+          ? ref.sheetId
+          : ref.kind === "pending-entity"
+            ? identities.slugBy.get(ref.ref.candidateId)
+            : undefined;
+        if (!sheetId) {
+          throw new MaterialiseError(candidate.id, "a relationship can only edit a sheet that already exists");
+        }
         const sheet = requireSheet(bundle, sheetId, candidate.id);
-        const sections: Record<string, string> = {};
-        for (const section of sheet.sections) sections[section.heading] = section.body;
-        sections[edit.sectionHeading] = edit.body;
-        // One section changes; the rest of the sheet is not this proposition's business.
-        const content = editSheetContent({ sheet, sections, date });
-        assertSheetParses(candidate.id, content, sheet.type);
-        targets.push({ path: `${folderFor(sheet.type)}/${sheet.id}.md`, content });
-        fields.push(edit.sectionHeading);
+        let change = changes.get(sheet.id);
+        if (!change) {
+          change = {
+            sheet,
+            sections: Object.fromEntries(sheet.sections.map((section) => [section.heading, section.body])),
+            canonRules: new Set(sheet.canonRules),
+            links: new Set(sheet.links),
+            fields: new Set(),
+          };
+          changes.set(sheet.id, change);
+        }
+        return change;
+      };
+
+      if (draft["linkAction"] !== "unchanged") {
+        const from = changeFor(draft["from"] as WorldChatLinkRef);
+        const resolved = resolveReferences(candidate, { links: [draft["to"]] }, identities, bundle, from.sheet.id);
+        const link = resolved.links[0];
+        const canon = resolved.canonRules[0];
+        if (!link && !canon) throw new MaterialiseError(candidate.id, "a relationship cannot link an entity to itself");
+        const values = link ? from.links : from.canonRules;
+        const value = link ?? canon!;
+        if (draft["linkAction"] === "add") values.add(value);
+        else values.delete(value);
+        from.fields.add(link ? "links" : "canonRules");
+      }
+
+      for (const edit of edits) {
+        const change = changeFor(edit.sheet);
+        change.sections[edit.sectionHeading] = edit.body;
+        change.fields.add(edit.sectionHeading);
+      }
+      const targets: MaterialisedTarget[] = [];
+      const projectedSheets: Sheet[] = [];
+      const fields = new Set<string>();
+      for (const change of changes.values()) {
+        const content = editSheetContent({
+          sheet: change.sheet,
+          sections: change.sections,
+          canonRules: [...change.canonRules],
+          links: [...change.links],
+          date,
+        });
+        projectedSheets.push(assertSheetParses(candidate.id, content, change.sheet.type));
+        targets.push({ path: `${folderFor(change.sheet.type)}/${change.sheet.id}.md`, content });
+        for (const field of change.fields) fields.add(field);
       }
       if (targets.length === 0) {
         throw new MaterialiseError(candidate.id, "this relationship change would edit no file");
       }
-      return { candidate, targets, fields, reservedCanonIds: [] };
+      return { candidate, targets, fields: [...fields], reservedCanonIds: [], projectedSheets };
     }
 
     case "art-direction.change": {
@@ -573,6 +650,7 @@ export function materialiseCandidate(
       const record = ArtDirectionRecordSchema.parse({
         version: current.version + 1,
         description: String(draft["description"]).trim(),
+        ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
         acceptedAt: at,
         // The fourth place that rebuilds this record (#244), and the one talking about the look
         // in a chat rather than on a form. A conversation that never mentioned music must not
@@ -586,6 +664,7 @@ export function materialiseCandidate(
             version: current.version,
             description: current.description,
             ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+            ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
             acceptedAt: current.acceptedAt ?? bundle.meta.created,
             audio: current.audio,
             failureModes: [...current.failureModes],
@@ -828,10 +907,10 @@ function folderFor(kind: Sheet["type"]): string {
  * Building content and never parsing it is how a proposal comes to hold a file the scanner will
  * silently drop — the entity would simply be missing after accept, with nothing to point at.
  */
-function assertSheetParses(candidateId: string, content: string, type: Sheet["type"]): void {
+function assertSheetParses(candidateId: string, content: string, type: Sheet["type"]): Sheet {
   try {
     const doc = MarkdownFile.parse(content);
-    SheetSchema.parse({ ...doc.data, type, sections: doc.sections() });
+    return SheetSchema.parse({ ...doc.data, type, sections: doc.sections() });
   } catch (err) {
     throw new MaterialiseError(candidateId, `the built sheet would not read back: ${detailOf(err)}`);
   }

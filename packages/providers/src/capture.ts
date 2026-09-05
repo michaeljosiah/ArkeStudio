@@ -1,3 +1,4 @@
+import { PromptDispatchProvenanceSchema } from "@arke-studio/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { Capability, ProviderId } from "@arke-studio/contracts";
@@ -69,18 +70,18 @@ async function requestBody(body: RequestInit["body"]): Promise<unknown> {
   if (body === undefined || body === null) return null;
   if (typeof body === "string") {
     try {
-      return JSON.parse(body);
+      return summarizeMedia(JSON.parse(body));
     } catch {
-      return body;
+      return summarizeMedia(body);
     }
   }
-  if (body instanceof URLSearchParams) return Object.fromEntries(body.entries());
+  if (body instanceof URLSearchParams) return summarizeMedia(Object.fromEntries(body.entries()));
   if (body instanceof FormData) {
     return {
       multipart: await Promise.all(
         [...body.entries()].map(async ([name, value]) =>
           typeof value === "string"
-            ? { name, value }
+            ? { name, value: summarizeMedia(value, name) }
             : {
                 name,
                 file: value.name,
@@ -108,7 +109,7 @@ async function requestBody(body: RequestInit["body"]): Promise<unknown> {
 }
 
 function summarizeMedia(value: unknown, key = ""): unknown {
-  if (Array.isArray(value)) return value.slice(0, 100).map((item) => summarizeMedia(item));
+  if (Array.isArray(value)) return value.slice(0, 100).map((item) => summarizeMedia(item, key));
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>)
@@ -116,17 +117,25 @@ function summarizeMedia(value: unknown, key = ""): unknown {
         .map(([name, item]) => [name, summarizeMedia(item, name)]),
     );
   }
-  if (
-    typeof value === "string" &&
-    (/(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && value.length > 4096))
-  ) {
-    const bytes = new Uint8Array(Buffer.from(value, "base64"));
-    return {
-      binary: true,
-      encodedCharacters: value.length,
-      sizeBytes: bytes.byteLength,
-      sha256: sha256(bytes),
-    };
+  if (typeof value === "string") {
+    // A data URI is media regardless of its field name or length. Strip its header before
+    // hashing: provenance describes the decoded bytes, not a base64 decoder's view of the URI.
+    const uri = /^data:([^;,]*)(?:;[^,]*)?,([\s\S]*)$/i.exec(value);
+    if (/^data:/i.test(value) && !uri) return { binary: true, unavailable: "malformed-media" };
+    if (uri || /(?:b64|base64)/i.test(key) || (/(?:audio|image|video)/i.test(key) && value.length > 4096)) {
+      let bytes: Buffer;
+      try {
+        bytes = uri
+          ? /;base64,/i.test(value.slice(0, value.indexOf(",") + 1))
+            ? Buffer.from(uri[2]!, "base64")
+            : Buffer.from(decodeURIComponent(uri[2]!), "utf8")
+          : Buffer.from(value, "base64");
+      } catch {
+        return { binary: true, unavailable: "malformed-media" };
+      }
+      return { binary: true, ...(uri ? { contentType: (uri[1] || "application/octet-stream").toLowerCase() } : {}),
+        sizeBytes: bytes.byteLength, sha256: sha256(bytes) };
+    }
   }
   return value;
 }
@@ -297,7 +306,7 @@ export function captureProviderClient(
       settleResponses: new Set<(error?: unknown) => void>(),
     };
     const endpoint = endpointOf(url);
-    const id = await capture.start({
+    const id = await (async () => capture.start({
       provider,
       operation: current.operation,
       context: current,
@@ -305,7 +314,8 @@ export function captureProviderClient(
       endpoint,
       headers: headersOf(init?.headers, true),
       body: redact("request", endpoint, await requestBody(init?.body)),
-    });
+    }))().catch(() => null);
+    if (id === null) return request(url, init);
     try {
       const response = await request(url, init);
       const clone = response.clone();
@@ -385,15 +395,16 @@ export function captureProviderClient(
       operationSettled: false,
       settleResponses: new Set<(error?: unknown) => void>(),
     };
-    const id = await capture.start({
+    const id = await (async () => capture.start({
       provider,
       operation: current.operation,
       context: current,
       method: "EXEC",
       endpoint: commandPath(args),
       headers: {},
-      body: { args: [...args] },
-    });
+      body: summarizeMedia({ args: [...args] }),
+    }))().catch(() => null);
+    if (id === null) return runImpl(args, options);
     try {
       const result = await runImpl(args, options);
       // A process that never produced an exit status did not reject anything — it failed to
@@ -455,10 +466,16 @@ export function captureProviderClient(
     id: client.id,
     declarations: client.declarations,
     validateKey: (key) => run("validate", undefined, () => client.validateKey(key)),
-    submit: (key, request, context) =>
-      run("submit", { ...context, model: request.model, capability: request.capability }, () =>
+    submit: async (key, request, context) => {
+      if(request.params.promptProvenance!==undefined){
+        const provenance=PromptDispatchProvenanceSchema.parse(request.params.promptProvenance);
+        const hash=`sha256:${createHash("sha256").update(String(request.params.prompt??"")).digest("hex")}`;
+        if(provenance.adapter.provider!==client.id||provenance.adapter.model!==request.model||provenance.adapter.creativePromptHash!==hash)throw new Error("The provider prompt differs from its approved provenance.");
+      }
+      return run("submit", { ...context, model: request.model, capability: request.capability }, () =>
         client.submit(key, request, context),
-      ),
+      );
+    },
     poll: (key, remoteId, context) => run("poll", context, () => client.poll(key, remoteId, context)),
     fetchArtifacts: (key, remoteId, context) =>
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
