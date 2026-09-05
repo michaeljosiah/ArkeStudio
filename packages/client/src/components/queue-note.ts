@@ -76,6 +76,7 @@ const NEVER_QUEUES = new Set([
   "upload-artifacts",
   "pick-staged-reference",
   "import-shot-frame",
+  "clear-shot-frame",
 ]);
 
 function noun(kind: string, count: number): string {

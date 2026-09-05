@@ -102,6 +102,7 @@ export const QueueCommandSchema = z.enum([
   "bench-upload-references",
   "upload-artifacts",
   "import-shot-frame",
+  "clear-shot-frame",
 ]);
 export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 
