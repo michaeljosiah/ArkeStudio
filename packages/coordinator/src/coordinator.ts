@@ -9,7 +9,7 @@ import { preparePerformanceGeneration, readPerformanceGenerationQuote, validateP
 import { reviewPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs, resolvePerformanceAudioReferences } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -11878,6 +11878,19 @@ export class Coordinator {
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: "The recording could not be kept. Check the current authored line, desktop audio tools and capture, then retry. Existing performances are retained." });
+        }
+        return;
+      }
+      case "prepare-performance-audio-reference": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId || !this.opts.audioMediaTools) throw new Error("Open the world with audio preparation tools available.");
+          const audioReference = await preparePerformanceAudioRange(store, this.opts.audioMediaTools, msg);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "prepared", audioReference });
+        } catch (error) {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Audio preparation failed." });
         }
         return;
       }

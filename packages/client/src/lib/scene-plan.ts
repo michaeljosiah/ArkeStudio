@@ -1,4 +1,4 @@
-import { type PerformanceAudioRequest, type FrozenPerformanceAudio } from "@arke-studio/contracts";
+import { type PerformanceAudioRequest, type PreparedPerformanceAudioReview, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { planScene, type ManifestModel, type Scene, type SizeTier } from "@arke-studio/contracts";
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
 
@@ -10,9 +10,11 @@ import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
  * this cost*, and the screen's whole claim is that it runs the same function on the same inputs
  * — so it is assembled once, here, and both callers read it.
  */
+export type PerformanceAudioChoice = PerformanceAudioRequest & { preview?: PreparedPerformanceAudioReview };
+
 export interface ScenePlanInput {
   audioReferencesDisabled?: boolean;
-  performanceAudio?: PerformanceAudioRequest[];
+  performanceAudio?: PerformanceAudioChoice[];
   world: WorldBundle;
   production: ProductionBundle;
   scene: Scene;
@@ -38,6 +40,7 @@ export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-s
     const performance = production.performances.find(p => p.id === request.performanceId);
     if (!performance) return [];
     return [{ intent: request.intent, sheetId: performance.target.speakerSheetId, characterName: world.sheets.find(s => s.id === performance.target.speakerSheetId)?.name ?? performance.target.speakerSheetId,
+      ...(request.preview ? { prepared: { file: `audio-inputs/sha256-${request.preview.provenance.outputHash.slice(7)}.wav`, provenance: request.preview.provenance } } : {}),
       label: "@Audio1", performance, acceptedReviewAt: request.acceptedReviewAt, warningCodes: request.warningCodes,
       attestations: [], acknowledgementId: "preview-only" }];
   });

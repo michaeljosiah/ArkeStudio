@@ -36,14 +36,24 @@ export async function audioWorldPath(root: string, portable: string, createParen
   return cursor;
 }
 
-export type AudioSourceRequest = { kind: "performance-recording"; productionId: string; performanceId: string } | { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |
+export type AudioSourceRequest = { kind: "performance"; productionId: string; performanceId: string; range?: AudioRange } | { kind: "performance-recording"; productionId: string; performanceId: string } | { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |
   { kind: "artifact"; artifactId: string; range?: AudioRange } |
   { kind: "production-take"; productionId: string; takeId: string; range: AudioRange };
 
 export async function resolveAudioSource(store: Pick<WorldStore, "dir" | "getBundle" | "closingSignal">, request: AudioSourceRequest) {
   const bundle = store.getBundle();
   let file: string, source: AudioSourceRef, physicalRange: AudioRange | undefined;
-  if (request.kind === "performance-recording") {
+  if (request.kind === "performance") {
+    SlugSchema.parse(request.productionId); PerformanceIdSchema.parse(request.performanceId);
+    const record = bundle.productions.find(p => p.meta.id === request.productionId)?.performances.find(p => p.id === request.performanceId);
+    if (!record) throw new Error("audio-source-unavailable");
+    file = `productions/${request.productionId}/performances/${record.id}/${record.file}`;
+    const hash = (await hashAudioFile(await audioWorldPath(store.dir, file), store.closingSignal)).hash;
+    if (hash !== record.provenance.outputHash) throw new Error("audio-source-changed");
+    physicalRange = request.range === undefined ? undefined : AudioRangeSchema.parse(request.range);
+    source = AudioSourceRefSchema.parse({ kind: request.kind, productionId: request.productionId, performanceId: record.id,
+      sourceMediaHash: hash, ...(physicalRange ? { range: physicalRange } : {}) });
+  } else if (request.kind === "performance-recording") {
     SlugSchema.parse(request.productionId); PerformanceIdSchema.parse(request.performanceId);
     if (!bundle.productions.some(p => p.meta.id === request.productionId)) throw new Error("audio-source-unavailable");
     const prefix = `productions/${request.productionId}/performances/${request.performanceId}`;

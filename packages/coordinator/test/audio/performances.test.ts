@@ -1,4 +1,4 @@
-import { resolvePerformanceAudioReferences, readCharacterAudioInputs } from "../../src/audio/reference-inputs.js";
+import { resolvePerformanceAudioReferences, readCharacterAudioInputs, preparePerformanceAudioRange } from "../../src/audio/reference-inputs.js";
 import { planCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
 import { FalClient } from "../../../providers/src/clients/fal.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -38,7 +38,11 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
     if (tool === "ffprobe") stdout = JSON.stringify({ format: { duration: "1", format_name: "wav" }, streams: [{ codec_type: "audio",
       codec_name: "pcm_s16le", sample_fmt: "s16", sample_rate: "48000", channels: 1, bits_per_sample: 16 }] });
     else if (args[0] === "-version") stdout = "ffmpeg version test\n";
-    else await writeFile(args.at(-1)!, bytes);
+    else if (args.includes("-t")) {
+      const start = Math.round(Number(args[args.indexOf("-ss") + 1]) * 48000);
+      const length = Math.round(Number(args[args.indexOf("-t") + 1]) * 48000);
+      await writeFile(args.at(-1)!, wav(Array.from({ length }, (_, i) => Buffer.from(bytes).readInt16LE(44 + (start + i) * 2))));
+    } else await writeFile(args.at(-1)!, bytes);
     return { code: 0, stdout: Buffer.from(stdout), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false };
   } });
   const request = { kind: "keep-performance-recording" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
@@ -115,6 +119,20 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   const mixed = { ...audioJob, params: { ...audioJob.params, audioReferences: { ...audioPlan,
     references: [audioPlan.references[0]!, { ...audioPlan.references[0]!, intent: "voice-reference", label: "@Audio2" }] } } };
   await assert.rejects(readCharacterAudioInputs(store, mixed), /Mixed audio intents/);
+  const trimmed = await preparePerformanceAudioRange(store, tools, { kind: "prepare-performance-audio-reference", worldId: store.worldId,
+    requestId: ulid(), productionId: production.meta.id, performanceId: next.id, expectedHash: next.provenance.outputHash,
+    range: { inSec: 0.125, outSec: 0.875 } });
+  assert.equal(trimmed.provenance.outputTechnical.durationSec, 0.75);
+  const rangeRequest = { ...referenceRequest, prepared: { operationId: trimmed.operationId, hash: trimmed.provenance.outputHash },
+    warningCodes: Object.values(trimmed.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) };
+  const rangeRequestId = ulid();
+  const rangeReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [rangeRequest], rangeRequestId);
+  assert.deepEqual(await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [rangeRequest], rangeRequestId), rangeReferences, "lost response reuses the committed preparation receipt");
+  const rangePlan = planCharacterAudio({ scene, shots: [shot], sheets: store.getBundle().sheets, kits: [], model: videoModel,
+    imageCount: 1, performanceReferences: rangeReferences });
+  const rangeBytes = await readCharacterAudioInputs(store, { ...audioJob, params: { ...audioJob.params, audioReferences: rangePlan } }, true);
+  assert.equal(rangeBytes[0]!.data.length, 44 + 36000 * 2);
+  assert.deepEqual(await readFile(join(dir, `productions/${production.meta.id}/performances/${next.id}/${next.file}`)), Buffer.from(bytes), "trimming never modifies the original performance");
   const placement = { kind: "place-selected-performance" as const, requestId: ulid(), worldId: store.worldId,
     productionId: production.meta.id, performanceId: next.id, expectedTimelineRevision: withTimeline.timeline.timeline.revision,
     expectedTimelineHash: withTimeline.timeline.hash!, expectedSelectionHash: withTimeline.performanceReview.selectionHash,

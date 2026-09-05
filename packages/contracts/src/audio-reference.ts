@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AudioAttestationSchema, FullSha256Schema } from "./audio.js";
+import { AudioAssetProvenanceSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
 import { IsoDateTimeSchema, SlugSchema } from "./ids.js";
 import { PerformanceIdSchema, PerformanceRecordSchema } from "./performance.js";
 import { CharacterVoiceSampleSchema } from "./voice-sample.js";
@@ -24,13 +24,22 @@ export const FrozenCharacterAudioSchema = z.object({
   label: z.string().regex(/^@Audio[1-3]$/), sample: CharacterVoiceSampleSchema,
 }).strict();
 export const PerformanceAudioRequestSchema = z.object({
+  prepared: z.object({ operationId: z.string().uuid(), hash: FullSha256Schema }).strict().optional(),
   performanceId: PerformanceIdSchema, hash: FullSha256Schema, acceptedReviewAt: IsoDateTimeSchema,
   intent: z.enum(["voice-reference", "performance-sync"]), warningCodes: z.array(z.string()),
   singleSpeaker: z.literal(true), noMusic: z.literal(true), cloudBasis: z.enum(["self", "authorized", "licensed"]),
 }).strict();
 export type PerformanceAudioRequest = z.infer<typeof PerformanceAudioRequestSchema>;
+export const PreparedPerformanceAudioReviewSchema = z.object({
+  operationId: z.string().uuid(), performanceId: PerformanceIdSchema, sourceHash: FullSha256Schema,
+  preparedFile: z.string().min(1), provenance: AudioAssetProvenanceSchema,
+}).strict();
+export type PreparedPerformanceAudioReview = z.infer<typeof PreparedPerformanceAudioReviewSchema>;
+export const PreparedReferenceAudioSchema = z.object({ file: z.string().regex(/^audio-inputs\/sha256-[a-f0-9]{64}\.wav$/),
+  provenance: AudioAssetProvenanceSchema }).strict();
 export const FrozenPerformanceAudioSchema = z.object({
   intent: z.enum(["voice-reference", "performance-sync"]), sheetId: SlugSchema, characterName: z.string().min(1),
+  prepared: PreparedReferenceAudioSchema.optional(),
   label: z.string().regex(/^@Audio[1-3]$/), performance: PerformanceRecordSchema, acceptedReviewAt: IsoDateTimeSchema,
   warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema), acknowledgementId: z.string().min(1),
 }).strict();
@@ -47,7 +56,7 @@ export const CharacterAudioPlanSchema = z.object({
 }).strict();
 export type CharacterAudioPlan = z.infer<typeof CharacterAudioPlanSchema>;
 export function referenceAudioAsset(ref: CharacterAudioPlan["references"][number]) {
-  return "sample" in ref ? ref.sample : { ...ref.performance, warningCodes: ref.warningCodes,
+  return "sample" in ref ? ref.sample : { ...(ref.prepared ?? ref.performance), warningCodes: ref.warningCodes,
     attestations: ref.attestations, acknowledgementId: ref.acknowledgementId };
 }
 

@@ -36,6 +36,8 @@ export const AudioRangeSchema = z
   });
 
 export const AudioSourceRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("performance"), productionId: SlugSchema, performanceId: prefixedIdSchema("pf"),
+    sourceMediaHash: FullSha256Schema, range: AudioRangeSchema.optional() }).strict(),
   z.object({ kind: z.literal("performance-recording"), productionId: SlugSchema, performanceId: prefixedIdSchema("pf"),
     sourceFile: z.string().min(1), sourceMediaHash: FullSha256Schema }).strict(),
   z.object({ kind: z.literal("legacy-character-sample"), sheetId: SlugSchema,

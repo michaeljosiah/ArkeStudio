@@ -1,5 +1,5 @@
 import { PerformanceAudioPicker } from "../../components/performance-audio-picker.js";
-import { type PerformanceAudioRequest } from "@arke-studio/contracts";
+import { type PerformanceAudioChoice } from "../../lib/scene-plan.js";
 import { TableReadPanel } from "../../components/table-read-panel.js";
 import { PerformancePanel } from "../../components/performance-panel.js";
 import { planForScene } from "../../lib/scene-plan.js";
@@ -91,7 +91,7 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
-  const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioRequest[]>([]);
+  const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioChoice[]>([]);
   const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
@@ -406,7 +406,7 @@ export function SceneWorkspace({
       sceneFile,
       "whole-scene",
       videoModel.id,
-      "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio,
+      "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio.map(({ preview: _preview, ...request }) => request),
     );
     setPlanError(null);
   };

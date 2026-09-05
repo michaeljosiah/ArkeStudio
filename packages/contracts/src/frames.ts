@@ -1,6 +1,6 @@
 import { PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
-import { FullSha256Schema } from "./audio.js";
+import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
@@ -1981,6 +1981,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),

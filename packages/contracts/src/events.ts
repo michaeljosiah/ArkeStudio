@@ -1,3 +1,4 @@
+import { PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
 import { TableReadPlanSchema } from "./rehearsal.js";
 import { PerformanceGenerationQuoteSchema } from "./performance.js";
@@ -532,7 +533,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   z.object({ ...base, type: z.literal("rehearsal.result"), plan: TableReadPlanSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
     status: z.enum(["saved", "planned", "refused"]), reason: z.string() }).strict(),
-  z.object({ ...base, type: z.literal("performance.result"), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
+  z.object({ ...base, type: z.literal("performance.result"), audioReference: PreparedPerformanceAudioReviewSchema.optional(), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "prepared", "queued", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),

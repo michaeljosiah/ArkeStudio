@@ -1,3 +1,7 @@
+import { readFile } from "node:fs/promises";
+import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
+import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "./storage.js";
+import type { AudioMediaTools } from "./media-tools.js";
 import { type FrozenPerformanceAudio, type PerformanceAudioRequest } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
 import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset, type Job } from "@arke-studio/contracts";
@@ -34,11 +38,12 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
       } else {
         const current = await readPerformance(store, ref.performance.target.productionId, ref.performance.id);
         const review = store.getBundle().productions.find(p => p.meta.id === current.target.productionId)?.performanceReview.reviews.filter(r => r.performanceId === current.id).at(-1);
-        if (!currentPerformanceTarget(store, current.target) || current.provenance.outputHash !== sample.provenance.outputHash ||
+        if (!currentPerformanceTarget(store, current.target) || current.provenance.outputHash !== ref.performance.provenance.outputHash ||
           review?.decision !== "accept" || review.ts !== ref.acceptedReviewAt) throw new Error("The accepted performance changed. Review the dispatch again.");
       }
     }
     const file = "sample" in ref ? `references/${ref.sheetId}/${sample.file}`
+      : ref.prepared ? `productions/${ref.performance.target.productionId}/${ref.prepared.file}`
       : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${sample.file}`;
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, file), store.closingSignal, route.maxBytesPerFile);
     seconds += sample.provenance.outputTechnical.durationSec ?? Infinity;
@@ -69,21 +74,60 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
     if (performance.kind !== "scratch" && (!sheet.voice || sheet.voice.provider !== performance.voiceAssignment.provider ||
       sheet.voice.voiceId !== performance.voiceAssignment.voiceId || sheet.voice.model !== performance.voiceAssignment.model ||
       sheet.voice.assignedAtVersion !== performance.voiceAssignment.assignedAtVersion)) throw new Error("The performance uses an earlier character voice assignment.");
+    const prepared = request.prepared ? await acceptPerformanceAudioRange(store, performance, request.prepared, requestId) : undefined;
+    const asset = prepared ?? performance;
+    const dispatchHash = asset.provenance.outputHash;
     const acknowledgementId = `performance-reference/${requestId}/${index}`;
     const prior = (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
     const at = prior?.at ?? store.now();
-    const attestations = (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: request.hash,
+    const attestations = (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: dispatchHash,
       statementVersion: 1, acknowledgedAt: at }));
     if (!request.singleSpeaker || !request.noMusic) throw new Error("Confirm a single speaker and no music.");
-    await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: request.hash,
+    await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: dispatchHash,
       basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at });
     const bytes = await readAudioBytes(await audioWorldPath(store.dir,
-      `productions/${productionId}/performances/${performance.id}/${performance.file}`), store.closingSignal, 15_000_000);
-    clearAudioDispatch({ bytes, hash: request.hash, report: performance.provenance.qualityReport,
+      prepared ? `productions/${productionId}/${prepared.file}` : `productions/${productionId}/performances/${performance.id}/${performance.file}`), store.closingSignal, 15_000_000);
+    clearAudioDispatch({ bytes, hash: dispatchHash, report: asset.provenance.qualityReport,
       rights: await readAudioRights(store), scope: "cloud-reference-upload", acknowledgementId,
       warningCodes: request.warningCodes, attestations, requiredAttestations: ["single-speaker", "no-music"], statementVersion: 1 });
-    references.push({ intent: request.intent, sheetId: sheet.id, characterName: sheet.name, label: "@Audio1", performance,
+    references.push({ intent: request.intent, sheetId: sheet.id, characterName: sheet.name, label: "@Audio1", performance, ...(prepared ? { prepared } : {}),
       acceptedReviewAt: review.ts, warningCodes: request.warningCodes, attestations, acknowledgementId });
   }
   return references;
+}
+
+export async function preparePerformanceAudioRange(store: WorldStore, tools: AudioMediaTools,
+  request: Extract<ClientMessage, { kind: "prepare-performance-audio-reference" }>) {
+  const performance = await readPerformance(store, request.productionId, request.performanceId);
+  const review = store.getBundle().productions.find(p => p.meta.id === request.productionId)?.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1);
+  if (review?.decision !== "accept" || !currentPerformanceTarget(store, performance.target) || performance.provenance.outputHash !== request.expectedHash) throw new Error("Choose a currently accepted performance.");
+  const candidate = await prepareAudio(store, tools, { kind: "performance", productionId: request.productionId,
+    performanceId: performance.id, range: request.range });
+  return PreparedPerformanceAudioReviewSchema.parse({ operationId: candidate.operationId, performanceId: performance.id,
+    sourceHash: request.expectedHash, preparedFile: candidate.stagedFile, provenance: candidate.provenance });
+}
+
+async function acceptPerformanceAudioRange(store: WorldStore, performance: PerformanceRecord,
+  prepared: NonNullable<PerformanceAudioRequest["prepared"]>, requestId: string) {
+  const prefix = `productions/${performance.target.productionId}`;
+  const receiptPath = `${prefix}/audio-inputs/${prepared.operationId}.json`;
+  const receipt = await readFile(await store.ownedWrite(() => audioWorldPath(store.dir, receiptPath, true)), "utf8").catch(error => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error;
+  });
+  const verify = (asset: { provenance: PerformanceRecord["provenance"] }) => {
+    const source = asset.provenance.source;
+    if (source.kind !== "performance" || source.productionId !== performance.target.productionId ||
+      source.performanceId !== performance.id || source.sourceMediaHash !== performance.provenance.outputHash ||
+      asset.provenance.outputHash !== prepared.hash) throw new Error("The prepared performance range changed. Prepare and review it again.");
+  };
+  if (receipt) { const asset = PreparedReferenceAudioSchema.parse(JSON.parse(receipt)); verify(asset); return asset; }
+  const candidate = JSON.parse(await readFile(await audioWorldPath(store.dir, `.staging/audio/${prepared.operationId}/candidate.json`), "utf8")) as PreparedAudioCandidate;
+  verify(candidate);
+  let asset: ReturnType<typeof PreparedReferenceAudioSchema.parse> | undefined;
+  await acceptPreparedAudio(store, candidate, `${prefix}/audio-inputs`, (file, provenance) => {
+    asset = PreparedReferenceAudioSchema.parse({ file: file.slice(prefix.length + 1), provenance });
+    return { kind: "prepare-performance-reference", source: "user", requestId, files: [{ path: receiptPath,
+      action: "create", baseHash: null, content: JSON.stringify(asset) + "\n" }] };
+  });
+  return asset!;
 }
