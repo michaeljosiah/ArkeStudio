@@ -1,3 +1,6 @@
+import { resolvePerformanceAudioReferences, readCharacterAudioInputs } from "../../src/audio/reference-inputs.js";
+import { planCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
+import { FalClient } from "../../../providers/src/clients/fal.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { placeSelectedPerformance, validatePlacedPerformanceBytes, proposePerformanceDuration } from "../../src/audio/performance-placement.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
@@ -86,6 +89,32 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   const withTimeline = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
   assert.equal(withTimeline.timeline?.status, "ready");
   if (withTimeline.timeline?.status !== "ready") throw new Error("timeline missing");
+  const referenceRequest = { performanceId: next.id, hash: next.provenance.outputHash,
+    acceptedReviewAt: withTimeline.performanceReview.reviews.filter(r => r.performanceId === next.id).at(-1)!.ts,
+    intent: "performance-sync" as const, warningCodes: Object.values(next.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code),
+    singleSpeaker: true as const, noMusic: true as const, cloudBasis: "self" as const };
+  await assert.rejects(resolvePerformanceAudioReferences(store, production.meta.id, scene.id,
+    [{ ...referenceRequest, hash: `sha256:${"a".repeat(64)}` }], ulid()), /changed/);
+  const performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [referenceRequest], ulid());
+  const videoModel = SHIPPED_MANIFEST.models.find(m => m.id === "seedance-2.0-fast")!;
+  const audioPlan = planCharacterAudio({ scene, shots: [shot], sheets: store.getBundle().sheets, kits: [], model: videoModel,
+    imageCount: 1, performanceReferences });
+  assert.deepEqual(audioPlan.problems, []);
+  const audioJob = { model: videoModel.id, provider: videoModel.provider, params: { audioReferences: audioPlan,
+    references: ["character.png"], prompt: characterAudioInstructions(audioPlan), durationSec: 5 } };
+  const prepared = await readCharacterAudioInputs(store, audioJob);
+  let submitted: Record<string, unknown> | undefined;
+  const fal = new FalClient(async (_url, init) => { submitted = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({ request_id: "performance-mock" }), { status: 200 }); });
+  await fal.submit("mock", { ...audioJob, capability: "video", audioReferences: prepared,
+    imageReferences: [{ name: "character.png", contentType: "image/png", data: new Uint8Array([1]) }] });
+  assert.equal(submitted!.generate_audio, false);
+  assert.deepEqual(submitted!.audio_urls, [`data:audio/wav;base64,${Buffer.from(bytes).toString("base64")}`]);
+  assert.equal(submitted!.audioReferences, undefined);
+  assert.match(String(submitted!.prompt), /final soundtrack/);
+  const mixed = { ...audioJob, params: { ...audioJob.params, audioReferences: { ...audioPlan,
+    references: [audioPlan.references[0]!, { ...audioPlan.references[0]!, intent: "voice-reference", label: "@Audio2" }] } } };
+  await assert.rejects(readCharacterAudioInputs(store, mixed), /Mixed audio intents/);
   const placement = { kind: "place-selected-performance" as const, requestId: ulid(), worldId: store.worldId,
     productionId: production.meta.id, performanceId: next.id, expectedTimelineRevision: withTimeline.timeline.timeline.revision,
     expectedTimelineHash: withTimeline.timeline.hash!, expectedSelectionHash: withTimeline.performanceReview.selectionHash,
@@ -127,6 +156,8 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
     expectedSelectionHash: reviewed.performanceReview.selectionHash });
   const rejected = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
   assert.equal(rejected.performanceReview.reviews.length, 2);
+  await assert.rejects(readCharacterAudioInputs(store, audioJob, true), /accepted performance changed/);
+  assert.deepEqual(Buffer.from((await readCharacterAudioInputs(store, JSON.parse(JSON.stringify(audioJob))))[0]!.data), Buffer.from(bytes), "queued reference remains frozen after a later review");
   assert.equal(rejected.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id, "rejection leaves current selection unchanged");
   await assert.rejects(purgePerformance(store, production.meta.id, next.id, []), /referenced/);
   await store.close(); store = await WorldStore.open(dir);

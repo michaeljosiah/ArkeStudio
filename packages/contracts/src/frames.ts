@@ -1,3 +1,4 @@
+import { PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
 import { FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
@@ -1984,6 +1985,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("dispatch-scene-planned"),
       audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2104,6 +2106,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("dispatch-scene"),
       audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,

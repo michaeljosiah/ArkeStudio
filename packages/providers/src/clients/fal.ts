@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { CharacterAudioPlanSchema, characterAudioRoute } from "@arke-studio/contracts";
+import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
 import {
   PROVIDERS,
   durationLimitsFor,
@@ -251,10 +251,12 @@ export class FalClient implements ProviderClient {
       audio.length !== (audioPlan?.references.length ?? 0)) throw new Error("fal: incomplete audio reference plan");
     if (audio.length && (!audioRoute || endpoint !== audioRoute.endpoint || audioPlan?.route !== endpoint || !imageUrls.length ||
       imageUrls.length > audioRoute.maxImages || audio.length > 3 || audio.length + imageUrls.length > 12)) throw new Error("fal: unsupported audio reference route or budget");
+    if (new Set(audioPlan?.references.map(ref => ref.intent)).size > 1) throw new Error("fal: mixed audio intents");
+    if (audioPlan && audioPlan.references.reduce((sum, ref) => sum + (referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) throw new Error("fal: audio duration exceeds route limit");
     const audioUrls = audio.map((clip, index) => {
       const frozen = audioPlan!.references[index]!;
       if (!audioRoute!.formats.includes(clip.contentType) || clip.data.byteLength > audioRoute!.maxBytesPerFile ||
-        frozen.label !== `@Audio${index + 1}` || `sha256:${createHash("sha256").update(clip.data).digest("hex")}` !== frozen.sample.provenance.outputHash) {
+        frozen.label !== `@Audio${index + 1}` || `sha256:${createHash("sha256").update(clip.data).digest("hex")}` !== referenceAudioAsset(frozen).provenance.outputHash) {
         throw new Error("fal: audio bytes do not match the reviewed binding");
       }
       return `data:${clip.contentType};base64,${Buffer.from(clip.data).toString("base64")}`;
@@ -327,7 +329,7 @@ export class FalClient implements ProviderClient {
           : {}),
         ...imageOutput,
         ...imagePayload,
-        ...(audioUrls.length ? { audio_urls: audioUrls, generate_audio: true } : {}),
+        ...(audioUrls.length ? { audio_urls: audioUrls, generate_audio: audioPlan?.references[0]?.intent !== "performance-sync" } : {}),
       }),
       // Deliberately NOT abortable, unlike the synchronous providers. This POST is an enqueue:
       // fal takes the work and answers with the `request_id` that `cancel()` needs to call it off.

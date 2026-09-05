@@ -9,7 +9,7 @@ import { preparePerformanceGeneration, readPerformanceGenerationQuote, validateP
 import { reviewPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolvePerformanceAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -3522,7 +3522,7 @@ export class Coordinator {
       if (input.params.audioReferences !== undefined) {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
-        await readCharacterAudioInputs(store, input);
+        await readCharacterAudioInputs(store, input, true);
       }
       return this.jobQueue!.enqueue(this.freezeLocalIdentity(input));
     });
@@ -7050,6 +7050,15 @@ export class Coordinator {
           fail("The scene or selected model is no longer available.");
           return;
         }
+        let performanceReferences;
+        try {
+          if (msg.audioReferencesDisabled && msg.performanceAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
+          fail(reason);
+          return;
+        }
         const audioDesign = await audioDesignFor(store, production.meta.id);
         // The same plan the dialog reviewed, recomputed server-side — then compiled and made
         // durable BEFORE any pass may reach a provider (SPEC-024 R-12).
@@ -7057,6 +7066,7 @@ export class Coordinator {
           {
             timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
+            performanceReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -7580,12 +7590,22 @@ export class Coordinator {
         }
         // The negatives derive from the production's audio design (SPEC-019 R-9, R-11): a cut
         // that composes its own score means the model must not lay music under every clip.
+        let performanceReferences;
+        try {
+          if (msg.audioReferencesDisabled && msg.performanceAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
+          this.rejectEnqueue(msg.requestId, msg.kind, reason);
+          return;
+        }
         const audioDesign = await audioDesignFor(store, production.meta.id);
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
             timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
+            performanceReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -9182,7 +9202,7 @@ export class Coordinator {
         }
         const outcome = await enqueueInputs(plan.inputs, async (input) => {
           if (!this.jobQueue) throw new Error("the job queue is unavailable");
-          if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input);
+          if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input, true);
           return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
         });
         // Jobs join their reserved takes in order: a failure keeps its number and says why.

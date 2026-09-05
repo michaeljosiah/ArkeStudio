@@ -1,3 +1,5 @@
+import { PerformanceAudioPicker } from "../../components/performance-audio-picker.js";
+import { type PerformanceAudioRequest } from "@arke-studio/contracts";
 import { TableReadPanel } from "../../components/table-read-panel.js";
 import { PerformancePanel } from "../../components/performance-panel.js";
 import { planForScene } from "../../lib/scene-plan.js";
@@ -89,10 +91,12 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [performanceAudio, setPerformanceAudio] = useState<PerformanceAudioRequest[]>([]);
   const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
+  useEffect(() => { setPerformanceAudio([]); }, [sceneKey]);
   const currentSceneKey = useRef(sceneKey);
   currentSceneKey.current = sceneKey;
   const pendingGenerator = useRef<{ requestId: string; sceneKey: string } | null>(null);
@@ -383,9 +387,15 @@ export function SceneWorkspace({
     setView("stage");
   }, [playblastRequest?.actionId, playblastRequest?.shotId]);
   const videoPlan = videoModel ? planForScene({ world, production, scene: legacySceneView(scene), model: videoModel,
-    audioReferencesDisabled }, "whole-scene").wholeScene : null;
+    audioReferencesDisabled, performanceAudio }, "whole-scene").wholeScene : null;
   const videoAudioPlans = videoPlan?.passReferences.map(p => p.audioReferences).filter(p => p !== undefined) ?? [];
   const videoAudioProblems = videoAudioPlans.flatMap(p => p.problems);
+  if (!audioReferencesDisabled && performanceAudio.some(request => {
+    const performance = production.performances.find(p => p.id === request.performanceId);
+    const review = production.performanceReview.reviews.filter(r => r.performanceId === request.performanceId).at(-1);
+    return !performance || performance.target.sceneId !== scene.id || performance.target.sceneVersion !== scene.version ||
+      performance.provenance.outputHash !== request.hash || review?.decision !== "accept" || review.ts !== request.acceptedReviewAt;
+  })) videoAudioProblems.push("A selected performance changed. Remove it and choose a currently accepted performance.");
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
     if (videoPlan?.timingProblems?.length) { setPlanError(videoPlan.timingProblems.join(" ")); return; }
@@ -396,7 +406,7 @@ export function SceneWorkspace({
       sceneFile,
       "whole-scene",
       videoModel.id,
-      "review-gated", undefined, undefined, audioReferencesDisabled,
+      "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio,
     );
     setPlanError(null);
   };
@@ -450,11 +460,12 @@ export function SceneWorkspace({
               {videoPlan.timingProblems?.map((message,i)=><p role="alert" key={`problem-${i}`}>{message}</p>)}
             </div> : null}
             {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>Timeline content: {videoPlan.pack.totalSec.toFixed(3)}s in {videoPlan.pack.passes.length} passes. Provider step padding stays outside these picture slots.</p>}
-            {world.referenceKits.some(k => k.designatedVoiceSample) && <div aria-label="Scene character audio references">
-              <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use assigned character voice references for this dispatch</label>
-              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.sheetId}`}>Pass {i + 1}: {r.characterName} · {r.label} · voice guidance with new scene dialogue</p>))}
+            {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0) && <div aria-label="Scene character audio references">
+              <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>
+              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.sheetId}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}
               {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
             </div>}
+            <PerformanceAudioPicker key={sceneKey} world={world} production={production} sceneId={scene.id} value={performanceAudio} onChange={setPerformanceAudio} />
             <SceneSynopsis
               scene={legacySceneView(scene)}
               onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}

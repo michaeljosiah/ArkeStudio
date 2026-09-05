@@ -1,3 +1,4 @@
+import { type PerformanceAudioRequest, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { planScene, type ManifestModel, type Scene, type SizeTier } from "@arke-studio/contracts";
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
 
@@ -11,6 +12,7 @@ import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
  */
 export interface ScenePlanInput {
   audioReferencesDisabled?: boolean;
+  performanceAudio?: PerformanceAudioRequest[];
   world: WorldBundle;
   production: ProductionBundle;
   scene: Scene;
@@ -32,7 +34,15 @@ export function planForScene(input: ScenePlanInput, mode: "per-shot"): Pick<Scen
  */
 export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-scene"): Partial<ScenePlans> {
   const { world, production, scene, model, resolution, tier } = input;
+  const performanceReferences: FrozenPerformanceAudio[] = (input.performanceAudio ?? []).flatMap(request => {
+    const performance = production.performances.find(p => p.id === request.performanceId);
+    if (!performance) return [];
+    return [{ intent: request.intent, sheetId: performance.target.speakerSheetId, characterName: world.sheets.find(s => s.id === performance.target.speakerSheetId)?.name ?? performance.target.speakerSheetId,
+      label: "@Audio1", performance, acceptedReviewAt: request.acceptedReviewAt, warningCodes: request.warningCodes,
+      attestations: [], acknowledgementId: "preview-only" }];
+  });
   const planInput = {
+    performanceReferences,
     timingProduction: production,
     audioReferencesDisabled: input.audioReferencesDisabled,
     world: world.meta,
