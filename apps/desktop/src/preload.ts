@@ -351,6 +351,24 @@ const bridge = {
     if (result?.cancelled === true) return { ok: false, cancelled: true };
     return { ok: false, reason: result?.reason ?? "the app could not save that image" };
   },
+
+  /**
+   * Put a picture on the system clipboard.
+   *
+   * The host does this rather than the renderer because Chromium's async clipboard asks the
+   * permission layer first, and this app answers no to every permission but the microphone.
+   * What crosses is PNG bytes the renderer read back from a URL it was already displaying — no
+   * filesystem path in either direction (SPEC-001 R-9).
+   */
+  async copyImage(bytes: Uint8Array): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const result = (await ipcRenderer
+      .invoke("arke:copy-image", { bytes })
+      .catch(() => ({ ok: false, reason: "the app could not copy that image" }))) as
+      | { ok: true }
+      | { ok: false; reason?: string };
+    if (result?.ok === true) return { ok: true };
+    return { ok: false, reason: result?.reason ?? "the app could not copy that image" };
+  },
 };
 
 export type ArkeBridge = typeof bridge;

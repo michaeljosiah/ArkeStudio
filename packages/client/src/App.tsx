@@ -72,6 +72,7 @@ import { ShotSheetScreen } from "./screens/storyboard.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
+import { ImageContextMenu } from "./components/image-context-menu.js";
 import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
 import { dismissPlayback } from "./lib/audio.js";
@@ -168,6 +169,9 @@ export function App() {
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
       <QueueToaster />
+      {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on
+          each of the twenty-odd frames that draw one. */}
+      <ImageContextMenu />
       <PermissionBackstops />
       <PlayerDock />
       <UpdateTransition />

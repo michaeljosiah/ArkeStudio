@@ -18,10 +18,15 @@
       no default of its own either. Permitting the origin under one directive and not the other
       left the embed refused exactly as before — the console said which directive had done it,
       the empty frame did not.
+
+      `connect-src` names `data:` and `blob:` for the same reason once more: copying a picture
+      reads it back the way saving one does, and a thumbnail the page holds as a blob or a data
+      URL was displayable under `img-src` and unreadable under `connect-src`. The two schemes are
+      this page's own bytes either way — nothing leaves the machine to fetch them.
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'self' http://127.0.0.1:* http://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; media-src 'self' http://127.0.0.1:* http://localhost:*; object-src 'self' http://127.0.0.1:* http://localhost:*; frame-src 'self' http://127.0.0.1:* http://localhost:*; font-src 'self' data:; connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Arke Studio</title>
