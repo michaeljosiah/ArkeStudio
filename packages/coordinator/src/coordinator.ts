@@ -237,7 +237,7 @@ import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
-import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "./productions/editor-requests.js";
+import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
 import {
   acceptStill,
@@ -374,7 +374,7 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
-import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, scrubAbsolutePaths, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
@@ -8125,7 +8125,7 @@ export class Coordinator {
               status,
               percent,
               output: safeExportOutput(output),
-              error: error === null ? null : "export failed",
+              error: error === null ? null : scrubAbsolutePaths(this.secrets.scrub(error)),
             });
           const requestedExportId = this.requestedExportIds.get(exportKey);
           const attemptId = requestedExportId ?? `ex_${ulid()}`;
@@ -8501,6 +8501,7 @@ export class Coordinator {
       case "editor-request-decide": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        const request = await readEditorRequest(store, msg.productionId, msg.requestId);
         try {
           await decideEditorRequest(store, {
             productionId: msg.productionId,
@@ -8522,6 +8523,10 @@ export class Coordinator {
             productionId: msg.productionId,
             reason: reason.slice(0, 500),
           });
+        }
+        if (request?.actionId) {
+          await this.conversationActionLifecycle(store).recoverConversation(request.conversationId);
+          await this.refreshConversationOutcome(store, request.conversationId);
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -12875,9 +12880,8 @@ export class Coordinator {
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
   ): Promise<boolean> {
     const candidate = store.getBundle().keyArtCandidates[candidateIndex - 1];
-    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition)) return false;
+    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
     await this.dropStagedReference(store, stagedReferenceKey("world-image"));
-    await store.commit({ kind: "world-chat-reference-world-image-result-use", source: mutation.source, files: [], requestId: mutation.requestId });
     this.refreshIfStillOpen(store);
     await this.refreshWorldList();
     return true;
@@ -12900,8 +12904,11 @@ export class Coordinator {
         toExtendedLength(join(store.dir, fromPortable(file))),
       );
     }, mutation.precondition);
-    const proposal = await gate.stageArtDirectionChange(direction.description, file, undefined, { source: mutation.source });
-    const outcome = await gate.accept(proposal.id, {});
+    const proposal = await gate.stageArtDirectionChange(direction.description, file, undefined, {
+      source: mutation.source,
+      precondition: mutation.precondition,
+    });
+    const outcome = await gate.accept(proposal.id, { precondition: mutation.precondition });
     if (outcome.status !== "accepted") {
       await store.ownedWrite(() => rm(toExtendedLength(join(store.dir, fromPortable(file))), { force: true }));
       return false;

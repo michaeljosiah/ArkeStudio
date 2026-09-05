@@ -168,7 +168,10 @@ function renderMediaConversation(): string {
   );
 }
 
-function renderActionConversation(family: "authored-diff" | "generation" | "take-review" = "authored-diff"): string {
+function renderActionConversation(
+  family: "authored-diff" | "generation" | "take-review" = "authored-diff",
+  options: { status?: "pending" | "stale" | "running" | "completed"; older?: boolean } = {},
+): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
   state.worldChat!.messages[1]!.turnId = turnId as never;
@@ -229,10 +232,17 @@ function renderActionConversation(family: "authored-diff" | "generation" | "take
             rejectionCitation: { sheet: "maren-kest", field: "appearance", note: "The coat drifted." },
           },
     },
-    status: "pending",
+    status: options.status ?? "pending",
     preparedAt: "2026-08-06T10:00:01Z",
-    availableDecisions: ["approve", "deny"],
+    availableDecisions: options.status === "stale" ? ["deny"] : options.status && options.status !== "pending" ? [] : ["approve", "deny"],
   }] as never;
+  if (options.older) {
+    state.worldChat!.messages = Array.from({ length: 50 }, (_, index) => ({
+      ...state.worldChat!.messages[1]!,
+      id: `msg_${index}` as never,
+      turnId: `turn_${index}` as never,
+    }));
+  }
   __setStateForTest(state);
   return renderToString(
     <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}>
@@ -288,6 +298,23 @@ describe("World Chat is built on the Genesis split", () => {
 });
 
 describe("conversation permission cards", () => {
+  it("keeps unresolved older cards reachable without duplicating visible cards", () => {
+    for (const status of ["pending", "stale", "running"] as const) {
+      const html = renderActionConversation("authored-diff", { older: true, status });
+      assert.match(html, /aria-label="Earlier actions"/);
+      assert.equal((html.match(/class="fy-actioncard"/g) ?? []).length, 1);
+      if (status !== "running") assert.match(html, /<button[^>]*>Deny<\/button>/);
+    }
+    assert.equal((renderActionConversation().match(/class="fy-actioncard"/g) ?? []).length, 1);
+    assert.doesNotMatch(renderActionConversation("authored-diff", { older: true, status: "completed" }), /class="fy-actioncard"/);
+  });
+
+  it("offers denial but never approval for stale cards", () => {
+    const html = renderActionConversation("authored-diff", { status: "stale" });
+    assert.match(html, /<button[^>]*>Deny<\/button>/);
+    assert.doesNotMatch(html, /<button[^>]*>Approve<\/button>/);
+  });
+
   it("places a coordinator-owned review beside its producing turn with native decisions", () => {
     const html = renderActionConversation();
     assert.match(html, /Rename this world/);

@@ -89,7 +89,13 @@ export function ConversationTranscript({
   const navigate = useNavigate();
   const worldId = useStore().state?.world?.meta.worldId;
   const messages = workspace?.messages ?? [];
-  if (messages.length === 0 && !running && !failure && empty) {
+  const visibleTurns = new Set(messages.map((message) => message.turnId));
+  // The message window is bounded; outstanding decisions and running work must stay reachable.
+  const olderActions = (workspace?.actions ?? []).filter((action) =>
+    !visibleTurns.has(action.turnId) &&
+    ["pending", "approved", "awaiting-host", "queued", "running", "stale"].includes(action.status),
+  );
+  if (messages.length === 0 && olderActions.length === 0 && !running && !failure && empty) {
     return (
       <div className="fy-chat__transcript" aria-live="polite">
         {empty}
@@ -98,6 +104,13 @@ export function ConversationTranscript({
   }
   return (
     <div className="fy-chat__transcript" aria-live="polite">
+      {olderActions.length > 0 && (
+        <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
+          {olderActions.map((action) => (
+            <ConversationPermissionCard key={action.actionId} action={action} conversationSeq={workspace?.seq ?? 0} />
+          ))}
+        </div>
+      )}
       {messages.map((m) => {
         const actions = m.turnId === undefined
           ? []
@@ -367,22 +380,22 @@ export function ConversationPermissionCard({
         </div>
       )}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
-      {action.status === "pending" && supported && (
+      {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
-          <Button
+          {action.status === "pending" && <Button
             variant="primary"
             disabled={busy || !action.availableDecisions.includes("approve")}
             onClick={() => decide("approve")}
           >
             {busy ? "Deciding…" : "Approve"}
-          </Button>
-          <Button
+          </Button>}
+          {action.availableDecisions.includes("deny") && <Button
             variant="ghost"
             disabled={busy || !action.availableDecisions.includes("deny")}
             onClick={() => decide("deny")}
           >
             Deny
-          </Button>
+          </Button>}
         </div>
       )}
       {(action.status === "queued" || action.status === "running") && action.shown.body.family === "generation" && action.shown.body.cancellationSupported && state?.world ? (

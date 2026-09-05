@@ -251,10 +251,19 @@ export async function stageWorldChatProductionAuthoredAction(
         id = `ep_${base}-${n}`;
         stem = `${base}-${n}`;
       }
+      const orders = production.episodes.map((episode) => episode.order);
+      // Distinct pending files can all be accepted, so each also reserves its place in the season.
+      for (const staged of store.getBundle().proposals) {
+        for (const target of staged.proposal.targets) {
+          if (target.baseHash !== null || !target.path.startsWith(`productions/${production.meta.id}/episodes/`)) continue;
+          const raw = await readFile(toExtendedLength(join(store.dir, ".proposals", staged.proposal.id, fromPortable(target.path))), "utf8");
+          orders.push(EpisodeSchema.parse(JSON.parse(raw)).order);
+        }
+      }
       const record = EpisodeSchema.parse({
         id,
         version: 1,
-        order: change.order ?? production.episodes.length + 1,
+        order: change.order ?? Math.max(0, ...orders) + 1,
         title: change.title,
         ...(change.promise !== undefined ? { promise: change.promise } : {}),
         scenes: change.scenes,

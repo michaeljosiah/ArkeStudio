@@ -40,6 +40,7 @@ import {
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -305,6 +306,26 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  it("reserves default episode order after accepted and pending creations", async () => {
+    const w = await setup();
+    const productionId = await createProduction(w.store, { title: "Ordered season", medium: "video", productionKind: "microdrama", seriesTitle: "Ordered series" });
+    const first = await createEpisode(w.store, { productionId, title: "First" });
+    assert.ok(first.episodeId);
+    const proposals = [];
+    for (const [title, order] of [["Second", 5], ["Third", undefined], ["Fourth", undefined]] as const) {
+      proposals.push(await stageWorldChatProductionAuthoredAction(w.store, w.gate, {
+        actionId: newId("act"), conversationId: w.conversationId,
+      }, {
+        kind: "world-chat-production-episode",
+        worldId: w.store.worldId,
+        action: { kind: "production-episode", productionId, change: { operation: "create", title, scenes: [], ...(order === undefined ? {} : { order }) }, checkReceiptIds: [] },
+      }));
+    }
+    for (const proposal of proposals.reverse()) assert.equal((await w.gate.accept(proposal.id)).status, "accepted");
+    const episodes = w.store.getBundle().productions.find((production) => production.meta.id === productionId)!.episodes;
+    assert.deepEqual(episodes.map((episode) => episode.order).sort((a, b) => a - b), [1, 5, 6, 7]);
+  });
+
   it("requires a coordinator-issued complete timeline receipt when a live run prepares an editor request", async () => {
     const context = { kind: "production" as const, productionId: PRODUCTION };
     const w = await setup(context);
@@ -725,7 +746,7 @@ describe("World Chat authority adapters", () => {
     assert.equal(w.store.getBundle().sheets.some((sheet) => sheet.id === "the-vigil-copy"), false);
   });
 
-  it("fences all Canon inputs inside proposal acceptance", async () => {
+  it("fences all Canon inputs inside proposal acceptance", async (t) => {
     const w = await setup();
     const canon = currentReceipt(w.store, "canon");
     const sheets = currentReceipt(w.store, "sheets");
@@ -752,7 +773,18 @@ describe("World Chat authority adapters", () => {
       await held;
     });
     await started;
+    // retire reads the file before joining the write queue. Wait for admission so disk speed
+    // cannot reverse the intended ordering between that edit and proposal acceptance.
+    let queued!: () => void;
+    const retirementQueued = new Promise<void>((resolve) => { queued = resolve; });
+    const commit = w.store.commit.bind(w.store);
+    t.mock.method(w.store, "commit", (...args: Parameters<typeof commit>) => {
+      const result = commit(...args);
+      if (args[0].kind === "retire") queued();
+      return result;
+    });
     const concurrent = w.store.retire("locations/the-vigil.md", "test");
+    await retirementQueued;
     const adapter = worldChatActionAdapters(w.store, w.gate, NOW)
       .find((candidate) => candidate.actionKind === "world-chat-canon")!;
     const executing = adapter.execute(action);

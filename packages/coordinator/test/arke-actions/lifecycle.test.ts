@@ -182,6 +182,25 @@ describe("conversation action folding and decisions", () => {
     assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "completed");
   });
 
+  it("folds a host completion that became stale and still permits denial", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const authority: ConversationActionAuthorityAdapter = {
+      ...adapter({ executions: 0 }),
+      execute: async () => ({ status: "awaiting-host" }),
+      completeHost: async () => ({ status: "stale", detail: "The Stage changed while recording." }),
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW });
+    const action = await prepare(lifecycle, conversationId);
+    await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+    await lifecycle.completeHostAction({ conversationId, actionId: action.actionId, payload: {} });
+    const view = await loaded(worldPath, conversationId);
+    assert.equal(view.actions[0]!.status, "stale");
+    assert.deepEqual(view.actions[0]!.availableDecisions, ["deny"]);
+    assert.equal(view.actions[0]!.statusDetail, "The Stage changed while recording.");
+    assert.equal((await lifecycle.decide(decision(action, view.seq, { expectedStatus: "stale", decision: "deny" }))).status, "denied");
+  });
+
   it("invokes preparation once when duplicate action IDs arrive concurrently", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);

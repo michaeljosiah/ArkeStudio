@@ -50,7 +50,7 @@ const ACTION_STATUS_TRANSITIONS: Record<ConversationActionStatus, readonly Conve
   // Recovery may discover that the bound authority was decided through its original surface.
   pending: ["completed", "failed", "cancelled", "stale"],
   approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled", "stale"],
-  "awaiting-host": ["completed", "failed", "cancelled"],
+  "awaiting-host": ["completed", "failed", "cancelled", "stale"],
   queued: ["running", "completed", "failed", "cancelled"],
   running: ["completed", "failed", "cancelled"],
   completed: [],
@@ -454,7 +454,10 @@ export function foldConversation(
         break;
       case "action.decision-recorded": {
         const action = actions.get(e.actionId);
-        if (!action || action.decision) break;
+        if (!action) break;
+        // An approved host action can later become stale. Its dismissal is a new decision;
+        // the original approval remains in the log, while the card shows the final denial.
+        if (action.decision && !(action.status === "stale" && e.decision.decision === "deny")) break;
         if (e.decision.expectedConversationSeq !== envelope.seq - 1) {
           problems.push({
             kind: "interior-corruption",

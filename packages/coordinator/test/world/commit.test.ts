@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { CommitPlanError, CommitStaleError, Committer } from "../../src/world/commit.js";
 import { readChanges } from "../../src/world/change-writer.js";
@@ -15,6 +15,24 @@ async function readWorld(dir: string) {
 }
 
 describe("the commit primitive (R-13, R-15..R-21, R-27)", () => {
+  it("replaces binary bytes with byte hashes and refuses stale binary bases", async () => {
+    const dir = await makeTempWorld();
+    const committer = new Committer(dir, CLOCK);
+    const before = Buffer.from([0xff, 0x00, 0x80]);
+    const after = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0xff]);
+    await writeFile(join(dir, "world-art.png"), before);
+    const input = { kind: "world-image-adopt", source: "test", files: [{
+      path: "world-art.png", action: "replace" as const, content: after.toString("base64"), encoding: "base64" as const, baseHash: sha256(before),
+    }] };
+    await committer.commit(input);
+    assert.deepEqual(await readFile(join(dir, "world-art.png")), after);
+    const changes = await readChanges(join(dir, "changes.jsonl"));
+    assert.equal(changes.at(-1)!["contentHashBefore"], sha256(before));
+    assert.equal(changes.at(-1)!["contentHashAfter"], sha256(after));
+    await assert.rejects(committer.commit(input), CommitStaleError);
+    await assert.rejects(committer.commit({ ...input, files: [{ ...input.files[0]!, path: "characters/maren-kest.md" }] }), CommitPlanError);
+  });
+
   it("bumps a sheet's own version and leaves canon untouched (R-17)", async () => {
     const dir = await makeTempWorld();
     const committer = new Committer(dir, CLOCK);
