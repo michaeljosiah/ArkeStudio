@@ -19,6 +19,7 @@ const state: ClientState = {
       voice: { status: "unavailable", reason: "Voxa is not configured" },
     },
     builds: [],
+    worldGenesis: {},
     jobs: [
       {
         id: "jb_01J8E0000000000000000000J5",

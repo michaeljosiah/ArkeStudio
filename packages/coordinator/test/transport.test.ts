@@ -21,6 +21,7 @@ const STATE: ClientState = {
     },
     jobs: [],
     builds: [],
+    worldGenesis: {},
     ledger: [],
     ledgerUnavailable: false,
     providers: [],

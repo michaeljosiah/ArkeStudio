@@ -2171,14 +2171,21 @@ export class Coordinator {
     // known before any screen asks, and its notice is still standing (R-45). The run itself
     // resumes when its world opens; discovery here is what lets the client route back to it.
     if (this.foundingBuild && this.opts.provider.worldDir) {
+      // Which genesis founded each world, taken here — the one moment every record is in hand
+      // and before the settled ones are pruned (issue 531). A founding preview's ledger entry
+      // keeps the genesis it was spent under, and the build that joined the two is dropped
+      // precisely when the founding went well, so the pair is kept as a fact about the world.
+      const worldGenesis: Record<string, string> = {};
       for (const summary of this.readModel.getState().worlds) {
         try {
           const dir = await this.opts.provider.worldDir(summary.worldId);
-          await this.foundingBuild.load(dir, summary.worldId);
+          const active = await this.foundingBuild.load(dir, summary.worldId);
+          if (active !== null) worldGenesis[summary.worldId] = active.record.genesisId;
         } catch {
           /* not a world any more, or no build — nothing to know */
         }
       }
+      this.readModel.setWorldGenesis(worldGenesis);
       // Kept in memory only while there is something to know: a run in flight, or work that
       // did not land. A build whose every item landed years ago is just a record on disk.
       this.foundingBuild.forgetSettled();

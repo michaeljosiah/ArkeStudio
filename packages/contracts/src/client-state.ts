@@ -16,7 +16,7 @@ import { ComfyUiStatusSchema } from "./comfyui.js";
 import { FoundingBuildStateSchema } from "./founding-build.js";
 import { FrameRunStateSchema } from "./frame-run.js";
 import { HealthStatusSchema } from "./events.js";
-import { IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
+import { GenesisIdSchema, IsoDateTimeSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { JobSchema, LedgerEntrySchema, QueueStatusSchema } from "./job.js";
 import { ModelManifestSchema } from "./manifest.js";
 import {
@@ -508,6 +508,14 @@ export const ClientStateSchema = z
          * reconnects mid-build returns to the building screen without an event replay (R-33).
          */
         builds: z.array(FoundingBuildStateSchema).default([]),
+        /**
+         * Which genesis founded each world, harvested from every build record at startup before
+         * settled builds are pruned (issue 531). A founding preview is paid for before its world
+         * exists and its ledger entry keeps the genesis it was spent under, so this is the join that
+         * keeps that money the world's after a restart — a fact about the world, kept regardless
+         * of whether the build is still activity. Defaulted: a read path.
+         */
+        worldGenesis: z.record(UlidSchema, GenesisIdSchema).default({}),
       })
       .strict(),
     worlds: z.array(WorldSummarySchema),
