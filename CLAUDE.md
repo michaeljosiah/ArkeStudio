@@ -73,6 +73,14 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
+## World ownership checks (issue #827)
+
+World ownership (issue #827): preserve the disk identity checks in WorldStore/Committer and the
+three-failure heartbeat cutoff. Ownership loss disables writes until reopen; do not retry under
+the old claim or remove a successor's lock. These checks are not an atomic fence. See
+[ADR-002's desktop decision](docs/decisions/002-ownership-is-a-revision.md#desktop-decision--issue-827-2026-09-05)
+and SPEC-002 §2.9 for the retained stale-reclaim policy and local-filesystem support limits.
+
 ## Journal flush boundaries (issue #826)
 
 JobJournal, LedgerFile and ProviderCallStore use `appendFlushed` inside their existing WriteQueue:

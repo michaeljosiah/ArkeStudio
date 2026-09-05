@@ -64,6 +64,24 @@ async function goCold(dir: string): Promise<void> {
 }
 
 describe("world ownership: recovery runs under the lock (R-3, R-15)", () => {
+  it("leaves staged work for the successor when ownership is lost before committing", async () => {
+    const dir = await makeTempWorld();
+    const before = await readFile(join(dir, "world.json"), "utf8");
+    let checks = 0;
+    const committer = new Committer(dir, CLOCK, async () => {
+      if (++checks > 1) throw new WorldLockDeposedError(process.pid);
+    });
+    await assert.rejects(committer.commit({
+      kind: "world-rename", source: "ownership-test", files: [], worldFields: { name: "Must not land" },
+    }), WorldLockDeposedError);
+    assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
+    assert.equal((await committer.pendingRecovery()).length, 1);
+    const successor = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => successor.close());
+    assert.equal((await committer.pendingRecovery()).length, 0);
+    assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
+  });
+
   it("does not touch another owner's journal when the world is already locked", async () => {
     const dir = await makeTempWorld();
     const { commitId, sheet } = await crashMidCommit(dir);
@@ -264,6 +282,108 @@ describe("world ownership: acquire is exclusive (R-3)", () => {
 });
 
 describe("world ownership: release removes only our own lock (R-3)", () => {
+  it("refuses a deposed store's writes before touching live files, history or journals", async () => {
+    const dir = await makeTempWorld();
+    const owner = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => owner.close().catch(() => {}));
+    await goCold(dir);
+    await delay(5);
+    const successor = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => successor.close().catch(() => {}));
+    const paths = ["world.json", "characters/maren-kest.md", "changes.jsonl", "world.lock", ".index/scan-state.json"];
+    const before = await Promise.all(paths.map((path) => readFile(join(dir, path), "utf8").catch(() => null)));
+    const entries = await readdir(dir, { recursive: true });
+    await assert.rejects(owner.renameWorld("Deposed write", "ownership-test"), /ownership lost.*writes refused/);
+    await assert.rejects(owner.ownedWrite(async () => { throw new Error("callback must not run"); }), /ownership lost/);
+    await assert.rejects(owner.gateOp(async () => { throw new Error("callback must not run"); }), /ownership lost/);
+    await assert.rejects(owner.close(), WorldLockDeposedError);
+    assert.deepEqual(await Promise.all(paths.map((path) => readFile(join(dir, path), "utf8").catch(() => null))), before);
+    assert.deepEqual(await readdir(dir, { recursive: true }), entries);
+    await successor.renameWorld("Successor write", "ownership-test");
+  });
+
+  it("logs heartbeat errors and disables store writes after three consecutive failures", async (t) => {
+    const dir = await makeTempWorld();
+    const locks: WorldLock[] = [];
+    const acquire = WorldLock.prototype.acquire;
+    t.mock.method(WorldLock.prototype, "acquire", async function (this: WorldLock) {
+      locks.push(this);
+      await acquire.call(this);
+    });
+    const warnings = t.mock.method(console, "warn", () => {});
+    const losses: Error[] = [];
+    const store = await WorldStore.open(dir, {
+      events: { onOwnershipLost: (error) => { losses.push(error); } },
+      lockOptions: { touch: async () => { throw new Error("simulated EACCES"); } },
+    });
+    closeOnCleanup(() => store.close().catch(() => {}));
+    // Keep the readable ownership record, but make timestamp updates fail deterministically.
+    const lock = locks[0]!;
+    await lock.refreshHeartbeat();
+    await lock.refreshHeartbeat();
+    assert.equal(losses.length, 0);
+    await store.renameWorld("Still owned", "ownership-test");
+    await lock.refreshHeartbeat();
+    assert.match(losses[0]?.message ?? "", /heartbeat failed three times/);
+    assert.equal(warnings.mock.callCount(), 3);
+    await assert.rejects(store.renameWorld("Must refuse", "ownership-test"), /read-only.*heartbeat/);
+    assert.equal(lock.held, false);
+  });
+
+  it("does not refresh a successor's heartbeat", async () => {
+    const dir = await makeTempWorld();
+    const old = new WorldLock(dir);
+    await old.acquire();
+    closeOnCleanup(() => old.release().catch(() => {}));
+    await goCold(dir);
+    await delay(5);
+    const next = new WorldLock(dir);
+    await next.acquire();
+    closeOnCleanup(() => next.release());
+    await goCold(dir);
+    const before = (await stat(join(dir, LOCK_FILE))).mtimeMs;
+    await old.refreshHeartbeat();
+    assert.equal((await stat(join(dir, LOCK_FILE))).mtimeMs, before);
+    await assert.rejects(old.assertOwned(), WorldLockDeposedError);
+  });
+
+  it("resets consecutive heartbeat failures after a successful update", async (t) => {
+    const dir = await makeTempWorld();
+    let failing = true;
+    const lock = new WorldLock(dir, { touch: async (...args) => {
+      if (failing) throw new Error("temporary failure");
+      await utimes(...args);
+    } });
+    await lock.acquire();
+    closeOnCleanup(() => lock.release());
+    t.mock.method(console, "warn", () => {});
+    const failures: number[] = [];
+    lock.onHeartbeatError = (_error, consecutive) => { failures.push(consecutive); };
+    await lock.refreshHeartbeat();
+    await lock.refreshHeartbeat();
+    failing = false;
+    await lock.refreshHeartbeat();
+    failing = true;
+    await lock.refreshHeartbeat();
+    await lock.refreshHeartbeat();
+    assert.equal(lock.held, true);
+    assert.deepEqual(failures, [1, 2, 1, 2]);
+    await lock.assertOwned();
+  });
+
+  for (const damaged of [false, true]) {
+    it(`refuses writes with a ${damaged ? "damaged" : "missing"} ownership record`, async () => {
+      const dir = await makeTempWorld();
+      const store = await WorldStore.open(dir);
+      closeOnCleanup(() => store.close().catch(() => {}));
+      const before = await readFile(join(dir, "world.json"), "utf8");
+      if (damaged) await writeFile(join(dir, LOCK_FILE), "null");
+      else await rm(join(dir, LOCK_FILE));
+      await assert.rejects(store.renameWorld("Refuse", "ownership-test"), /lock missing or unreadable/);
+      assert.equal(await readFile(join(dir, "world.json"), "utf8"), before);
+    });
+  }
+
   it("leaves a successor's lock alone when the deposed process closes", async () => {
     const dir = await makeTempWorld();
     const deposed = new WorldLock(dir);

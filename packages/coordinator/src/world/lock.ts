@@ -41,13 +41,11 @@ export class WorldLockedError extends Error {
  * `world.lock` no longer names this process: it was reclaimed as stale — a cold heartbeat, or a
  * pid that looked dead — while this process still believed it held the world.
  *
- * Raised rather than swallowed. Everything written since the reclaim went to a world somebody
- * else owns, which the person is entitled to hear about; and the successor's lock is left where
- * it is, because it is not ours to remove.
+ * Raised before new writes and at release. The successor's lock is left where it is.
  */
 export class WorldLockDeposedError extends Error {
-  constructor(readonly pid: number) {
-    super(`world.lock now names pid ${pid}: this process no longer owns the world and did not release it`);
+  constructor(readonly pid: number | null) {
+    super(`world ownership lost${pid === null ? " (lock missing or unreadable)" : ` (lock now names pid ${pid})`}: writes refused; close and reopen the world`);
   }
 }
 
@@ -77,14 +75,67 @@ export class WorldLock {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   /** The record we wrote, and the identity release checks against. Null when we hold nothing. */
   private record: LockRecord | null = null;
+  private failure: Error | null = null;
+  private heartbeatFailures = 0;
+  private refreshing = false;
 
-  constructor(worldDir: string) {
+  onLost: ((error: Error) => void) | undefined;
+  onHeartbeatError: ((error: unknown, consecutive: number) => void) | undefined;
+
+  constructor(worldDir: string, private readonly options: WorldLockOptions = {}) {
     this.path = join(worldDir, LOCK_FILE);
   }
 
   /** Whether this process currently believes it owns the world. */
   get held(): boolean {
-    return this.record !== null;
+    return this.record !== null && this.failure === null;
+  }
+
+  /** A disk check, not an atomic fence: takeover can still race the subsequent write. */
+  async assertOwned(): Promise<void> {
+    if (this.failure) throw this.failure;
+    const current = await this.read();
+    if (this.record === null || current === null || !sameRecord(current, this.record)) {
+      throw this.lose(new WorldLockDeposedError(current?.pid ?? null));
+    }
+    if (this.failure) throw this.failure;
+  }
+
+  private lose(error: Error): Error {
+    if (!this.failure) {
+      this.failure = error;
+      if (this.heartbeat) clearInterval(this.heartbeat);
+      this.heartbeat = null;
+      try { this.onLost?.(error); } catch (callbackError) {
+        console.warn("[world.lock] ownership-loss notification failed", callbackError);
+      }
+    }
+    return this.failure;
+  }
+
+  /** Serialized heartbeats never refresh a successor's known claim. Fail closed after three
+   * consecutive errors; recovery requires reopening, not a later successful timestamp write. */
+  async refreshHeartbeat(): Promise<void> {
+    if (this.refreshing || !this.held) return;
+    this.refreshing = true;
+    try {
+      await this.assertOwned();
+      if (!this.held) return;
+      const now = new Date();
+      await (this.options.touch ?? utimes)(toExtendedLength(this.path), now, now);
+      this.heartbeatFailures = 0;
+    } catch (error) {
+      this.heartbeatFailures++;
+      console.warn(`[world.lock] heartbeat failed (${this.heartbeatFailures}/3): ${error instanceof Error ? error.message : String(error)}`);
+      try { this.onHeartbeatError?.(error, this.heartbeatFailures); } catch {
+        /* Logging cannot prevent the ownership cutoff. */
+      }
+      if (this.heartbeatFailures >= 3) {
+        this.lose(new Error("world is read-only: lock heartbeat failed three times; close and reopen the world"));
+      }
+    } finally {
+      this.refreshing = false;
+    }
   }
 
   /**
@@ -101,8 +152,10 @@ export class WorldLock {
       const record: LockRecord = { pid: process.pid, startedAt: new Date().toISOString() };
       if (await this.createExclusive(record)) {
         this.record = record;
+        this.failure = null;
+        this.heartbeatFailures = 0;
         this.heartbeat = setInterval(() => {
-          void utimes(toExtendedLength(this.path), new Date(), new Date()).catch(() => {});
+          void this.refreshHeartbeat();
         }, HEARTBEAT_MS);
         this.heartbeat.unref?.();
         return;
@@ -164,7 +217,11 @@ export class WorldLock {
 
   private async read(): Promise<LockRecord | null> {
     try {
-      return JSON.parse(await readFile(toExtendedLength(this.path), "utf8")) as LockRecord;
+      const record: unknown = JSON.parse(await readFile(toExtendedLength(this.path), "utf8"));
+      if (record === null || typeof record !== "object") return null;
+      const value = record as Partial<LockRecord>;
+      return typeof value.pid === "number" && typeof value.startedAt === "string"
+        ? value as LockRecord : null;
     } catch {
       return null;
     }
@@ -197,8 +254,7 @@ export class WorldLock {
    * whatever `world.lock` contains would leave the successor writing to an unlocked world.
    *
    * A record naming somebody else is therefore not removed, and not passed over quietly either
-   * (WorldLockDeposedError) — being deposed means this process has been writing to a world it
-   * did not own.
+   * (WorldLockDeposedError) — a stale in-memory claim is not permission to remove the file.
    */
   async release(): Promise<void> {
     if (this.heartbeat) clearInterval(this.heartbeat);
@@ -218,4 +274,9 @@ export class WorldLock {
     // race with a virus scanner locks the user out until the heartbeat goes cold.
     await withTransientRetry(() => rm(toExtendedLength(this.path), { force: true }));
   }
+}
+
+export interface WorldLockOptions {
+  /** I/O seam for deterministic heartbeat-failure tests. */
+  touch?: typeof utimes;
 }
