@@ -229,6 +229,12 @@ describe("the pass compiler (issue 398)", () => {
     const passes=compilePasses({productionId:production.meta.id,scene,plan,model:WAN_LIKE,world:bundle});
     assert.equal(passes[1]!.params.providerPaddingSec,2);assert.equal((passes[1]!.params.dispatchTiming as {slotSource:string}).slotSource,"spine-anchor");
     assert.deepEqual((passes[1]!.params.shotPlan as Array<{endSec:number}>).map(p=>p.endSec),[3]);
+    const otherShot = shot(4, 2, "another scene");
+    const overlapping = { ...timed, spine: { ...timed.spine, anchors: { ...timed.spine.anchors,
+      [otherShot.id]: { startSec: 1, endSec: 2, clipAudio: { mode: "mute" as const } } } } };
+    const conflict = planScene({ world: bundle.meta, sheets: bundle.sheets, kits: [], scene, selections: {}, model: WAN_LIKE, timingProduction: overlapping }, "whole-scene");
+    assert.throws(() => compilePasses({ productionId: production.meta.id, scene, plan: conflict, model: WAN_LIKE, world: bundle }), /overlap across the production/);
+
   });
 
   it("keeps authored timing inside each shot prompt and out of the machine shot plan", async () => {

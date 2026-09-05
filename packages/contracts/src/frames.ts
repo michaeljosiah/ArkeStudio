@@ -1348,6 +1348,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("place-selected-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedTimelineRevision: z.number().int().nonnegative(),
     expectedTimelineHash: z.string().min(1), expectedSelectionHash: z.string().nullable(),
+    partner: z.object({ performanceId: PerformanceIdSchema, leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict().optional(),
     leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),

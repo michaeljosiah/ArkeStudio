@@ -181,4 +181,36 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   await store.close(); store = await WorldStore.open(dir);
   assert.deepEqual(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.performanceReview, rejected.performanceReview);
 
+  const partnerShot = orderedShots(scene).find(s => s.id !== shot.id && resolvePerformanceLine(scene, s.id).ok)!;
+  assert.ok(partnerShot, "fixture has a second authored spoken line");
+  const partnerRecord = await keepPerformanceRecording(store, tools, spool, { ...request, requestId: ulid(), shotId: partnerShot.id });
+  for (const performanceId of [next.id, partnerRecord.id]) {
+    const latest = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+    await reviewPerformance(store, { ...review, requestId: ulid(), performanceId, decision: "accept",
+      expectedReviewHash: latest.performanceReview.reviewHash, expectedSelectionHash: latest.performanceReview.selectionHash });
+  }
+  const beforeSlots = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (beforeSlots.timeline?.status !== "ready") throw new Error("timeline missing");
+  const rate = beforeSlots.timeline.timeline.frameRate;
+  await applyTimelineCommand(store, production.meta.id, { kind: "commands", baseRevision: beforeSlots.timeline.timeline.revision, sourceFingerprint: "",
+    commands: [{ kind: "trim", clipId: "cl_dialogue_picture", edge: "end", deltaFrames: rate-300 },
+      { kind: "place", trackId: "tr_picture", clip: { id: "cl_dialogue_partner", startFrame: rate, durationFrames: rate, sourceInFrames: 0,
+        source: { kind: "shot", shotId: partnerShot.id, sceneNumber: scene.number, shotNumber: partnerShot.number, label: partnerShot.title } } }] });
+  const beforePair = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (beforePair.timeline?.status !== "ready") throw new Error("timeline missing");
+  const paired = { ...placement, requestId: ulid(), expectedTimelineRevision: beforePair.timeline.timeline.revision,
+    expectedTimelineHash: beforePair.timeline.hash!, expectedSelectionHash: beforePair.performanceReview.selectionHash, leadInSec: 0.25,
+    timing: { sourceRange: { inSec: 0, outSec: 1 }, postHandle: { kind: "tail" as const, durationSec: 0 }, overflow: { mode: "overlap" as const, withShotId: partnerShot.id } },
+    partner: { performanceId: partnerRecord.id, leadInSec: 0, timing: { sourceRange: { inSec: 0, outSec: 0.5 },
+      postHandle: { kind: "tail" as const, durationSec: 0 }, overflow: { mode: "overlap" as const, withShotId: shot.id } } } };
+  await assert.rejects(placeSelectedPerformance(store, { ...paired, partner: { ...paired.partner, performanceId: next.id } }), /different shots/);
+  assert.deepEqual(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.timeline, beforePair.timeline, "invalid pair never places the first half");
+  await placeSelectedPerformance(store, paired);
+  const afterPair = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  if (afterPair.timeline?.status !== "ready") throw new Error("timeline missing");
+  assert.equal(afterPair.timeline.timeline.revision, beforePair.timeline.timeline.revision + 1, "the pair is one atomic timeline revision");
+  const pairRender = buildRenderPlan({ production: afterPair, timeline: afterPair.timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(pairRender.ok, pairRender.ok ? "" : pairRender.reason);
+  assert.deepEqual(pairRender.plan.audio.filter(a => a.role === "dialogue").map(a => [a.startSec, a.endSec]).sort((a,b) => a[0]!-b[0]!), [[0.25,1.25],[1,1.5]]);
+
 });

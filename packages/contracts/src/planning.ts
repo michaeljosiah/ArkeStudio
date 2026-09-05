@@ -1888,6 +1888,13 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   });
   if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("Place at least one scene shot on the timeline before whole-scene generation.");
   if (mode === "whole-scene" && hasClock) ordered.sort((a,b)=>byShot.get(a.id)!.startSec-byShot.get(b.id)!.startSec);
+  const chronologicalSlots = [...slots].sort((a,b) => a.startSec-b.startSec);
+  const sceneShotIds = new Set(authored.map(shot => shot.id));
+  let furthest = chronologicalSlots[0];
+  for (const slot of chronologicalSlots.slice(1)) {
+    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${slot.shotId} / ${furthest.shotId}: picture slots overlap across the production.`);
+    if (!furthest || slot.endSec > furthest.endSec) furthest = slot;
+  }
   const timingBreaks = new Set<string>();
   if (hasClock) for (let i=1;i<ordered.length;i++) {
     const previous=byShot.get(ordered[i-1]!.id), next=byShot.get(ordered[i]!.id);

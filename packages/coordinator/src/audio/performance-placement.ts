@@ -2,7 +2,7 @@ import { ProposalManager } from "../gate/proposals.js";
 import { SceneRecordSchema, editShot, stagingRetimed, orderedShots, resolvedAuthoredDuration } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, performanceLineKey, framesToSeconds, secondsToFrames,
-  type ClientMessage, type DialogueTiming, type TimelineCommand, type ProductionBundle } from "@arke-studio/contracts";
+  type PerformanceRecord, type DialogueTimingIntent, type ClientMessage, type DialogueTiming, type TimelineCommand, type ProductionBundle } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
 import { audioWorldPath } from "./storage.js";
@@ -16,44 +16,56 @@ export async function placeSelectedPerformance(store: WorldStore, request: Extra
   const production = store.getBundle().productions.find(p => p.meta.id === request.productionId);
   if (!production || production.timeline?.status !== "ready") throw new Error("Open and assemble the production timeline before placing dialogue.");
   const timeline = production.timeline.timeline;
-  const performance = await readPerformance(store, request.productionId, request.performanceId);
-  const slots = dialogueSlots(production).filter(s => s.shotId === performance.target.shotId);
-  if (slots.length !== 1) throw new Error("Place this shot exactly once on the Picture track before adding its dialogue.");
-  const result = calculateDialogueTiming(slots[0]!, performance.provenance.outputTechnical.durationSec, request.leadInSec, request.timing);
-  if (!result.ok) throw new Error(result.reason);
-  const t = result.timing;
-  const current = timeline.tracks.flatMap(track => track.clips.filter(c => c.source.kind === "performance" && c.source.shotId === performance.target.shotId));
-  if (current.length > 1) throw new Error("Remove duplicate dialogue placements for this shot first.");
-  const trackId = `tr_dialogue_${performance.target.shotId.replaceAll("_", "-")}` as const;
-  const commands: TimelineCommand[] = current.map(clip => ({ kind: "delete", clipId: clip.id }));
-  if (!timeline.tracks.some(track => track.id === trackId)) commands.push({ kind: "add-track", trackId, trackKind: "dialogue", name: `Dialogue · ${performance.target.shotId}` });
-  commands.push({ kind: "place", trackId, clip: {
-    id: current[0]?.id ?? `cl_performance_${request.requestId}`, startFrame: secondsToFrames(t.speechStartSec,timeline.frameRate),
-    durationFrames: Math.max(1,Math.ceil(t.spokenSec / framesToSeconds(1,timeline.frameRate))),
-    sourceInFrames: secondsToFrames(t.sourceInSec,timeline.frameRate),
-    source: { kind: "performance", performanceId: performance.id, shotId: performance.target.shotId,
-      label: `Performance ${performance.id}`, sourceHash: performance.provenance.outputHash, leadInSec: request.leadInSec, timing: request.timing },
-  } });
-  await applyTimelineCommand(store,request.productionId,{ kind:"commands",commands,baseRevision:request.expectedTimelineRevision,sourceFingerprint:"",label:"Place selected dialogue performance" },async latest => {
+  const placements: Array<{ performance: PerformanceRecord; calculated: DialogueTiming; leadInSec: number; timing: DialogueTimingIntent }> = [];
+  const commands: TimelineCommand[] = [];
+  for (const [index, choice] of [request, ...(request.partner ? [request.partner] : [])].entries()) {
+    const performance = await readPerformance(store, request.productionId, choice.performanceId);
+    if (placements.some(p => p.performance.target.shotId === performance.target.shotId)) throw new Error("Paired placement needs two different shots.");
+    const slots = dialogueSlots(production).filter(s => s.shotId === performance.target.shotId);
+    if (slots.length !== 1) throw new Error("Place each shot exactly once on the Picture track before adding dialogue.");
+    const result = calculateDialogueTiming(slots[0]!, performance.provenance.outputTechnical.durationSec, choice.leadInSec, choice.timing);
+    if (!result.ok) throw new Error(result.reason);
+    const t = result.timing;
+    placements.push({ performance, calculated: t, leadInSec: choice.leadInSec, timing: choice.timing });
+    const current = timeline.tracks.flatMap(track => track.clips.filter(c => c.source.kind === "performance" && c.source.shotId === performance.target.shotId));
+    if (current.length > 1) throw new Error("Remove duplicate dialogue placements for this shot first.");
+    const trackId = `tr_dialogue_${performance.target.shotId.replaceAll("_", "-")}` as const;
+    commands.push(...current.map(clip => ({ kind: "delete" as const, clipId: clip.id })));
+    if (!timeline.tracks.some(track => track.id === trackId)) commands.push({ kind: "add-track", trackId, trackKind: "dialogue", name: `Dialogue · ${performance.target.shotId}` });
+    commands.push({ kind: "place", trackId, clip: {
+      id: current[0]?.id ?? `cl_performance_${request.requestId}_${index}`, startFrame: secondsToFrames(t.speechStartSec,timeline.frameRate),
+      durationFrames: Math.max(1,Math.ceil(t.spokenSec / framesToSeconds(1,timeline.frameRate))),
+      sourceInFrames: secondsToFrames(t.sourceInSec,timeline.frameRate),
+      source: { kind: "performance", performanceId: performance.id, shotId: performance.target.shotId,
+        label: `Performance ${performance.id}`, sourceHash: performance.provenance.outputHash, leadInSec: choice.leadInSec, timing: choice.timing },
+    } });
+  }
+  if (request.partner && placements.some((placement, index) => placement.timing.overflow.mode !== "overlap" ||
+    placement.timing.overflow.withShotId !== placements[1-index]!.performance.target.shotId)) throw new Error("Both performances must explicitly approve each other as overlap partners.");
+  await applyTimelineCommand(store,request.productionId,{ kind:"commands",commands,baseRevision:request.expectedTimelineRevision,sourceFingerprint:"",
+    label: request.partner ? "Place mutually approved dialogue overlap" : "Place selected dialogue performance" },async latest => {
     const raw = await readFile(await audioWorldPath(store.dir,`productions/${request.productionId}/timeline.json`),"utf8");
     if (sha256(raw) !== request.expectedTimelineHash) throw new Error("The cut changed. Review the current placement before applying again.");
-    if (latest.performanceReview.selectionHash !== request.expectedSelectionHash || latest.performanceReview.selections[performanceLineKey(performance.target)]?.performanceId !== performance.id) throw new Error("The performance selection changed. Review the selected source again.");
-    if (!currentPerformanceTarget(store,performance.target)) throw new Error("This performance targets an earlier authored line.");
-    if (performance.kind !== "scratch") {
-      const voice=store.getBundle().sheets.find(s=>s.id===performance.target.speakerSheetId)?.voice, frozen=performance.voiceAssignment;
-      if (!voice || voice.provider!==frozen.provider || voice.voiceId!==frozen.voiceId || voice.model!==frozen.model || voice.assignedAtVersion!==frozen.assignedAtVersion) throw new Error("This performance uses an earlier character voice. Review a current performance before placement.");
+    if (latest.performanceReview.selectionHash !== request.expectedSelectionHash) throw new Error("The performance selection changed. Review the selected sources again.");
+    for (const { performance } of placements) {
+      if (latest.performanceReview.selections[performanceLineKey(performance.target)]?.performanceId !== performance.id) throw new Error("The selected performance changed.");
+      if (!currentPerformanceTarget(store,performance.target)) throw new Error("This performance targets an earlier authored line.");
+      if (performance.kind !== "scratch") {
+        const voice=store.getBundle().sheets.find(s=>s.id===performance.target.speakerSheetId)?.voice, frozen=performance.voiceAssignment;
+        if (!voice || voice.provider!==frozen.provider || voice.voiceId!==frozen.voiceId || voice.model!==frozen.model || voice.assignedAtVersion!==frozen.assignedAtVersion) throw new Error("This performance uses an earlier character voice. Review a current performance before placement.");
+      }
+      const accepted = latest.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1);
+      if (accepted?.decision !== "accept") throw new Error("Accept both performances before placing an overlap.");
+      const bytes = await readAudioBytes(await audioWorldPath(store.dir,`productions/${request.productionId}/performances/${performance.id}/${performance.file}`),store.closingSignal);
+      if (audioHash(bytes) !== performance.provenance.outputHash) throw new Error("Performance bytes changed; placement refused.");
     }
-    const accepted = latest.performanceReview.reviews.filter(r => r.performanceId === performance.id).at(-1);
-    if (accepted?.decision !== "accept") throw new Error("Accept this performance before placing it.");
-    const bytes = await readAudioBytes(await audioWorldPath(store.dir,`productions/${request.productionId}/performances/${performance.id}/${performance.file}`),store.closingSignal);
-    if (audioHash(bytes) !== performance.provenance.outputHash) throw new Error("Performance bytes changed; placement refused.");
-    const timings = placedPerformanceTimings(latest).filter(p => p.shotId !== t.shotId);
+    const timings = placedPerformanceTimings(latest).filter(p => !placements.some(placed => placed.calculated.shotId === p.shotId));
     const allSlots = dialogueSlots(latest);
-    const end = Math.max(0,...allSlots.map(s => s.endSec));
-    const problems = dialogueTimingProblems([...timings,t],allSlots,end);
+    const problems = dialogueTimingProblems([...timings,...placements.map(p => p.calculated)],allSlots,Math.max(0,...allSlots.map(s => s.endSec)));
     if (problems.length) throw new Error(problems.join(" "));
   });
 }
+
 export function placedPerformanceTimings(production: ProductionBundle): DialogueTiming[] {
   if (production.timeline?.status !== "ready") return [];
   const slots = dialogueSlots(production), result: DialogueTiming[] = [];
