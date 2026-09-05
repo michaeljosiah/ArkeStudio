@@ -1,3 +1,4 @@
+import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
@@ -139,6 +140,7 @@ interface StoreState {
     {
       requestId: string;
       prompt: string;
+      promptReviewId?:string; modelId?:string; fixedConstraints?:string; candidate?:string; review?:PromptReview; reason?:string; sources?:PromptSourceSnapshot[];
       carried: Array<{ name: string; role: string }>;
       dropped: Array<{ name: string; reason: string }>;
     }
@@ -1069,6 +1071,7 @@ function handleFrame(json: string): void {
         [event.worldId]: {
           requestId: event.requestId,
           prompt: event.prompt,
+          promptReviewId:event.promptReviewId,modelId:event.modelId,fixedConstraints:event.fixedConstraints,candidate:event.candidate,review:event.review,reason:event.reason,sources:event.sources,
           carried: event.carried,
           dropped: event.dropped,
         },
@@ -1654,13 +1657,15 @@ export function genesisAttachFiles(genesisId: string): void {
  * the coordinator reads a present prompt as "the author has decided", and would then skip the
  * art-director rewrite for every generation whose box was merely opened and closed.
  */
-export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string } = {}): void {
+export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string; promptReviewId?:string; count?:number } = {}): void {
   send({
     kind: "generate-world-image",
     worldId,
     requestId: queueRequest("generate-world-image"),
     ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
     ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
+    ...(opts.promptReviewId?{promptReviewId:opts.promptReviewId}:{}),
+    ...(opts.count!==undefined?{count:opts.count}:{}),
   });
 }
 
@@ -1984,8 +1989,8 @@ export function generateLookPreview(genesisId: string): void {
 }
 
 /** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
-export function planKeyArt(worldId: string): void {
-  send({ kind: "plan-key-art", worldId, requestId: ulid() });
+export function planKeyArt(worldId: string, opts: {modelId?:string;draftAlternative?:boolean} = {}): string {
+  const requestId=ulid();send({ kind: "plan-key-art", worldId, requestId, ...opts });return requestId;
 }
 
 export function useKeyArtPlans(): StoreState["keyArtPlans"] {

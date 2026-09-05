@@ -1,3 +1,4 @@
+import { promptHash } from "@arke-studio/contracts";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { captureProviderClient } from "../src/capture.js";
@@ -71,6 +72,18 @@ function client(fetchImpl: typeof fetch): ProviderClient {
 }
 
 describe("provider call capture", () => {
+  it("refuses a changed approved prompt before network IO and preserves accepted text on the wire",async()=>{
+    let calls=0;let sent="";
+    const wrapped=captureProviderClient("openai",observed=>client(observed),async(_url,init)=>{calls++;assert.ok(init?.body instanceof FormData);sent=String(init.body.get("prompt"));return new Response("{}");});
+    const hash=await promptHash("Exact approved words.");
+    const provenance={schemaVersion:1,workflow:"world-key-art",assembledHash:hash,approvedHash:hash,approvedFrom:"assembled",warningSetVersion:1,
+      adapter:{provider:"openai",model:"image",version:1,creativePromptHash:hash,mechanicalSteps:[]}};
+    await assert.rejects(wrapped.submit("key",{model:"image",capability:"image",params:{prompt:"Altered",promptProvenance:provenance}}),/approved provenance/);
+    assert.equal(calls,0);
+    await wrapped.submit("key",{model:"image",capability:"image",params:{prompt:"Exact approved words.",promptProvenance:provenance}});
+    assert.equal(calls,1);assert.equal(sent,"Exact approved words.");
+  });
+
   it("captures effective multipart fields and media metadata without credentials", async () => {
     const seen = recorder();
     const wrapped = captureProviderClient(

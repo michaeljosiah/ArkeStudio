@@ -1,3 +1,4 @@
+import { PromptDispatchProvenanceSchema } from "@arke-studio/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import type { Capability, ProviderId } from "@arke-studio/contracts";
@@ -465,10 +466,16 @@ export function captureProviderClient(
     id: client.id,
     declarations: client.declarations,
     validateKey: (key) => run("validate", undefined, () => client.validateKey(key)),
-    submit: (key, request, context) =>
-      run("submit", { ...context, model: request.model, capability: request.capability }, () =>
+    submit: async (key, request, context) => {
+      if(request.params.promptProvenance!==undefined){
+        const provenance=PromptDispatchProvenanceSchema.parse(request.params.promptProvenance);
+        const hash=`sha256:${createHash("sha256").update(String(request.params.prompt??"")).digest("hex")}`;
+        if(provenance.adapter.provider!==client.id||provenance.adapter.model!==request.model||provenance.adapter.creativePromptHash!==hash)throw new Error("The provider prompt differs from its approved provenance.");
+      }
+      return run("submit", { ...context, model: request.model, capability: request.capability }, () =>
         client.submit(key, request, context),
-      ),
+      );
+    },
     poll: (key, remoteId, context) => run("poll", context, () => client.poll(key, remoteId, context)),
     fetchArtifacts: (key, remoteId, context) =>
       run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),

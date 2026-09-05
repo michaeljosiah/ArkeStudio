@@ -109,6 +109,7 @@ const INTERNAL_PARAMS = new Set([
   "shotPlan",
   "providerPaddingSec",
   "dispatchTiming",
+  "promptProvenance",
   "continuedFrom",
   "taskMode",
   "route",

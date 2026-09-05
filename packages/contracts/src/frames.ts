@@ -148,7 +148,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * that would be the studio's taste in front of theirs. The standing constraint suffix is
        * still appended either way; it is not the author's to drop.
        */
-      prompt: z.string().min(1).optional(),
+      prompt: z.string().min(1).max(20000).optional(),
+      promptReviewId: z.string().uuid().optional(),
       /**
        * How many to make, 1–4 (design 65). Absent is one, so every caller written before the
        * count still asks for exactly what it used to.
@@ -705,7 +706,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * box with the words the dispatch would actually compose. Answered by a world-image.plan
    * event; nothing is created.
    */
-  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema, modelId: z.string().min(1).optional(), draftAlternative: z.boolean().optional() }).strict(),
+  z.object({kind:z.literal("cancel-key-art-prompt"),worldId:UlidSchema}).strict(),
   /**
    * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
    * The agent proposes; a person presses — the estimate is on the control, and the prompt is

@@ -1,4 +1,7 @@
-import { useRef, useState, type RefObject } from "react";
+import { PromptReviewDetails } from "../components/prompt-review.js";
+import { reviewPrompt, normalizePrompt, type PromptReview } from "@arke-studio/contracts";
+import { send } from "../lib/store.js";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useNavigate, useParams } from "react-router";
 import type {
   ArtDirectionHistoryEntry,
@@ -9,7 +12,7 @@ import type {
 import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
-import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
+import { GenerationDialog } from "../components/generation-dialog.js";
 import { ReferencePickerBody, worldPickerSources } from "../components/reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
@@ -266,6 +269,9 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   // Null is "the words the app would have sent", which is where the box always opens. A draft is
   // kept only while the dialog is open; reopening re-composes, because the look may have changed.
+  const [pendingReview,setPendingReview]=useState<string|null>(null);
+  const [promptReview,setPromptReview]=useState<PromptReview|null>(null);
+  const [reviewError,setReviewError]=useState("");
   const [draft, setDraft] = useState<string | null>(null);
   const [choice, setChoice] = useState<{ modelId?: string }>({});
   const [dismissed, setDismissed] = useState<readonly string[]>([]);
@@ -306,6 +312,19 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   const plan = useKeyArtPlans()[worldId];
   const composed = plan?.prompt ?? worldImagePrompt(world.meta, world.artDirection);
   const prompt = draft ?? composed;
+  useEffect(()=>{
+    if(!dialogOpen||!model)return;
+    setDraft(null);setPromptReview(null);setReviewError("");
+    setPendingReview(planKeyArt(worldId,{modelId:model.id}));
+    return ()=>{send({kind:"cancel-key-art-prompt",worldId});};
+  },[dialogOpen,model?.id,worldId,world.meta.canonRevision,world.artDirection.version,JSON.stringify(world.stagedReferences)]);
+  useEffect(()=>{if(plan?.requestId===pendingReview)setPendingReview(null);},[plan?.requestId,pendingReview]);
+  useEffect(()=>{
+    let live=true;setPromptReview(null);
+    if(plan?.sources&&prompt.trim())void reviewPrompt(plan.prompt,prompt,plan.sources).then(review=>{if(live){setPromptReview(review);setReviewError("");}},()=>{if(live)setReviewError("This prompt cannot be reviewed. Shorten it and try again.");});
+    return ()=>{live=false;};
+  },[plan?.promptReviewId,prompt]);
+
   const carriedLine =
     plan !== undefined && plan.carried.length > 0
       ? `Carries ${plan.carried.map((r) => `${r.name} · ${r.role}`).join(", ")}. `
@@ -323,7 +342,6 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         disabled={running}
         onClick={() => {
           setDraft(null);
-          planKeyArt(worldId);
           setDialogOpen(true);
         }}
       >
@@ -400,7 +418,17 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         lede="One picture of this world, for the app to show it by."
         prompt={prompt}
         onPrompt={setDraft}
-        promptHint="Opens as the words this would send on its own — the look, the logline, the tone. Edit them and yours are sent as written, with the standing clause added after, and the studio writes nothing of its own on top."
+        promptHint="The creative body sent on Generate. Fixed constraints appear separately below. Drafting an alternative never generates an image."
+        extra={<div style={{overflowWrap:"anywhere"}}>
+          <Button disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
+          {pendingReview!==null&&<Button onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}
+          <Button disabled={!plan||pendingReview!==null} onClick={()=>setDraft(null)}>Use assembled</Button>
+          {plan?.candidate&&<Button disabled={pendingReview!==null} onClick={()=>setDraft(plan.candidate!)}>Use candidate</Button>}
+          {plan?.candidate&&draft===null&&<p>The alternative below is not selected. Generate will use the assembled prompt shown in the box.</p>}
+          {pendingReview!==null?<p role="status">Preparing prompt review… No image has been enqueued.</p>:<>
+            {(plan?.candidate&&draft===null?plan.review:promptReview)&&<PromptReviewDetails review={(plan?.candidate&&draft===null?plan.review:promptReview)!}/>}<p role="status">{plan?.reason??reviewError}</p></>}
+          <p>Fixed constraints: {plan?.fixedConstraints??"Preparing…"}</p>
+        </div>}
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
         referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
@@ -415,7 +443,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         choice={choice}
         onChoice={setChoice}
         submitLabel={count === 1 ? "Generate" : `Generate ${count}`}
-        submitDisabled={model === null || running}
+        submitDisabled={model === null || running || pendingReview!==null || !plan?.promptReviewId || plan.modelId!==model.id || promptReview?.candidate.text!==normalizePrompt(prompt)}
         {...(why !== undefined ? { why } : {})}
         previews={candidates.map((path, index) => ({
           key: path,
@@ -448,10 +476,9 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         }}
         onSubmit={() => {
           if (failed) setDismissed((prev) => [...prev, failed.id]);
-          const authored = authoredPrompt(prompt, composed);
           generateWorldImage(worldId, {
             ...(model ? { modelId: model.id } : {}),
-            ...(authored !== undefined ? { prompt: authored } : {}),
+            prompt, promptReviewId:plan?.promptReviewId,
             ...(count !== 1 ? { count } : {}),
           });
           // The dialog stays open: the previews it asked for land in its own right-hand column,

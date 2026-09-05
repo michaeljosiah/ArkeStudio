@@ -1,3 +1,4 @@
+import { PromptReviewSchema } from "./prompt-review.js";
 import { TableReadPlanSchema } from "./rehearsal.js";
 import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
@@ -1237,6 +1238,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       worldId: UlidSchema,
       requestId: UlidSchema,
       prompt: z.string(),
+      promptReviewId: z.string().uuid().optional(), modelId:z.string().optional(), fixedConstraints:z.string().optional(),
+      candidate:z.string().optional(), review:PromptReviewSchema.optional(), reason:z.string().optional(),
+      sources:z.array(z.object({kind:z.enum(["accepted-world","user-instruction"]),ref:z.string(),text:z.string()}).strict()).optional(),
       carried: z.array(z.object({ name: z.string(), role: z.string() }).strict()),
       dropped: z.array(z.object({ name: z.string(), reason: z.string() }).strict()),
     })

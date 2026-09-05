@@ -368,7 +368,7 @@ function directorAdapter(reply: string | null) {
         },
       };
     },
-  } as never;
+  } as import("@arke-studio/contracts").HarnessAdapter;
 }
 
 describe("the art director", () => {
@@ -389,6 +389,16 @@ describe("the art director", () => {
     const fenced = ["Here you go:", "```json", '{"prompt": "A drowned harbour at dusk, wet basalt, sodium light"}', "```"].join("\n");
     const run = await director(fenced);
     assert.equal(await run("brief"), "A drowned harbour at dusk, wet basalt, sodium light");
+  });
+
+  it("cleans only its scratch directory after success, timeout and session-creation failure",async()=>{
+    const root=await tempDir("art-cleanup-");await writeFile(join(root,"keep.txt"),"unrelated");
+    const run=makeArtDirector(directorAdapter('{"prompt":"A harbour"}'),()=>buildSessionConfig({}),root);
+    assert.equal(await run("brief"),"A harbour");assert.deepEqual(await readdir(root),["keep.txt"]);
+    const timed=makeArtDirector(directorAdapter(null),()=>buildSessionConfig({}),root,{timeoutMs:5});
+    await assert.rejects(timed("brief"),/stopped/);assert.deepEqual(await readdir(root),["keep.txt"]);
+    const failing={...directorAdapter(null),async createSession(){throw new Error("create failed");}};
+    await assert.rejects(makeArtDirector(failing,()=>buildSessionConfig({}),root)("brief"),/create failed/);assert.deepEqual(await readdir(root),["keep.txt"]);
   });
 
   it("returns null rather than nonsense when the answer is not a prompt", async () => {
