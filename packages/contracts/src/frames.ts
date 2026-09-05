@@ -1,3 +1,4 @@
+import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
@@ -1309,6 +1310,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       identityReferences: z.array(z.string().min(1)).max(4),
     })
     .strict(),
+  z.object({ kind: z.literal("convert-performance"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    performanceId: PerformanceIdSchema, expectedHash: z.string().min(1), expectedVoiceId: z.string().min(1),
+    modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
+    confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
+  z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
   z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,

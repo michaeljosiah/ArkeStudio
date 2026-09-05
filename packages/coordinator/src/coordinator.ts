@@ -1,3 +1,5 @@
+import { purgePerformance } from "./audio/performance-purge.js";
+import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
@@ -777,6 +779,10 @@ export interface CoordinatorOptions {
   mediaProbe?: MediaProbe;
   /** Shared local audio foundation; sample/performance consumers use the same host tools. */
   audioMediaTools?: AudioMediaTools;
+  performanceSpool?: {
+    claim(spoolId: string): Promise<{ absolutePath: string; contentType: string; sizeBytes: number } | null>;
+    discard(spoolId: string): Promise<void>;
+  };
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
@@ -1566,6 +1572,12 @@ export class Coordinator {
               } catch {
                 return false;
               }
+            },
+            readAudioInputs: async job => {
+              if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, store => readPerformanceConversionInputs(store, job));
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== job.worldId) throw new Error("The owning world is unavailable.");
+              return readPerformanceConversionInputs(store, job);
             },
             readAudioReferences: async job => {
               if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, store => readCharacterAudioInputs(store, job));
@@ -2908,6 +2920,14 @@ export class Coordinator {
       return;
     }
     const finalize = async (store: WorldStore) => {
+      if (job.target.kind === "performance-conversion") {
+        if (!this.opts.audioMediaTools) throw new Error("Audio preparation is required to finalize this performance.");
+        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        await finalizePerformanceConversion(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
+          actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
+        return;
+      }
+
       if (job.target.kind === "bench-take") {
         const [benchSessionId, benchTakeId] = (job.target.id ?? "").split("/") as [
           SessionId | undefined,
@@ -11664,6 +11684,44 @@ export class Coordinator {
           ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "purge-performance": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the performance world first.");
+          await purgePerformance(store, msg.productionId, msg.performanceId, this.jobQueue?.listJobs() ?? []);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "purged", reason: "Local performance purged. Provider history is unchanged." });
+        } catch {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: "Purge refused. Check dependent performances, reviews, selections, designations and jobs. Interrupted purges recover on reopen." });
+        }
+        return;
+      }
+      case "convert-performance": {
+        const store = this.opts.provider.openStore?.();
+        const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
+        if (!store || store.worldId !== msg.worldId || !model) { this.rejectEnqueue(msg.requestId, msg.kind, "Open the performance world and choose an available conversion model."); return; }
+        try { await this.enqueueBatch(msg.requestId, msg.kind, [await performanceConversionRequest(store, model, msg)]); }
+        catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error && !/[\\/]/.test(error.message) ? error.message : "The performance could not be cleared for conversion. Check its bytes, wording, rights and current target."); }
+        return;
+      }
+      case "keep-performance-recording": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the recording's world first.");
+          if (!this.opts.audioMediaTools || !this.opts.performanceSpool) throw new Error("Keeping a performance requires desktop audio preparation.");
+          const performance = await keepPerformanceRecording(store, this.opts.audioMediaTools, this.opts.performanceSpool, msg,
+            this.voiceService ? bytes => this.voiceService!.transcribe(bytes, "audio/wav") : undefined);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "kept", performance });
+        } catch {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: "The recording could not be kept. Check the current authored line, desktop audio tools and capture, then retry. Existing performances are retained." });
+        }
         return;
       }
       case "resume-character-voice-sample":

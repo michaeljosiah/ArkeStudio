@@ -1,3 +1,6 @@
+import { pathToFileURL } from "node:url";
+import { createPerformanceSpool } from "./performance-spool.js";
+import { microphoneAllowed } from "./microphone-permission.js";
 import { audioMediaOptions } from "./media-tools.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
 import { execFile } from "node:child_process";
@@ -200,6 +203,7 @@ let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
 let stageExporter: StageExporter | null = null;
+let performanceSpool: ReturnType<typeof createPerformanceSpool>;
 
 async function closeProviderTransport(): Promise<void> {
   const transport = providerTransport;
@@ -303,6 +307,15 @@ function publishStartup(state: StartupState): void {
 }
 
 function registerHostIpc(): void {
+  performanceSpool = createPerformanceSpool(appRoot);
+  ipcMain.handle("arke:performance-stage", async (event, input: unknown) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { ok: false, reason: "Only the main studio can stage a recording." };
+    if (!input || typeof input !== "object") return { ok: false, reason: "Invalid recording." };
+    return performanceSpool.stage(input);
+  });
+  ipcMain.handle("arke:performance-discard", async (event, id: unknown) => {
+    if (window && event.sender === window.webContents && event.senderFrame === window.webContents.mainFrame && typeof id === "string") await performanceSpool.discard(id);
+  });
   stageExporter = createStageExporter(appRoot, ffmpegPath());
   ipcMain.handle("arke:spool", async (event, input: { name?: unknown; bytes?: unknown }) => {
     if (!window || event.sender !== window.webContents) return { reason: "that window cannot attach" };
@@ -447,6 +460,15 @@ async function createWindow(): Promise<void> {
       ],
     },
   });
+  const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
+  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
+    permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
+    requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
+  }));
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(microphoneAllowed({
+    permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
+    requestingUrl: details.requestingUrl, rendererUrl, mediaTypes: "mediaTypes" in details ? details.mediaTypes ?? [] : [],
+  })));
   window.webContents.session.webRequest.onBeforeSendHeaders(
     { urls: ["<all_urls>"] },
     (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id) }),
@@ -1125,6 +1147,7 @@ async function initialize(): Promise<{ port: number }> {
         }
       : {}),
     ...audioMediaOptions(ffmpegPath(), ffprobeResolution().path),
+    performanceSpool,
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is
     // unknown, and the cut cannot check a take against the window it was cut for. Wired
     // separately from ffmpeg because a machine may resolve one and not the other, and a missing

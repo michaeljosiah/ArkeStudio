@@ -1,3 +1,4 @@
+import { recoverPerformanceStorage } from "../audio/performance-purge.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -142,9 +143,10 @@ export class WorldStore {
 
     let store: WorldStore | null = null;
     let pending: PendingCommit[] = [];
+    let recoveredPerformances: string[] = [];
     try {
       if (opts.readOnly) pending = await committer.pendingRecovery();
-      else await committer.recover();
+      else { await committer.recover(); await lock!.assertOwned(); recoveredPerformances = await recoverPerformanceStorage(dir); }
       const scan = await scanWorld(dir);
       if (pending.length > 0) {
         scan.bundle.problems = [
@@ -161,6 +163,11 @@ export class WorldStore {
       let scanState = opts.readOnly ? null : await readScanState(dir);
       if (!opts.readOnly && scanState === null) scanState = await reconstructScanState(dir, scan);
       else if (scanState !== null) scanState = await advanceCommittedScanState(dir, scanState);
+      if (scanState) for (const path of recoveredPerformances) {
+        const hash = scan.manifest[path];
+        if (hash === undefined) delete scanState.manifest[path];
+        else scanState.manifest[path] = hash;
+      }
       const externalEdits = scanState === null ? [] : detectExternalEdits(scan, scanState);
       store = new WorldStore(
         dir,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { jsonRequest, tryProbe } from "./http.js";
 import {
@@ -46,9 +47,11 @@ export class ElevenLabsClient implements ProviderClient {
       return [
         { capability: "voice-tts", available: false, reason },
         { capability: "voice-clone", available: false, reason },
+        { capability: "voice-conversion", available: false, reason },
       ];
     }
     const sub = probe.value.body as {
+      tier?: string;
       character_count?: number;
       character_limit?: number;
       can_use_instant_voice_cloning?: boolean;
@@ -66,10 +69,16 @@ export class ElevenLabsClient implements ProviderClient {
     const clone: CapabilityProbe = sub?.can_use_instant_voice_cloning
       ? { capability: "voice-clone", available: true }
       : { capability: "voice-clone", available: false, reason: "this plan does not include voice cloning" };
-    return [tts, clone];
+    const models = await tryProbe(() => jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/models`, { headers: this.headers(key) }));
+    const conversionAvailable = !overQuota && models.ok && Array.isArray(models.value.body) && models.value.body.some(
+      (m: { model_id?: string; can_do_voice_conversion?: boolean }) => m.model_id === "eleven_multilingual_sts_v2" && m.can_do_voice_conversion === true);
+    return [tts, clone, conversionAvailable ? { capability: "voice-conversion", available: true, zeroRetention: sub?.tier === "enterprise" } : {
+      capability: "voice-conversion", available: false, reason: "The account did not expose the Multilingual speech-to-speech model, or its quota is exhausted." }];
   }
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    if (request.capability === "voice-conversion") return this.convert(key, request);
+    if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("elevenlabs: unsupported synthesis capability");
     const remoteId = `elevenlabs-${++this.counter}-${Date.now()}`;
     const voiceId = String(request.params["voiceId"] ?? "");
     if (!voiceId) throw new Error("elevenlabs: params.voiceId is required");
@@ -94,6 +103,39 @@ export class ElevenLabsClient implements ProviderClient {
       acceptedAt: new Date().toISOString(),
       artifacts: [{ name: "speech.mp3", contentType: "audio/mpeg", data }],
     };
+  }
+
+  private async convert(key: string, request: SubmitRequest): Promise<SubmitResult> {
+    const input = request.audioInputs?.[0];
+    const voiceId = request.params.voiceId;
+    if (request.model !== "eleven_multilingual_sts_v2" || typeof voiceId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(voiceId) ||
+      request.audioInputs?.length !== 1 || !input?.data.byteLength || !["audio/wav", "audio/mpeg"].includes(input.contentType) ||
+      !Number.isFinite(input.durationSec) || input.durationSec <= 0 || input.durationSec > 300 ||
+      input.hash !== `sha256:${createHash("sha256").update(input.data).digest("hex")}`) {
+      throw new ProviderRequestRejectedError("elevenlabs: invalid voice-conversion input or target");
+    }
+    if (request.params.retention !== "provider-history" && request.params.retention !== "zero-retention") throw new ProviderRequestRejectedError("elevenlabs: choose a retention mode");
+    const models = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/models`, { headers: this.headers(key) });
+    if (models.status >= 400 || !Array.isArray(models.body) || !models.body.some((m: { model_id?: string; can_do_voice_conversion?: boolean }) =>
+      m.model_id === request.model && m.can_do_voice_conversion === true)) throw new ProviderRequestRejectedError("elevenlabs: this account cannot use the selected voice conversion model");
+    if (request.params.retention === "zero-retention") {
+      const subscription = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/user/subscription`, { headers: this.headers(key) });
+      if (subscription.status >= 400 || (subscription.body as { tier?: string })?.tier !== "enterprise") throw new ProviderRequestRejectedError("elevenlabs: zero retention requires an enterprise account");
+    }
+    const form = new FormData();
+    form.append("audio", new Blob([new Uint8Array(input.data)], { type: input.contentType }), input.name);
+    form.append("model_id", request.model);
+    form.append("file_format", "other");
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/speech-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128&enable_logging=${request.params.retention === "provider-history"}`, {
+      method: "POST", headers: { "xi-api-key": key }, body: form, ...(request.signal ? { signal: request.signal } : {}),
+    });
+    if (res.status === 401 || res.status === 403) throw new ProviderAuthError("elevenlabs", `elevenlabs: conversion permission was rejected (HTTP ${res.status})`);
+    if (res.status >= 500) throw new Error(`elevenlabs: conversion failed (HTTP ${res.status})`);
+    if (res.status >= 400) throw new ProviderRequestRejectedError(`elevenlabs: conversion failed (HTTP ${res.status})`);
+    const data = new Uint8Array(await res.arrayBuffer());
+    if (!data.length) throw new Error("elevenlabs: conversion returned empty audio");
+    return { remoteId: res.headers.get("request-id") ?? `elevenlabs-sts-${++this.counter}-${Date.now()}`,
+      acceptedAt: new Date().toISOString(), artifacts: [{ name: "conversion.mp3", contentType: "audio/mpeg", data }] };
   }
 
   async poll(_key: string, _remoteId: string): Promise<PollResult> {

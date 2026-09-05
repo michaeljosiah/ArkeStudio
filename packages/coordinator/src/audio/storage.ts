@@ -2,7 +2,7 @@ import { link, lstat, mkdir, open, readFile, readdir, realpath, rm, writeFile } 
 import { isAbsolute, join, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { AudioAssetProvenanceSchema, AudioQcReportSchema, AudioRangeSchema, AudioSourceRefSchema,
-  ArtifactIdSchema, SlugSchema, TakeIdSchema, type AudioAssetProvenance, type AudioRange, type AudioSourceRef } from "@arke-studio/contracts";
+  PerformanceIdSchema, ArtifactIdSchema, SlugSchema, TakeIdSchema, type AudioAssetProvenance, type AudioRange, type AudioSourceRef } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import type { CommitInput } from "../world/commit.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -36,14 +36,25 @@ export async function audioWorldPath(root: string, portable: string, createParen
   return cursor;
 }
 
-export type AudioSourceRequest = { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |
+export type AudioSourceRequest = { kind: "performance-recording"; productionId: string; performanceId: string } | { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |
   { kind: "artifact"; artifactId: string; range?: AudioRange } |
   { kind: "production-take"; productionId: string; takeId: string; range: AudioRange };
 
 export async function resolveAudioSource(store: Pick<WorldStore, "dir" | "getBundle" | "closingSignal">, request: AudioSourceRequest) {
   const bundle = store.getBundle();
   let file: string, source: AudioSourceRef, physicalRange: AudioRange | undefined;
-  if (request.kind === "legacy-character-sample") {
+  if (request.kind === "performance-recording") {
+    SlugSchema.parse(request.productionId); PerformanceIdSchema.parse(request.performanceId);
+    if (!bundle.productions.some(p => p.meta.id === request.productionId)) throw new Error("audio-source-unavailable");
+    const prefix = `productions/${request.productionId}/performances/${request.performanceId}`;
+    const record = JSON.parse(await readFile(await audioWorldPath(store.dir, `${prefix}/source.json`), "utf8")) as { file: string; hash: string };
+    if (!/^source\.(webm|m4a|wav|mp3)$/.test(record.file)) throw new Error("audio-path-invalid");
+    file = `${prefix}/${record.file}`;
+    const hash = (await hashAudioFile(await audioWorldPath(store.dir, file), store.closingSignal)).hash;
+    if (hash !== record.hash) throw new Error("audio-source-changed");
+    source = AudioSourceRefSchema.parse({ kind: request.kind, productionId: request.productionId,
+      performanceId: request.performanceId, sourceFile: record.file, sourceMediaHash: hash });
+  } else if (request.kind === "legacy-character-sample") {
     SlugSchema.parse(request.sheetId);
     const sample = bundle.referenceKits.find(k => k.sheetId === request.sheetId)?.designatedVoiceSample;
     if (!sample || "schemaVersion" in sample) throw new Error("audio-source-changed");

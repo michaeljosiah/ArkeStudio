@@ -8,6 +8,8 @@ import {
   REFERENCE_FINALIZATION_TARGETS,
   isReplayableFinalization,
   ulid,
+  UlidSchema,
+  type PreparedAudioInput,
   type Capability,
   type ClientDeclarations,
   type ComfyUiRecoveryDecision,
@@ -73,6 +75,7 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       audioReferences?: DispatchVoiceReference[];
+      audioInputs?: PreparedAudioInput[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
       idempotencyKey?: string;
@@ -151,6 +154,7 @@ export interface JobQueueOptions {
    */
   landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
+  readAudioInputs?: (job: Job) => Promise<PreparedAudioInput[]>;
   readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
@@ -532,7 +536,7 @@ export class JobQueue {
     this.requireAccepting();
     const now = this.clock();
     const job: Job = {
-      id: `jb_${ulid()}`,
+      id: `jb_${input.target.kind === "performance-conversion" ? UlidSchema.parse(input.idempotencyKey) : ulid()}`,
       idempotencyKey: input.idempotencyKey ?? ulid(), // persisted before submission (R-2)
       worldId: input.worldId,
       ...(input.productionId !== undefined ? { productionId: input.productionId } : {}),
@@ -732,6 +736,7 @@ export class JobQueue {
     }
     if (!this.stillQueued(job)) return;
 
+    let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
@@ -823,6 +828,17 @@ export class JobQueue {
       if (!this.stillQueued(job)) return;
     }
 
+    if (job.capability === "voice-conversion") {
+      try {
+        if (!this.opts.readAudioInputs) throw new Error("Performance conversion input transport is not configured.");
+        audioInputs = await this.opts.readAudioInputs(job);
+      } catch (error) {
+        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Performance is not cleared for conversion.");
+        return;
+      }
+      if (!this.stillQueued(job)) return;
+    }
+
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
@@ -853,6 +869,7 @@ export class JobQueue {
           params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
           ...(audioReferences ? { audioReferences } : {}),
+          ...(audioInputs ? { audioInputs } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),

@@ -32,6 +32,7 @@ function episode(id: string, order: number, scenes: string[], over: Partial<Epis
 
 function production(over: Partial<ProductionBundle>): ProductionBundle {
   return {
+    performances: [],
     meta: {
       id: "bell-watch-season-1",
       format: "video",

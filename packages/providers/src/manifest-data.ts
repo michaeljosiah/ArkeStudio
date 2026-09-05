@@ -14,8 +14,8 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 18,
-  generated: "2026-08-28",
+  manifestVersion: 19,
+  generated: "2026-09-05",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -177,6 +177,15 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       requires: { vramMb: 20000, diskMb: 18000 },
     },
     // ---- voice ------------------------------------------------------------
+    {
+      // Verified 2026-09-05: https://elevenlabs.io/docs/api-reference/speech-to-speech/convert
+      // https://help.elevenlabs.io/hc/en-us/articles/20349793097233-What-is-Voice-Changer
+      // https://join.elevenlabs.io/api/developer-api — $0.12/minute = 2,000 micro-USD/second.
+      id: "eleven_multilingual_sts_v2", provider: "elevenlabs", capability: "voice-conversion",
+      displayName: "ElevenLabs Multilingual Speech-to-Speech v2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    },
     {
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",

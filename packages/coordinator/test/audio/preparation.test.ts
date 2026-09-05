@@ -92,6 +92,7 @@ it("pass segment range resolves to parent media without changing selected-relati
   const store = { dir, closingSignal: signal(), getBundle: () => bundle } as unknown as WorldStore;
   const result = await resolveAudioSource(store, { kind: "production-take", productionId: "p", takeId: selectedId, range: { inSec: 0.1, outSec: 0.4 } });
   assert.deepEqual(result.physicalRange, { inSec: 0.35, outSec: 0.65 });
+  assert.ok(result.source.kind === "production-take");
   assert.deepEqual(result.source.range, { inSec: 0.1, outSec: 0.4 });
   await assert.rejects(resolveAudioSource(store, { kind: "production-take", productionId: "p", takeId: selectedId, range: { inSec: 0, outSec: 0.6 } }), /range-invalid/);
 });

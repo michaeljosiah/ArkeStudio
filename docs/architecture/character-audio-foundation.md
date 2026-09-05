@@ -129,3 +129,39 @@ three MP3/WAV inputs, 15 seconds combined, 15 MB per audio input and 12 combined
 Performance and master-slice intents are strictly distinguished by schema; their actual source
 resolution will be integrated with their owning issues (#113/#112/#256), never inferred from a
 character designation. Full epic interaction verification and those downstream consumers remain.
+
+
+## Recorded performances and conversion (#113)
+
+`contracts/performance.ts` owns the common immutable performance base and authoritative line resolver.
+Covered script dialogue takes precedence over legacy shot audio. Multiple covered lines need an explicit
+block choice. Scratch and speech-to-speech records live in each production's `performances/<pf-id>/`;
+they never participate in picture takes, picture selection, or designated character samples.
+
+Design turn 115 defines explicit Start, Stop, Keep and Convert actions. The desktop permission policy
+allows only its own top-level renderer's microphone request. The opaque host spool is process-owned,
+limited to 128 MiB, and discarded after a durable Keep or a failure with an available renderer preview.
+The coordinator re-reads the authored target, prepares canonical audio through #117, compares local
+transcription when available, and commits `performance.json` last. A failed metadata commit retains
+its bytes for commit-journal recovery. Abandoned scratch source directories are removed on reopen;
+paid conversion landing material remains available for queue finalization replay.
+
+ElevenLabs speech-to-speech is a distinct capability. The manifest records the verified model,
+five-minute limit and duration rate. Account model probing is independent of cloning. Only a verified
+enterprise probe exposes zero retention, and submission checks entitlement again. The queue freezes
+the exact source hash, target, voice assignment, rights, wording confirmation and retention. Only
+verified ephemeral bytes reach multipart upload. The transformed ID uses the queue job's ULID;
+`performance-conversion` is a replayable finalization target. Source and result remain independently
+playable, and conversion never accepts a performance or dispatches a video.
+
+Purge takes the world write gate, refuses current production or durable job references, moves the
+whole directory into `.staging/performance-purge`, flushes a content-free tombstone, and removes the
+staged bytes. Reopen restores a staged record without a tombstone and deletes one with a tombstone.
+Only the recovered manifest paths advance scan-state, preserving unrelated external edit detection.
+Tombstones also block stale Keep and conversion finalization from resurrecting media. #112 and #114
+must expose their reviews, selections and designations to this reference census.
+
+Validation so far includes real world Keep/reopen/retry, interrupted purge restoration, completed
+purge and resurrection refusal, desktop permission/spool tests, multipart upload/refusal and account
+probe tests. The remaining epic integration pass must cover conversion queue/finalization replay,
+recorder interaction and narrow-window QA, and downstream review/selection/bible references.

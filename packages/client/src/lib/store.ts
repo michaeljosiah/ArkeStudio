@@ -344,6 +344,9 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type PerformanceResult = Extract<DomainEvent, { type: "performance.result" }>;
+const performanceListeners = new Set<(result: PerformanceResult) => void>();
+export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { performanceListeners.add(listener); return () => { performanceListeners.delete(listener); }; }
 export type VoiceSampleResult = Extract<DomainEvent, { type: "voice.sample-result" }>;
 const voiceSampleListeners = new Set<(result: VoiceSampleResult) => void>();
 export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void {
@@ -923,6 +926,7 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
     if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
@@ -4379,4 +4383,9 @@ export function openEngineLog(engine: "comfyui" | "voxa"): void {
 /** Replace the Arke-managed ComfyUI tree with the pinned version — an explicit choice, never automatic (SPEC-021 R-20). */
 export function updateComfyUiRuntime(): void {
   send({ kind: "comfyui-update-runtime" });
+}
+
+export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "convert-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("convert-performance");
+  return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
 }

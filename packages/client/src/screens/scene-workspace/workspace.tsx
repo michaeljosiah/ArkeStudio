@@ -1,3 +1,4 @@
+import { PerformancePanel } from "../../components/performance-panel.js";
 import { planForScene } from "../../lib/scene-plan.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -460,6 +461,7 @@ export function SceneWorkspace({
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
+          {focus && <PerformancePanel key={`${world.meta.worldId}/${scene.id}/${scene.version}/${focus}`} world={world} production={production} scene={scene} shotId={focus} />}
 
           {/*
             Tabs are a mode of working, not a rendering of the same thing — so they are a

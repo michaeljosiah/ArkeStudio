@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  prefixedIdSchema,
   ArtifactIdSchema,
   JobIdSchema,
   IsoDateTimeSchema,
@@ -35,6 +36,8 @@ export const AudioRangeSchema = z
   });
 
 export const AudioSourceRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("performance-recording"), productionId: SlugSchema, performanceId: prefixedIdSchema("pf"),
+    sourceFile: z.string().min(1), sourceMediaHash: FullSha256Schema }).strict(),
   z.object({ kind: z.literal("legacy-character-sample"), sheetId: SlugSchema,
     sourceFile: z.string().min(1), legacySource: z.enum(["cloning-recording", "voice-take"]),
     legacyDesignatedAt: IsoDateTimeSchema, sourceMediaHash: FullSha256Schema, range: AudioRangeSchema.optional() }).strict(),
@@ -320,3 +323,8 @@ export type AudioRightsEvent = z.infer<typeof AudioRightsEventSchema>;
 export type AudioRightsScope = z.infer<typeof AudioRightsScopeSchema>;
 export type AudioAttestation = z.infer<typeof AudioAttestationSchema>;
 export type AudioUseIntent = z.infer<typeof AudioUseIntentSchema>;
+
+/** Host-verified ephemeral conversion input. Bytes never belong in durable job parameters. */
+export interface PreparedAudioInput {
+  name: string; contentType: "audio/wav" | "audio/mpeg"; hash: string; durationSec: number; data: Uint8Array;
+}

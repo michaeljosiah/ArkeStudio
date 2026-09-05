@@ -70,6 +70,7 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
  * nothing the user can do about it. The two lists are asserted equal in the activity tests.
  */
 export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
+  "performance-conversion",
   ...REFERENCE_FINALIZATION_TARGETS,
   "voice-line",
   "voice-preview",

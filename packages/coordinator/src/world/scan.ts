@@ -1,3 +1,4 @@
+import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
@@ -678,7 +679,15 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
       : null;
 
+    const performances: ProductionBundle["performances"] = [];
+    for (const entry of await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
+      if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
+      const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
+      if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
+    }
     productions.push({
+      performances,
       meta: metaDoc,
       story,
       season,

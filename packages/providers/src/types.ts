@@ -1,4 +1,5 @@
 import type {
+  PreparedAudioInput,
   Capability,
   CapabilityProbe,
   ClientDeclarations,
@@ -45,6 +46,7 @@ export interface SubmitRequest {
    * a cloning endpoint accepts; this is whatever the microphone or the file on disk produced.
    */
   audioSource?: PreparedAudioSource;
+  audioInputs?: PreparedAudioInput[];
   /** Attached when the provider honours it (declared via supportsIdempotencyKey). */
   idempotencyKey?: string;
   /**
