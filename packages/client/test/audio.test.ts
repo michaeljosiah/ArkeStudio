@@ -1,3 +1,4 @@
+import { loadPlaylist, playPlaylistLine, playlistSnapshot, nextPlaylistLine, setPlaylistRate, setPlaylistSolo, clearPlaylist, restartPlaylistLine } from "../src/lib/audio.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -13,6 +14,7 @@ import {
 function fakeAudio() {
   const calls: string[] = [];
   const element = {
+    playbackRate: 1,
     src: "",
     currentTime: 0,
     duration: NaN,
@@ -116,6 +118,32 @@ describe("audio playback controller", () => {
     assert.equal(element.currentTime, 12);
     seekTo(-4);
     assert.equal(element.currentTime, 0);
+    setAudioFactoryForTest(null);
+  });
+});
+
+
+describe("table-read playlist uses the existing single element", () => {
+  it("advances, changes rate, solos, restarts and relinquishes ownership to ordinary playback", async () => {
+    const { element } = fakeAudio(); setAudioFactoryForTest(() => element);
+    const items = [0, 1, 2].map(i => ({ ...clip(`table/${i}`, `/${i}.wav`), lineId: `line/${i}`, speakerSheetId: i === 1 ? "bray" : "maren" }));
+    loadPlaylist(items); await playPlaylistLine(); assert.equal(element.src, "/0.wav");
+    setPlaylistRate(1.25); assert.equal(element.playbackRate, 1.25);
+    emitForTest("ended"); await Promise.resolve(); assert.equal(element.src, "/1.wav");
+    setPlaylistSolo("maren"); await Promise.resolve(); assert.equal(element.src, "/0.wav");
+    nextPlaylistLine(); await Promise.resolve(); assert.equal(element.src, "/2.wav");
+    element.currentTime = 3; restartPlaylistLine(); await Promise.resolve(); assert.equal(element.currentTime, 0);
+    assert.equal(playlistSnapshot()?.index, 2);
+    await playClip(clip("ordinary", "/ordinary.wav")); assert.equal(playlistSnapshot(), null); assert.equal(element.playbackRate, 1);
+    clearPlaylist(); assert.equal(playbackSnapshot().clip?.id, "ordinary", "route cleanup cannot dismiss another clip's player");
+    setAudioFactoryForTest(null);
+  });
+  it("clears its active source and reports a failed line before advancing", async () => {
+    const { element } = fakeAudio(); setAudioFactoryForTest(() => element);
+    loadPlaylist([0, 1].map(i => ({ ...clip(`table/${i}`, `/${i}.wav`), lineId: `${i}`, speakerSheetId: "maren" })));
+    await playPlaylistLine(); emitForTest("error"); nextPlaylistLine(); await Promise.resolve();
+    assert.match(playlistSnapshot()!.notice, /Skipped.*could not be decoded/);
+    clearPlaylist(); assert.equal(playbackSnapshot().status, "idle"); assert.equal(playlistSnapshot(), null);
     setAudioFactoryForTest(null);
   });
 });

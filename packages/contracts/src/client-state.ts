@@ -1,3 +1,5 @@
+import { RehearsalSessionSchema } from "./rehearsal.js";
+import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
 import { HarnessStatusSchema } from "./harness.js";
@@ -132,6 +134,8 @@ export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 /** A production with everything its screens render. */
 export const ProductionBundleSchema = z
   .object({
+    rehearsals: z.array(RehearsalSessionSchema).default([]),
+    rehearsalHashes: z.record(z.string(), z.string()).optional(),
     performances: z.array(PerformanceRecordSchema).default([]),
     performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
@@ -261,6 +265,7 @@ export const WorldBundleSchema = z
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),
+    performanceBibles: z.array(PerformanceBibleStateSchema).optional(),
     /** Prop records, references/<propId>/prop.json (design turn 105; issue 535). Defaulted: a read path. */
     props: z.array(PropSchema).default([]),
     referenceTakes: z.array(TakeSchema).default([]),

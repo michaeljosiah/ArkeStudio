@@ -344,6 +344,9 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
+const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
+export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
 export type PerformanceResult = Extract<DomainEvent, { type: "performance.result" }>;
 const performanceListeners = new Set<(result: PerformanceResult) => void>();
 export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { performanceListeners.add(listener); return () => { performanceListeners.delete(listener); }; }
@@ -926,6 +929,7 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
     if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
     if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
     if (event.type === "voice.assignment-result") {

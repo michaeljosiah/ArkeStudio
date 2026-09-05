@@ -415,6 +415,9 @@ export function jobOrigin(job: Job): JobOrigin | null {
       where: "the scene workspace",
     };
   }
+  if (job.productionId && job.target.kind === "table-read-cache" && typeof job.params.tableReadSceneId === "string") {
+    return { path: `/w/${job.worldId}/p/${job.productionId}/scenes/${job.params.tableReadSceneId}`, label: "Table read", where: "the scene table read" };
+  }
   if (job.productionId && ["performance-conversion", "performance-generation"].includes(job.target.kind)) {
     const input = (job.params.performanceConversion ?? job.params.performanceGeneration) as { target?: { sceneId?: string } } | undefined;
     if (input?.target?.sceneId) return { path: `/w/${job.worldId}/p/${job.productionId}/scenes/${input.target.sceneId}`,

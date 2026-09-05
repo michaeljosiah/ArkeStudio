@@ -576,7 +576,7 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
   });
 
   it("per character", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 300000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
   });
 
   it("per token, both directions, ceiling at the millionth", () => {
@@ -1248,7 +1248,7 @@ describe("direct voice models declare the exact provider wire spelling", () => {
   });
 
   it("still prices the row in the unit it is billed in", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 300000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
   });
 });
 

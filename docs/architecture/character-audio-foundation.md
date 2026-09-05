@@ -212,3 +212,37 @@ forwarded pace and cancellation. The alias regression test verifies `eleven-v3` 
 The full epic validation pass still needs recorder/cadence interactions, narrow-window inspection,
 real packaged local pace verification, conversion queue recovery, and reference transport of the
 accepted performance variants.
+
+
+## Rehearsal and performance bible (#114)
+
+`deriveRehearsalLines` projects current authored shot order and covered script blocks; duplicated
+coverage reads once, legacy VO and dialogue share the same resolver, and unresolved speakers remain
+visible. The table-read planner verifies accepted exact-line selection and bytes before considering
+an exact speech cache. A broken selection is not hidden by synthesis fallback. Missing cloud lines
+are priced in aggregate against current wire-model identity; confirmation binds the complete plan.
+Running jobs are recognized, partial cloud enqueue uses the existing aggregate acknowledgement, and
+an explicitly confirmed retry after failure gets a fresh spend key. Local preparation is sequential,
+cache only and unledgered. `table-read-cache` finalization validates exact frozen cache identity.
+
+The single player now owns playlist sequencing, previous/skip/restart, solo and playback rate. External
+ordinary playback releases the playlist; table-read route cleanup cannot dismiss an unrelated clip.
+No second audio element was added. Tests cover that ownership, end transitions and failed-line skips.
+
+Rehearsal notes store only line keys, text hashes and user prose in `rehearsals/<rh-id>.json`, with
+base-hash conflict refusal and no scene-version bump. Missing line keys become explicit orphan-note
+problems. Performance bible events live in each character's `performance-bible.jsonl`, never kit.json.
+Designate validates the current accepted decision, exact bytes, role, current identity assignment,
+shared QC and explicit reference rights. Scratch is cadence only. Replace/clear append revisions;
+retries are idempotent and historical bible events block source purge. Damaged histories keep intact
+revisions visible while writes and purge fail closed.
+
+Design 117 and the scene/character panels expose these distinctions. Tests cover derived ordering,
+covered-line deduplication, tied recommendations, revision conflicts, accepted playback without spend,
+cache planning and running-job reuse, notes, designation replay, raw-identity refusal and clear history.
+The verified Multilingual v2 price is corrected to 100 micro-USD per character, with a 10,000-character
+limit; Eleven v3 remains 100 micro-USD and 5,000 characters.
+
+The epic integration pass must still exercise live narrow-window controls, explicit selection clear
+for broken sources, bible cadence-plan seeding and advisory eligibility, deleted-scene note cleanup,
+real local pace verification, and the end-to-end video/cut consumers in #111/#115/#256.

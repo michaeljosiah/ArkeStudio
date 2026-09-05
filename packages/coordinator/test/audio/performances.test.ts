@@ -1,3 +1,7 @@
+import { writePerformanceBible } from "../../src/audio/performance-bible.js";
+import { saveRehearsalNote } from "../../src/audio/rehearsal-notes.js";
+import { planTableRead } from "../../src/audio/table-read.js";
+import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile, readFile, rename, lstat } from "node:fs/promises";
@@ -65,6 +69,30 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.equal(reviewed.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id);
   assert.deepEqual(reviewed.selections, originalSelections, "performance acceptance never changes picture selection");
   await assert.rejects(reviewPerformance(store, { ...review, requestId: ulid() }), /review changed/);
+  const planned = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], []);
+  assert.equal(planned.plan.items.find(i => i.lineId === performanceLineKey(next.target))?.route, "existing");
+  assert.equal(planned.cloud.length, 0, "accepted playback never enqueues a synthesis");
+  const noteRequest = { kind: "save-rehearsal-note" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    sceneId: scene.id, rehearsalId: `rh_${ulid()}`, expectedHash: null, lineId: performanceLineKey(next.target), body: "Leave a beat before answering." };
+  await saveRehearsalNote(store, noteRequest);
+  const noted = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(noted.rehearsals[0]!.notes[noteRequest.lineId]!.body, noteRequest.body);
+  assert.equal(noted.scenes.find(s => s.id === scene.id)!.version, scene.version);
+  await assert.rejects(saveRehearsalNote(store, { ...noteRequest, requestId: ulid(), body: "Different note" }), /notes changed/);
+  const designation = { kind: "designate-performance-bible" as const, requestId: ulid(), worldId: store.worldId, sheetId: next.target.speakerSheetId,
+    slotId: "measured-example", expectedHash: null, expectedRevision: 0, label: "Measured example", delivery: "measured" as const,
+    role: "cadence" as const, productionId: production.meta.id, performanceId: next.id, expectedPerformanceHash: next.provenance.outputHash,
+    acceptedReviewAt: reviewed.performanceReview.reviews[0]!.ts, cloudBasis: "self" as const, singleSpeaker: true, noMusic: true,
+    warningCodes: Object.values(next.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) };
+  await writePerformanceBible(store, designation);
+  await writePerformanceBible(store, designation);
+  const bible = store.getBundle().performanceBibles!.find(b => b.sheetId === next.target.speakerSheetId)!;
+  assert.equal(bible.events.length, 1, "designation replay does not append duplicate history");
+  await assert.rejects(writePerformanceBible(store, { ...designation, requestId: ulid(), slotId: "identity-example", role: "identity", expectedHash: bible.hash }), /cadence only/);
+  await writePerformanceBible(store, { kind: "clear-performance-bible", requestId: ulid(), worldId: store.worldId, sheetId: next.target.speakerSheetId,
+    slotId: "measured-example", expectedHash: bible.hash, expectedRevision: 1 });
+  assert.equal(store.getBundle().performanceBibles!.find(b => b.sheetId === next.target.speakerSheetId)!.events.length, 2);
+
   await reviewPerformance(store, { ...review, requestId: ulid(), decision: "reject", expectedReviewHash: reviewed.performanceReview.reviewHash,
     expectedSelectionHash: reviewed.performanceReview.selectionHash });
   const rejected = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;

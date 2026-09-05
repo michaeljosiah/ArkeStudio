@@ -1,3 +1,7 @@
+import { FullSha256Schema } from "./audio.js";
+import { RehearsalIdSchema } from "./rehearsal.js";
+import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
+import { PerformanceDeliverySchema } from "./voice.js";
 import { CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
@@ -1316,6 +1320,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
     confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
     warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("plan-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("prepare-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema,
+    confirmationToken: FullSha256Schema, confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("save-rehearsal-note"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, rehearsalId: RehearsalIdSchema, expectedHash: z.string().nullable(), lineId: z.string().min(1).max(300), body: z.string().trim().min(1).max(4000).nullable() }).strict(),
+  z.object({ kind: z.literal("designate-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative(), label: z.string().trim().min(1).max(80),
+    delivery: PerformanceDeliverySchema, role: PerformanceReferenceRoleSchema, productionId: SlugSchema, performanceId: PerformanceIdSchema,
+    expectedPerformanceHash: FullSha256Schema, acceptedReviewAt: z.string(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), noMusic: z.boolean() }).strict(),
+  z.object({ kind: z.literal("clear-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative() }).strict(),
   z.object({ kind: z.literal("prepare-performance-generation"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),

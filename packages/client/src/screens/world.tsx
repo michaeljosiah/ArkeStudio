@@ -1,3 +1,4 @@
+import { PerformanceBiblePanel } from "../components/performance-bible-panel.js";
 import { CharacterVoiceSamplePanel } from "../components/character-voice-sample.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
@@ -2602,6 +2603,7 @@ export function VoicePickerScreen() {
                 </span>
               )}
             </div>
+            {world && sheet && <PerformanceBiblePanel key={`${world.meta.worldId}/${sheet.id}/bible`} world={world} sheet={sheet} />}
             {world && sheet && <CharacterVoiceSamplePanel key={`${world.meta.worldId}/${sheet.id}`} world={world} sheet={sheet} />}
             <h2>Text-to-speech voice</h2>
             <DegradedBanner component="voice" />

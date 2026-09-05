@@ -1,3 +1,6 @@
+import { planTableRead, prepareLocalTableRead, finalizeTableReadCache } from "./audio/table-read.js";
+import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
+import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
   finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
 import { reviewPerformance } from "./audio/performance-review.js";
@@ -2924,6 +2927,7 @@ export class Coordinator {
       return;
     }
     const finalize = async (store: WorldStore) => {
+      if (job.target.kind === "table-read-cache") { await finalizeTableReadCache(store, job); return; }
       if (job.target.kind === "performance-generation") {
         const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
         await finalizePerformanceGenerationJob(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
@@ -11694,6 +11698,47 @@ export class Coordinator {
           ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "plan-table-read":
+      case "prepare-table-read": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId || !this.opts.manifest) throw new Error("Open this rehearsal world first.");
+          const prepared = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+          if (msg.kind === "prepare-table-read") {
+            if (prepared.plan.confirmationToken !== msg.confirmationToken || prepared.plan.totalEstimatedMicroUsd !== msg.confirmedMicroUsd) {
+              this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan,
+                reason: "Preparation changed. Review the updated plan before confirming." }); return;
+            }
+            const failures = this.voiceService ? await prepareLocalTableRead(store, this.voiceService, prepared.local) : prepared.local.map(() => "Local synthesis is unavailable.");
+            const scene = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.scenes.find(s => s.id === msg.sceneId);
+            if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
+            if (prepared.cloud.length) await this.enqueueBatch(msg.requestId, msg.kind, prepared.cloud);
+            const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+            this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: refreshed.plan,
+              reason: failures.length ? `${failures.length} local lines could not be prepared. Other prepared lines remain available.` : "Preparation processed. Ready cache audio remains separate from performance review." });
+          } else this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan, reason: "Review missing lines and the aggregate estimate." });
+        } catch {
+          this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused", reason: "Table read preparation could not complete. Refresh the authored lines, voices and provider readiness. Existing work is retained." });
+        }
+        return;
+      }
+      case "save-rehearsal-note":
+      case "designate-performance-bible":
+      case "clear-performance-bible": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the rehearsal world first.");
+          if (msg.kind === "save-rehearsal-note") await saveRehearsalNote(store, msg);
+          else await writePerformanceBible(store, msg);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            status: "saved", reason: msg.kind === "save-rehearsal-note" ? "Rehearsal note saved." : "Performance bible updated. Voice assignment and designated sample are unchanged." });
+        } catch {
+          this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            status: "refused", reason: "Update refused. Refresh the source and history, then check acceptance, reference rights and quality." });
+        }
         return;
       }
       case "prepare-performance-generation": {

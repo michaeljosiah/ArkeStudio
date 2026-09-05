@@ -188,8 +188,6 @@ export const CapabilityAvailabilitySchema = z
   .object({
     capability: CapabilitySchema,
     available: z.boolean(),
-    /** Reported only by an authenticated account probe; submit revalidates. */
-    zeroRetention: z.boolean().optional(),
     /** Providers that currently unlock it. */
     via: z.array(ProviderIdSchema),
     reason: z.string().optional(),

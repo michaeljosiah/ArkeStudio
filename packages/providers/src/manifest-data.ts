@@ -14,7 +14,7 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 20,
+  manifestVersion: 21,
   generated: "2026-09-05",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
@@ -187,13 +187,14 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
     },
     {
+      // Reviewed 2026-09-05: https://elevenlabs.io/pricing/api — $0.10/1,000 characters.
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3" },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3", maxPromptChars: 10000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
     },
     {
       // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.

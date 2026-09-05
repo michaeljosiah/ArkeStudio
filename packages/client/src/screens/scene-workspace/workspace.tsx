@@ -1,3 +1,4 @@
+import { TableReadPanel } from "../../components/table-read-panel.js";
 import { PerformancePanel } from "../../components/performance-panel.js";
 import { planForScene } from "../../lib/scene-plan.js";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -461,6 +462,7 @@ export function SceneWorkspace({
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
+          <TableReadPanel key={`${world.meta.worldId}/${scene.id}/${scene.version}`} world={world} production={production} scene={scene} onRecord={shotId => setSubject({ kind: "shot", shotId: shotId as never })} />
           {focus && <PerformancePanel key={`${world.meta.worldId}/${scene.id}/${scene.version}/${focus}`} world={world} production={production} scene={scene} shotId={focus} />}
 
           {/*

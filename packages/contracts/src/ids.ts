@@ -44,6 +44,7 @@ export const GenesisIdSchema = z
 export const ID_PREFIXES = {
   take: "tk",
   performance: "pf",
+  rehearsal: "rh",
   job: "jb",
   pass: "ps",
   proposal: "pr",

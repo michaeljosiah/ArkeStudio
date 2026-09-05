@@ -42,7 +42,7 @@ function episode(id: string, order: number, scenes: string[]): Episode {
 
 function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
   return {
-    performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
+    rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
     meta: { id: "bell-watch", format: "video", medium: "video", kind: "microdrama", title: "Bell Watch", status: "in-progress", frameRate: 25, failureModes: [], created: AT, updated: AT },
     story: null,
     season: null,

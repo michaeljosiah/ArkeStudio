@@ -42,9 +42,9 @@ export async function purgePerformance(store: WorldStore, productionId: string, 
     if (events.some(p => p.performanceId === id)) return;
     const production = store.getBundle().productions.find(p => p.meta.id === productionId);
     if (!production) throw new Error("This production is unavailable.");
-    if (store.getBundle().problems.some(problem => problem.path.startsWith(`productions/${productionId}/performance`))) throw new Error("Repair performance metadata before purging.");
+    if (store.getBundle().problems.some(problem => (problem.path.startsWith(`productions/${productionId}/performance`) || problem.path.endsWith("/performance-bible.jsonl")))) throw new Error("Repair performance metadata before purging.");
     const { performances, ...authorities } = production;
-    const references = [authorities, ...performances.filter(p => p.id !== id), ...jobs.filter(j => j.worldId === store.worldId)];
+    const references = [store.getBundle().performanceBibles ?? [], authorities, ...performances.filter(p => p.id !== id), ...jobs.filter(j => j.worldId === store.worldId)];
     if (references.some(value => JSON.stringify(value).includes(id))) throw new Error("This performance is referenced by a performance, selection, review, designation or job. Remove its dependencies first.");
     const prefix = `productions/${productionId}/performances/${id}`;
     PerformanceRecordSchema.parse(JSON.parse(await readFile(await audioWorldPath(store.dir, `${prefix}/performance.json`), "utf8")));

@@ -25,7 +25,7 @@ export function performanceTarget(store: WorldStore, input: { productionId: stri
   if (!scene) throw new Error("This scene is no longer available.");
   const line = resolvePerformanceLine(scene, input.shotId, input.blockId);
   if (!line.ok) throw new Error(line.reason);
-  const sheet = store.getBundle().sheets.find(s => s.id === line.speakerSheetId && s.type === "character");
+  const sheet = store.getBundle().sheets.find(s => s.id === line.speakerSheetId && s.type === "character" && !s.retired);
   if (!sheet) throw new Error("The line's speaking character is missing.");
   const target = PerformanceTargetSchema.parse({ productionId: input.productionId, sceneId: input.sceneId, shotId: input.shotId, sceneVersion: scene.version, speakerSheetId: sheet.id,
     ...(line.blockId ? { blockId: line.blockId } : {}), authoredTextHash: audioHash(Buffer.from(line.text)) });

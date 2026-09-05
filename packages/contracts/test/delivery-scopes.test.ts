@@ -84,7 +84,7 @@ function take(id: string, shotId: string) {
 /** Two scenes in two episodes: sc_a (sh_1 2s, sh_2 1.5s) and sc_b (sh_3 4s, sh_4 2s) at 25 fps. */
 function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
   return {
-    performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
+    rehearsals: [], performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
     meta: { id: "bell-watch", format: "video", medium: "video", kind: "microdrama", title: "Bell Watch", status: "in-progress", frameRate: 25, failureModes: [], created: AT, updated: AT },
     story: null,
     season: null,
