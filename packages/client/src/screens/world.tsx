@@ -796,15 +796,19 @@ function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
  * Each ledger keeps its own address and presentation; this row is how you move between them,
  * with the counts carried so an empty kind says so before you visit it.
  */
-function SheetKindNav({ active }: { active: Sheet["type"] }) {
+function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
   const { worldId } = useParams();
   const world = useWorld();
-  const count = (t: Sheet["type"]) =>
-    worldSheets(world?.sheets ?? []).filter((s) => s.type === t && s.retired !== true).length;
+  // Props sit beside the sheets they are deliberately not one of (design turn 105; issue 537).
+  const count = (t: Sheet["type"] | "prop") =>
+    t === "prop"
+      ? (world?.props.length ?? 0)
+      : worldSheets(world?.sheets ?? []).filter((s) => s.type === t && s.retired !== true).length;
   const items = [
     ["character", "Characters", "cast"],
     ["location", "Locations", "locations"],
     ["faction", "Factions", "factions"],
+    ["prop", "Props", "props"],
   ] as const;
   return (
     <nav className="fy-sheetkinds" aria-label="Kind of sheet">

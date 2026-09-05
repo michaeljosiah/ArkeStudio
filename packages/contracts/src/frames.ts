@@ -1238,6 +1238,25 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       replaceExistingName: z.boolean().optional(),
     })
     .strict(),
+  /** A prop is born as a name with no states (design turn 105; issue 537); states are added by name. */
+  z.object({ kind: z.literal("create-prop"), worldId: UlidSchema, name: z.string().trim().min(1).max(80) }).strict(),
+  z
+    .object({
+      kind: z.literal("add-prop-state"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      name: z.string().trim().min(1).max(80),
+    })
+    .strict(),
+  /** Ask the host picker for one image for a prop state; it lands as a pending take, never straight as the reference. */
+  z
+    .object({
+      kind: z.literal("import-prop-state-candidate"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      stateId: PropStateIdSchema,
+    })
+    .strict(),
   /**
    * Accept a candidate or a pending take as one prop state's reference (design turn 105; issue
    * 535). `replace` is the confirmation a state that already has its reference requires — the

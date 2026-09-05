@@ -1,6 +1,6 @@
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { PropSchema, type Prop, type Take } from "@arke-studio/contracts";
+import { newId, PropSchema, type Prop, type PropState, type Take } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -117,4 +117,25 @@ export async function acceptPropStateReference(
   // its accept only reappears as a choice already made.
   if (candidatePath !== null) await rm(toExtendedLength(join(store.dir, fromPortable(candidatePath)))).catch(() => {});
   return { status: "accepted", takeId: accepted.id };
+}
+
+/** A prop is born as a name and an empty, ordered list of states — nothing owned beyond them (turn 105f; issue 537). */
+export async function createProp(store: WorldStore, name: string): Promise<Prop> {
+  const prop: Prop = { id: newId("prop"), name: name.trim(), states: [] };
+  await commitReferenceRecord(store, [
+    { path: propPath(prop.id), action: "create", content: `${JSON.stringify(prop, null, 2)}\n`, baseHash: null },
+  ]);
+  return prop;
+}
+
+/** One more named state at the end of the order; its id is what shots will cite, so the name may change later. */
+export async function addPropState(store: WorldStore, propId: string, name: string): Promise<PropState | null> {
+  const found = await readProp(store, propId);
+  if (!found) return null;
+  const state: PropState = { id: newId("pst"), name: name.trim() };
+  const next: Prop = { ...found.prop, states: [...found.prop.states, state] };
+  await commitReferenceRecord(store, [
+    { path: propPath(propId), action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(found.raw) },
+  ]);
+  return state;
 }

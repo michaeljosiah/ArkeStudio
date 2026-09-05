@@ -33,6 +33,7 @@ import {
   ReplaceMainPhotoScreen,
 } from "./screens/character-reference.js";
 import { LocationReferenceScreen } from "./screens/location-reference.js";
+import { PropDetailScreen, PropsScreen } from "./screens/props.js";
 import {
   ArtifactsScreen,
   CanonEntryScreen,
@@ -232,6 +233,8 @@ export function App() {
           <Route path="locations/new" element={<NewLocationScreen />} />
           <Route path="locations/:sheetId" element={<LocationDetailScreen />} />
           <Route path="locations/:sheetId/reference" element={<LocationReferenceScreen />} />
+          <Route path="props" element={<PropsScreen />} />
+          <Route path="props/:propId" element={<PropDetailScreen />} />
           <Route path="factions" element={<FactionsScreen />} />
           <Route path="factions/:sheetId" element={<LocationDetailScreen />} />
           <Route path="canon" element={<CanonScreen />} />

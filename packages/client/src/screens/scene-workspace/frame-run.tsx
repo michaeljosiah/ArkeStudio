@@ -16,6 +16,7 @@ import {
   type ProductionBundle,
   type SceneRecord,
   type WorldBundle,
+  resolvePropStates,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
@@ -172,6 +173,20 @@ function GenerateFramesDialogOpen({
     : models.map((model) => ({ id: model.id, model }));
   const unavailable = knownModel !== null && !usable.some((candidate) => candidate.id === knownModel.id);
   const included = scope === "all" ? shots : missing;
+  // Turn 105's strips (issue 537): a cited prop with no state, or a state with no accepted image,
+  // sends the description alone — said before spend and acknowledged, never inferred around.
+  const propIssues = world.props.length === 0
+    ? []
+    : included.flatMap((shot) =>
+        resolvePropStates(shot, world.props).flatMap((entry) =>
+          entry.stateId === null
+            ? [{ key: `${shot.id}:${entry.propId}`, label: "UNRESOLVED", text: `no state chosen for ${entry.propName} in shot ${shot.number} · sending description only` }]
+            : entry.referenceFile === null
+              ? [{ key: `${shot.id}:${entry.propId}`, label: "NO REFERENCE", text: `${entry.propName} · ${entry.stateName} has no accepted image in shot ${shot.number} · sending description only` }]
+              : [],
+        ),
+      );
+  const [propsAcknowledged, setPropsAcknowledged] = useState(false);
   const cap = boardCap(videoModel);
   const pack = boardsForScene({
     scene,
@@ -276,7 +291,8 @@ function GenerateFramesDialogOpen({
     quote.sceneVersion === scene.version &&
     quote.blockedReason === null &&
     quote.signature !== null &&
-    quote.estimatedMicroUsd !== null;
+    quote.estimatedMicroUsd !== null &&
+    (propIssues.length === 0 || propsAcknowledged);
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
   const aspectVerdict = knownModel === null ? null : aspectSupport(knownModel, aspect);
   const compatibleAlternative = aspectVerdict?.ok === false
@@ -453,6 +469,25 @@ function GenerateFramesDialogOpen({
                 </article>
               ))}
             </div>
+          </section>
+        )}
+
+        {propIssues.length === 0 ? null : (
+          <section className="fy-swgen__section" data-testid="prop-strips">
+            <h3>Props</h3>
+            {propIssues.map((issue) => (
+              <p key={issue.key} className="fy-swgen__guard" role="status">
+                <strong>{issue.label}</strong> · {issue.text}
+              </p>
+            ))}
+            <label className="fy-swgen__hint">
+              <input
+                type="checkbox"
+                checked={propsAcknowledged}
+                onChange={(e) => setPropsAcknowledged(e.target.checked)}
+              />{" "}
+              Send these on the description alone
+            </label>
           </section>
         )}
 

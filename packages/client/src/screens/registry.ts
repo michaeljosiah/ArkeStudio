@@ -52,6 +52,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "location-detail", samplePath: `${W}/locations/the-vigil` },
   { id: "location-reference", samplePath: `${W}/locations/the-vigil/reference` },
   { id: "new-location", samplePath: `${W}/locations/new` },
+  { id: "props", samplePath: `${W}/props` },
   { id: "factions", samplePath: `${W}/factions` },
   { id: "canon", samplePath: `${W}/canon` },
   { id: "canon-entry", samplePath: `${W}/canon/CANON-002` },

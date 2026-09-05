@@ -345,9 +345,10 @@ import {
   recordUploadedCharacterSheetTake,
   recordUploadedLocationViewTake,
   referenceReviewDecision,
+  recordUploadedPropImage,
 } from "./references/takes.js";
 import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
-import { acceptPropStateReference } from "./references/props.js";
+import { acceptPropStateReference, addPropState, createProp } from "./references/props.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
@@ -11317,6 +11318,38 @@ export class Coordinator {
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("location-view", msg.sheetId));
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "create-prop": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await createProp(store, msg.name).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "add-prop-state": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await addPropState(store, msg.propId, msg.name).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "import-prop-state-candidate": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        if (!source || chosen.length > 1) return;
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store) || "error" in picked) return;
+        // Lands as a pending take under the prop, exactly where a location view lands: accepting
+        // is where a state that already has its reference asks first, and doing both in one
+        // motion would put that question behind a file dialog that has already closed.
+        const media = `prop-state-upload-${Date.now().toString(36)}${picked.extension}`;
+        await recordUploadedPropImage(store, msg.propId, msg.stateId, media, picked.data).catch(() => null);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "accept-prop-state": {
