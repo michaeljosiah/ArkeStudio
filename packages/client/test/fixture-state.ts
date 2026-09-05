@@ -327,6 +327,7 @@ const state: ClientState = {
       },
     ],
     referenceCandidates: {},
+    props: [],
     referenceTakes: [],
     referenceReviews: [],
     artifacts: [

@@ -388,13 +388,15 @@ export function referenceReviewDecision(
   decision: "accept" | "reject",
   input: { field?: string; note?: string } = {},
 ): ReviewDecision {
-  if (!take.reference) throw new Error(`${take.id} is not a reference take`);
+  // A prop-state take is a reference take that names no sheet (issue 535): it is decided the
+  // same way, and a rejection of one has no sheet field to cite.
+  if (!take.reference && !take.prop) throw new Error(`${take.id} is not a reference take`);
   const review: ReviewDecision = {
     ts: now,
     takeId: take.id,
     decision,
     by: "user",
-    ...(decision === "reject"
+    ...(decision === "reject" && take.reference
       ? {
           citation: {
             sheet: take.reference.sheetId,
@@ -405,4 +407,73 @@ export function referenceReviewDecision(
       : {}),
   };
   return review;
+}
+
+/** A prop-state take waiting on its accept (issue 535): the main photo's pending rule, keyed by prop and state. */
+export function pendingPropStateTake(
+  takes: readonly Take[],
+  reviews: readonly ReviewDecision[],
+  takeId: Take["id"],
+  propId: string,
+  stateId: string,
+): Take | null {
+  const take = takes.find(
+    (candidate) =>
+      candidate.id === takeId &&
+      candidate.kind === "prop-state" &&
+      candidate.prop?.propId === propId &&
+      candidate.prop.stateId === stateId,
+  );
+  if (!take || reviews.some((review) => review.takeId === take.id)) return null;
+  return take;
+}
+
+/**
+ * The take a hand-carried prop reference gets (issue 535): `uploadedTake`'s shape without a
+ * sheet to version — a prop is not one, and the record the accept commits is its identity.
+ * Filed under `references/<propId>/takes/`, the directory shape the scan already walks.
+ */
+export async function recordUploadedPropTake(
+  store: WorldStore,
+  propId: string,
+  stateId: string,
+  candidatePath: string,
+): Promise<Take> {
+  const bundle = store.getBundle();
+  const existing = bundle.referenceTakes.find(
+    (take) =>
+      take.kind === "prop-state" &&
+      take.prop?.propId === propId &&
+      take.prop.stateId === stateId &&
+      take.provider === "user" &&
+      take.params["uploadedCandidate"] === candidatePath,
+  );
+  if (existing) return existing;
+  const now = store.now();
+  const media = basename(candidatePath);
+  const take: Take = {
+    id: `tk_${ulid()}` as Take["id"],
+    coversShots: [],
+    kind: "prop-state",
+    prop: { propId, stateId },
+    provider: "user",
+    model: "upload",
+    provenance: {
+      canonRevision: bundle.meta.canonRevision,
+      sheets: {},
+      artDirectionVersion: bundle.artDirection.version,
+    },
+    references: [],
+    params: { uploadedCandidate: candidatePath },
+    cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
+    dispatchedAt: now,
+    completedAt: now,
+    media,
+  };
+  await store.gateOp(() =>
+    writeTakeDirectory(store, propId, take, async (dir) => {
+      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+    }),
+  );
+  return take;
 }
