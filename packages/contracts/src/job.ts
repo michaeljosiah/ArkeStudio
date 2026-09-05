@@ -193,14 +193,17 @@ export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "
 
 /** Rebuild the document identity frozen into a durable voice-preview job. */
 export function voiceJobReadIdentity(job: Pick<Job, "params">): {
-  purpose: "candidate-preview" | "sheet-section" | "bible-section";
+  purpose: "candidate-preview" | "sheet-section" | "bible-section" | "prose";
   sheetId?: string;
 } {
   const rawPurpose = job.params["purpose"];
-  const purpose = rawPurpose === "sheet-section" || rawPurpose === "bible-section"
-    ? rawPurpose
-    : "candidate-preview";
-  if (purpose === "bible-section") return { purpose };
+  const purpose =
+    rawPurpose === "sheet-section" || rawPurpose === "bible-section" || rawPurpose === "prose"
+      ? rawPurpose
+      : "candidate-preview";
+  // Neither belongs to a sheet: the bible is the world's, and a prose read addresses a canon
+  // entry, a production record or a conversation reply (issue 857).
+  if (purpose === "bible-section" || purpose === "prose") return { purpose };
   const sheetId = job.params["sheetId"];
   return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
 }

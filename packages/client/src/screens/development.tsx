@@ -15,6 +15,7 @@ import { mediaUrl } from "../lib/media.js";
 import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
+import { ReadAloud } from "../components/read-aloud.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
@@ -247,20 +248,32 @@ export function DevelopmentWorkspace() {
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
           Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
           editing it is the Series' own accept, never a side effect of a season edit. */}
+      {/* Each of the three is a block somebody reads, so each carries its own read-aloud
+          (issue 857); an unwritten one renders no control, because there is nothing to hear. */}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr) 260px", gap: 24 }}>
-        <div>
+        <div className="fy-texthost">
           <div className="fy-mono">THE QUESTION IT ANSWERS</div>
           <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
             {season?.question ?? "Not asked yet."}
           </div>
+          <ReadAloud
+            source={{ of: "season", productionId: prodId ?? "", field: "question" }}
+            title={`${production.meta.title} · the question it answers`}
+            text={season?.question ?? ""}
+          />
         </div>
-        <div>
+        <div className="fy-texthost">
           <div className="fy-mono">HOW IT ENDS</div>
           <div style={{ font: "400 13px/1.6 var(--font-sans)", marginTop: 5 }}>
             {season?.ending ?? "Not settled yet."}
           </div>
+          <ReadAloud
+            source={{ of: "season", productionId: prodId ?? "", field: "ending" }}
+            title={`${production.meta.title} · how it ends`}
+            text={season?.ending ?? ""}
+          />
         </div>
-        <div>
+        <div className="fy-texthost">
           <div className="fy-mono">SERIES ENGINE · READ-ONLY</div>
           <div
             style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}
@@ -269,6 +282,13 @@ export function DevelopmentWorkspace() {
               ? (series.engine ?? `${series.title} has no engine written yet.`)
               : "This production belongs to no Series."}
           </div>
+          {series && (
+            <ReadAloud
+              source={{ of: "series", seriesId: series.id }}
+              title={`${series.title} · engine`}
+              text={series.engine ?? ""}
+            />
+          )}
         </div>
       </div>
       {/*

@@ -294,6 +294,7 @@ import {
 import {
   normalizeSpeechText,
   authoritativeBibleSpeech,
+  authoritativeProseSpeech,
   authoritativeSheetSpeech,
   cachedVoiceAudioLooksRight,
   previewCacheFile,
@@ -1073,7 +1074,7 @@ export class Coordinator {
     confirmationToken?: string;
     /** Already resolved and normalised by the caller — this method never reads a document. */
     text: string;
-    purpose: "sheet-section" | "bible-section";
+    purpose: "sheet-section" | "bible-section" | "prose";
     sectionHeading: string;
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
@@ -10516,6 +10517,74 @@ export class Coordinator {
           sectionHeading: msg.sectionHeading,
           subject: { id: "bible", version: bible.version },
           fail: failBible,
+        });
+        return;
+      }
+      case "read-prose": {
+        /*
+         * Read-aloud for the rest of the world's authored prose (issue 857).
+         *
+         * The shape is the sheet and bible reads': resolve the words from the record on disk,
+         * fail by name if the source has moved, then hand the text to the same narrator. What
+         * differs is only how many kinds of record it can address.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const failProse = (error: string, characters = 0, heading = "Read aloud") =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetVersion: 1,
+            purpose: "prose",
+            sectionHeading: heading,
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        const source = msg.source;
+        let resolved: { text: string; heading: string; version: number; subjectId: string };
+        try {
+          if (source.of === "reply") {
+            /*
+             * A conversation is an event log, not part of the world bundle, so this one arm
+             * loads. The window is the default one the screen was drawn from; a reply that has
+             * paged out of it refuses rather than reading a different message, because the id
+             * is the only thing that says which reply was asked for.
+             */
+            const loaded = await new WorldChatService(store.dir).load(source.conversationId);
+            const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
+            if (!message) throw new Error("That reply is no longer in this conversation.");
+            if (message.role !== "studio") throw new Error("Only Arke's replies are read aloud.");
+            const text = normalizeSpeechText(message.text);
+            if (!text) throw new Error("Nothing to read yet.");
+            resolved = { text, heading: "Arke", version: 1, subjectId: source.messageId };
+          } else {
+            resolved = authoritativeProseSpeech(store.getBundle(), source);
+          }
+        } catch (error) {
+          failProse(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          text: resolved.text,
+          purpose: "prose",
+          sectionHeading: resolved.heading,
+          subject: { id: resolved.subjectId, version: resolved.version },
+          fail: (error, characters) => failProse(error, characters, resolved.heading),
         });
         return;
       }

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { act } from "react";
+import { act, type ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 
@@ -40,7 +40,9 @@ async function rightClick(target: Element): Promise<Event> {
 
 async function withMenu(
   body: (container: HTMLElement) => Promise<void>,
-  markup: (props: Record<string, never>) => React.ReactElement,
+  // `ReactElement`, not a bare `JSX.Element`: React 19's types no longer declare the global
+  // JSX namespace, so the bare spelling typechecks nowhere the app actually builds.
+  markup: (props: Record<string, never>) => ReactElement,
 ): Promise<void> {
   const container = dom.document.createElement("div");
   dom.document.body.appendChild(container);

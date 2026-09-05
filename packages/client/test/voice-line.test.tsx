@@ -590,6 +590,20 @@ describe("reading a sheet aloud", () => {
     assert.equal(subs.length, 2, "both clip builders are accounted for");
     for (const sub of subs) assert.equal(sub, "narratorLabel", "each names who is reading");
   });
+
+  it("reaches a location's own section, not characters alone (issue 857)", () => {
+    // The read was drawn beside a character's two lead paragraphs, so a location sheet and a
+    // faction sheet — whose whole body is one authored section — had no way to be listened to.
+    const html = render(`/w/${FIXTURE_WORLD_ID}/locations/the-vigil`);
+    assert.match(html, /Read aloud/);
+  });
+});
+
+describe("read aloud reaches the prose people read (issue 857)", () => {
+  it("offers a canon entry's statement", () => {
+    const html = render(`/w/${FIXTURE_WORLD_ID}/canon/CANON-002`);
+    assert.match(html, /Read aloud/);
+  });
 });
 
 describe("the Library's audio rows report what exists", () => {
