@@ -576,7 +576,7 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
   });
 
   it("per character", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 300000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
   });
 
   it("per token, both directions, ceiling at the millionth", () => {
@@ -1239,22 +1239,16 @@ describe("the reference route's own ceiling (probed 2026-08-16)", () => {
   });
 });
 
-describe("a direct provider's row IS its own id (ElevenLabs 400, 2026-08-17)", () => {
-  /**
-   * ElevenLabs answered `An invalid ID has been received: 'eleven-v3'` to every synthesis this
-   * app has ever sent, because the row's id travelled as `model_id`. Only fal needs a route
-   * map — openai and elevenlabs send `request.model` straight through, so for them the
-   * catalogue id and the provider's id are the same string or nothing works.
-   */
-  it("names ElevenLabs models the way ElevenLabs names them", () => {
+describe("direct voice models declare the exact provider wire spelling", () => {
+  it("resolves explicit app aliases before sending an ElevenLabs model id", () => {
     for (const m of SHIPPED_MANIFEST.models.filter((x) => x.provider === "elevenlabs")) {
-      assert.match(m.id, /^eleven_[a-z0-9_]+$/, `${m.id} is spelled the way the provider spells it`);
-      assert.doesNotMatch(m.id, /-/, "hyphens are this catalogue's house style, not ElevenLabs'");
+      assert.match(m.providerModelId ?? m.id, /^eleven_[a-z0-9_]+$/, `${m.id} has a valid provider spelling`);
     }
+    assert.equal(model("eleven-v3").providerModelId, "eleven_v3");
   });
 
   it("still prices the row in the unit it is billed in", () => {
-    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 300000);
+    assert.equal(estimateMicroUsd(model("eleven_multilingual_v2"), { characters: 1000 }), 100000);
   });
 });
 

@@ -361,6 +361,7 @@ const REFERENCE_ORIGINS: Record<string, Omit<JobOrigin, "path"> & { segment: str
   "location-view-candidate": { segment: "reference", label: "Location views", where: "the location's reference tab" },
   "reference-tile": { segment: "kit", label: "Reference kit", where: "the reference kit" },
   "establish-candidate": { segment: "kit", label: "Reference kit", where: "the reference kit" },
+  "character-voice-sample": { segment: "voice", label: "Voice sample", where: "the character voice screen" },
   "voice-preview": { segment: "voice", label: "Voice", where: "the voice screen" },
 };
 
@@ -414,6 +415,14 @@ export function jobOrigin(job: Job): JobOrigin | null {
       label: "Scene workspace",
       where: "the scene workspace",
     };
+  }
+  if (job.productionId && job.target.kind === "table-read-cache" && typeof job.params.tableReadSceneId === "string") {
+    return { path: `/w/${job.worldId}/p/${job.productionId}/scenes/${job.params.tableReadSceneId}`, label: "Table read", where: "the scene table read" };
+  }
+  if (job.productionId && ["performance-conversion", "performance-generation"].includes(job.target.kind)) {
+    const input = (job.params.performanceConversion ?? job.params.performanceGeneration) as { target?: { sceneId?: string } } | undefined;
+    if (input?.target?.sceneId) return { path: `/w/${job.worldId}/p/${job.productionId}/scenes/${input.target.sceneId}`,
+      label: "Performance", where: "the scene's performance panel" };
   }
   // Shots, scene passes, storyboards and lines are the production's. A line is the exception
   // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or

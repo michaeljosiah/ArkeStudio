@@ -1,5 +1,11 @@
+import { assessDialogueShot, dialogueShotFacts, type DialogueDispatchAssessment } from "./dialogue-assessment.js";
+import { referenceAudioAsset, type CharacterAudioPlan } from "./audio-reference.js";
+import type { ModelManifest } from "./manifest.js";
+import { parseMentions } from "./planning.js";
 import type { PropStateProvenance } from "./prop.js";
 import type { ShotPropResolution } from "./planning.js";
+import { resolvedAuthoredDuration } from "./scene.js";
+import { characterAudioInstructions } from "./audio-reference.js";
 import {
   assemblePassBlocks,
   bindingPreamble,
@@ -12,7 +18,6 @@ import {
   type BoundReference,
   type ContinuationPlan,
   type ScenePlan,
-  type ShotPlanEntry,
 } from "./planning.js";
 import {
   continueDispatchFor,
@@ -186,17 +191,6 @@ function askedSeconds(model: ManifestModel, requestedSec: number, what: string, 
   return choice.kind === "asked" ? choice.seconds : requestedSec;
 }
 
-/**
- * The shot plan stretched to the clip that was actually asked for. Segmentation and the
- * per-shot charge split both read these boundaries, so a plan that stops short of the clip
- * hides the tail from review and prorates the money over the wrong total.
- */
-function coverPlan(plan: ShotPlanEntry[], seconds: number): ShotPlanEntry[] {
-  const last = plan[plan.length - 1];
-  if (!last || last.endSec >= seconds) return plan;
-  return [...plan.slice(0, -1), { ...last, endSec: seconds }];
-}
-
 function compiledReferences(
   bound: ScenePlan["shots"][number]["bound"],
   sheets: readonly Sheet[],
@@ -230,6 +224,9 @@ function droppedOf(
 }
 
 export interface CompilePassesInput {
+  manifest?: ModelManifest;
+  assessedAt?: string;
+  acknowledgedRecommendationIds?: string[];
   productionId: string;
   scene: SceneRecord;
   plan: ScenePlan;
@@ -249,6 +246,34 @@ export interface CompilePassesInput {
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   const { productionId, scene, plan, model, world } = input;
+  if (plan.timingProblems?.length) throw new Error(plan.timingProblems.join(" "));
+  const audioPlans = plan.mode === "per-shot" ? plan.shots.map(s => s.audioReferences) : plan.passReferences.map(p => p.audioReferences);
+  const audioProblems = audioPlans.flatMap(a => a?.problems ?? []);
+  if (audioProblems.length) throw new Error(audioProblems.join(" "));
+  if (input.chainWholeSceneFrames && plan.mode === "whole-scene" && audioPlans.slice(1).some(a => a?.references.length)) {
+    throw new Error("Chained frame routes cannot carry character audio references. Use independent referenced passes or explicitly disable audio references.");
+  }
+  const assessments = (shots: readonly import("./scene.js").Shot[], route: CompiledRoute, audio?: CharacterAudioPlan) => {
+    if (model.capability !== "video") return undefined;
+    const endpoint = route.kind === "frame" || route.kind === "continuation" ? route.endpoint
+      : route.kind === "reference" ? model.dispatchEndpoints?.reference : model.dispatchEndpoints?.text;
+    // Routes without an explicit adapter revision have no quality evidence to match.
+    const providerRoute = audio?.route ?? endpoint ?? `${model.provider}/${model.id}`;
+    return Object.fromEntries(shots.map(shot => {
+      const references = (audio?.disabled ? [] : audio?.references ?? []).filter(ref =>
+        "master" in ref ? ref.master.shotId === shot.id : "performance" in ref ? ref.performance.target.shotId === shot.id : ref.sheetId === shot.audio?.speaker);
+      const durations = references.map(ref => referenceAudioAsset(ref).provenance.outputTechnical.durationSec);
+      const facts = dialogueShotFacts(shot, parseMentions(shot.description).filter(id => world.sheets.some(sheet => sheet.id === id && sheet.type === "character")), {
+        frameMode: route.kind === "frame" ? "exact-start-frame" : route.kind === "reference" ? "reference-image" : "none",
+        audioIntent: references.length ? references[0]!.intent : "none",
+        shotDurationSec: resolvedAuthoredDuration(shot), audioDurationSec: durations.length && durations.every(d => d !== undefined) ? Math.max(...durations as number[]) : null,
+      });
+      return [shot.id, assessDialogueShot({ engineVersion: 1, manifestVersion: input.manifest?.manifestVersion ?? 1,
+        modelId: model.id, providerRoute, endpointVersion: model.dispatchEndpoints?.version ?? "unreviewed",
+        now: input.assessedAt ?? `${input.manifest?.generated ?? "2026-09-05"}T00:00:00.000Z`, facts,
+        guidance: input.manifest?.dialogueGuidance ?? [], hardBlocks: [], acknowledgedRecommendationIds: input.acknowledgedRecommendationIds ?? [] }).assessment];
+    }));
+  };
   const styleSource = (overridden: boolean) =>
     overridden
       ? { version: world.artDirection.version, source: "generation", transport: "text" }
@@ -268,6 +293,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
     sheets: Record<string, number>;
     artDirectionVersion: number;
     propStates?: PropStateProvenance[];
+    dialogueAssessments?: Record<string, DialogueDispatchAssessment>;
   } => ({
     canonRevision: world.meta.canonRevision,
     artDirectionVersion: world.artDirection.version,
@@ -353,6 +379,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             ? askedSeconds(model, entry.shot.durationSec, `shot ${entry.shot.number}`, route)
             : undefined;
       const provenance = provenanceFor(entry.budget.carried.map((c) => c.sheetId), entry.propStates);
+      provenance.dialogueAssessments = assessments([entry.shot], route, entry.audioReferences);
       return {
         target: { kind: "shot" as const, id: entry.shot.id, coversShots: [entry.shot.id] },
         model: {
@@ -367,6 +394,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // below comes from the same bound records the preamble numbers, so the stated order
           // and the sent order are one structure rather than two that can drift (R-2, D2).
           prompt: composePrompt(entry.parts),
+          ...(entry.audioReferences && (entry.audioReferences.disabled || entry.audioReferences.references.length) ? { audioReferences: entry.audioReferences } : {}),
           artDirection: styleSource(entry.prompt.overridden),
           // A continued shot sends no images at all: the extend route declares one video field
           // and nothing else, so an empty list here is the accurate description of the request.
@@ -396,7 +424,10 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
                   frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
                 }
               : {}),
-          ...(askedSec !== undefined ? { durationSec: askedSec } : {}),
+          ...(askedSec !== undefined ? { durationSec: askedSec, dispatchTiming: {
+            slotSource: entry.slot?.source ?? "shot-duration", slotDurationSec: resolvedAuthoredDuration(entry.shot), requestedDurationSec: askedSec,
+            providerDurationMode: "requested", providerPaddingSec: Math.max(0, askedSec-resolvedAuthoredDuration(entry.shot)),
+          } } : {}),
           ...size,
           provenance,
         },
@@ -467,6 +498,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       .filter((block) => block.length > 0)
       .join("\n\n");
     const provenance = provenanceFor(passReferencePlan.budget.carried.map((candidate) => candidate.sheetId), passReferencePlan.propStates);
+    provenance.dialogueAssessments = assessments(shotsInPass.map(entry => entry.shot), route, passReferencePlan.audioReferences);
     return {
       target: { kind: "scene-pass" as const, id: scene.id, coversShots: pass.plan.map((p) => p.shotId) },
       model: {
@@ -482,7 +514,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // below are only where we say they are if the model divides the clip where we do.
           structure: passStructure({
             shotCount: pass.plan.length,
-            askedSec: passSeconds,
+            askedSec: pass.durationSec,
             // From the plan, not re-looked-up (issue 389): the dialog showed this plan, and the
             // prompt's stated shape must be the shape the parameters ask for. A chained pass
             // whose frame route locks the ratio states none — the boundary image decides the
@@ -492,12 +524,13 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           }),
           // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
           // numbers its assets. Never both — the route carries one or the other.
-          preamble: chained ? START_FRAME_PREAMBLE : bindingPreamble(passReferencePlan.bound),
+          preamble: chained ? START_FRAME_PREAMBLE : [bindingPreamble(passReferencePlan.bound), passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"),
           body: passBody,
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
           // be the same request (R-9).
           negatives: passReferencePlan.negatives,
         }),
+        ...(passReferencePlan.audioReferences && (passReferencePlan.audioReferences.disabled || passReferencePlan.audioReferences.references.length) ? { audioReferences: passReferencePlan.audioReferences } : {}),
         artDirection: styleSource(false),
         references,
         durationSec: passSeconds,
@@ -509,10 +542,12 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             ([key]) => !(chained && key === "aspect" && chainFrameRoute!.locked.includes("aspect")),
           ),
         ),
-        // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses — which is
-        // why it has to describe the clip that was actually asked for. A pass snapped from 5s to
-        // 6s left a second nobody reviewed and nobody could cut from.
-        shotPlan: coverPlan(pass.plan, passSeconds),
+        // Provider step padding is unused source handle. The authored content boundaries
+        // remain exact, so a paid tail never becomes another shot's time by accident.
+        shotPlan: pass.plan,
+        providerPaddingSec: Math.max(0, passSeconds - pass.durationSec),
+        dispatchTiming: { slotSource: plan.shots.find(s=>s.shot.id===pass.plan[0]?.shotId)?.slot?.source ?? "shot-duration", slotDurationSec: pass.durationSec,
+          requestedDurationSec: passSeconds, providerDurationMode: "requested", providerPaddingSec: Math.max(0,passSeconds-pass.durationSec) },
         provenance,
       },
       references: chained ? [] : compiledReferences(passReferencePlan.bound, world.sheets),

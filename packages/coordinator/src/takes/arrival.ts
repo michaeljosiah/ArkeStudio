@@ -31,6 +31,7 @@ function provenanceOf(job: Job): Provenance {
   // outlives an app update must land as what it was dispatched as.
   return ProvenanceSchema.parse({
     canonRevision: frozen?.canonRevision ?? 0,
+    ...(frozen?.dialogueAssessments ? { dialogueAssessments: frozen.dialogueAssessments } : {}),
     sheets: frozen?.sheets ?? {},
     ...(frozen?.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
     ...(frozen?.sceneId !== undefined ? { sceneId: frozen.sceneId } : {}),

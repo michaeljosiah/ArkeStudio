@@ -1,3 +1,4 @@
+import { createMediaProcessRunner } from "./media-tools.js";
 import { spawn as nodeSpawn } from "node:child_process";
 import {
   createBoundaryFrameMaker,
@@ -22,42 +23,12 @@ type SpawnLike = typeof nodeSpawn;
 
 /** A bounded ffmpeg probe: killed on time or on volume, and never given a shell to interpret. */
 export function createFfmpegProbeRunner(ffmpeg: string, spawn: SpawnLike = nodeSpawn): MediaProbeRunner {
-  return {
-    run: (args, limits) =>
-      new Promise((resolve) => {
-        const child = spawn(ffmpeg, args as string[], { windowsHide: true });
-        let stdout = "";
-        let stderr = "";
-        let timedOut = false;
-        let settled = false;
-
-        const finish = (code: number | null): void => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve({ code, stdout, stderr, timedOut });
-        };
-        const timer = setTimeout(() => {
-          timedOut = true;
-          child.kill("SIGKILL");
-          finish(null);
-        }, limits.timeoutMs);
-        // Held in memory, not spooled: the ceiling that stops a runaway file is the same one
-        // that stops a runaway probe, and a few KiB of frame hashes is the expected size.
-        const capture = (target: "out" | "err") => (chunk: Buffer) => {
-          if (target === "out") stdout += chunk.toString();
-          else stderr += chunk.toString();
-          if (stdout.length + stderr.length > limits.maxOutputBytes) {
-            child.kill("SIGKILL");
-            finish(null);
-          }
-        };
-        child.stdout?.on("data", capture("out"));
-        child.stderr?.on("data", capture("err"));
-        child.on("error", () => finish(null));
-        child.on("exit", (code) => finish(code));
-      }),
-  };
+  const runner = createMediaProcessRunner({ ffmpeg, ffprobe: ffmpeg }, spawn);
+  return { async run(args, limits) {
+    const result = await runner.run("ffmpeg", args, { signal: new AbortController().signal,
+      timeoutMs: limits.timeoutMs, maxStdoutBytes: limits.maxOutputBytes, maxStderrBytes: limits.maxOutputBytes, maxCombinedBytes: limits.maxOutputBytes });
+    return { code: result.code, stdout: new TextDecoder().decode(result.stdout), stderr: result.stderr, timedOut: result.timedOut };
+  } };
 }
 
 /**

@@ -15,6 +15,7 @@ class FakeChild extends EventEmitter {
   killed: string | null = null;
   kill(signal: string): boolean {
     this.killed = signal;
+    queueMicrotask(() => this.emit("close", null));
     return true;
   }
 }
@@ -51,7 +52,7 @@ describe("desktop take-QC wiring (#248)", () => {
 
     child.stdout.emit("data", Buffer.from("#tb 0: 1/24\n"));
     child.stderr.emit("data", Buffer.from(""));
-    child.emit("exit", 0);
+    child.emit("close", 0);
 
     const result = await pending;
     assert.deepEqual(result, { code: 0, stdout: "#tb 0: 1/24\n", stderr: "", timedOut: false });

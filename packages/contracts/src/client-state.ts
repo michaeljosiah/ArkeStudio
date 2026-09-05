@@ -1,3 +1,7 @@
+import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
+import { RehearsalSessionSchema } from "./rehearsal.js";
+import { PerformanceBibleStateSchema } from "./performance-bible.js";
+import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
 import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
@@ -131,6 +135,10 @@ export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 /** A production with everything its screens render. */
 export const ProductionBundleSchema = z
   .object({
+    rehearsals: z.array(RehearsalSessionSchema).default([]),
+    rehearsalHashes: z.record(z.string(), z.string()).optional(),
+    performances: z.array(PerformanceRecordSchema).default([]),
+    performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
@@ -159,6 +167,7 @@ export const ProductionBundleSchema = z
     episodeFiles: z.record(EpisodeIdSchema, z.string().min(1)).default({}),
     takes: z.array(TakeSchema),
     reviews: z.array(ReviewDecisionSchema),
+    feedback: z.array(TakeDialogueFeedbackSchema).optional(),
     selections: SelectionsSchema,
     /** `spine.json`, or null for every production that is not cut to a track (#253). */
     spine: ProductionSpineSchema.nullable().default(null),
@@ -258,6 +267,7 @@ export const WorldBundleSchema = z
     sheets: z.array(SheetSchema),
     canon: z.array(CanonEntrySchema),
     referenceKits: z.array(ReferenceKitSchema),
+    performanceBibles: z.array(PerformanceBibleStateSchema).optional(),
     /** Prop records, references/<propId>/prop.json (design turn 105; issue 535). Defaulted: a read path. */
     props: z.array(PropSchema).default([]),
     referenceTakes: z.array(TakeSchema).default([]),

@@ -71,3 +71,25 @@ export * from "./arke-actions.js";
 export * from "./arke-reads.js";
 export * from "./world-chat-actions.js";
 export * from "./harness-env.js";
+
+export * from "./audio.js";
+
+export * from "./voice-sample.js";
+
+export * from "./audio-reference.js";
+
+export * from "./performance.js";
+
+export * from "./cadence.js";
+
+export * from "./rehearsal.js";
+export * from "./performance-bible.js";
+
+export * from "./dialogue-timing.js";
+
+export * from "./prompt-review.js";
+
+export * from "./shot-visual-facts.js";
+export * from "./provider-guidance.js";
+export * from "./dialogue-assessment.js";
+export * from "./take-feedback.js";

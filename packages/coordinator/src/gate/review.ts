@@ -1,3 +1,4 @@
+import { SceneRecordSchema, orderedShots } from "@arke-studio/contracts";
 import {
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
@@ -79,6 +80,17 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
    * steers drafting. Every schema field is projected; a malformed file returns null and the
    * accept gate refuses it separately.
    */
+  if (/^productions\/[a-z0-9-]+\/scenes\/[^/]+\.json$/.test(path)) {
+    try {
+      const scene = SceneRecordSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>([["Scene JSON", JSON.stringify(scene, null, 2)]]);
+      for (const shot of orderedShots(scene)) {
+        if (shot.visualFacts) fields.set(`Shot ${shot.id} · Authored visual facts`, JSON.stringify(shot.visualFacts, null, 2));
+        if (shot.promptOverride !== undefined) fields.set(`Shot ${shot.id} · Prompt override`, shot.promptOverride.text);
+      }
+      return { label: scene.title, kind: `scene · v${scene.version}`, fields };
+    } catch { return null; }
+  }
   const storyMatch = /^productions\/[a-z0-9-]+\/story\.json$/.exec(path);
   if (storyMatch) {
     try {

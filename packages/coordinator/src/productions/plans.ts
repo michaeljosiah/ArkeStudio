@@ -1,3 +1,4 @@
+import { readCharacterAudioInputs } from "../audio/reference-inputs.js";
 /**
  * Durable scene-dispatch plans (SPEC-024; issue #402).
  *
@@ -100,6 +101,8 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
 }
 
 export interface CreatePlanInput {
+  manifest?: import("@arke-studio/contracts").ModelManifest;
+  acknowledgedRecommendationIds?: string[];
   worldId: string;
   productionId: string;
   scene: SceneRecord;
@@ -122,16 +125,22 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
 
   // Compilation refuses what dispatch would refuse (R-13) — a plan that could not compile does
   // not exist. Whole-scene passes chain behind boundary frames where the model has a route.
+  const chainFrames = input.plan.mode === "whole-scene" && !input.plan.passReferences.some(p => p.audioReferences?.references.length);
   const compiled = compilePasses({
     productionId: input.productionId,
     scene: input.scene,
     plan: input.plan,
     model: input.model,
     world: input.world,
-    chainWholeSceneFrames: input.plan.mode === "whole-scene",
+    chainWholeSceneFrames: chainFrames,
+    manifest: input.manifest, acknowledgedRecommendationIds: input.acknowledgedRecommendationIds, assessedAt: input.clock(),
   });
+  for (const pass of compiled) {
+    if (pass.params.audioReferences !== undefined) await readCharacterAudioInputs(store, {
+      model: pass.model.id, provider: pass.model.provider, params: pass.params });
+  }
   if (compiled.length === 0) throw new Error("nothing to dispatch — the plan compiled no passes");
-  const dependencies = chainedDependencies(input.plan.mode, input.model, compiled.length);
+  const dependencies = chainFrames ? chainedDependencies(input.plan.mode, input.model, compiled.length) : compiled.map(() => []);
   const aggregate: DispatchPlan = DispatchPlanSchema.parse({
     planId: `pl_${ulid()}`,
     requestId: input.requestId,

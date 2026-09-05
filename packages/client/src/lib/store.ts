@@ -1,3 +1,5 @@
+import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
+import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
@@ -139,6 +141,7 @@ interface StoreState {
     {
       requestId: string;
       prompt: string;
+      promptReviewId?:string; modelId?:string; fixedConstraints?:string; candidate?:string; review?:PromptReview; reason?:string; sources?:PromptSourceSnapshot[];
       carried: Array<{ name: string; role: string }>;
       dropped: Array<{ name: string; reason: string }>;
     }
@@ -344,6 +347,25 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type DialogueResult = Extract<DomainEvent, { type: "dialogue.result" }>;
+const dialogueListeners = new Set<(result: DialogueResult) => void>();
+export function subscribeDialogueResults(listener: (result: DialogueResult) => void): () => void { dialogueListeners.add(listener); return () => { dialogueListeners.delete(listener); }; }
+export type RehearsalResult = Extract<DomainEvent, { type: "rehearsal.result" }>;
+const rehearsalListeners = new Set<(result: RehearsalResult) => void>();
+export function subscribeRehearsalResults(listener: (result: RehearsalResult) => void): () => void { rehearsalListeners.add(listener); return () => { rehearsalListeners.delete(listener); }; }
+export type PerformanceResult = Extract<DomainEvent, { type: "performance.result" }>;
+const performanceListeners = new Set<(result: PerformanceResult) => void>();
+export function subscribePerformanceResults(listener: (result: PerformanceResult) => void): () => void { performanceListeners.add(listener); return () => { performanceListeners.delete(listener); }; }
+export type VoiceSampleResult = Extract<DomainEvent, { type: "voice.sample-result" }>;
+const voiceSampleListeners = new Set<(result: VoiceSampleResult) => void>();
+export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void {
+  voiceSampleListeners.add(listener); return () => { voiceSampleListeners.delete(listener); };
+}
+export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, { kind: "generate-character-voice-sample" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-character-voice-sample");
+  if (!send({ kind: "generate-character-voice-sample", ...input, requestId })) { pendingQueueRequests.delete(requestId); return null; }
+  return requestId;
+}
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
@@ -913,6 +935,10 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "dialogue.result") for (const listener of dialogueListeners) listener(event);
+    if (event.type === "rehearsal.result") for (const listener of rehearsalListeners) listener(event);
+    if (event.type === "performance.result") for (const listener of performanceListeners) listener(event);
+    if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }
@@ -1050,6 +1076,7 @@ function handleFrame(json: string): void {
         [event.worldId]: {
           requestId: event.requestId,
           prompt: event.prompt,
+          promptReviewId:event.promptReviewId,modelId:event.modelId,fixedConstraints:event.fixedConstraints,candidate:event.candidate,review:event.review,reason:event.reason,sources:event.sources,
           carried: event.carried,
           dropped: event.dropped,
         },
@@ -1635,13 +1662,15 @@ export function genesisAttachFiles(genesisId: string): void {
  * the coordinator reads a present prompt as "the author has decided", and would then skip the
  * art-director rewrite for every generation whose box was merely opened and closed.
  */
-export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string } = {}): void {
+export function generateWorldImage(worldId: string, opts: { modelId?: string; prompt?: string; promptReviewId?:string; count?:number } = {}): void {
   send({
     kind: "generate-world-image",
     worldId,
     requestId: queueRequest("generate-world-image"),
     ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
     ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
+    ...(opts.promptReviewId?{promptReviewId:opts.promptReviewId}:{}),
+    ...(opts.count!==undefined?{count:opts.count}:{}),
   });
 }
 
@@ -1965,8 +1994,8 @@ export function generateLookPreview(genesisId: string): void {
 }
 
 /** What key art would carry and drop — asked when the dialog opens (SPEC-010 R-15). */
-export function planKeyArt(worldId: string): void {
-  send({ kind: "plan-key-art", worldId, requestId: ulid() });
+export function planKeyArt(worldId: string, opts: {modelId?:string;draftAlternative?:boolean} = {}): string {
+  const requestId=ulid();send({ kind: "plan-key-art", worldId, requestId, ...opts });return requestId;
 }
 
 export function useKeyArtPlans(): StoreState["keyArtPlans"] {
@@ -3128,6 +3157,10 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
+  performanceAudio?: PerformanceAudioRequest[],
+  masterAudio?: MasterAudioRequest[],
+  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
   send({
@@ -3139,8 +3172,12 @@ export function dispatchScenePlanned(
     mode,
     modelId,
     policy,
+    ...(performanceAudio?.length ? { performanceAudio } : {}),
+    ...(masterAudio?.length ? { masterAudio } : {}),
+    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
@@ -3225,6 +3262,7 @@ export function dispatchScene(
   modelId: string,
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
 ): void {
   send({
     kind: "dispatch-scene",
@@ -3236,6 +3274,7 @@ export function dispatchScene(
     requestId: queueRequest("dispatch-scene"),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
 }
 
@@ -4364,4 +4403,9 @@ export function openEngineLog(engine: "comfyui" | "voxa"): void {
 /** Replace the Arke-managed ComfyUI tree with the pinned version — an explicit choice, never automatic (SPEC-021 R-20). */
 export function updateComfyUiRuntime(): void {
   send({ kind: "comfyui-update-runtime" });
+}
+
+export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "convert-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("convert-performance");
+  return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
 }

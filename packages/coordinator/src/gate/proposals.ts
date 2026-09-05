@@ -350,7 +350,7 @@ export interface StageInput {
   /** Where the still-outstanding human decision is being collected. */
   decision?: ProposalDecision;
   /** World-relative paths to materialise. Created paths carry content and no live base. */
-  targets: Array<{ path: string; content?: string }>;
+  targets: Array<{ path: string; content?: string; expectedBaseHash?: string | null }>;
   /**
    * SPEC-020 R-8: the production this draft belongs to, when it stages a guest. Carried on the
    * proposal so the world's surfaces can keep a pending guest off them — the targets hold no
@@ -471,6 +471,9 @@ export class ProposalManager {
       const targets: Proposal["targets"] = [];
       for (const target of input.targets) {
         const live = await this.readLive(target.path);
+        if (target.expectedBaseHash !== undefined && (live === null ? null : sha256(live)) !== target.expectedBaseHash) {
+          throw new Error(`${target.path}: the source changed before proposal staging; review the current scene again`);
+        }
         const baseVersion = live !== null ? readVersion(target.path, live) : null;
         targets.push({
           path: target.path,

@@ -1,3 +1,9 @@
+import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
+import { PromptReviewSchema } from "./prompt-review.js";
+import { TableReadPlanSchema } from "./rehearsal.js";
+import { PerformanceGenerationQuoteSchema } from "./performance.js";
+import { PerformanceRecordSchema } from "./performance.js";
+import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -83,6 +89,10 @@ export const QueueCommandSchema = z.enum([
   "establish-look",
   "generate-main-photo",
   "generate-character-sheet",
+  "generate-character-voice-sample",
+  "convert-performance",
+  "generate-performance",
+  "prepare-table-read",
   "generate-location-view",
   "generate-character-looks",
   "generate-missing-tiles",
@@ -521,6 +531,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict()),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("dialogue.result"), requestId: UlidSchema, worldId: UlidSchema, status: z.enum(["saved", "proposed", "refused"]), reason: z.string() }).strict(),
+  z.object({ ...base, type: z.literal("rehearsal.result"), plan: TableReadPlanSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
+    status: z.enum(["saved", "planned", "refused"]), reason: z.string() }).strict(),
+  z.object({ ...base, type: z.literal("performance.result"), audioReference: PreparedPerformanceAudioReviewSchema.optional(), masterAudioReference: MasterAudioReviewSchema.optional(), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "prepared", "queued", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
+  z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
+    review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),
   /** A direct voice assignment committed or refused. Every request receives exactly one result. */
   z
     .object({
@@ -1222,6 +1240,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       worldId: UlidSchema,
       requestId: UlidSchema,
       prompt: z.string(),
+      promptReviewId: z.string().uuid().optional(), modelId:z.string().optional(), fixedConstraints:z.string().optional(),
+      candidate:z.string().optional(), review:PromptReviewSchema.optional(), reason:z.string().optional(),
+      sources:z.array(z.object({kind:z.enum(["accepted-world","user-instruction"]),ref:z.string(),text:z.string()}).strict()).optional(),
       carried: z.array(z.object({ name: z.string(), role: z.string() }).strict()),
       dropped: z.array(z.object({ name: z.string(), reason: z.string() }).strict()),
     })

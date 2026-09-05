@@ -1,3 +1,5 @@
+import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
+import { resolvedAuthoredDuration } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -1524,7 +1526,7 @@ export function ProductionDashboardScreen() {
                     <span className="fy-mono">
                       {seconds(
                         t.coversShots.reduce(
-                          (sum, id) => sum + (shots.find((s) => s.id === id)?.durationSec ?? 0),
+                          (sum, id) => sum + resolvedAuthoredDuration(shots.find((s) => s.id === id) ?? {}),
                           0,
                         ),
                       )}
@@ -1961,7 +1963,7 @@ export function ScenesScreen() {
   const navigate = useNavigate();
   const newScene = useSharedNewScene(worldId, prodId);
   const totalSec =
-    production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + (sh.durationSec ?? 0), 0), 0) ??
+    production?.scenes.reduce((s, sc) => s + orderedShots(sc).reduce((x, sh) => x + resolvedAuthoredDuration(sh), 0), 0) ??
     0;
   return (
     <div className="fy-prodmain" data-screen="scenes">
@@ -2008,7 +2010,7 @@ export function ScenesScreen() {
                   </div>
                   <div className="fy-row__sub">
                     {sceneShots.length} shots ·{" "}
-                    {seconds(sceneShots.reduce((s, x) => s + (x.durationSec ?? 0), 0))}
+                    {seconds(sceneShots.reduce((s, x) => s + resolvedAuthoredDuration(x), 0))}
                     {scene.inherits?.location ? ` · @${scene.inherits.location}` : ""}
                     {scene.inherits?.timeOfDay ? ` · ${scene.inherits.timeOfDay}` : ""}
                   </div>
@@ -2628,6 +2630,7 @@ function TakesView({
           </button>
         </div>
       </div>
+      {picked && worldId && shotId && <TakeDialogueFeedbackPanel key={`${picked.id}/${shotId}`} worldId={worldId} production={production} take={picked} shotId={shotId} />}
       {/* Layer two, in the same column it holds everywhere else (turns 99, 100, 102). */}
       <ProductionConversation
         worldId={worldId}
@@ -4919,7 +4922,7 @@ function CutInspector({
       ? selectedSpine.endSec - selectedSpine.startSec
       : selectedClip
         ? selectedClip.durationFrames / frameRate
-        : (selectedStory?.durationSec ?? 0);
+        : resolvedAuthoredDuration(selectedStory ?? {});
     return (
       <div className="fy-cutinspect">
         <div className="fy-cutinspect__eyebrow">PICTURE CLIP</div>

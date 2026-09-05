@@ -1559,8 +1559,11 @@ export function composeDispatches(
   plan: ScenePlan,
   model: ManifestModel,
   world: WorldBundle,
+  manifest?: import("@arke-studio/contracts").ModelManifest,
+  acknowledgedRecommendationIds?: string[],
+  assessedAt?: string,
 ): EnqueueInput[] {
-  return compilePasses({ productionId, scene, plan, model, world }).map((pass) => ({
+  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt }).map((pass) => ({
     worldId,
     productionId,
     target: pass.target,

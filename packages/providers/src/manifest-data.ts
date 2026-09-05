@@ -1,6 +1,6 @@
 import { ModelManifestSchema, type ModelManifest } from "@arke-studio/contracts";
 import { COMFYUI_MANIFEST_MODELS } from "./comfyui/recipes.js";
-import { FAL_MODELS } from "./fal-catalogue.generated.js";
+import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.generated.js";
 
 /**
  * The shipped model manifest (SPEC-008 §2.5, D9): read at start, never fetched at run time.
@@ -14,8 +14,9 @@ import { FAL_MODELS } from "./fal-catalogue.generated.js";
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 18,
-  generated: "2026-08-28",
+  manifestVersion: 22,
+  dialogueGuidance: [],
+  generated: "2026-09-05",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -42,6 +43,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // ---- fal: generated from the live catalogue ---------------------------
     ...FAL_MODELS.map((model) => ({
       ...model,
+      dispatchEndpoints: { text: FAL_ENDPOINTS[model.id]!, ...(FAL_EDIT_ENDPOINTS[model.id] ? { reference: FAL_EDIT_ENDPOINTS[model.id] } : {}), version: "arke-fal-payload-v1" },
       accepts: { ...model.accepts, referenceRoles: false },
     })),
     // ---- comfyui: projected from the shipped recipe catalogue (SPEC-021 R-3) ----
@@ -178,15 +180,40 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     },
     // ---- voice ------------------------------------------------------------
     {
+      // Verified 2026-09-05: https://elevenlabs.io/docs/api-reference/speech-to-speech/convert
+      // https://help.elevenlabs.io/hc/en-us/articles/20349793097233-What-is-Voice-Changer
+      // https://join.elevenlabs.io/api/developer-api — $0.12/minute = 2,000 micro-USD/second.
+      id: "eleven_multilingual_sts_v2", provider: "elevenlabs", capability: "voice-conversion",
+      displayName: "ElevenLabs Multilingual Speech-to-Speech v2",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
+    },
+    {
+      // Reviewed 2026-09-05: https://elevenlabs.io/pricing/api — $0.10/1,000 characters.
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
       displayName: "Eleven Multilingual v2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
-      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3" },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
+      limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "mp3", maxPromptChars: 10000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
     },
     {
+      // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.
+      // https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
+      // https://elevenlabs.io/pricing/api — v3 $0.10/1,000 characters, 5,000-character maximum.
+      id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3", maxPromptChars: 5000 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
+          breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
+          warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+    },
+    {
+      cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+        deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } },
       id: "kokoro-82m",
       provider: "kokoro",
       capability: "voice-tts",

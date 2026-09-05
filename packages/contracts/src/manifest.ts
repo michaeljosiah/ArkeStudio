@@ -1,3 +1,5 @@
+import { ModelDialogueGuidanceSchema } from "./provider-guidance.js";
+import { CadenceCapabilitiesSchema } from "./cadence.js";
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
@@ -270,6 +272,8 @@ export const ManifestModelSchema = z
     id: z.string().min(1),
     /** The provider or harness spelling when it differs from the stable manifest id. */
     providerModelId: z.string().min(1).optional(),
+    dispatchEndpoints: z.object({ text: z.string().min(1), reference: z.string().min(1).optional(), version: z.string().min(1) }).strict().optional(),
+    cadence: CadenceCapabilitiesSchema.optional(),
     provider: ProviderIdSchema,
     capability: CapabilitySchema,
     displayName: z.string().min(1),
@@ -350,6 +354,7 @@ export const ModelManifestSchema = z
     manifestVersion: z.number().int().min(1),
     generated: IsoDateSchema,
     models: z.array(ManifestModelSchema),
+    dialogueGuidance: z.array(ModelDialogueGuidanceSchema).optional(),
     /**
      * capability → local model ids, best first (SPEC-033 R-33). Authored, and expressing
      * **quality alone**: it makes no claim about any machine, because the gate already answers
@@ -364,7 +369,17 @@ export const ModelManifestSchema = z
      */
     localPreference: z.record(CapabilitySchema, z.array(z.string().min(1))).optional(),
   })
-  .strict();
+  .strict().superRefine((manifest, ctx) => {
+    const identities = new Set<string>();
+    for (const [index, row] of (manifest.dialogueGuidance ?? []).entries()) {
+      const model = manifest.models.find(m => m.id === row.modelId);
+      const routes = model ? [model.dispatchEndpoints?.text, model.dispatchEndpoints?.reference, ...Object.values(model.modes ?? {}).map(mode => mode?.route)] : [];
+      const key = `${row.id}/${row.revision}`;
+      if (!model || !routes.includes(row.providerRoute) || row.endpointVersion !== model.dispatchEndpoints?.version || identities.has(key))
+        ctx.addIssue({ code: "custom", path: ["dialogueGuidance", index], message: "Guidance must name one shipped exact route and current adapter revision, with a unique evidence identity." });
+      identities.add(key);
+    }
+  });
 export type ModelManifest = z.infer<typeof ModelManifestSchema>;
 
 /** Select a routed model, validating its capability before falling back to the manifest order. */

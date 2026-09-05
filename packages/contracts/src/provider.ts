@@ -25,6 +25,7 @@ export const CapabilitySchema = z.enum([
   "music",
   "llm",
   "voice-tts",
+  "voice-conversion",
   "voice-clone",
   "voice-stt",
 ]);
@@ -102,7 +103,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   },
   elevenlabs: {
     displayName: "ElevenLabs",
-    capabilities: ["voice-tts", "voice-clone"],
+    capabilities: ["voice-tts", "voice-clone", "voice-conversion"],
     local: false,
     credential: "in-app",
   },
@@ -153,6 +154,8 @@ export const CapabilityProbeSchema = z
   .object({
     capability: CapabilitySchema,
     available: z.boolean(),
+    /** Reported only by an authenticated account probe; submit revalidates. */
+    zeroRetention: z.boolean().optional(),
     /** Why not, in provider terms: "no video access on this plan", "out of credit" … */
     reason: z.string().optional(),
   })

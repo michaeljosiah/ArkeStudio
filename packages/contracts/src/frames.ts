@@ -1,3 +1,14 @@
+import { DialogueFailureTagSchema } from "./take-feedback.js";
+import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
+import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
+import { DialogueTimingIntentSchema } from "./cut.js";
+import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
+import { RehearsalIdSchema } from "./rehearsal.js";
+import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
+import { PerformanceDeliverySchema } from "./voice.js";
+import { CadencePlanSchema } from "./cadence.js";
+import { PerformanceIdSchema } from "./performance.js";
+import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
@@ -140,7 +151,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * that would be the studio's taste in front of theirs. The standing constraint suffix is
        * still appended either way; it is not the author's to drop.
        */
-      prompt: z.string().min(1).optional(),
+      prompt: z.string().min(1).max(20000).optional(),
+      promptReviewId: z.string().uuid().optional(),
       /**
        * How many to make, 1–4 (design 65). Absent is one, so every caller written before the
        * count still asks for exactly what it used to.
@@ -697,7 +709,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * box with the words the dispatch would actually compose. Answered by a world-image.plan
    * event; nothing is created.
    */
-  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("plan-key-art"), worldId: UlidSchema, requestId: UlidSchema, modelId: z.string().min(1).optional(), draftAlternative: z.boolean().optional() }).strict(),
+  z.object({kind:z.literal("cancel-key-art-prompt"),worldId:UlidSchema}).strict(),
   /**
    * One picture of the look, from inside the founding conversation (SPEC-031 R-50, R-51).
    * The agent proposes; a person presses — the estimate is on the control, and the prompt is
@@ -1308,6 +1321,67 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       identityReferences: z.array(z.string().min(1)).max(4),
     })
     .strict(),
+  z.object({ kind: z.literal("convert-performance"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    performanceId: PerformanceIdSchema, expectedHash: z.string().min(1), expectedVoiceId: z.string().min(1),
+    modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
+    confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("record-dialogue-feedback"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeId: TakeIdSchema, shotId: ShotIdSchema, tags: z.array(DialogueFailureTagSchema).min(1), recommendationIds: z.array(z.string().min(1)), note: z.string().max(1000).optional() }).strict(),
+  z.object({ kind: z.literal("propose-shot-visual-facts"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, shotId: ShotIdSchema, expectedSceneVersion: z.number().int().positive(), visualFacts: ShotVisualFactsSchema.nullable() }).strict(),
+  z.object({ kind: z.literal("plan-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("prepare-table-read"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema,
+    confirmationToken: FullSha256Schema, confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("save-rehearsal-note"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema,
+    sceneId: SceneIdSchema, rehearsalId: RehearsalIdSchema, expectedHash: z.string().nullable(), lineId: z.string().min(1).max(300), body: z.string().trim().min(1).max(4000).nullable() }).strict(),
+  z.object({ kind: z.literal("designate-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative(), label: z.string().trim().min(1).max(80),
+    delivery: PerformanceDeliverySchema, role: PerformanceReferenceRoleSchema, productionId: SlugSchema, performanceId: PerformanceIdSchema,
+    expectedPerformanceHash: FullSha256Schema, acceptedReviewAt: z.string(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+    warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), noMusic: z.boolean() }).strict(),
+  z.object({ kind: z.literal("clear-performance-bible"), requestId: UlidSchema, worldId: UlidSchema, sheetId: SlugSchema,
+    slotId: SlugSchema, expectedHash: z.string().nullable(), expectedRevision: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("prepare-performance-generation"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),
+  z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("propose-performance-duration"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedSceneVersion: z.number().int().positive(),
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ kind: z.literal("place-selected-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedTimelineRevision: z.number().int().nonnegative(),
+    expectedTimelineHash: z.string().min(1), expectedSelectionHash: z.string().nullable(),
+    partner: z.object({ performanceId: PerformanceIdSchema, leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict().optional(),
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
+  z.object({ kind: z.literal("clear-performance-selection"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, lineKey: z.string().min(1).max(300), expectedSelectionHash: z.string().nullable() }).strict(),
+  z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
+    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),
+  z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
+  z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
+  z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, source: VoiceSampleSourceSchema }).strict(),
+  z.object({ kind: z.literal("accept-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid(), warningCodes: z.array(z.string()).max(20),
+    singleSpeaker: z.boolean(), noMusic: z.boolean(),
+    rightsBasis: z.enum(["self", "authorized", "licensed"]).nullable() }).strict(),
+  z.object({ kind: z.literal("clear-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("withdraw-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("generate-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, modelId: z.string().min(1), script: z.string().trim().min(1).max(2000),
+    durationSec: z.number().int().min(5).max(10), confirmedMicroUsd: z.number().int().min(0) }).strict(),
   /** SPEC-017: one composite generation, conditioned on the accepted main photo. */
   z
     .object({
@@ -1916,9 +1990,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** SPEC-024 R-12: create a durable dispatch plan — idempotent by requestId, durable before spend. */
+  z.object({ kind: z.literal("prepare-master-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
+  z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
+      audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2038,6 +2120,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene"),
+      acknowledgedRecommendationIds: z.array(z.string().min(1)).optional(),
+      audioReferencesDisabled: z.boolean().optional(),
+      performanceAudio: z.array(PerformanceAudioRequestSchema).max(100).optional(),
+      masterAudio: z.array(MasterAudioRequestSchema).max(100).optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,

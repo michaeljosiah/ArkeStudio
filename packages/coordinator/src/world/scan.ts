@@ -1,3 +1,7 @@
+import { TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
+import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
+import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
+import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
@@ -659,10 +663,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
     const timelinePath = `productions/${id}/timeline.json`;
     const timeline: ProductionBundle["timeline"] = (await exists(join(pdir, "timeline.json")))
-      ? await tryParse(timelinePath, (raw) => ProductionTimelineSchema.parse(JSON.parse(raw))).then((parsed) =>
+      ? await tryParse(timelinePath, (raw) => ({ timeline: ProductionTimelineSchema.parse(JSON.parse(raw)), hash: sha256(raw) })).then((parsed) =>
           parsed === null
             ? { status: "invalid", message: "timeline.json is invalid; see the world problems for details" }
-            : { status: "ready", timeline: parsed },
+            : { status: "ready", ...parsed },
         )
       : { status: "absent" };
 
@@ -678,7 +682,47 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ? await tryParse(`productions/${id}/season.json`, (raw) => SeasonSchema.parse(JSON.parse(raw)))
       : null;
 
+    const performances: ProductionBundle["performances"] = [];
+    for (const entry of await readdir(join(pdir, "performances"), { withFileTypes: true }).catch(() => [])) {
+      if (!entry.isDirectory() || !/^pf_[0-9A-HJKMNP-TV-Z]{26}$/.test(entry.name)) continue;
+      if (!(await exists(join(pdir, "performances", entry.name, "performance.json")))) continue;
+      const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
+      if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
+    }
+    const rehearsals: ProductionBundle["rehearsals"] = [], rehearsalHashes: Record<string, string> = {};
+    for (const file of await readdir(join(pdir, "rehearsals")).catch(() => [])) {
+      if (!/^rh_[0-9A-HJKMNP-TV-Z]{26}\.json$/.test(file)) continue;
+      const path = `productions/${id}/rehearsals/${file}`;
+      const rehearsal = await tryParse(path, raw => RehearsalSessionSchema.parse(JSON.parse(raw)));
+      if (!rehearsal || `${rehearsal.id}.json` !== file) continue;
+      rehearsals.push(rehearsal); if (manifest[path]) rehearsalHashes[rehearsal.id] = manifest[path]!;
+      const scene = scenes.find(s => s.id === rehearsal.sceneId);
+      const ids = scene ? new Set(deriveRehearsalLines(scene, sheets).map(line => line.id)) : new Set<string>();
+      if (Object.keys(rehearsal.notes).some(key => !ids.has(key))) problems.push({ path, message: "This rehearsal has an orphaned line note. Remove it explicitly in the table read." });
+    }
+    const feedbackPath = `productions/${id}/take-feedback.jsonl`;
+    const feedback: TakeDialogueFeedback[] = [];
+    if (await exists(join(pdir, "take-feedback.jsonl"))) await tryParse(feedbackPath, raw => {
+      raw.split("\n").forEach((line, index) => {
+        if (!line.trim()) return;
+        try { feedback.push(TakeDialogueFeedbackSchema.parse(JSON.parse(line))); }
+        catch { problems.push({ path: feedbackPath, message: `Malformed dialogue feedback at line ${index + 1}. Valid records remain available.` }); }
+      });
+      if (raw && !raw.endsWith("\n")) problems.push({ path: feedbackPath, message: "Incomplete dialogue feedback tail. Repair before adding feedback." });
+      return feedback;
+    });
+    const performanceReviewPath = `productions/${id}/performance-reviews.jsonl`;
+    const performanceSelectionPath = `productions/${id}/performance-selections.json`;
+    const performanceReviews = (await exists(join(pdir, "performance-reviews.jsonl"))) ? await tryParse(performanceReviewPath, raw => {
+      if (raw && !raw.endsWith("\n")) throw new Error("Incomplete performance review history.");
+      return raw.split("\n").filter(Boolean).map(line => PerformanceReviewDecisionSchema.parse(JSON.parse(line)));
+    }) : [];
+    const performanceSelections = (await exists(join(pdir, "performance-selections.json"))) ? await tryParse(performanceSelectionPath, raw => PerformanceSelectionsSchema.parse(JSON.parse(raw))) : {};
     productions.push({
+      rehearsals, rehearsalHashes, feedback,
+      performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
+        reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },
+      performances,
       meta: metaDoc,
       story,
       season,
@@ -917,6 +961,27 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     }
   }
 
+  const performanceBibles: NonNullable<WorldBundle["performanceBibles"]> = [];
+  const bibleSheetIds = new Set([...sheets.filter(s => s.type === "character").map(s => s.id),
+    ...(await readdir(join(dir, "references")).catch(() => [])).filter(id => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id))]);
+  for (const sheetId of bibleSheetIds) {
+    const path = `references/${sheetId}/performance-bible.jsonl`;
+    if (!(await exists(join(dir, path)))) continue;
+    const raw = await tryParse(path, text => text);
+    const events: NonNullable<WorldBundle["performanceBibles"]>[number]["events"] = [];
+    let damaged = raw === null || (Boolean(raw) && !raw!.endsWith("\n"));
+    const lines = (raw ?? "").split("\n");
+    if (raw && !raw.endsWith("\n")) lines.pop();
+    for (const line of lines.filter(Boolean)) {
+      try {
+        const event = PerformanceBibleEventSchema.parse(JSON.parse(line));
+        foldPerformanceBible([...events, event]); events.push(event);
+      } catch { damaged = true; }
+    }
+    if (damaged) problems.push({ path, message: "Performance bible history needs repair. Intact revisions remain visible." });
+    performanceBibles.push({ sheetId, events, hash: manifest[path] ?? null,
+      ...(damaged ? { problem: "Performance bible history needs repair." } : {}) });
+  }
   const bundle: WorldBundle = {
     meta,
     bible,
@@ -939,6 +1004,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     sheets,
     canon,
     referenceKits,
+    performanceBibles,
     referenceCandidates,
     props,
     referenceTakes,

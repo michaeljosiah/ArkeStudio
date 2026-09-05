@@ -43,6 +43,8 @@ export const GenesisIdSchema = z
 /** Record-kind prefixes used across the world model and the app-level logs. */
 export const ID_PREFIXES = {
   take: "tk",
+  performance: "pf",
+  rehearsal: "rh",
   job: "jb",
   pass: "ps",
   proposal: "pr",
