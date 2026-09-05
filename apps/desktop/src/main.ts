@@ -691,7 +691,9 @@ async function initialize(): Promise<{ port: number }> {
     writeTextFile: (path, text) => writeFile(path, text, "utf8"),
     readNodeRef: (dir) => readCustomNodeRef(dir),
     createSupervisor: (spec) => {
-      return new ChildSupervisor(spec, { ledger: childLedger });
+      // What the engine says is kept beside the app's own journals (SPEC-033 R-70; issue 585),
+      // one file per engine so the reader never demultiplexes what the supervisor already did.
+      return new ChildSupervisor({ ...spec, logFile: join(appRoot, "logs", "engines", `${spec.id}.log`) }, { ledger: childLedger });
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
@@ -839,6 +841,7 @@ async function initialize(): Promise<{ port: number }> {
     {
       id: "voxa",
       ...voxaLaunch(voxaSelection, voxaSettings),
+      logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
       readyTimeoutMs: 30_000,
       validateHealth: async (response) => {

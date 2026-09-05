@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import net from "node:net";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
+import { createWriteStream, mkdirSync, openSync, renameSync, statSync, type WriteStream } from "node:fs";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
   killTree,
@@ -68,6 +69,12 @@ export interface SupervisedSpec {
    */
   onStdoutLine?: (line: string) => void;
   /**
+   * Where what the child says is kept, both streams, bounded (SPEC-033 R-70; issue 585). Absent
+   * for the harness on purpose: its stdout carries the launch password (issue 327 §4), and a log
+   * that kept it would be the secret written to disk by the code that promised not to.
+   */
+  logFile?: string;
+  /**
    * Optional protocol validation after a 2xx response.
    *
    * `false` means not ready yet — keep probing. `{ ok: false, reason }` means the contract is
@@ -132,12 +139,100 @@ export interface SupervisorDeps {
   probe?: ProcessProbe;
 }
 
+/**
+ * What the engine said, kept (SPEC-033 R-70; issue 585).
+ *
+ * Both streams, raw and interleaved as they arrived: a Python engine that cannot import a custom
+ * node says so on stderr and exits, and stdout carries the launch protocol and little else, so a
+ * log of the stream we already parse would be empty exactly when somebody opened it. Bounded per
+ * engine with one previous generation kept — an engine spinning on a startup failure under
+ * backoff writes the same traceback until the cap, not until the disk fills — which is what lets
+ * this be on by default. A failure to write is swallowed: the log is a courtesy to whoever
+ * troubleshoots later, never a reason the child does not start.
+ */
+export const ENGINE_LOG_CAP_BYTES = 2 * 1024 * 1024;
+
+export class EngineLog {
+  private stream: WriteStream | null = null;
+  private written = 0;
+
+  constructor(readonly file: string) {}
+
+  open(header: string): void {
+    try {
+      mkdirSync(dirname(this.file), { recursive: true });
+      this.written = statSync(this.file, { throwIfNoEntry: false })?.size ?? 0;
+      if (this.written >= ENGINE_LOG_CAP_BYTES) this.rotate();
+      this.stream = this.append();
+      this.write(header);
+    } catch {
+      this.stream = null;
+    }
+  }
+
+  write(chunk: string | Buffer): void {
+    if (this.stream === null) return;
+    const bytes = Buffer.byteLength(chunk);
+    if (this.written + bytes > ENGINE_LOG_CAP_BYTES) {
+      this.stream.end();
+      this.rotate();
+      try {
+        this.stream = this.append();
+      } catch {
+        this.stream = null;
+        return;
+      }
+    }
+    this.written += bytes;
+    this.stream.write(chunk);
+  }
+
+  /**
+   * Resolves once everything handed to any stream this log opened is on disk — the rotated-out
+   * generation included, whose descriptor follows the rename and drains after it.
+   */
+  close(): Promise<void> {
+    this.stream?.end();
+    this.stream = null;
+    return Promise.all(
+      [...this.open_].map((stream) =>
+        stream.closed || stream.destroyed ? Promise.resolve() : new Promise<void>((resolve) => stream.once("close", resolve)),
+      ),
+    ).then(() => undefined);
+  }
+
+  private readonly open_ = new Set<WriteStream>();
+
+  private append(): WriteStream {
+    // The descriptor is opened here, synchronously, so it exists before the first write: a stream
+    // that opens lazily and is rotated while still opening would open the path after the rename,
+    // and the generation's tail would land in the fresh file instead of the one moved aside.
+    const stream = createWriteStream(this.file, { fd: openSync(this.file, "a") });
+    this.open_.add(stream);
+    stream.on("error", () => {
+      if (this.stream === stream) this.stream = null;
+    });
+    stream.on("close", () => this.open_.delete(stream));
+    return stream;
+  }
+
+  /** The current file becomes the one previous generation; a rename that fails keeps appending. */
+  private rotate(): void {
+    try {
+      renameSync(this.file, `${this.file}.1`);
+    } catch {
+      /* nothing to rotate, or the file is held open by something else: the cap can slip */
+    }
+    this.written = 0;
+  }
+}
+
 export class ChildSupervisor extends EventEmitter {
   readonly id: string;
   private readonly spec: Required<
-    Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine">
+    Omit<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile">
   > &
-    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine">;
+    Pick<SupervisedSpec, "command" | "args" | "env" | "validateHealth" | "healthHeaders" | "onStdoutLine" | "logFile">;
   private readonly deps: SupervisorDeps;
   private child: ChildProcess | null = null;
   private _port: number | null = null;
@@ -487,14 +582,25 @@ export class ChildSupervisor extends EventEmitter {
   }
 
   private drain(child: ChildProcess): void {
-    child.stderr?.on("data", () => {});
+    // Kept only where the spec names a file (issue 585): both streams, raw, in arrival order,
+    // closed with the child so the last thing it said is on disk before the restart that follows.
+    const log = this.spec.logFile === undefined ? null : new EngineLog(this.spec.logFile);
+    if (log !== null) {
+      log.open(`=== ${new Date().toISOString()} ${this.id} spawned pid ${child.pid ?? "?"} ===\n`);
+      child.once("exit", (code, signal) => {
+        log.write(`=== ${new Date().toISOString()} exited ${code ?? signal ?? "?"} ===\n`);
+        void log.close();
+      });
+    }
+    child.stderr?.on("data", (chunk: Buffer) => log?.write(chunk));
     const handler = this.spec.onStdoutLine;
     if (!handler) {
-      child.stdout?.on("data", () => {});
+      child.stdout?.on("data", (chunk: Buffer) => log?.write(chunk));
       return;
     }
     let buffer = "";
     child.stdout?.on("data", (chunk: Buffer) => {
+      log?.write(chunk);
       buffer += chunk.toString("utf8");
       let newline: number;
       while ((newline = buffer.indexOf("\n")) !== -1) {

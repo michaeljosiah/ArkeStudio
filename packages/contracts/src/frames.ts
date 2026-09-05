@@ -1099,6 +1099,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
+  /** Open what a spawned engine said, host-owned end to end (SPEC-033 R-70; issue 585). */
+  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa"]) }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({
