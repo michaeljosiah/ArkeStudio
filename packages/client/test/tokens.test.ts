@@ -185,7 +185,11 @@ describe("design tokens", () => {
       // credentials remain forbidden here and everywhere else in the client.
       const inspected = sourcePath === join("lib", "dev-session.ts")
         ? source.replaceAll("sessionStorage", "")
-        : source;
+        : sourcePath === join("components", "character-voice-sample.tsx")
+          // This panel persists only a schema-validated preparation UUID for restart recovery.
+          // Strip that storage vocabulary only; provider keys, auth and decryption still fail.
+          ? source.replaceAll("localStorage", "")
+          : source;
       if (suspicious.test(inspected)) offenders.push(sourcePath);
     }
     assert.deepEqual(offenders, [], `credential-handling code found in: ${offenders.join(", ")}`);

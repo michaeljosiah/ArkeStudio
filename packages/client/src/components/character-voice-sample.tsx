@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
 import { estimateMicroUsd, supportsCharacterSpeakingVideo, ulid, type ClientMessage, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
@@ -5,6 +6,8 @@ import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscrib
 import { mediaUrl } from "../lib/media.js";
 import { playClip } from "../lib/audio.js";
 import { Button } from "./ui.js";
+
+const ReviewOperationId = z.string().uuid();
 
 /** Design 114: sample audio and TTS assignment have separate authorities and separate actions. */
 export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
@@ -20,8 +23,9 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
   const [rightsBasis, setRightsBasis] = useState<"self" | "authorized" | "licensed" | "">("");
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
   const recoveryKey = `voice-sample-review/${world.meta.worldId}/${sheet.id}`;
-  const [recovery, setRecovery] = useState(() => { try { return localStorage.getItem(recoveryKey); } catch { return null; } });
-  const retainReview = (operationId: string | null) => { setRecovery(operationId); try { if (operationId) localStorage.setItem(recoveryKey, operationId); else localStorage.removeItem(recoveryKey); } catch { /* Session review remains usable without browser storage. */ } };
+  const [recovery, setRecovery] = useState(() => { try { const saved = ReviewOperationId.safeParse(localStorage.getItem(recoveryKey)); return saved.success ? saved.data : null; } catch { return null; } });
+  // Only the opaque preparation UUID survives restart, never audio, paths, permission or provider credentials.
+  const retainReview = (operationId: string | null) => { if (operationId !== null) ReviewOperationId.parse(operationId); setRecovery(operationId); try { if (operationId) localStorage.setItem(recoveryKey, operationId); else localStorage.removeItem(recoveryKey); } catch { /* Session review remains usable without browser storage. */ } };
   const pending = useRef<string | null>(null), generation = useRef<string | null>(null);
   const kit = world.referenceKits.find(k => k.sheetId === sheet.id);
   const photo = kit?.mainPhoto?.file ?? kit?.anchor;
