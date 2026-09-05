@@ -75,3 +75,9 @@ export function mapCadence(text: string, expectedHash: string, input: CadencePla
   return { provider: model.provider, model: model.id, providerModel: model.providerModelId ?? model.id,
     providerText, voiceSettings, controls };
 }
+
+/** Text offsets are reusable only for the same normalized authored wording. */
+export function seedCadencePlan(source: CadencePlan | undefined, delivery: CadencePlan["delivery"], sourceTextHash: string): CadencePlan {
+  return { schemaVersion: 1, sourceTextHash, delivery, speed: source?.speed ?? 1,
+    cues: source?.sourceTextHash === sourceTextHash ? structuredClone(source.cues) : [] };
+}

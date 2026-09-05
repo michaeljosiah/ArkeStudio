@@ -298,3 +298,7 @@ The newer timeline already gives ordinary dialogue productions an operational pi
 ### Selection repair (#112)
 
 Clear selection is now available for every selected line, including missing media and stale targets. It changes only the existing `performance-selections.json` entry under its current hash guard, preserving reviews, immutable performances and placed timeline audio. Repeating a successful clear is harmless. The focused store test clears while media is absent, refuses a stale selection hash and verifies that both review history and the existing cut are unchanged.
+
+### Rehearsal completion (#114)
+
+The performance generator explicitly seeds cadence from current accepted cadence/both bible examples. Delivery and speed transfer; exact UTF-16 cues transfer only when the authored text hash matches. Selecting an example never generates audio or changes the character voice. Deleted-scene rehearsal notes remain visible and removable with the existing hash-guarded note command; removing the final note deletes only its empty orphaned session. Focused tests cover cue isolation across different wording and note removal after an externally deleted scene is reconciled.

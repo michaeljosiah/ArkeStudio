@@ -225,4 +225,17 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.deepEqual(cleared.performanceReview.reviews, afterPair.performanceReview.reviews);
   assert.deepEqual(cleared.timeline, afterPair.timeline, "clearing selection leaves already placed audio alone");
 
+  const scenePath = join(dir, `productions/${production.meta.id}/scenes/${production.sceneFiles[scene.id]}.json`);
+  await store.close(); await rename(scenePath, `${scenePath}.missing`);
+  try {
+    store = await WorldStore.open(dir);
+    await store.reconcileExternalEdit(`productions/${production.meta.id}/scenes/${production.sceneFiles[scene.id]}.json`);
+    const orphaned = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+    assert.equal(orphaned.scenes.some(s => s.id === scene.id), false);
+    await saveRehearsalNote(store, { ...noteRequest, requestId: ulid(), body: null,
+      expectedHash: orphaned.rehearsalHashes![noteRequest.rehearsalId]! });
+    assert.equal(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.rehearsals.some(r => r.id === noteRequest.rehearsalId), false,
+      "removing the last deleted-scene note removes only its empty orphaned session");
+  } finally { await rename(`${scenePath}.missing`, scenePath); }
+
 });

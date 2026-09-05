@@ -86,7 +86,7 @@ export function PerformancePanel({ world, production, scene, shotId }: {
         if (!send({ kind: "clear-performance-selection", worldId: world.meta.worldId, productionId: production.meta.id, requestId,
           lineKey, expectedSelectionHash: production.performanceReview.selectionHash })) { pending.current = null; setNotice("Reconnect before clearing the selection."); }
       }}>Clear selection</Button></p>)}
-    {line.ok && sheet && <PerformanceGenerationPanel key={`${scene.id}/${shotId}/${line.blockId ?? "legacy"}`} worldId={world.meta.worldId}
+    {line.ok && sheet && <PerformanceGenerationPanel key={`${scene.id}/${shotId}/${line.blockId ?? "legacy"}`} world={world} worldId={world.meta.worldId}
       production={production} scene={scene} shotId={shotId} blockId={line.blockId} text={line.text} sheet={sheet} />}
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       <Button disabled={busy || !line.ok} onClick={() => { void start(); }}>Start recording</Button>

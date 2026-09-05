@@ -73,6 +73,15 @@ export function TableReadPanel({ world, production, scene, onRecord }: { world: 
       {note && <Button variant="ghost" disabled={busy} onClick={() => { setDrafts(current => ({ ...current, [line.id]: "" })); saveNote(line.id, null); }}>Remove note</Button>}
     </div>; })}
     {Object.entries(session?.notes ?? {}).filter(([key]) => !lines.some(l => l.id === key)).map(([key, note]) => <p key={key}>Orphaned note: {note.body} <Button disabled={busy} onClick={() => saveNote(key, null)}>Remove orphaned note</Button></p>)}
+    {production.rehearsals.filter(r => !production.scenes.some(s => s.id === r.sceneId)).flatMap(orphan => Object.entries(orphan.notes).map(([lineId, note]) =>
+      <p key={`${orphan.id}/${lineId}`} style={{ overflowWrap: "anywhere" }}>Deleted-scene note · {orphan.sceneId}: {note.body}{" "}
+        <Button disabled={busy} onClick={() => {
+          pending.current = ulid(); setBusy(true);
+          if (!send({ kind: "save-rehearsal-note", worldId: world.meta.worldId, productionId: production.meta.id, requestId: pending.current,
+            sceneId: orphan.sceneId, rehearsalId: orphan.id, expectedHash: production.rehearsalHashes?.[orphan.id] ?? null, lineId, body: null })) {
+            pending.current = null; setBusy(false); setNotice("Reconnect before removing the note.");
+          }
+        }}>Remove deleted-scene note</Button></p>))}
     <p>Notes are world content and travel with exports. Table-read audio cache is derived content.</p>
   </details>;
 }

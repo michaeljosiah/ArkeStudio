@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { mapCadence, normalizeSpeechText, formatMicroUsd, ulid, DELIVERIES, type CadencePlan, type PerformanceGenerationQuote,
-  type SceneRecord, type Sheet, type ProductionBundle } from "@arke-studio/contracts";
+import { foldPerformanceBible, seedCadencePlan, mapCadence, normalizeSpeechText, formatMicroUsd, ulid, DELIVERIES, type CadencePlan, type PerformanceGenerationQuote,
+  type WorldBundle, type SceneRecord, type Sheet, type ProductionBundle } from "@arke-studio/contracts";
 import { useStore, send, subscribePerformanceResults, subscribeQueueResults } from "../lib/store.js";
 import { Button } from "./ui.js";
 
-export function PerformanceGenerationPanel({ worldId, production, scene, shotId, blockId, text, sheet }: {
-  worldId: string; production: ProductionBundle; scene: SceneRecord; shotId: string; blockId?: string; text: string; sheet: Sheet;
+export function PerformanceGenerationPanel({ world, worldId, production, scene, shotId, blockId, text, sheet }: {
+  world?: WorldBundle; worldId: string; production: ProductionBundle; scene: SceneRecord; shotId: string; blockId?: string; text: string; sheet: Sheet;
 }) {
   const { state } = useStore();
   const normalized = normalizeSpeechText(text);
@@ -44,6 +44,14 @@ export function PerformanceGenerationPanel({ worldId, production, scene, shotId,
   const unsupported = mapping?.controls.filter(c => c.status === "unsupported") ?? [];
   const add = (cue: CadencePlan["cues"][number]) => setCues(current => [...current, cue].sort((a, b) =>
     (a.kind === "emphasis" ? a.span.from : a.at) - (b.kind === "emphasis" ? b.span.from : b.at)));
+  const bible = world?.performanceBibles?.find(b => b.sheetId === sheet.id);
+  const examples = bible && !bible.problem ? foldPerformanceBible(bible.events).flatMap(entry => {
+    if (entry.action !== "designate" || entry.role === "identity") return [];
+    const owner = world!.productions.find(p => p.meta.id === entry.productionId);
+    const performance = owner?.performances.find(p => p.id === entry.performanceId && p.provenance.outputHash === entry.performanceHash);
+    const review = owner?.performanceReview.reviews.filter(r => r.performanceId === entry.performanceId).at(-1);
+    return performance && review?.decision === "accept" && review.ts === entry.acceptedReviewAt ? [{ entry, performance }] : [];
+  }) : [];
   const jobs = state?.app.jobs.filter(j => j.worldId === worldId && j.target.kind === "performance-generation" &&
     (j.params.performanceGeneration as PerformanceGenerationQuote | undefined)?.target.shotId === shotId) ?? [];
   return <details><summary>Generate a TTS performance</summary>
@@ -52,6 +60,12 @@ export function PerformanceGenerationPanel({ worldId, production, scene, shotId,
         <label>Model <select value={model.id} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}</option>)}</select></label>{" "}
         <label>Delivery <select value={delivery} onChange={e => setDelivery(e.target.value as typeof delivery)}>{DELIVERIES.map(d => <option key={d}>{d}</option>)}</select></label>{" "}
         <label>Speed <input type="number" min={0.7} max={1.2} step={0.05} value={speed} onChange={e => setSpeed(Number(e.target.value))} /></label>
+        {examples.length > 0 && <div aria-label="Performance bible cadence examples">{examples.map(({ entry, performance }) => <Button key={entry.slotId} disabled={!hash} onClick={() => {
+          const source = performance.kind === "generated-tts" ? performance.cadencePlan : undefined;
+          const seeded = seedCadencePlan(source, entry.delivery, hash);
+          setDelivery(seeded.delivery); setSpeed(seeded.speed); setCues(seeded.cues); setQuote(null);
+          setNotice(source?.sourceTextHash === hash ? "Cadence copied for the same wording. Review before generating." : "Delivery and speed copied. Place new cues for this line; old text offsets were not transferred.");
+        }}>Use cadence from {entry.label}</Button>)}</div>}
         <p>Select text for emphasis, or place the caret where a pause or breath belongs.</p>
         <textarea ref={textArea} readOnly aria-label="Authored wording for cadence selection" value={normalized} style={{ width: "100%", minHeight: 80 }}
           onSelect={() => { const input = textArea.current; if (input) setSpan({ from: input.selectionStart, to: input.selectionEnd }); }} />

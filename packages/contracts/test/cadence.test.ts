@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { mapCadence, normalizeSpeechText, type CadencePlan, type ManifestModel } from "../src/index.js";
+import { seedCadencePlan, mapCadence, normalizeSpeechText, type CadencePlan, type ManifestModel } from "../src/index.js";
 const hash = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 const model: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "test-v3", provider: "elevenlabs", cadence: {
   deliveries: ["measured"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization",
@@ -31,4 +31,13 @@ it("names every unsupported control instead of silently claiming local cadence",
     { id: "unknown", provider: "kokoro" });
   assert.deepEqual(output.controls.map(c => c.status), ["unsupported", "unsupported", "unsupported"]);
   assert.equal(output.providerText, text);
+});
+
+it("cadence seeding never transfers text offsets to different wording", () => {
+  const source = plan("Wait here.", [{ kind: "pause", at: 4, length: "long" }]);
+  const same = seedCadencePlan(source, "urgent", source.sourceTextHash);
+  assert.deepEqual(same.cues, source.cues); assert.notEqual(same.cues, source.cues);
+  const different = seedCadencePlan(source, "urgent", hash("Go."));
+  assert.deepEqual(different.cues, []); assert.equal(different.delivery, "urgent");
+  assert.equal(different.sourceTextHash, hash("Go."));
 });
