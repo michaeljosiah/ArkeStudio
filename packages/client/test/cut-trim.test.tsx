@@ -488,10 +488,11 @@ describe("the unified editor shell (#685)", () => {
       .filter((label) => ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"].includes(label ?? ""));
     assert.deepEqual(named, ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"]);
 
-    const tabs = [...editor.querySelectorAll<HTMLButtonElement>("[role='tab']")];
-    assert.deepEqual(tabs.map((tab) => tab.textContent?.trim()), ["Inspector", "Arke"]);
-    assert.equal(tabs[0]?.getAttribute("aria-selected"), "true");
-    assert.ok(editor.querySelector("[role='tabpanel'][aria-labelledby='cut-inspector-tab']"));
+    // Design turn 122: Inspector and Arke stack rather than tabbing, so both are present at
+    // once and neither can be reached by taking the other away.
+    assert.equal(editor.querySelectorAll("[role='tab']").length, 0, "no tabs left on the edge");
+    assert.ok(editor.querySelector("#cut-inspector-panel"), "the Inspector is on the edge");
+    assert.ok(editor.querySelector("#cut-arke-panel"), "and Arke is under it, at the same time");
   });
 
   it("inspects a selected real Picture clip with the frame timing control", async () => {

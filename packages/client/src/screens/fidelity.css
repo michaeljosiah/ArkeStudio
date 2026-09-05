@@ -6001,12 +6001,14 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 
 
 .fy-cutside { min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--background); display: flex; flex-direction: column; }
-.fy-cutside__tabs { min-height: 43px; flex: none; display: flex; align-items: end; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--border); }
-.fy-cutside__tabs > [role="tab"] { height: 43px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-foreground); padding: 0 1px; font: 500 11.5px var(--font-sans); cursor: pointer; }
-.fy-cutside__tabs > [role="tab"][aria-selected="true"] { border-bottom-color: var(--foreground); color: var(--foreground); }
+/* Inspector above, Arke below, one edge (design turn 122). The Inspector is capped at half so
+   the composer can never be pushed off the screen; Arke takes the rest and keeps its floor. */
+.fy-cutside__head { min-height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.fy-cutside__headlabel { font: 500 11.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-cutside__close { margin: auto 0 auto auto; }
 .fy-cutside__panel { flex: 1; min-height: 0; overflow-y: auto; }
-.fy-cutside__panel--arke { display: flex; flex-direction: column; overflow: hidden; }
+.fy-cutside__panel--inspect { flex: 0 1 auto; max-height: 50%; }
+.fy-cutside__panel--arke { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border); }
 .fy-cutinspect { padding: 16px 15px; }
 .fy-cutinspect__eyebrow { font: 500 8.5px var(--font-mono); letter-spacing: .1em; color: var(--neutral-400); }
 .fy-cutinspect h2 { margin: 5px 0 14px; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.015em; }
@@ -7467,11 +7469,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-seasontile__img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .fy-seasontile__scrim {
   position: absolute; inset: auto 0 0; height: 104px;
-  background: linear-gradient(to top, rgba(10,10,10,.88), rgba(10,10,10,.55) 46%, rgba(10,10,10,0));
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--media-overlay-bg) 88%, transparent),
+    color-mix(in srgb, var(--media-overlay-bg) 55%, transparent) 46%,
+    transparent);
 }
 .fy-seasontile__hook {
   position: absolute; left: 9px; right: 9px; bottom: 9px;
-  color: var(--neutral-50); font: 400 10.5px/1.4 var(--font-sans);
+  color: var(--media-overlay-fg); font: 400 10.5px/1.4 var(--font-sans);
 }
 /* The number is the whole of an empty tile, so it is set at the size of the thing missing. */
 .fy-seasontile__num {
@@ -7511,7 +7516,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-seasontile__move { position: absolute; right: 6px; top: 6px; display: flex; gap: 2px; }
 .fy-seasontile__move > button {
   width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; cursor: pointer;
-  background: rgba(250,250,250,.86); color: var(--neutral-950);
+  background: var(--media-control-bg); color: var(--media-control-fg); opacity: .88;
   font: 500 11px var(--font-sans); line-height: 1;
 }
-.fy-seasontile__move > button:hover { background: var(--neutral-50); }
+.fy-seasontile__move > button:hover { opacity: 1; }
