@@ -84,3 +84,5 @@ export * from "./cadence.js";
 
 export * from "./rehearsal.js";
 export * from "./performance-bible.js";
+
+export * from "./dialogue-timing.js";

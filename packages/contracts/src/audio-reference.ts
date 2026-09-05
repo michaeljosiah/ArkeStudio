@@ -34,7 +34,7 @@ export function characterAudioRoute(model: { provider: string; id: string }, tas
     !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)) return null;
   return { endpoint: `bytedance/${model.id}/reference-to-video`, field: "audio_urls", maxFiles: 3,
     maxBytesPerFile: 15 * 1024 * 1024, maxTotalDurationSec: 15, maxCombinedReferences: 12,
-    formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0,
+    formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0, providerDurationMode: "requested",
     effects: { wording: "prompt-guided", timing: "not-preserved", identity: "guidance", cadence: "guidance",
       lipSync: "generated", generatedAudio: true, suppliedAudioPreserved: false, separateAudioArtifact: false } } as const;
 }

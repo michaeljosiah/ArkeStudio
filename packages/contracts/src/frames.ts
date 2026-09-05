@@ -1,3 +1,4 @@
+import { DialogueTimingIntentSchema } from "./cut.js";
 import { FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
@@ -1338,6 +1339,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
     operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
   z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("place-selected-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedTimelineRevision: z.number().int().nonnegative(),
+    expectedTimelineHash: z.string().min(1), expectedSelectionHash: z.string().nullable(),
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
     expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),

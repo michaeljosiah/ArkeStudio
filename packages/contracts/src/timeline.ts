@@ -1,3 +1,7 @@
+import { FullSha256Schema } from "./audio.js";
+import { PerformanceIdSchema } from "./performance.js";
+import { DialogueTimingIntentSchema } from "./cut.js";
+import { resolvedAuthoredDuration } from "./scene.js";
 import { z } from "zod";
 import type { ProductionBundle } from "./client-state.js";
 import { deriveCut, type CutEntry, type DerivedCut } from "./cut.js";
@@ -50,6 +54,9 @@ export const MAX_TRACK_CLIPS = 4000;
  * directly because nothing else decides what they are.
  */
 export const TimelineClipSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("performance"), performanceId: PerformanceIdSchema, shotId: ShotIdSchema,
+    label: z.string().min(1), sourceHash: FullSha256Schema,
+    leadInSec: z.number().finite().nonnegative(), timing: DialogueTimingIntentSchema }).strict(),
   z
     .object({
       kind: z.literal("shot"),
@@ -400,7 +407,7 @@ export type ProductionTimeline = z.infer<typeof ProductionTimelineSchema>;
 /** Scanner-facing state. Absence is not encoded as a nullable or empty timeline document. */
 export const TimelineStateSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("absent") }).strict(),
-  z.object({ status: z.literal("ready"), timeline: ProductionTimelineSchema }).strict(),
+  z.object({ status: z.literal("ready"), timeline: ProductionTimelineSchema, hash: z.string().optional() }).strict(),
   z.object({ status: z.literal("invalid"), message: z.string().min(1).max(500) }).strict(),
 ]);
 export type TimelineState = z.infer<typeof TimelineStateSchema>;
@@ -509,6 +516,7 @@ export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take"
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
 export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio">): string | null {
   if (kind === "subtitle") return "a Subtitle track holds cues, not clips";
+  if (clip.source.kind === "performance" && kind !== "dialogue") return "an exact performance belongs on a Dialogue track";
   if (kind === "picture") return null;
   if (clip.source.kind === "shot") return `a shot belongs on a Picture track, not ${kind}`;
   if (clip.audio !== undefined) return "keep and mute describe a picture's own sound; an audio clip has gain";
@@ -603,7 +611,7 @@ export function formatFrames(frames: number, frameRate: FrameRate): string {
   return `${pad(hh)}:${pad(mm)}:${pad(ss)}:${pad(ff)}`;
 }
 
-const DEFAULT_SHOT_SEC = 4;
+
 export const PICTURE_TRACK_ID: TimelineTrackId = "tr_picture";
 
 function orderedStoryShots(production: ProductionBundle) {
@@ -613,7 +621,7 @@ function orderedStoryShots(production: ProductionBundle) {
 }
 
 function shotDurationFrames(durationSec: number | undefined, frameRate: FrameRate): number {
-  return Math.max(1, secondsToFrames(durationSec ?? DEFAULT_SHOT_SEC, frameRate));
+  return Math.max(1, secondsToFrames(resolvedAuthoredDuration({ durationSec }), frameRate));
 }
 
 function sourceFingerprint(value: string, clock: "story" | "spine" = "story"): string {
@@ -1836,6 +1844,11 @@ export function sourceLengthFramesFor(
     if (clip.source.kind === "artifact") {
       const seconds = artifacts.find((artifact) => artifact.id === (clip.source.kind === "artifact" ? clip.source.artifactId : ""))?.mediaInfo?.durationSec;
       return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
+    }
+    if (clip.source.kind === "performance") {
+      const id = clip.source.performanceId;
+      const seconds = production.performances.find(p => p.id === id)?.provenance.outputTechnical.durationSec;
+      return seconds == null ? undefined : secondsToFrames(seconds, frameRate);
     }
     if (clip.source.kind === "take") return measured(clip.source.takeId);
     const takeId = production.selections[clip.source.shotId]?.acceptedTakeId ?? null;

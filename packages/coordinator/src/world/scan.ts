@@ -662,10 +662,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
     const timelinePath = `productions/${id}/timeline.json`;
     const timeline: ProductionBundle["timeline"] = (await exists(join(pdir, "timeline.json")))
-      ? await tryParse(timelinePath, (raw) => ProductionTimelineSchema.parse(JSON.parse(raw))).then((parsed) =>
+      ? await tryParse(timelinePath, (raw) => ({ timeline: ProductionTimelineSchema.parse(JSON.parse(raw)), hash: sha256(raw) })).then((parsed) =>
           parsed === null
             ? { status: "invalid", message: "timeline.json is invalid; see the world problems for details" }
-            : { status: "ready", timeline: parsed },
+            : { status: "ready", ...parsed },
         )
       : { status: "absent" };
 

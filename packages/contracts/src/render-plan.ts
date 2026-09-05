@@ -1,3 +1,4 @@
+import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   buildExportPlan,
@@ -293,12 +294,14 @@ function audioFromTimeline(
 ): { ok: true; audio: RenderAudioItem[]; speech: SpeechRegion[] } | { ok: false; reason: string } {
   const audio: RenderAudioItem[] = [];
   const speech: SpeechRegion[] = [];
+  const slots = dialogueSlots(production), timings: DialogueTiming[] = [];
   for (const track of audibleTracks(timeline).filter((track) => AUDIO_TRACK_KINDS.has(track.kind)).sort((a, b) => a.order - b.order)) {
     for (const clip of orderedTrackClips(track)) {
-      const startSec = framesToSeconds(clip.startFrame, frameRate);
-      const endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
+      let startSec = framesToSeconds(clip.startFrame, frameRate);
+      let endSec = framesToSeconds(clip.startFrame + clip.durationFrames, frameRate);
       let path: string;
       let segmentInSec = 0;
+      let physicalInSec: number | undefined;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
         const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -314,6 +317,21 @@ function audioFromTimeline(
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         path = resolved.path;
         segmentInSec = resolved.inSec;
+      } else if (clip.source.kind === "performance") {
+        const source = clip.source;
+        const performance = production.performances.find(p => p.id === source.performanceId);
+        if (!performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) return { ok: false, reason: `${clip.id}: performance identity is missing or changed` };
+        const slot = slots.filter(s => s.shotId === source.shotId);
+        if (slot.length !== 1) return { ok: false, reason: `${clip.id}: choose one picture slot for this dialogue` };
+        const calculated = calculateDialogueTiming(slot[0]!,performance.provenance.outputTechnical.durationSec,source.leadInSec,source.timing);
+        if (!calculated.ok) return calculated;
+        const timing = calculated.timing;
+        const halfFrame = framesToSeconds(1,frameRate)/2 + 0.000001;
+        if (Math.abs(startSec-timing.speechStartSec)>halfFrame || Math.abs(framesToSeconds(clip.sourceInFrames,frameRate)-timing.sourceInSec)>halfFrame || Math.abs((endSec-startSec)-timing.spokenSec)>2*halfFrame) return { ok:false,reason:`${clip.id}: picture or dialogue trim moved; review the performance placement again` };
+        // Frame windows draw the editor, but the immutable audio plays its exact physical range.
+        startSec=timing.speechStartSec; endSec=timing.speechEndSec; physicalInSec=timing.sourceInSec;
+        timings.push(timing);
+        path = `productions/${production.meta.id}/performances/${performance.id}/${performance.file}`;
       } else {
         return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
       }
@@ -323,12 +341,14 @@ function audioFromTimeline(
         endSec,
         gainDb: clip.gainDb ?? 0,
         role: track.kind as RenderAudioRole,
-        sourceInSec: segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate),
+        sourceInSec: physicalInSec ?? (segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate)),
         clipId: clip.id,
       });
       if (track.kind === "dialogue") speech.push({ startSec, endSec });
     }
   }
+  const problems = dialogueTimingProblems(timings,slots,Math.max(0,...slots.map(s=>s.endSec)));
+  if (problems.length) return {ok:false,reason:problems.join(" ")};
   return { ok: true, audio, speech: mergeRegions(speech) };
 }
 

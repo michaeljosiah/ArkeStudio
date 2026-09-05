@@ -246,3 +246,11 @@ limit; Eleven v3 remains 100 micro-USD and 5,000 characters.
 The epic integration pass must still exercise live narrow-window controls, explicit selection clear
 for broken sources, bible cadence-plan seeding and advisory eligibility, deleted-scene note cleanup,
 real local pace verification, and the end-to-end video/cut consumers in #111/#115/#256.
+
+## Exact performance timing (#115, first integration)
+
+The refreshed issue body missed the newer SPEC-037/038 editor: `timeline.json` is already the writable cut after migration. Do not revive `cut.json` writers or introduce a competing spine. Legacy cut source forms remain readable; new performance placements use the existing timeline command, revision, hash, history and render pipeline. A performance source carries its immutable id/hash and explicit physical trim, lead-in and post-speech handle. The reviewed placement command rechecks current selection, authored target, latest acceptance, contained bytes and cut hash inside the normal world gate. Picture selection is unchanged. Export checks exact bytes again and renders the physical audio range without frame-rounding truncation; stale timeline trims require a fresh placement review.
+
+`resolvedAuthoredDuration` owns the four-second fallback for display, planning, packing and cut derivation. Fixed-step provider padding is recorded separately in job parameters and excluded from shotPlan/virtual segment boundaries. Provider clients strip that app metadata. Dispatch timing is frozen separately from returned media measurement.
+
+Completed checks: exact trim/lead-in/reaction arithmetic, unknown and out-of-range refusal, mutual positive overlap calculations, legacy source compatibility, actual-store selected placement/stale CAS/export range, and unchanged picture selection; provider-padding compiler regression. The first timing panel deliberately exposes no overlap action until paired atomic placement is wired. Remaining #115 work includes anchored/saved-timeline pass packing, clock compatibility/creation, scene-duration proposal action, paired-overlap editing, and broader editor/narrow-window verification. This commit does not close the issue.

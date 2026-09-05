@@ -1,3 +1,4 @@
+import { PerformanceTimingPanel } from "./performance-timing-panel.js";
 import { PerformanceGenerationPanel } from "./performance-generation-panel.js";
 import { useEffect, useRef, useState } from "react";
 import { resolvePerformanceLine, performanceLineKey, orderedShots, estimateMicroUsd, formatMicroUsd, ulid, type PerformanceRecord, type VoiceAssignment, type WorldBundle, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
@@ -124,6 +125,7 @@ export function PerformancePanel({ world, production, scene, shotId }: {
           performanceId: record.id, decision, expectedReviewHash: production.performanceReview.reviewHash, expectedSelectionHash: production.performanceReview.selectionHash })) setNotice("The studio is disconnected.");
       }}>{decision === "accept" ? "Accept for this line" : "Reject"}</Button>)}
       <Button variant="ghost" onClick={() => { pending.current = ulid(); if (!send({ kind: "purge-performance", requestId: pending.current, worldId: world.meta.worldId, productionId: production.meta.id, performanceId: record.id })) setNotice("The studio is disconnected."); }}>Purge local recording</Button>
+      {production.performanceReview.selections[performanceLineKey(record.target)]?.performanceId === record.id && <PerformanceTimingPanel key={record.id} world={world} production={production} performance={record} />}
       {record.kind === "scratch" && <PerformanceConversionControls record={record} voice={sheet?.voice} worldId={world.meta.worldId} />}
     </div>)}
   </section>;

@@ -270,6 +270,8 @@ export class FalClient implements ProviderClient {
       "referenceScript",
       "characterName",
       "shotPlan",
+  "providerPaddingSec",
+  "dispatchTiming",
       // Ours, not fal's: the mode already chose the endpoint and the image field names.
       "taskMode",
       "route",

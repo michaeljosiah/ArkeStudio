@@ -53,6 +53,8 @@ const INTERNAL_PARAMS = new Set([
   "lookKind",
   "lookPrompt",
   "shotPlan",
+  "providerPaddingSec",
+  "dispatchTiming",
   "continuedFrom",
   "durationSec",
   "output",

@@ -1,3 +1,4 @@
+import { placeSelectedPerformance, validatePlacedPerformanceBytes } from "./audio/performance-placement.js";
 import { planTableRead, prepareLocalTableRead, finalizeTableReadCache } from "./audio/table-read.js";
 import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
@@ -8205,6 +8206,7 @@ export class Coordinator {
            * edited picture rather than replacing it. A refusal is the plan's own words.
            */
           if (timeline?.status === "ready") {
+            await validatePlacedPerformanceBytes(store, production);
             const projected = buildRenderPlan({
               production,
               artifacts: store.getBundle().artifacts,
@@ -11791,6 +11793,20 @@ export class Coordinator {
           }
         } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
         finally { this.performanceGenerations.delete(operationKey); }
+        return;
+      }
+      case "place-selected-performance": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open this performance world first.");
+          await placeSelectedPerformance(store, msg);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "reviewed", reason: "Selected performance placed in the cut. Picture selection is unchanged." });
+        } catch (error) {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Performance placement refused." });
+        }
         return;
       }
       case "review-performance": {

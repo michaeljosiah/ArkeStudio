@@ -1,3 +1,4 @@
+import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
 import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan } from "./audio-reference.js";
 import {
   compilationIsStale,
@@ -626,7 +627,7 @@ export type PackResult =
   | { ok: true; passes: Pass[]; totalSec: number }
   | { ok: false; oversizeShot: { shotId: string; number: number; durationSec: number; capSec: number } };
 
-export const DEFAULT_SHOT_SEC = 4;
+
 
 /**
  * Greedy, order-preserving; a shot is never split (D9). Oversize disables whole-scene (D10).
@@ -668,7 +669,7 @@ export function packScene(
     currentHasReferences = false;
   };
   for (const shot of shots) {
-    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+    const duration = resolvedAuthoredDuration(shot);
     const shotRefs = carries(shot.id);
     const shotCap = shotRefs ? referenceCap : capSec;
     if (duration > shotCap) {
@@ -1116,9 +1117,8 @@ export function composePrompt(parts: PromptParts): string {
  * "14 seconds" as a parameter and says nothing in the prompt is a request to compose 14 seconds
  * however it likes, and the cuts then land on whatever it happened to do.
  *
- * The seconds are the seconds actually asked for, not the seconds planned — a pass snapped up to
- * the route's next length is longer than its shots, and the last one absorbs the difference
- * (`coverPlan`), so that is the clip being described.
+ * These are the content seconds. Provider step padding remains unused source handle after
+ * the last boundary; it must not expand a shot or claim authored time.
  */
 export function passStructure(input: {
   shotCount: number;
@@ -1898,7 +1898,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
     // route offers keeps its own seconds here and is refused by name in the warnings.
-    const duration = pricedDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+    const duration = pricedDuration(model, resolvedAuthoredDuration(shot), {
       taskMode: taskModeForShot(shot.id),
       withReferences: bound.length > 0,
     });
@@ -2106,7 +2106,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const overlongShots = ordered
     .map((shot) => ({
       shot,
-      choice: dispatchDuration(model, shot.durationSec ?? DEFAULT_SHOT_SEC, {
+      choice: dispatchDuration(model, resolvedAuthoredDuration(shot), {
         taskMode: taskModeForShot(shot.id),
         // The route the shot will actually take (issue #390): a 12-second shot with references
         // is over-cap on a 15s-text/10s-reference model, and saying so here is the difference
@@ -2122,7 +2122,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     .map((entry) => ({
       shotId: entry.shot.id,
       number: entry.shot.number,
-      durationSec: entry.shot.durationSec ?? DEFAULT_SHOT_SEC,
+      durationSec: resolvedAuthoredDuration(entry.shot),
       longestSec: entry.choice.longest,
       becauseReferences: entry.choice.becauseReferences,
     }));
@@ -2305,3 +2305,5 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     warnings,
   };
 }
+
+export { DEFAULT_SHOT_SEC } from "./scene.js";

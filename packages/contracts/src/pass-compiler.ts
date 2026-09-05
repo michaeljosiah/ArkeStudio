@@ -1,5 +1,6 @@
 import type { PropStateProvenance } from "./prop.js";
 import type { ShotPropResolution } from "./planning.js";
+import { resolvedAuthoredDuration } from "./scene.js";
 import { characterAudioInstructions } from "./audio-reference.js";
 import {
   assemblePassBlocks,
@@ -13,7 +14,6 @@ import {
   type BoundReference,
   type ContinuationPlan,
   type ScenePlan,
-  type ShotPlanEntry,
 } from "./planning.js";
 import {
   continueDispatchFor,
@@ -185,17 +185,6 @@ function askedSeconds(model: ManifestModel, requestedSec: number, what: string, 
     );
   }
   return choice.kind === "asked" ? choice.seconds : requestedSec;
-}
-
-/**
- * The shot plan stretched to the clip that was actually asked for. Segmentation and the
- * per-shot charge split both read these boundaries, so a plan that stops short of the clip
- * hides the tail from review and prorates the money over the wrong total.
- */
-function coverPlan(plan: ShotPlanEntry[], seconds: number): ShotPlanEntry[] {
-  const last = plan[plan.length - 1];
-  if (!last || last.endSec >= seconds) return plan;
-  return [...plan.slice(0, -1), { ...last, endSec: seconds }];
 }
 
 function compiledReferences(
@@ -404,7 +393,10 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
                   frameArtifact: { id: entry.frame!.artifactId, hash: entry.frame!.hash },
                 }
               : {}),
-          ...(askedSec !== undefined ? { durationSec: askedSec } : {}),
+          ...(askedSec !== undefined ? { durationSec: askedSec, dispatchTiming: {
+            slotSource: "shot-duration", slotDurationSec: resolvedAuthoredDuration(entry.shot), requestedDurationSec: askedSec,
+            providerDurationMode: "requested", providerPaddingSec: Math.max(0, askedSec-resolvedAuthoredDuration(entry.shot)),
+          } } : {}),
           ...size,
           provenance,
         },
@@ -490,7 +482,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // below are only where we say they are if the model divides the clip where we do.
           structure: passStructure({
             shotCount: pass.plan.length,
-            askedSec: passSeconds,
+            askedSec: pass.durationSec,
             // From the plan, not re-looked-up (issue 389): the dialog showed this plan, and the
             // prompt's stated shape must be the shape the parameters ask for. A chained pass
             // whose frame route locks the ratio states none — the boundary image decides the
@@ -518,10 +510,12 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
             ([key]) => !(chained && key === "aspect" && chainFrameRoute!.locked.includes("aspect")),
           ),
         ),
-        // The explicit plan (R-19, D11): SPEC-013 segments from these, never guesses — which is
-        // why it has to describe the clip that was actually asked for. A pass snapped from 5s to
-        // 6s left a second nobody reviewed and nobody could cut from.
-        shotPlan: coverPlan(pass.plan, passSeconds),
+        // Provider step padding is unused source handle. The authored content boundaries
+        // remain exact, so a paid tail never becomes another shot's time by accident.
+        shotPlan: pass.plan,
+        providerPaddingSec: Math.max(0, passSeconds - pass.durationSec),
+        dispatchTiming: { slotSource: "shot-duration", slotDurationSec: pass.durationSec,
+          requestedDurationSec: passSeconds, providerDurationMode: "requested", providerPaddingSec: Math.max(0,passSeconds-pass.durationSec) },
         provenance,
       },
       references: chained ? [] : compiledReferences(passReferencePlan.bound, world.sheets),

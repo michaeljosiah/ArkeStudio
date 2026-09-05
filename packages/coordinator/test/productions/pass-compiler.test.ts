@@ -189,7 +189,7 @@ describe("the pass compiler (issue 398)", () => {
     );
   });
 
-  it("a whole-scene pass carries its shot plan stretched to the clip actually asked for", async () => {
+  it("provider padding does not extend the last content segment", async () => {
     const { bundle } = await open();
     const production = bundle.productions[0]!;
     const scene: Scene = {
@@ -212,7 +212,8 @@ describe("the pass compiler (issue 398)", () => {
     assert.equal(pass!.target.kind, "scene-pass");
     assert.equal(pass!.askedSec, 10, "8s rounds up to the route's 10");
     const shotPlan = pass!.params["shotPlan"] as Array<{ endSec: number }>;
-    assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 10, "the plan describes the clip that was asked for");
+    assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 8, "the content ends at its authored boundary");
+    assert.equal(pass!.params["providerPaddingSec"], 2);
   });
 
   it("keeps authored timing inside each shot prompt and out of the machine shot plan", async () => {

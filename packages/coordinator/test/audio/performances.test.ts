@@ -1,3 +1,6 @@
+import { placeSelectedPerformance, validatePlacedPerformanceBytes } from "../../src/audio/performance-placement.js";
+import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { storyTimelineFingerprint, buildRenderPlan } from "@arke-studio/contracts";
 import { writePerformanceBible } from "../../src/audio/performance-bible.js";
 import { saveRehearsalNote } from "../../src/audio/rehearsal-notes.js";
 import { planTableRead } from "../../src/audio/table-read.js";
@@ -69,6 +72,25 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.equal(reviewed.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id);
   assert.deepEqual(reviewed.selections, originalSelections, "performance acceptance never changes picture selection");
   await assert.rejects(reviewPerformance(store, { ...review, requestId: ulid() }), /review changed/);
+  await applyTimelineCommand(store, production.meta.id, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(reviewed),
+    commands: [{ kind: "place", trackId: "tr_picture", clip: { id: "cl_dialogue_picture", startFrame: 0, durationFrames: 300, sourceInFrames: 0,
+      source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title } } }] });
+  const withTimeline = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(withTimeline.timeline?.status, "ready");
+  if (withTimeline.timeline?.status !== "ready") throw new Error("timeline missing");
+  const placement = { kind: "place-selected-performance" as const, requestId: ulid(), worldId: store.worldId,
+    productionId: production.meta.id, performanceId: next.id, expectedTimelineRevision: withTimeline.timeline.timeline.revision,
+    expectedTimelineHash: withTimeline.timeline.hash!, expectedSelectionHash: withTimeline.performanceReview.selectionHash,
+    leadInSec: 0.125, timing: { sourceRange: { inSec: 0.125, outSec: 0.875 }, postHandle: { kind: "reaction" as const, durationSec: 0.25 }, overflow: { mode: "forbid" as const } } };
+  await placeSelectedPerformance(store, placement);
+  await assert.rejects(placeSelectedPerformance(store, { ...placement, requestId: ulid(), leadInSec: 0.2 }), /cut changed/);
+  const placed = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.deepEqual(placed.selections, originalSelections, "dialogue placement never selects picture");
+  await validatePlacedPerformanceBytes(store, placed);
+  const rendered = buildRenderPlan({ production: placed, timeline: placed.timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(rendered.ok, rendered.ok ? "" : rendered.reason);
+  const dialogue = rendered.plan.audio.find(a => a.role === "dialogue")!;
+  assert.equal(dialogue.startSec, 0.125); assert.equal(dialogue.endSec, 0.875); assert.equal(dialogue.sourceInSec, 0.125);
   const planned = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], []);
   assert.equal(planned.plan.items.find(i => i.lineId === performanceLineKey(next.target))?.route, "existing");
   assert.equal(planned.cloud.length, 0, "accepted playback never enqueues a synthesis");

@@ -610,3 +610,9 @@ export function hasOwnFrame(
     !artifacts.some((candidate) => candidate.supersedes === artifactId)
   );
 }
+
+/** One authored fallback for planning, pricing, picture slots and display. */
+export const DEFAULT_SHOT_SEC = 4;
+export function resolvedAuthoredDuration(shot: { durationSec?: number }): number {
+  return shot.durationSec ?? DEFAULT_SHOT_SEC;
+}

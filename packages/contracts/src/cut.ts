@@ -1,3 +1,5 @@
+import { PerformanceIdSchema } from "./performance.js";
+import { resolvedAuthoredDuration } from "./scene.js";
 import { z } from "zod";
 import { orderedShots } from "./scene-flow.js";
 import { ArtifactIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, prefixedIdSchema } from "./ids.js";
@@ -22,10 +24,28 @@ import type { FrameRate } from "./world.js";
 export const AudioTrackKindSchema = z.enum(["dialogue", "score", "ambience"]);
 export type AudioTrackKind = z.infer<typeof AudioTrackKindSchema>;
 
+export const CutAudioSourceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("performance"), performanceId: PerformanceIdSchema }).strict(),
+  z.object({ kind: z.literal("take"), takeId: TakeIdSchema }).strict(),
+  z.object({ kind: z.literal("artifact"), artifactId: ArtifactIdSchema }).strict(),
+]);
+export const DialogueTimingIntentSchema = z.object({
+  sourceRange: z.object({ inSec: z.number().finite().nonnegative(), outSec: z.number().finite().positive() }).strict()
+    .refine(r => r.outSec > r.inSec, "outSec must exceed inSec").optional(),
+  postHandle: z.object({ kind: z.enum(["tail", "reaction", "hold"]), durationSec: z.number().finite().nonnegative() }).strict().default({ kind: "tail", durationSec: 0 }),
+  overflow: z.discriminatedUnion("mode", [
+    z.object({ mode: z.literal("forbid") }).strict(),
+    z.object({ mode: z.literal("overlap"), withShotId: ShotIdSchema }).strict(),
+  ]).default({ mode: "forbid" }),
+}).strict();
+export type DialogueTimingIntent = z.infer<typeof DialogueTimingIntentSchema>;
+
 export const AudioEntrySchema = z
   .object({
     /** Placement is track-level against shot boundaries in v1 (§1.4). */
     shotId: ShotIdSchema.optional(),
+    source: CutAudioSourceSchema.optional(),
+    timing: DialogueTimingIntentSchema.optional(),
     /** Dialogue references the voice take; beds may reference a filed artifact. */
     takeId: TakeIdSchema.optional(),
     artifactId: ArtifactIdSchema.optional(),
@@ -35,8 +55,16 @@ export const AudioEntrySchema = z
     offsetSec: z.number().min(0).default(0),
     note: z.string().optional(),
   })
-  .strict();
+  .strict().superRefine((entry, ctx) => {
+    if ([entry.source, entry.takeId, entry.artifactId].filter(x => x !== undefined).length > 1) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["source"], message: "Use one audio source representation." });
+    }
+  });
 export type AudioEntry = z.infer<typeof AudioEntrySchema>;
+export function audioSourceOf(entry: AudioEntry): z.infer<typeof CutAudioSourceSchema> | null {
+  return entry.source ?? (entry.takeId ? { kind: "take", takeId: entry.takeId } : entry.artifactId ? { kind: "artifact", artifactId: entry.artifactId } : null);
+}
+
 
 export const AudioTrackSchema = z
   .object({
@@ -147,7 +175,7 @@ export interface DerivedCut {
   uncoveredSec: number;
 }
 
-const DEFAULT_SHOT_SEC = 4;
+
 
 export function deriveCut(production: ProductionBundle): DerivedCut {
   // Explicit scene order, with the birth number as the legacy fallback (issue #387): the
@@ -278,7 +306,7 @@ function deriveCutOver(production: ProductionBundle, scenes: readonly Production
               };
         }
       }
-      const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
+      const durationSec = resolvedAuthoredDuration(shot);
       entries.push({
         sceneNumber: scene.number,
         shot,
