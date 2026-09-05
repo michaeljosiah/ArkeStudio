@@ -1108,6 +1108,18 @@ ${assembled.entryContext}`);
 /** What the person has selected while they talk (SPEC-039 R-26), worded for the model. */
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
-  const named = subject.kind === "timeline-clip" ? `clip ${subject.clipId}` : `track ${subject.trackId}`;
-  return ` They have ${named} selected on the timeline; that is what "this" and "the selected clip" mean.`;
+  const named = subject.kind === "timeline-clip"
+    ? `clip ${subject.clipId} on the timeline`
+    : subject.kind === "timeline-track"
+      ? `track ${subject.trackId} on the timeline`
+      : subject.kind === "scene"
+        ? `scene ${subject.sceneId}`
+        : subject.kind === "shot"
+          ? `shot ${subject.shotId} in scene ${subject.sceneId}`
+          : subject.kind === "board"
+            ? `the board containing shots ${subject.memberShotIds.join(", ")} in scene ${subject.sceneId}`
+            : subject.kind === "edge"
+              ? `the scene edge from ${subject.fromShotId ?? "the opening"} to ${subject.toShotId ?? "the ending"} in scene ${subject.sceneId}`
+              : `take ${subject.takeId}`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
 }

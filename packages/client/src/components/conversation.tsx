@@ -37,6 +37,7 @@ import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Pin } from "./icons.js";
+import { mediaUrl } from "../lib/media.js";
 
 /**
  * One conversation, drawn once (design turn 86).
@@ -230,6 +231,7 @@ const DECIDABLE_CARD_FAMILIES = new Set([
   "command",
   "destructive",
   "take-review",
+  "generation",
   "host-action",
   "setting",
 ]);
@@ -241,6 +243,8 @@ export function ConversationPermissionCard({
   action: ConversationActionCard;
   conversationSeq: number;
 }) {
+  const { state } = useStore();
+  const navigate = useNavigate();
   const card = useRef<HTMLElement>(null);
   const request = useRef<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -317,6 +321,11 @@ export function ConversationPermissionCard({
         <div className="fy-actioncard__receipt">
           <strong>Result</strong>
           <span>{action.receipt.summary}</span>
+          {action.receipt.kind === "bench-session" && state?.world ? (
+            <Button variant="ghost" onClick={() => void navigate(`/w/${state.world!.meta.worldId}/artifacts/bench/${action.receipt!.id}`)}>
+              Open Bench
+            </Button>
+          ) : null}
         </div>
       )}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
@@ -347,6 +356,7 @@ export function ConversationPermissionCard({
 }
 
 function ConversationActionBody({ action, supported }: { action: ConversationActionCard; supported: boolean }) {
+  const { state } = useStore();
   const body = action.shown.body;
   if (!supported) return null;
   switch (body.family) {
@@ -375,13 +385,46 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
         <p>Undo {body.undoAvailable ? "available" : "not available"}</p>
       </div>;
     case "take-review":
-      return <div className="fy-actioncard__body"><p>{body.mediaKind} · {body.destination}</p><p>Current: {body.currentSelection ?? "None"}</p>{body.reason && <p>{body.reason}</p>}</div>;
+      return <div className="fy-actioncard__body">
+        {body.mediaPath && state?.world ? (
+          body.mediaKind === "video" ? (
+            <video
+              className="fy-actioncard__media"
+              controls
+              preload="metadata"
+              src={mediaUrl(state.world.meta.slug, body.mediaPath)}
+              {...(body.posterPath ? { poster: mediaUrl(state.world.meta.slug, body.posterPath) } : {})}
+            />
+          ) : body.mediaKind === "audio" ? (
+            <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world.meta.slug, body.mediaPath)} />
+          ) : body.mediaKind === "image" ? (
+            <img className="fy-actioncard__media" src={mediaUrl(state.world.meta.slug, body.mediaPath)} alt={`Take ${body.mediaId}`} />
+          ) : (
+            <a href={mediaUrl(state.world.meta.slug, body.mediaPath)}>Open source document</a>
+          )
+        ) : null}
+        <p>{body.mediaKind} · {body.destination}</p>
+        {body.scene && <p>Scene: {body.scene}</p>}
+        {body.shot && <p>Shot: {body.shot}</p>}
+        <p>Current selection: {body.currentSelection ?? "None"}</p>
+        {body.reason && <p>{body.reason}</p>}
+        {body.rejectionCitation && (
+          <p>Cites {body.rejectionCitation.sheet} · {body.rejectionCitation.field}{body.rejectionCitation.note ? ` · ${body.rejectionCitation.note}` : ""}</p>
+        )}
+        {(body.reviewHistory ?? []).length > 0 && <><strong>Review history</strong><ul>{(body.reviewHistory ?? []).map((line) => <li key={line}>{line}</li>)}</ul></>}
+      </div>;
     case "host-action":
       return <div className="fy-actioncard__body"><strong>{body.action}</strong><p>{body.effect}</p></div>;
     case "setting":
       return <div className="fy-actioncard__body"><div className="fy-actioncard__change"><strong>{body.setting}</strong><span className="fy-actioncard__before">{body.current ?? "Not set"}</span><span aria-hidden="true">→</span><span>{body.proposed ?? "Not set"}</span></div>{body.consequences.map((line) => <p key={line}>{line}</p>)}</div>;
     case "generation":
-      return null;
+      return <div className="fy-actioncard__body">
+        <div className="fy-actioncard__line"><strong>{body.medium}</strong><span>{body.purpose}</span></div>
+        <p>{body.prompt}</p>
+        {body.references.length > 0 && <p>References: {body.references.map((reference) => `${reference.id} · ${reference.role}`).join("; ")}</p>}
+        <p>{body.provider} · {body.model} · {body.quantity} output{body.quantity === 1 ? "" : "s"}</p>
+        <p>{body.output} · {body.cost}</p>
+      </div>;
   }
 }
 

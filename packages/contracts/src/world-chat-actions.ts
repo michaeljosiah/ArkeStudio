@@ -19,6 +19,7 @@ import { STAGED_REFERENCE_KEY } from "./planning.js";
 import { CompilationFormatSchema, ReferenceAngleSchema } from "./reference.js";
 import { CapabilitySchema } from "./provider.js";
 import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
+import { SceneCommandSchema } from "./scene-operations.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -755,6 +756,99 @@ const ProductionStyleModelActionSchema = z
   })
   .strict();
 
+const ProductionSceneCommandModelActionSchema = z
+  .object({
+    kind: z.literal("production-scene-command"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    command: SceneCommandSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionBoardCompileModelActionSchema = z
+  .object({
+    kind: z.literal("production-board-compile"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionBoardExportModelActionSchema = z
+  .object({
+    kind: z.literal("production-board-export"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionTakeImportModelActionSchema = z
+  .object({
+    kind: z.literal("production-take-import"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    shotId: ShotIdSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionTakeGenerationModelActionSchema = z
+  .object({
+    kind: z.literal("production-take-generation"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    target: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("shot"), shotId: ShotIdSchema }).strict(),
+      z.object({ kind: z.literal("board"), memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
+    ]),
+    mode: z.enum(["image", "video"]),
+    retakeOf: TakeIdSchema.optional(),
+    instruction: z.string().trim().min(1).max(2_000).optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionTakeReviewModelActionSchema = z
+  .object({
+    kind: z.literal("production-take-review"),
+    productionId: SlugSchema,
+    takeId: TakeIdSchema,
+    review: z.discriminatedUnion("decision", [
+      z.object({ decision: z.literal("accept"), shotId: ShotIdSchema }).strict(),
+      z
+        .object({
+          decision: z.literal("reject"),
+          shotId: ShotIdSchema.optional(),
+          citation: z
+            .object({
+              sheet: SlugSchema,
+              field: z.string().trim().min(1).max(200),
+              note: z.string().trim().min(1).max(1_000).optional(),
+            })
+            .strict(),
+        })
+        .strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionTakeTrimModelActionSchema = z
+  .object({
+    kind: z.literal("production-take-trim"),
+    productionId: SlugSchema,
+    shotId: ShotIdSchema,
+    takeId: TakeIdSchema,
+    trimInSec: z.number().min(0),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+const ProductionStagePlayblastModelActionSchema = z
+  .object({
+    kind: z.literal("production-stage-playblast"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    shotId: ShotIdSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
   CanonModelActionSchema,
@@ -847,6 +941,14 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionSceneDeleteModelActionSchema,
   ProductionSceneRestoreModelActionSchema,
   ProductionStyleModelActionSchema,
+  ProductionSceneCommandModelActionSchema,
+  ProductionBoardCompileModelActionSchema,
+  ProductionBoardExportModelActionSchema,
+  ProductionTakeImportModelActionSchema,
+  ProductionTakeGenerationModelActionSchema,
+  ProductionTakeReviewModelActionSchema,
+  ProductionTakeTrimModelActionSchema,
+  ProductionStagePlayblastModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -925,6 +1027,14 @@ export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-c
 export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
 export const WorldChatProductionSceneRestoreActionSchema = preparedAction("world-chat-production-scene-restore", ProductionSceneRestoreModelActionSchema);
 export const WorldChatProductionStyleActionSchema = preparedAction("world-chat-production-style", ProductionStyleModelActionSchema);
+export const WorldChatProductionSceneCommandActionSchema = preparedAction("world-chat-production-scene-command", ProductionSceneCommandModelActionSchema);
+export const WorldChatProductionBoardCompileActionSchema = preparedAction("world-chat-production-board-compile", ProductionBoardCompileModelActionSchema);
+export const WorldChatProductionBoardExportActionSchema = preparedAction("world-chat-production-board-export", ProductionBoardExportModelActionSchema);
+export const WorldChatProductionTakeImportActionSchema = preparedAction("world-chat-production-take-import", ProductionTakeImportModelActionSchema);
+export const WorldChatProductionTakeGenerationActionSchema = preparedAction("world-chat-production-take-generation", ProductionTakeGenerationModelActionSchema);
+export const WorldChatProductionTakeReviewActionSchema = preparedAction("world-chat-production-take-review", ProductionTakeReviewModelActionSchema);
+export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-chat-production-take-trim", ProductionTakeTrimModelActionSchema);
+export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -974,6 +1084,14 @@ export type WorldChatProductionSceneOrderAction = z.infer<typeof WorldChatProduc
 export type WorldChatProductionSceneDeleteAction = z.infer<typeof WorldChatProductionSceneDeleteActionSchema>;
 export type WorldChatProductionSceneRestoreAction = z.infer<typeof WorldChatProductionSceneRestoreActionSchema>;
 export type WorldChatProductionStyleAction = z.infer<typeof WorldChatProductionStyleActionSchema>;
+export type WorldChatProductionSceneCommandAction = z.infer<typeof WorldChatProductionSceneCommandActionSchema>;
+export type WorldChatProductionBoardCompileAction = z.infer<typeof WorldChatProductionBoardCompileActionSchema>;
+export type WorldChatProductionBoardExportAction = z.infer<typeof WorldChatProductionBoardExportActionSchema>;
+export type WorldChatProductionTakeImportAction = z.infer<typeof WorldChatProductionTakeImportActionSchema>;
+export type WorldChatProductionTakeGenerationAction = z.infer<typeof WorldChatProductionTakeGenerationActionSchema>;
+export type WorldChatProductionTakeReviewAction = z.infer<typeof WorldChatProductionTakeReviewActionSchema>;
+export type WorldChatProductionTakeTrimAction = z.infer<typeof WorldChatProductionTakeTrimActionSchema>;
+export type WorldChatProductionStagePlayblastAction = z.infer<typeof WorldChatProductionStagePlayblastActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1071,5 +1189,13 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneRestoreActionSchema,
   WorldChatProductionStyleActionSchema,
+  WorldChatProductionSceneCommandActionSchema,
+  WorldChatProductionBoardCompileActionSchema,
+  WorldChatProductionBoardExportActionSchema,
+  WorldChatProductionTakeImportActionSchema,
+  WorldChatProductionTakeGenerationActionSchema,
+  WorldChatProductionTakeReviewActionSchema,
+  WorldChatProductionTakeTrimActionSchema,
+  WorldChatProductionStagePlayblastActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

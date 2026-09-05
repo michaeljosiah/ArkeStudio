@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationActionIdSchema, ConversationIdSchema, SlugSchema } from "./ids.js";
+import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import {
   PICTURE_TRACK_ID,
   TimelineClipIdSchema,
@@ -114,10 +114,22 @@ export const EditorRequestFileSchema = z
   .strict();
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
-/** What the person has selected while they talk to Arke (R-26): the subject of "this" and "the selected clip". */
+/** What the person has selected while they talk to Arke (R-26): the subject of "this". */
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),
+  z.object({ kind: z.literal("scene"), sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("shot"), sceneId: SceneIdSchema, shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("board"), sceneId: SceneIdSchema, memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("edge"),
+      sceneId: SceneIdSchema,
+      fromShotId: ShotIdSchema.nullable(),
+      toShotId: ShotIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("take"), takeId: TakeIdSchema }).strict(),
 ]);
 export type WorldChatSubject = z.infer<typeof WorldChatSubjectSchema>;
 

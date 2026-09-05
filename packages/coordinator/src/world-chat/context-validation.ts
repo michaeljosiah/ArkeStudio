@@ -1,4 +1,4 @@
-import type { WorldBundle, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
+import { orderedShots, type WorldBundle, type WorldChatContext, type WorldChatSubject } from "@arke-studio/contracts";
 
 /** Resolve a conversation's semantic entry point against the world it claims to describe. */
 export function worldChatContextExists(bundle: WorldBundle, context: WorldChatContext): boolean {
@@ -38,9 +38,22 @@ export function worldChatSubjectExists(
     ? context.productionId
     : null;
   if (productionId === null) return false;
-  const state = bundle.productions.find((production) => production.meta.id === productionId)?.timeline;
-  if (state?.status !== "ready") return false;
-  return subject.kind === "timeline-track"
-    ? state.timeline.tracks.some((track) => track.id === subject.trackId)
-    : state.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === subject.clipId));
+  const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+  if (production === undefined) return false;
+  if (subject.kind === "timeline-track" || subject.kind === "timeline-clip") {
+    const state = production.timeline;
+    if (state?.status !== "ready") return false;
+    return subject.kind === "timeline-track"
+      ? state.timeline.tracks.some((track) => track.id === subject.trackId)
+      : state.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === subject.clipId));
+  }
+  if (subject.kind === "take") return production.takes.some((take) => take.id === subject.takeId);
+  const scene = production.scenes.find((candidate) => candidate.id === subject.sceneId);
+  if (scene === undefined || (context.kind === "scene" && context.sceneId !== scene.id)) return false;
+  if (subject.kind === "scene") return true;
+  const hasShot = (shotId: string | null) => shotId === null || orderedShots(scene).some((shot) => shot.id === shotId);
+  if (subject.kind === "shot") return hasShot(subject.shotId);
+  if (subject.kind === "board") return subject.memberShotIds.every(hasShot);
+  return (subject.fromShotId !== null || subject.toShotId !== null) &&
+    hasShot(subject.fromShotId) && hasShot(subject.toShotId);
 }

@@ -11,6 +11,7 @@ import {
   type ProductionBundle,
   type SceneRecord,
   type WorldBundle,
+  type WorldChatSubject,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { seconds } from "../../lib/format.js";
@@ -105,6 +106,18 @@ export function SceneWorkspace({
       ? { kind: "shot", shotId: linkedShotId as never }
       : { kind: "scene" },
   );
+  const conversationSubject: WorldChatSubject = subject.kind === "scene"
+    ? { kind: "scene", sceneId: scene.id }
+    : subject.kind === "shot"
+      ? { kind: "shot", sceneId: scene.id, shotId: subject.shotId as never }
+      : subject.kind === "board"
+        ? { kind: "board", sceneId: scene.id, memberShotIds: subject.memberShotIds as never }
+        : {
+            kind: "edge",
+            sceneId: scene.id,
+            fromShotId: subject.fromShotId as never,
+            toShotId: subject.toShotId as never,
+          };
   const selection = useMemo(() => ({ subject, select: setSubject }), [subject]);
   useEffect(() => {
     if (linkedShotId !== null && orderedShots(scene).some((shot) => shot.id === linkedShotId)) {
@@ -358,6 +371,25 @@ export function SceneWorkspace({
     setSubject({ kind: "shot", shotId: shotId as never });
     setView("stage");
   };
+  const activeConversation = state?.worldChat;
+  const activeConversationSummary = activeConversation === null || activeConversation === undefined
+    ? undefined
+    : world.conversations.find((conversation) => conversation.id === activeConversation.conversationId);
+  const activeContext = activeConversationSummary?.entryContext;
+  const playblastAction = activeContext?.kind === "scene" &&
+    activeContext.productionId === production.meta.id && activeContext.sceneId === scene.id
+    ? activeConversation?.actions.find((action) =>
+        action.actionKind === "world-chat-production-stage-playblast" && action.status === "awaiting-host")
+    : undefined;
+  const playblastShotId = playblastAction?.targets.find((target) => target.kind === "shot")?.id;
+  const playblastRequest = playblastAction && playblastShotId
+    ? { actionId: playblastAction.actionId, conversationId: activeConversation!.conversationId, shotId: playblastShotId }
+    : undefined;
+  useEffect(() => {
+    if (playblastRequest === undefined) return;
+    setSubject({ kind: "shot", shotId: playblastRequest.shotId as never });
+    setView("stage");
+  }, [playblastRequest?.actionId, playblastRequest?.shotId]);
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
     pendingPlan.current = dispatchScenePlanned(
@@ -575,6 +607,7 @@ export function SceneWorkspace({
               refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
+              {...(playblastRequest ? { playblastRequest } : {})}
             />
           ) : (
             <ScenePreview
@@ -611,6 +644,7 @@ export function SceneWorkspace({
             worldId={world.meta.worldId}
             productionId={production.meta.id}
             entry={{ kind: "scene", productionId: production.meta.id, sceneId: scene.id }}
+            subject={conversationSubject}
             dock={{
               title: dockTitle,
               subject: dockSubject,

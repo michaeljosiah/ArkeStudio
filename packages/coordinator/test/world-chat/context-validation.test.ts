@@ -46,4 +46,25 @@ describe("World Chat context validation", () => {
     assert.equal(worldChatSubjectExists(bundle, context, { kind: "timeline-clip", clipId: "cl_missing" }), false);
     assert.equal(worldChatSubjectExists(bundle, { kind: "world" }, { kind: "timeline-track", trackId: "tr_picture" }), false);
   });
+
+  it("resolves scene, shot, board, edge, and take subjects within the conversation production", async () => {
+    const bundle = await fixtureBundle();
+    const context = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
+
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "scene", sceneId: "sc_04" }), true);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "shot", sceneId: "sc_04", shotId: "sh_12" }), true);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "board", sceneId: "sc_04", memberShotIds: ["sh_12", "sh_13"] }), true);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "edge", sceneId: "sc_04", fromShotId: "sh_12", toShotId: "sh_13" }), true);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "edge", sceneId: "sc_04", fromShotId: null, toShotId: null }), false);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "shot", sceneId: "sc_04", shotId: "sh_missing" }), false);
+    assert.equal(worldChatSubjectExists(bundle, context, { kind: "scene", sceneId: "sc_02" }), false);
+    assert.equal(
+      worldChatSubjectExists(bundle, context, { kind: "take", takeId: "tk_01J8F0000000000000000000B2" }),
+      true,
+    );
+    assert.equal(
+      worldChatSubjectExists(bundle, { kind: "world" }, { kind: "take", takeId: "tk_01J8F0000000000000000000B2" }),
+      false,
+    );
+  });
 });

@@ -59,6 +59,8 @@ import {
   type WorldChatReferenceImageImportAction,
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
+  type WorldChatProductionTakeImportAction,
+  type WorldChatProductionTakeGenerationAction,
   type Job,
   type FrameRunQuote,
   type FrameRunState,
@@ -7633,6 +7635,17 @@ export class Coordinator {
         }
         return;
       }
+      case "conversation-action-stage-playblast-complete": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.conversationActionLifecycle(store).completeHostAction({
+          conversationId: msg.conversationId,
+          actionId: msg.actionId,
+          payload: msg,
+        });
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "accept-take": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -12450,6 +12463,79 @@ export class Coordinator {
     return { status: "completed", id: take.id };
   }
 
+  private async importProductionTakeForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionTakeImportAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }> {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
+    const scene = production?.scenes.find((candidate) => candidate.id === action.sceneId);
+    if (!production || !scene || !orderedShots(scene).some((shot) => shot.id === action.shotId)) {
+      return { status: "failed", detail: "That shot is no longer in this scene." };
+    }
+    const takeId = `tk_${mutation.requestId.slice(4)}` as never;
+    const existing = production.takes.find((take) => take.id === takeId);
+    if (existing) return { status: "completed", id: existing.id };
+    const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }) ?? [];
+    if (chosen.length === 0) return { status: "cancelled", detail: "No image was selected." };
+    if (chosen.length !== 1) return { status: "failed", detail: ONE_IMAGE_ONLY };
+    if (!this.stillOpen(store)) return { status: "cancelled", detail: "That world is no longer open." };
+    const picked = await readPickedImage(chosen[0]!);
+    if ("error" in picked) return { status: "failed", detail: picked.error };
+    const take = await recordUploadedShotFrameTake(
+      store,
+      action.productionId,
+      action.shotId,
+      `upload-${mutation.requestId.slice(-8).toLowerCase()}${picked.extension}`,
+      picked.data,
+      { takeId, ...mutation },
+    );
+    this.refreshIfStillOpen(store);
+    return { status: "completed", id: take.id };
+  }
+
+  private async openProductionTakeGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionTakeGenerationAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "failed"; id?: string; detail?: string }> {
+    const stale = mutation.precondition();
+    if (stale) return { status: "failed", detail: stale };
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    const reader = worldFileReader(store.dir);
+    const prepared = await prepareBenchSubject(store.getBundle(), {
+      productionId: action.productionId,
+      sceneId: action.sceneId,
+      subject: action.target,
+      mode: action.mode,
+      settings,
+      manifest: this.opts.manifest ?? null,
+      sources: {
+        read: reader.read,
+        durationSec: (path) =>
+          measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
+      },
+    });
+    if (!prepared.ok) return { status: "failed", detail: prepared.reason };
+    const moved = mutation.precondition();
+    if (moved) return { status: "failed", detail: moved };
+    const brief = [
+      prepared.prefill.composer.brief,
+      ...(action.retakeOf ? [`Retake ${action.retakeOf}.`] : []),
+      ...(action.instruction ? [action.instruction] : []),
+    ].filter((line) => line.trim() !== "").join("\n\n");
+    const sessionId = `sess_${mutation.requestId.slice(4)}` as SessionId;
+    const opened = await openSubjectBenchSession(store.dir, sessionId, this.nowIso(), {
+      ...prepared.prefill,
+      composer: { ...prepared.prefill.composer, brief },
+    });
+    const session = (await opened.store.fold()) ?? opened.session;
+    this.readModel.setBench({ worldId: store.worldId, session });
+    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    this.transport.broadcastSnapshot();
+    return { status: "completed", id: sessionId };
+  }
+
   private async importReferenceImageForConversationAction(
     store: WorldStore,
     target: WorldChatReferenceImageImportAction["action"]["target"],
@@ -12691,6 +12777,11 @@ export class Coordinator {
           supportsVoiceUse(candidate, "line"),
         );
       },
+      ...(this.opts.boundaryFrameMaker ? { boundaryFrameMaker: this.opts.boundaryFrameMaker } : {}),
+      importProductionTake: (action, mutation) =>
+        this.importProductionTakeForConversationAction(store, action, mutation),
+      openProductionTakeGeneration: (action, mutation) =>
+        this.openProductionTakeGenerationForConversationAction(store, action, mutation),
     };
     return [
       ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso(), deps)

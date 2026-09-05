@@ -46,7 +46,7 @@ import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
 import { CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
 import { readSceneRecord } from "./scene-record.js";
-import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
+import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
 
 /**
@@ -1222,17 +1222,25 @@ export async function landBoard(
   sceneFile: string,
   png: Uint8Array,
   clock: () => string,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition; sceneId?: string; baseVersion?: number } = {},
 ): Promise<void> {
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     const { scene, raw, path } = await readScene(store, productionId, sceneFile);
+    if (options.sceneId !== undefined && scene.id !== options.sceneId) throw new Error("the scene at that path was replaced");
+    if (options.baseVersion !== undefined && scene.version !== options.baseVersion) {
+      throw new WorldStateStaleError(`the scene moved to v${scene.version} before its board was compiled`);
+    }
     const image = `boards/scene-${scene.number}.png`;
     await atomicWriteFile(join(store.dir, "productions", productionId, fromPortable(image)), png);
     const doc = JsonFile.parse(raw);
     doc.set({ board: { version: scene.version, compiledAt: clock(), image } });
     await store.commitUnserialised({
       kind: "board-compile",
-      source: "form",
+      source: options.source ?? "form",
       files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw), preserveVersion: true }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
 }
@@ -1244,6 +1252,7 @@ export async function exportBoard(
   scene: SceneRecord,
   png: Uint8Array,
   clock: () => string,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<string> {
   const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
   const file = `board-${productionId}-scene-${scene.number}-v${scene.version}-${stamp}.png`;
@@ -1257,10 +1266,12 @@ export async function exportBoard(
     created: clock(),
   };
   await store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
     await atomicWriteFile(join(store.dir, "artifacts", file), png);
     await store.commitUnserialised({
       kind: "board-export",
-      source: "form",
+      source: options.source ?? "form",
       files: [
         {
           path: `artifacts/${file}.json`,
@@ -1269,6 +1280,7 @@ export async function exportBoard(
           baseHash: null,
         },
       ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     });
   });
   return file;

@@ -71,6 +71,8 @@ export interface ConversationActionAuthorityAdapter {
   abandonPreparation?(intent: ConversationActionPrepareIntent): Promise<void>;
   validate(action: ConversationActionCard): Promise<ConversationActionValidation>;
   execute(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome>;
+  /** Finish renderer-owned work after `execute` deliberately returned `awaiting-host`. */
+  completeHost?(action: ConversationActionCard, payload: unknown): Promise<ConversationActionExecutionOutcome>;
   /** Idempotently settle authority-owned preparation after the local actor's denial is durable. */
   deny?(action: ConversationActionCard): Promise<void>;
   /** Null means the authority still has exactly the projected status. */
@@ -112,7 +114,7 @@ function transitionAllowed(from: ConversationActionStatus, to: ConversationActio
   const transitions: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
     pending: ["completed", "failed", "cancelled", "stale"],
     approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled", "stale"],
-    "awaiting-host": ["completed", "failed", "cancelled"],
+    "awaiting-host": ["completed", "failed", "cancelled", "stale"],
     queued: ["running", "completed", "failed", "cancelled"],
     running: ["completed", "failed", "cancelled"],
     completed: [],
@@ -210,6 +212,27 @@ export class ConversationActionLifecycle {
   constructor(private readonly options: ConversationActionLifecycleOptions) {
     this.adapters = adaptersByKind(options.adapters ?? []);
     this.now = options.now ?? (() => new Date().toISOString());
+  }
+
+  async completeHostAction(input: {
+    readonly conversationId: ConversationId;
+    readonly actionId: ConversationActionId;
+    readonly payload: unknown;
+  }): Promise<boolean> {
+    return serialise(executions, this.operationKey(input.actionId), async () => {
+      const action = await this.loadAction(input.conversationId, input.actionId);
+      if (!action || action.status !== "awaiting-host") return false;
+      if (this.options.isWorldOpen && !this.options.isWorldOpen()) return false;
+      const adapter = this.adapters.get(action.actionKind);
+      if (!adapter?.completeHost) return false;
+      let outcome: ConversationActionExecutionOutcome;
+      try {
+        outcome = await adapter.completeHost(action, input.payload);
+      } catch {
+        outcome = { status: "failed", detail: "The host could not finish the approved action." };
+      }
+      return this.appendOutcome(this.store(action.conversationId), action, outcome);
+    });
   }
 
   /** Build an intent for inclusion in the same `turn.completed` append as the reply. */

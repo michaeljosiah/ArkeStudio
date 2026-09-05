@@ -3251,7 +3251,7 @@ export async function cancelStageExport(jobId: string): Promise<void> {
 }
 
 export async function stagePlayblast(
-  target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+  target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -3263,6 +3263,22 @@ export async function stagePlayblast(
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
   }
+}
+
+export function failStagePlayblastAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  detail: string,
+): void {
+  send({
+    kind: "conversation-action-stage-playblast-complete",
+    worldId,
+    conversationId,
+    actionId,
+    status: "failed",
+    detail: detail.slice(0, 1_000) || "The Stage recording failed.",
+  });
 }
 
 export function importShotFrame(worldId: string, productionId: string, shotId: string): void {

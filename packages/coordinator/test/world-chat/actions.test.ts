@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   newId,
+  orderedShots,
   orderedTrackClips,
+  stageShot,
   ulid,
   type CandidateGroup,
   type CandidateId,
@@ -16,13 +18,17 @@ import {
   type WorldChangeCandidate,
   type WorldChatContext,
   type WorldChatCheckReceipt,
+  type WorldChatProductionTakeGenerationAction,
 } from "@arke-studio/contracts";
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
 import { createEpisode, createProduction } from "../../src/productions/ops.js";
+import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
+import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
 import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
 import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -76,13 +82,14 @@ async function setup(
   const log = new WorldChatStore(conversationDir(dir, conversationId));
   await log.create(conversationId, AT);
   await log.append({ type: "conversation.created", title: "Actions", entryContext }, { at: AT });
+  const adapters = worldChatActionAdapters(store, gate, NOW, actionDeps);
   const lifecycle = new ConversationActionLifecycle({
     worldPath: dir,
     worldId: store.worldId,
-    adapters: worldChatActionAdapters(store, gate, NOW, actionDeps),
+    adapters,
     now: NOW,
   });
-  return { store, gate, conversationId, log, lifecycle, entryContext };
+  return { store, gate, conversationId, log, lifecycle, adapters, entryContext };
 }
 
 async function loaded(log: WorldChatStore) {
@@ -1436,5 +1443,318 @@ describe("World Chat authority adapters", () => {
     const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     assert.equal(production.reviews.find((review) => review.takeId === takeId)?.decision, "accept");
     assert.equal(production.selections["sh_12"]?.acceptedTakeId, takeId);
+  });
+
+  it("applies one semantic scene command only after approval", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    const before = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .scenes.find((scene) => scene.id === context.sceneId)!;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const description = "Maren hears the submerged bell answer from below.";
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [receipt],
+      actions: [{
+        kind: "production-scene-command",
+        productionId: PRODUCTION,
+        sceneId: context.sceneId,
+        command: { kind: "edit-shot", shotId: "sh_12", change: { description } },
+        checkReceiptIds: [receipt.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.notEqual(orderedShots(before)[0]!.description, description);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.body.family, "command");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .scenes.find((scene) => scene.id === context.sceneId)!;
+    assert.equal(orderedShots(after)[0]!.description, description);
+    assert.equal(after.version, before.version + 1);
+  });
+
+  it("compiles and exports boards through separate approved authorities", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    const prepareBoard = (kind: "production-board-compile" | "production-board-export") => {
+      const receipts = [
+        currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`),
+        currentReceipt(w.store, "takes", PRODUCTION),
+        currentReceipt(w.store, "artifacts"),
+      ];
+      const oneTurn = turn(w.conversationId, context, {
+        receipts,
+        actions: [{
+          kind,
+          productionId: PRODUCTION,
+          sceneId: context.sceneId,
+          checkReceiptIds: receipts.map((receipt) => receipt.id),
+        }],
+      });
+      return { oneTurn, prepared: prepareWorldChatActions(w.store, w.lifecycle, oneTurn) };
+    };
+
+    const compiled = prepareBoard("production-board-compile");
+    await appendTurn(w.log, compiled.oneTurn, compiled.prepared);
+    await bindAll(w.lifecycle, compiled.prepared);
+    const compileCard = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, compileCard)).status, "completed");
+    const compiledScene = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .scenes.find((scene) => scene.id === context.sceneId)!;
+    assert.equal(compiledScene.board?.compiledAt, AT);
+
+    const artifactCount = w.store.getBundle().artifacts.length;
+    const exported = prepareBoard("production-board-export");
+    await appendTurn(w.log, exported.oneTurn, exported.prepared);
+    await bindAll(w.lifecycle, exported.prepared);
+    const exportCard = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(exportCard.shown.body.family, "host-action");
+    assert.equal((await decide(w.lifecycle, w.log, exportCard)).status, "completed");
+    const artifacts = w.store.getBundle().artifacts;
+    assert.equal(artifacts.length, artifactCount + 1);
+    assert.ok(artifacts.some((artifact) => artifact.kind === "board" && artifact.created === AT));
+  });
+
+  it("imports an immutable take without selecting it and opens generation in Bench without dispatch", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    let imported = 0;
+    let opened: WorldChatProductionTakeGenerationAction["action"] | null = null;
+    let actionStore: WorldStore;
+    const w = await setup(context, {
+      importProductionTake: async (action, mutation) => {
+        imported += 1;
+        const takeId = `tk_${mutation.requestId.slice(4)}` as const;
+        const take = await recordUploadedShotFrameTake(
+          actionStore,
+          action.productionId,
+          action.shotId,
+          "approved-import.png",
+          encodePng(solidImage(4, 4, [20, 40, 60, 255])),
+          { takeId, ...mutation },
+        );
+        return { status: "completed", id: take.id };
+      },
+      openProductionTakeGeneration: async (action, mutation) => {
+        assert.equal(mutation.precondition(), null);
+        opened = action;
+        return { status: "completed", id: `sess_${mutation.requestId.slice(4)}` };
+      },
+    });
+    actionStore = w.store;
+    const selectedBefore = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .selections["sh_12"]?.acceptedTakeId;
+    const importReceipts = [
+      currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`),
+      currentReceipt(w.store, "takes", PRODUCTION),
+    ];
+    const importTurn = turn(w.conversationId, context, {
+      receipts: importReceipts,
+      actions: [{
+        kind: "production-take-import",
+        productionId: PRODUCTION,
+        sceneId: context.sceneId,
+        shotId: "sh_12",
+        checkReceiptIds: importReceipts.map((receipt) => receipt.id),
+      }],
+    });
+    const importPrepared = prepareWorldChatActions(w.store, w.lifecycle, importTurn);
+    await appendTurn(w.log, importTurn, importPrepared);
+    await bindAll(w.lifecycle, importPrepared);
+    const importCard = (await loaded(w.log)).actions[0]!;
+    assert.equal(imported, 0);
+    assert.equal(JSON.stringify(importCard).includes("approved-import.png"), false);
+    assert.equal((await decide(w.lifecycle, w.log, importCard)).status, "completed");
+    const importedTakeId = `tk_${importCard.actionId.slice(4)}`;
+    const afterImport = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!;
+    assert.equal(imported, 1);
+    assert.ok(afterImport.takes.some((take) => take.id === importedTakeId));
+    assert.equal(afterImport.selections["sh_12"]?.acceptedTakeId, selectedBefore);
+
+    const generationReceipts = [
+      currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`),
+      currentReceipt(w.store, "takes", PRODUCTION),
+    ];
+    const generationTurn = turn(w.conversationId, context, {
+      receipts: generationReceipts,
+      actions: [{
+        kind: "production-take-generation",
+        productionId: PRODUCTION,
+        sceneId: context.sceneId,
+        target: { kind: "shot", shotId: "sh_12" },
+        mode: "video",
+        retakeOf: importedTakeId,
+        instruction: "Keep the bell reflection stable.",
+        checkReceiptIds: generationReceipts.map((receipt) => receipt.id),
+      }],
+    });
+    const generationPrepared = prepareWorldChatActions(w.store, w.lifecycle, generationTurn);
+    await appendTurn(w.log, generationTurn, generationPrepared);
+    await bindAll(w.lifecycle, generationPrepared);
+    const generationCard = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(generationCard.shown.body.family, "generation");
+    assert.equal(opened, null);
+    assert.equal((await decide(w.lifecycle, w.log, generationCard)).status, "completed");
+    assert.deepEqual(opened, generationTurn.actions[0]);
+    assert.equal(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .selections["sh_12"]?.acceptedTakeId, selectedBefore);
+  });
+
+  it("shows rich take evidence, records cited rejection, and trims only the selected take", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    const takeId = "tk_01J8C0000000000000000000C3";
+    const selectedBefore = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .selections["sh_12"]?.acceptedTakeId;
+    const reviewReceipt = currentReceipt(w.store, "takes", PRODUCTION);
+    const reviewTurn = turn(w.conversationId, context, {
+      receipts: [reviewReceipt],
+      actions: [{
+        kind: "production-take-review",
+        productionId: PRODUCTION,
+        takeId,
+        review: {
+          decision: "reject",
+          shotId: "sh_12",
+          citation: { sheet: "maren-kest", field: "appearance", note: "The coat drifted." },
+        },
+        checkReceiptIds: [reviewReceipt.id],
+      }],
+    });
+    const reviewPrepared = prepareWorldChatActions(w.store, w.lifecycle, reviewTurn);
+    await appendTurn(w.log, reviewTurn, reviewPrepared);
+    await bindAll(w.lifecycle, reviewPrepared);
+    const reviewCard = (await loaded(w.log)).actions[0]!;
+    assert.equal(reviewCard.shown.body.family, "take-review");
+    if (reviewCard.shown.body.family === "take-review") {
+      assert.match(reviewCard.shown.body.mediaPath ?? "", /clip\.mp4$/);
+      assert.equal(reviewCard.shown.body.currentSelection, selectedBefore);
+      assert.equal(reviewCard.shown.body.rejectionCitation?.field, "appearance");
+      assert.ok((reviewCard.shown.body.reviewHistory ?? []).length > 0);
+    }
+    assert.equal((await decide(w.lifecycle, w.log, reviewCard)).status, "completed");
+    const afterReview = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!;
+    assert.equal(afterReview.reviews.at(-1)?.citation?.note, "The coat drifted.");
+    assert.equal(afterReview.selections["sh_12"]?.acceptedTakeId, selectedBefore);
+
+    const trimReceipt = currentReceipt(w.store, "takes", PRODUCTION);
+    const trimTurn = turn(w.conversationId, context, {
+      receipts: [trimReceipt],
+      actions: [{
+        kind: "production-take-trim",
+        productionId: PRODUCTION,
+        shotId: "sh_12",
+        takeId: selectedBefore!,
+        trimInSec: 0.5,
+        checkReceiptIds: [trimReceipt.id],
+      }],
+    });
+    const trimPrepared = prepareWorldChatActions(w.store, w.lifecycle, trimTurn);
+    await appendTurn(w.log, trimTurn, trimPrepared);
+    await bindAll(w.lifecycle, trimPrepared);
+    const trimCard = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal((await decide(w.lifecycle, w.log, trimCard)).status, "completed");
+    const selection = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
+      .selections["sh_12"]!;
+    assert.equal(selection.acceptedTakeId, selectedBefore);
+    assert.equal(selection.trimInSec, 0.5);
+  });
+
+  it("keeps an approved Stage action awaiting the renderer, then files its correlated playblast", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes.find((candidate) => candidate.id === context.sceneId)!;
+    const sceneFile = production.sceneFiles[scene.id]!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    const staging = stageShot(shot, { cast: ["maren-kest"], sets: ["The Vigil"], durationSec: 4 });
+    await applySceneCommand(w.store, {
+      productionId: PRODUCTION,
+      sceneFile,
+      sceneId: scene.id,
+      baseVersion: scene.version,
+      command: {
+        kind: "edit-stage",
+        shotId: shot.id,
+        staging: {
+          cast: staging.cast,
+          sets: staging.sets,
+          keys: staging.keys,
+          rig: staging.rig,
+          seed: staging.seed,
+          rigIntensity: staging.rigIntensity,
+        },
+      },
+    });
+    const stagedProduction = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const stagedScene = stagedProduction.scenes.find((candidate) => candidate.id === context.sceneId)!;
+    const stagedShot = orderedShots(stagedScene).find((candidate) => candidate.id === "sh_12")!;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [receipt],
+      actions: [{
+        kind: "production-stage-playblast",
+        productionId: PRODUCTION,
+        sceneId: context.sceneId,
+        shotId: stagedShot.id,
+        checkReceiptIds: [receipt.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "awaiting-host");
+
+    const hostDir = join(w.store.dir, ".staging", "private-stage-spool");
+    await mkdir(hostDir, { recursive: true });
+    const sourcePath = join(hostDir, "private-playblast.mp4");
+    const openingFrameSourcePath = join(hostDir, "private-opening-frame.png");
+    await writeFile(sourcePath, new Uint8Array([
+      0, 0, 0, 12, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d,
+      0, 0, 0, 8, 0x6d, 0x6f, 0x6f, 0x76,
+      0, 0, 0, 9, 0x6d, 0x64, 0x61, 0x74, 0,
+    ]));
+    await writeFile(openingFrameSourcePath, encodePng(solidImage(16, 9, [20, 40, 60, 255])));
+    const payload = {
+      kind: "conversation-action-stage-playblast-complete" as const,
+      worldId: w.store.worldId,
+      conversationId: w.conversationId,
+      actionId: card.actionId,
+      status: "completed" as const,
+      productionId: PRODUCTION,
+      sceneFile,
+      sceneId: stagedScene.id,
+      baseVersion: stagedScene.version,
+      shotId: stagedShot.id,
+      stagingVersion: stagedShot.staging!.version,
+      durationSec: stagedShot.durationSec ?? 4,
+      aspect: "16:9",
+      sourcePath,
+      openingFrameSourcePath,
+    };
+    const adapter = w.adapters.find((candidate) => candidate.actionKind === card.actionKind)!;
+    assert.equal((await adapter.completeHost!(card, payload)).status, "completed");
+    assert.equal((await loaded(w.log)).actions[0]!.status, "awaiting-host", "the host outcome append was interrupted");
+
+    const completed = await w.lifecycle.completeHostAction({
+      conversationId: w.conversationId,
+      actionId: card.actionId,
+      payload,
+    });
+
+    assert.equal(completed, true);
+    const settled = (await loaded(w.log)).actions[0]!;
+    assert.equal(settled.status, "completed");
+    assert.equal(settled.receipt?.kind, "stage-playblast");
+    const filedProduction = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const filedShot = orderedShots(filedProduction.scenes.find((candidate) => candidate.id === context.sceneId)!)
+      .find((candidate) => candidate.id === stagedShot.id)!;
+    assert.ok(filedShot.staging?.playblast);
+    const events = await readFile(join(w.store.dir, ".conversations", w.conversationId, "events.jsonl"), "utf8");
+    assert.equal(events.includes("private-playblast.mp4"), false);
+    assert.equal(events.includes("private-opening-frame.png"), false);
   });
 });

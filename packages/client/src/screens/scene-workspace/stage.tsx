@@ -25,7 +25,7 @@ import {
 } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
-import { beginStageExport, cancelStageExport, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
+import { beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
@@ -129,6 +129,7 @@ export function SceneStage({
   refusalVersion,
   onCommand,
   onRenderShot,
+  playblastRequest,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -141,6 +142,7 @@ export function SceneStage({
   refusalVersion: number;
   onCommand: (command: Command) => boolean;
   onRenderShot: (shotId: string) => void;
+  playblastRequest?: { actionId: string; conversationId: string; shotId: string };
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -197,6 +199,7 @@ export function SceneStage({
   const host = useRef<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
+  const handledPlayblastActions = useRef(new Set<string>());
   const frozen = locked || exporting !== null;
 
   // The end key is the end pose, so it always sits at the shot's length: a staging kept before
@@ -406,6 +409,79 @@ export function SceneStage({
     viewport.current?.select(selection);
   }, [selection]);
 
+  const exportPlayblast = async (request?: { actionId: string; conversationId: string; shotId: string }) => {
+    const view = viewport.current;
+    if (view === null || persisted === null || sceneFile === undefined || exporting !== null || shot === null) return;
+    const fail = (reason: string) => {
+      setNote(reason);
+      if (request) failStagePlayblastAction(world.meta.worldId, request.conversationId, request.actionId, reason);
+    };
+    stop();
+    setNote(null);
+    setExporting(0);
+    try {
+      const { jobId, openingFrame } = await view.record({
+        start: beginStageExport,
+        write: writeStageExportFrame,
+        cancel: cancelStageExport,
+      }, setExporting);
+      // The viewport is disposed when the shot changes, and its recording ends early: a partial
+      // take is never filed as the whole shot.
+      if (viewport.current !== view) {
+        await cancelStageExport(jobId);
+        fail("export stopped - the shot changed");
+        return;
+      }
+      if (openingFrame.size === 0) {
+        await cancelStageExport(jobId);
+        fail("the Stage export came back empty - export it again");
+        return;
+      }
+      const common = {
+        worldId: world.meta.worldId,
+        productionId: production.meta.id,
+        sceneFile,
+        sceneId: scene.id,
+        baseVersion: scene.version,
+        shotId: shot.id,
+        stagingVersion: persisted.version,
+        durationSec,
+        aspect,
+        // An unset lens is recorded as the empty string, so setting one later reads as a change.
+        lens: framing.lens ?? "",
+      };
+      const target = request
+        ? {
+            kind: "conversation-action-stage-playblast-complete" as const,
+            conversationId: request.conversationId,
+            actionId: request.actionId,
+            status: "completed" as const,
+            ...common,
+          }
+        : { kind: "stage-playblast" as const, ...common };
+      const outcome = await stagePlayblast(target, jobId, new Uint8Array(await openingFrame.arrayBuffer()));
+      if (!outcome.ok) fail(outcome.reason);
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "the playblast could not be recorded");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  useEffect(() => {
+    if (
+      playblastRequest === undefined ||
+      playblastRequest.shotId !== shot?.id ||
+      persisted === null ||
+      sceneFile === undefined ||
+      viewport.current === null ||
+      exporting !== null ||
+      handledPlayblastActions.current.has(playblastRequest.actionId)
+    ) return;
+    handledPlayblastActions.current.add(playblastRequest.actionId);
+    void exportPlayblast(playblastRequest);
+  }, [playblastRequest, shot?.id, persisted, sceneFile, exporting]);
+
   if (shot === null) {
     return <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">Add a shot to begin.</div>;
   }
@@ -591,58 +667,6 @@ export function SceneStage({
     ...current,
     rigIntensity: Math.max(0, Math.min(2, round((current.rigIntensity ?? 1) + delta))),
   }));
-  const exportPlayblast = async () => {
-    const view = viewport.current;
-    if (view === null || persisted === null || sceneFile === undefined || exporting !== null) return;
-    stop();
-    setNote(null);
-    setExporting(0);
-    try {
-      const { jobId, openingFrame } = await view.record({
-        start: beginStageExport,
-        write: writeStageExportFrame,
-        cancel: cancelStageExport,
-      }, setExporting);
-      // The viewport is disposed when the shot changes, and its recording ends early: a partial
-      // take is never filed as the whole shot.
-      if (viewport.current !== view) {
-        await cancelStageExport(jobId);
-        setNote("export stopped — the shot changed");
-        return;
-      }
-      if (openingFrame.size === 0) {
-        await cancelStageExport(jobId);
-        setNote("the Stage export came back empty — export it again");
-        return;
-      }
-      const outcome = await stagePlayblast(
-        {
-          kind: "stage-playblast",
-          worldId: world.meta.worldId,
-          productionId: production.meta.id,
-          sceneFile,
-          sceneId: scene.id,
-          baseVersion: scene.version,
-          shotId: shot.id,
-          stagingVersion: persisted.version,
-          durationSec,
-          aspect,
-          // An unset lens is recorded as the empty string, so setting one later reads as a change.
-          lens: framing.lens ?? "",
-        },
-        jobId,
-        new Uint8Array(await openingFrame.arrayBuffer()),
-      );
-      if (!outcome.ok) {
-        setNote(outcome.reason);
-      }
-    } catch (error) {
-      setNote(error instanceof Error ? error.message : "the playblast could not be recorded");
-    } finally {
-      setExporting(null);
-    }
-  };
-
   const selLabel =
     selection === null
       ? "nothing selected"

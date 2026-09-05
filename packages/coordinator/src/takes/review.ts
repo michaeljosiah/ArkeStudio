@@ -177,38 +177,46 @@ export async function setTrim(
   store: WorldStore,
   production: ProductionBundle,
   input: { shotId: string; trimInSec: number },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<ShotSelection> {
   const selectionsPath = `productions/${production.meta.id}/selections.json`;
-  const selections = await readOr(store, selectionsPath, "{}");
-  const map = JSON.parse(selections.raw) as Selections;
-  const current = map[input.shotId];
-  const takeId = current?.acceptedTakeId;
-  if (!takeId) throw new Error(`shot ${input.shotId} has no accepted take to trim`);
+  return store.gateOp(async () => {
+    const stale = options.precondition?.();
+    if (stale) throw new WorldStateStaleError(stale);
+    const currentProduction = store.getBundle().productions.find((candidate) => candidate.meta.id === production.meta.id);
+    if (!currentProduction) throw new Error(`production ${production.meta.id} is no longer available`);
+    const selections = await readOr(store, selectionsPath, "{}");
+    const map = JSON.parse(selections.raw) as Selections;
+    const current = map[input.shotId];
+    const takeId = current?.acceptedTakeId;
+    if (!takeId) throw new Error(`shot ${input.shotId} has no accepted take to trim`);
 
-  const ceiling = trimCeilingSec(production, input.shotId, takeId);
-  if (!ceiling.ok) throw new Error(`shot ${input.shotId} cannot be trimmed: ${ceiling.reason}`);
-  // Absent is "not measured", never "measured zero" (R-5a). Refusing every trim on an unprobed
-  // file would disable the control on a machine without ffmpeg, which is a supported way to run.
-  if (ceiling.ceilingSec !== undefined && input.trimInSec >= ceiling.ceilingSec) {
-    throw new Error(
-      `trim of ${input.trimInSec}s leaves nothing of ${ceiling.ceilingSec.toFixed(3)}s of material`,
-    );
-  }
+    const ceiling = trimCeilingSec(currentProduction, input.shotId, takeId);
+    if (!ceiling.ok) throw new Error(`shot ${input.shotId} cannot be trimmed: ${ceiling.reason}`);
+    // Absent is "not measured", never "measured zero" (R-5a). Refusing every trim on an unprobed
+    // file would disable the control on a machine without ffmpeg, which is a supported way to run.
+    if (ceiling.ceilingSec !== undefined && input.trimInSec >= ceiling.ceilingSec) {
+      throw new Error(
+        `trim of ${input.trimInSec}s leaves nothing of ${ceiling.ceilingSec.toFixed(3)}s of material`,
+      );
+    }
 
-  const next: Selections = { ...map, [input.shotId]: { ...current, trimInSec: input.trimInSec } };
-  await store.commit({
-    kind: "shot-trim",
-    source: "review:user",
-    files: [
-      {
-        path: selectionsPath,
-        action: selections.existed ? "replace" : "create",
-        content: JSON.stringify(next, null, 2) + "\n",
-        baseHash: selections.existed ? sha256(selections.raw) : null,
-      },
-    ],
+    const next: Selections = { ...map, [input.shotId]: { ...current, trimInSec: input.trimInSec } };
+    await store.commitUnserialised({
+      kind: "shot-trim",
+      source: options.source ?? "review:user",
+      files: [
+        {
+          path: selectionsPath,
+          action: selections.existed ? "replace" : "create",
+          content: JSON.stringify(next, null, 2) + "\n",
+          baseHash: selections.existed ? sha256(selections.raw) : null,
+        },
+      ],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+    return next[input.shotId]!;
   });
-  return next[input.shotId]!;
 }
 
 /**

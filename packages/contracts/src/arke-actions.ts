@@ -313,6 +313,19 @@ export const ArkeTakeReviewBodySchema = z
     destination: z.string().min(1).max(500),
     currentSelection: z.string().max(500).nullable(),
     reason: z.string().max(2_000).optional(),
+    mediaPath: z.string().min(1).max(1_000).optional(),
+    posterPath: z.string().min(1).max(1_000).optional(),
+    scene: z.string().min(1).max(500).optional(),
+    shot: z.string().min(1).max(500).optional(),
+    reviewHistory: z.array(z.string().min(1).max(1_000)).max(100).optional(),
+    rejectionCitation: z
+      .object({
+        sheet: z.string().min(1).max(200),
+        field: z.string().min(1).max(200),
+        note: z.string().min(1).max(1_000).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

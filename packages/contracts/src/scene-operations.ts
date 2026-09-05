@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema } from "./ids.js";
-import type { SceneBlocking, Shot } from "./scene.js";
+import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema, type SceneBlocking, type Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -60,6 +60,98 @@ export const ShotAnchorSchema = z.union([
   z.object({ atStart: z.literal(true) }).strict(),
 ]);
 export type ShotAnchor = z.infer<typeof ShotAnchorSchema>;
+
+/** Optional shot fields that a semantic patch can explicitly remove. */
+export const CLEARABLE_SHOT_FIELDS = [
+  "camera",
+  "audio",
+  "durationSec",
+  "intent",
+  "beats",
+  "framing",
+  "continuity",
+  "covers",
+  "promptOverride",
+] as const;
+
+/** One bounded scene mutation. Arbitrary graph replacement is deliberately absent. */
+export const SceneCommandSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("edit-scene"),
+      title: z.string().trim().min(1).max(200).optional(),
+      synopsis: z.string().min(1).nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("insert-shot"),
+      at: ShotAnchorSchema,
+      shot: ShotSchema.omit({ id: true, number: true }),
+    })
+    .strict(),
+  z.object({ kind: z.literal("move-shot"), shotId: ShotIdSchema, to: ShotAnchorSchema }).strict(),
+  z.object({ kind: z.literal("duplicate-shot"), shotId: ShotIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("edit-shot"),
+      shotId: ShotIdSchema,
+      change: ShotSchema.omit({ id: true, number: true, staging: true }).partial(),
+      clear: z.array(z.enum(CLEARABLE_SHOT_FIELDS)).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("edit-stage"),
+      shotId: ShotIdSchema,
+      blocking: SceneBlockingSchema.omit({ version: true }).nullable().optional(),
+      staging: ShotStageEditSchema.nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-prompt-override"),
+      shotId: ShotIdSchema,
+      text: z.string().max(4000).nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("set-board-override"),
+      shotId: ShotIdSchema,
+      override: z.enum(["split", "merge"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("clear-board-override"),
+      shotId: ShotIdSchema,
+      override: z.enum(["split", "merge"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("move-board-boundary"),
+      fromShotId: ShotIdSchema,
+      toShotId: ShotIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("set-board-prompt"),
+      members: z.array(ShotIdSchema).min(1),
+      text: z.string().min(1),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("clear-board-prompt"),
+      members: z.array(ShotIdSchema).min(1),
+    })
+    .strict(),
+]);
+export type SceneCommand = z.infer<typeof SceneCommandSchema>;
 
 /**
  * The scene's shots as the operations work in them: the canonical order, refusing an invalid

@@ -147,6 +147,41 @@ describe("conversation action folding and decisions", () => {
     assert.equal(view.deletionBlock, "pending-actions");
   });
 
+  it("settles renderer-owned work exactly once after approval reaches awaiting-host", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    let completions = 0;
+    const authority: ConversationActionAuthorityAdapter = {
+      ...adapter({ executions: 0 }),
+      execute: async () => ({ status: "awaiting-host", detail: "Waiting for the renderer." }),
+      completeHost: async (action, payload) => {
+        completions++;
+        assert.deepEqual(payload, { result: "renderer-output" });
+        return {
+          status: "completed",
+          receipt: { kind: "renderer-result", id: action.actionId, summary: "The renderer finished." },
+        };
+      },
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW });
+    const action = await prepare(lifecycle, conversationId);
+    const approved = await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+    assert.equal(approved.status, "awaiting-host");
+
+    assert.equal(await lifecycle.completeHostAction({
+      conversationId,
+      actionId: action.actionId,
+      payload: { result: "renderer-output" },
+    }), true);
+    assert.equal(await lifecycle.completeHostAction({
+      conversationId,
+      actionId: action.actionId,
+      payload: { result: "renderer-output" },
+    }), false);
+    assert.equal(completions, 1);
+    assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "completed");
+  });
+
   it("invokes preparation once when duplicate action IDs arrive concurrently", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);

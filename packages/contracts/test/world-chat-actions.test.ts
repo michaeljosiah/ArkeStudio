@@ -232,4 +232,64 @@ describe("World Chat authored action contracts", () => {
       checkReceiptIds: [CHECK],
     }), /script block ids must be unique/i);
   });
+
+  it("admits every scene, board, and take action without admitting host paths or generic scene payloads", () => {
+    const actions = [
+      {
+        kind: "production-scene-command",
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        command: { kind: "set-prompt-override", shotId: "sh_12", text: "Hold on the listening face." },
+      },
+      { kind: "production-board-compile", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "production-board-export", productionId: "saltlight", sceneId: "sc_04" },
+      { kind: "production-take-import", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+      {
+        kind: "production-take-generation",
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        target: { kind: "board", memberShotIds: ["sh_12", "sh_13"] },
+        mode: "video",
+        retakeOf: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+        instruction: "Keep the bell reflection stable.",
+      },
+      {
+        kind: "production-take-review",
+        productionId: "saltlight",
+        takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+        review: { decision: "reject", shotId: "sh_12", citation: { sheet: "maren-kest", field: "appearance" } },
+      },
+      {
+        kind: "production-take-trim",
+        productionId: "saltlight",
+        shotId: "sh_12",
+        takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+        trimInSec: 0.5,
+      },
+      { kind: "production-stage-playblast", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
+    ];
+    for (const action of actions) {
+      assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({ ...action, checkReceiptIds: [CHECK] }));
+    }
+
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      ...actions[3],
+      sourcePath: "C:\\private\\frame.png",
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-scene-command",
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      command: { kind: "replace-graph", graph: {} },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-take-review",
+      productionId: "saltlight",
+      takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC",
+      review: { decision: "reject", shotId: "sh_12" },
+      checkReceiptIds: [CHECK],
+    }));
+  });
 });

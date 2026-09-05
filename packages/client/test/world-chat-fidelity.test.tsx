@@ -168,7 +168,7 @@ function renderMediaConversation(): string {
   );
 }
 
-function renderActionConversation(family: "authored-diff" | "generation" = "authored-diff"): string {
+function renderActionConversation(family: "authored-diff" | "generation" | "take-review" = "authored-diff"): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
   state.worldChat!.messages[1]!.turnId = turnId as never;
@@ -203,7 +203,7 @@ function renderActionConversation(family: "authored-diff" | "generation" = "auth
             conflicts: [],
             openChoices: [],
           }
-        : {
+        : family === "generation" ? {
             family,
             medium: "image",
             purpose: "World cover",
@@ -214,6 +214,19 @@ function renderActionConversation(family: "authored-diff" | "generation" = "auth
             quantity: 1,
             output: "One image",
             cost: "Estimate unavailable",
+          }
+        : {
+            family,
+            mediaKind: "video",
+            mediaId: "tk_01J8F0000000000000000000B2",
+            destination: "The verse rises · Maren at the rail, listening",
+            currentSelection: "tk_01J8A0000000000000000000A1",
+            mediaPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4",
+            posterPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png",
+            scene: "4 · The verse rises",
+            shot: "12 · Maren at the rail, listening",
+            reviewHistory: ["2026-08-06 · reject · local-user"],
+            rejectionCitation: { sheet: "maren-kest", field: "appearance", note: "The coat drifted." },
           },
     },
     status: "pending",
@@ -286,11 +299,24 @@ describe("conversation permission cards", () => {
     assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
   });
 
-  it("keeps a body owned by a later client version unapprovable without dumping it", () => {
-    const html = renderActionConversation("generation");
-    assert.match(html, /This card type is not available in this version/);
-    assert.doesNotMatch(html, />Approve<\/button>/);
-    assert.doesNotMatch(html, /Private prompt content/);
+  it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
+    const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
+    assert.match(html, /Private prompt content/);
+    assert.match(html, /provider.*model.*1 output/s);
+    assert.match(html, /Estimate unavailable/);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
+    assert.doesNotMatch(html, /This card type is not available in this version/);
+  });
+
+  it("renders playable take evidence, destination, history, and rejection citation", () => {
+    const html = renderActionConversation("take-review");
+    assert.match(html, /<video[^>]*controls=""/);
+    assert.match(html, /clip\.mp4/);
+    assert.match(html, /Maren at the rail, listening/);
+    assert.match(html, /tk_01J8A0000000000000000000A1/);
+    assert.match(html, /Review history/);
+    assert.match(html, /maren-kest.*appearance.*The coat drifted/s);
+    assert.match(html, /<button[^>]*>Approve<\/button>/);
   });
 
   it("keeps cards fluid at narrow widths and exposes text status alongside colour", () => {

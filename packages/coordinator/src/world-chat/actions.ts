@@ -8,10 +8,12 @@ import {
   productionFrameRate,
   productionShape,
   SceneRecordSchema,
+  orderedShots,
   sceneDeleteBlockers,
   SheetSchema,
   sortScenes,
   WorldMetaSchema,
+  ClientMessageSchema,
   ModelWorldChatActionSchema,
   applyBibleEdits,
   sheetDir,
@@ -45,6 +47,14 @@ import {
   WorldChatProductionSeasonActionSchema,
   WorldChatProductionSeriesActionSchema,
   WorldChatProductionStyleActionSchema,
+  WorldChatProductionSceneCommandActionSchema,
+  WorldChatProductionBoardCompileActionSchema,
+  WorldChatProductionBoardExportActionSchema,
+  WorldChatProductionTakeImportActionSchema,
+  WorldChatProductionTakeGenerationActionSchema,
+  WorldChatProductionTakeReviewActionSchema,
+  WorldChatProductionTakeTrimActionSchema,
+  WorldChatProductionStagePlayblastActionSchema,
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
   WorldChatReferenceGenerationActionSchema,
@@ -91,6 +101,8 @@ import {
   type WorldChatReferenceImportAction,
   type WorldChatReferenceResultUseAction,
   type WorldChatVoiceAssignmentAction,
+  type WorldChatProductionTakeImportAction,
+  type WorldChatProductionTakeGenerationAction,
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
@@ -121,6 +133,7 @@ import {
   type AcceptOutcome,
   type ProposalManager,
 } from "../gate/proposals.js";
+import { discoverBenchSessions } from "../bench/service.js";
 import {
   decideEditorRequest,
   productionOfContext,
@@ -142,7 +155,12 @@ import {
   setProductionStyle,
   updateProductionMetadata,
   validateProductionMetadataChanges,
+  compileBoard,
+  exportBoard,
+  landBoard,
 } from "../productions/ops.js";
+import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
+import { filePlayblast } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -165,7 +183,10 @@ import {
 } from "../references/takes.js";
 import { stagedReferenceDir } from "../references/master-look.js";
 import { applyVoiceAssignment } from "../sheets/authoring.js";
-import { acceptTake, rejectTake } from "../takes/review.js";
+import { acceptTake, rejectTake, setTrim } from "../takes/review.js";
+import { acceptStill } from "../takes/drawn-frame.js";
+import { posterNameFor } from "../takes/poster.js";
+import type { BoundaryFrameMaker } from "../takes/boundary.js";
 import { AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS, cloneVoice } from "../voice/library.js";
 import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -273,6 +294,16 @@ export interface WorldChatActionAdapterDeps {
   readonly exportWorld?: (actionId: string) => Promise<{ id: string }>;
   readonly inFlightWorldJobs?: () => number;
   readonly voiceAvailable?: (voice: NonNullable<WorldChatVoiceAssignmentAction["action"]["voice"]>) => Promise<boolean>;
+  readonly boundaryFrameMaker?: BoundaryFrameMaker;
+  readonly importProductionTake?: (
+    action: WorldChatProductionTakeImportAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }>;
+  /** Opens a prepared Bench subject. Provider execution remains a separate confirmation in Bench. */
+  readonly openProductionTakeGeneration?: (
+    action: WorldChatProductionTakeGenerationAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
 }
 
 function completeObservation(
@@ -350,6 +381,14 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-scene-delete": ["scenes"],
   "production-scene-restore": ["scenes"],
   "production-style": ["production-metadata", "art-direction"],
+  "production-scene-command": ["scenes"],
+  "production-board-compile": ["scenes", "takes", "artifacts"],
+  "production-board-export": ["scenes", "takes", "artifacts"],
+  "production-take-import": ["scenes", "takes"],
+  "production-take-generation": ["scenes", "takes"],
+  "production-take-review": ["takes"],
+  "production-take-trim": ["takes"],
+  "production-stage-playblast": ["scenes"],
 };
 
 function currentWorldObservation(
@@ -478,6 +517,25 @@ function productionActionTargets(
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "art-direction", target: "art-direction" },
     ];
+    case "production-scene-command": return [
+      { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
+    ];
+    case "production-board-compile":
+    case "production-board-export": return [
+      { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
+      { requirement: "takes", target: action.productionId },
+      { requirement: "artifacts", target: worldId },
+    ];
+    case "production-take-import":
+    case "production-take-generation": return [
+      { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
+      { requirement: "takes", target: action.productionId },
+    ];
+    case "production-take-review":
+    case "production-take-trim": return [{ requirement: "takes", target: action.productionId }];
+    case "production-stage-playblast": return [
+      { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
+    ];
     default: return [];
   }
 }
@@ -586,6 +644,14 @@ function preparedWorldPayload(
     case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
     case "production-scene-restore": return WorldChatProductionSceneRestoreActionSchema.parse({ kind: "world-chat-production-scene-restore", ...common });
     case "production-style": return WorldChatProductionStyleActionSchema.parse({ kind: "world-chat-production-style", ...common });
+    case "production-scene-command": return WorldChatProductionSceneCommandActionSchema.parse({ kind: "world-chat-production-scene-command", ...common });
+    case "production-board-compile": return WorldChatProductionBoardCompileActionSchema.parse({ kind: "world-chat-production-board-compile", ...common });
+    case "production-board-export": return WorldChatProductionBoardExportActionSchema.parse({ kind: "world-chat-production-board-export", ...common });
+    case "production-take-import": return WorldChatProductionTakeImportActionSchema.parse({ kind: "world-chat-production-take-import", ...common });
+    case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
+    case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
+    case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
+    case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
   }
 }
 
@@ -843,6 +909,22 @@ function worldActionTargets(
     case "production-scene-delete":
     case "production-scene-restore": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
     case "production-style": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-scene-command": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
+    case "production-board-compile":
+    case "production-board-export": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
+    case "production-take-import": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
+    case "production-take-generation": return action.target.kind === "shot"
+      ? [{ kind: "shot", id: action.target.shotId, label: action.target.shotId }]
+      : action.target.memberShotIds.map((shotId) => ({ kind: "shot", id: shotId, label: shotId }));
+    case "production-take-review": return [
+      { kind: "take", id: action.takeId, label: action.takeId },
+      ...(action.review.shotId ? [{ kind: "shot", id: action.review.shotId, label: action.review.shotId }] : []),
+    ];
+    case "production-take-trim": return [
+      { kind: "take", id: action.takeId, label: action.takeId },
+      { kind: "shot", id: action.shotId, label: action.shotId },
+    ];
+    case "production-stage-playblast": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
   }
 }
 
@@ -2265,6 +2347,227 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-scene-command": {
+      authority = { kind: "scene-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      if (!production || !scene || !production.sceneFiles[scene.id]) {
+        throw new Error("That scene is no longer in this production.");
+      }
+      const command = payload.action.command;
+      const namedShot = "shotId" in command ? command.shotId : undefined;
+      if (namedShot !== undefined && !orderedShots(scene).some((shot) => shot.id === namedShot)) {
+        throw new Error(`Shot ${namedShot} is no longer in this scene.`);
+      }
+      shown = {
+        title: `${command.kind.replaceAll("-", " ")} in ${scene.title}`,
+        consequence: "Applies this one semantic command and versions the complete validated scene.",
+        affectedTargets: [...intent.targets],
+        ripples: command.kind === "delete-shot"
+          ? ["The authority rechecks takes, selections, and active plans before deleting the shot."]
+          : [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [{ label: command.kind.replaceAll("-", " "), detail: clipped(JSON.stringify(command)) ?? undefined }],
+          expectedResult: `Scene ${scene.id} advances from v${scene.version} only if the semantic operation remains valid.`,
+          undoAvailable: true,
+        },
+      };
+      authorityRevision = scene.version;
+      break;
+    }
+    case "world-chat-production-board-compile":
+    case "world-chat-production-board-export": {
+      const exporting = payload.kind === "world-chat-production-board-export";
+      authority = { kind: exporting ? "export" : "board", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      if (!production || !scene || !production.sceneFiles[scene.id]) {
+        throw new Error("That scene is no longer in this production.");
+      }
+      shown = exporting
+        ? {
+            title: `Export the board for ${scene.title}`,
+            consequence: "Compiles the current selected frames locally and files one immutable board artifact.",
+            affectedTargets: [...intent.targets],
+            ripples: [],
+            permissionReason: "export",
+            body: {
+              family: "host-action",
+              action: "File one board snapshot in this world",
+              effect: "No external provider runs and no destination path comes from the model.",
+            },
+          }
+        : {
+            title: `Compile the board for ${scene.title}`,
+            consequence: "Compiles selected and pinned frames locally, then records the result on the scene.",
+            affectedTargets: [...intent.targets],
+            ripples: [],
+            permissionReason: "authored-change",
+            body: {
+              family: "command",
+              commands: [{ label: `Compile ${orderedShots(scene).length} shot cells` }],
+              expectedResult: "The scene points at a fresh deterministic board image; takes and selections remain unchanged.",
+              undoAvailable: false,
+            },
+          };
+      authorityRevision = scene.version;
+      break;
+    }
+    case "world-chat-production-take-import": {
+      authority = { kind: "host", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find((candidate) => candidate.id === payload.action.shotId);
+      if (!production || !scene || !shot) throw new Error("That shot is no longer in this scene.");
+      if (!deps.importProductionTake) approvalBlockedReason = "This take import needs the desktop host's image picker.";
+      shown = {
+        title: `Import a frame take for ${shot.title}`,
+        consequence: "Opens a host-owned image picker and records the chosen image as an immutable take.",
+        affectedTargets: [...intent.targets],
+        ripples: ["The imported take is not selected, accepted, or placed by this action."],
+        permissionReason: "host-file-access",
+        body: {
+          family: "host-action",
+          action: "Choose one image on this device",
+          effect: "The host path and bytes stay outside the conversation; only the new take ID is returned.",
+        },
+      };
+      break;
+    }
+    case "world-chat-production-take-generation": {
+      authority = { kind: "bench", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      if (!production || !scene) throw new Error("That scene is no longer in this production.");
+      const shotIds = payload.action.target.kind === "shot"
+        ? [payload.action.target.shotId]
+        : payload.action.target.memberShotIds;
+      if (shotIds.some((shotId) => !orderedShots(scene).some((shot) => shot.id === shotId))) {
+        throw new Error("A generation target is no longer in this scene.");
+      }
+      if (payload.action.retakeOf && !production.takes.some((take) => take.id === payload.action.retakeOf)) {
+        throw new Error("The take being retaken is no longer in this production.");
+      }
+      if (!deps.openProductionTakeGeneration) approvalBlockedReason = "The production generator is unavailable in this authoring session.";
+      shown = {
+        title: payload.action.retakeOf ? "Prepare a retake" : "Prepare take generation",
+        consequence: "Opens the exact shot or board in Bench. Provider execution and result selection remain separate decisions.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Generated output will arrive as an unselected immutable take."],
+        permissionReason: "spend-and-compute",
+        body: {
+          family: "generation",
+          medium: payload.action.mode,
+          purpose: payload.action.retakeOf ? `Retake ${payload.action.retakeOf}` : `Generate ${payload.action.target.kind}`,
+          prompt: payload.action.instruction ?? "Use the scene's current inherited context and prompt overrides.",
+          references: payload.action.retakeOf ? [{ id: payload.action.retakeOf, role: "retake reference" }] : [],
+          provider: "Chosen in Bench",
+          model: "Chosen in Bench",
+          quantity: 1,
+          output: "One or more unselected production takes",
+          cost: "Quoted in Bench before provider execution",
+        },
+      };
+      break;
+    }
+    case "world-chat-production-take-review": {
+      authority = { kind: "take-review", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const take = production?.takes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!production || !take) throw new Error("That take is no longer in this production.");
+      const shotId = payload.action.review.shotId ?? take.coversShots[0];
+      const located = shotId === undefined
+        ? undefined
+        : production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => ({ scene, shot })))
+            .find((candidate) => candidate.shot.id === shotId);
+      if (payload.action.review.decision === "accept" && !located) {
+        throw new Error("The destination shot is no longer in this production.");
+      }
+      const sourceTake = take.media !== undefined
+        ? take
+        : take.segment !== undefined
+          ? production.takes.find((candidate) => candidate.id === take.segment!.passTakeId)
+          : undefined;
+      const mediaPath = sourceTake?.media
+        ? `productions/${production.meta.id}/takes/${sourceTake.id}/${sourceTake.media}`
+        : undefined;
+      const mediaKind = take.kind === "clip" ? "video" as const : take.kind === "voice" ? "audio" as const : "image" as const;
+      const selection = located ? production.selections[located.shot.id] : undefined;
+      const currentSelection = selection?.acceptedTakeId ?? selection?.startFrameTakeId ?? null;
+      const history = production.reviews
+        .filter((review) => review.takeId === take.id)
+        .map((review) => `${review.ts} · ${review.decision}${review.shotId ? ` for ${review.shotId}` : ""} · ${review.by}`);
+      shown = {
+        title: `${payload.action.review.decision === "accept" ? "Accept" : "Reject"} ${take.id}`,
+        consequence: payload.action.review.decision === "accept"
+          ? "Records acceptance and changes the destination selection atomically through the take authority."
+          : "Appends a cited rejection without changing the take or current selection.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "take-review",
+          mediaKind,
+          mediaId: take.id,
+          destination: located ? `${located.scene.title} · ${located.shot.title}` : production.meta.title,
+          currentSelection,
+          ...(mediaPath ? { mediaPath } : {}),
+          ...(mediaKind === "video" && sourceTake?.media
+            ? { posterPath: `productions/${production.meta.id}/takes/${sourceTake.id}/${posterNameFor(sourceTake.media)}` }
+            : {}),
+          ...(located ? { scene: `${located.scene.number} · ${located.scene.title}`, shot: `${located.shot.number} · ${located.shot.title}` } : {}),
+          reviewHistory: history,
+          ...(payload.action.review.decision === "reject" ? { rejectionCitation: payload.action.review.citation } : {}),
+        },
+      };
+      break;
+    }
+    case "world-chat-production-take-trim": {
+      authority = { kind: "take-review", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const selection = production?.selections[payload.action.shotId];
+      if (!production || selection?.acceptedTakeId !== payload.action.takeId) {
+        throw new Error("That take is no longer selected for this shot.");
+      }
+      shown = {
+        title: `Trim ${payload.action.shotId}`,
+        consequence: "Changes only where the selected footage starts; the immutable take and review history remain unchanged.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [{ label: `Set trim-in to ${payload.action.trimInSec}s`, detail: payload.action.takeId }],
+          expectedResult: `Shot ${payload.action.shotId} starts ${payload.action.trimInSec}s into the selected take.`,
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-stage-playblast": {
+      authority = { kind: "scene-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find((candidate) => candidate.id === payload.action.shotId);
+      if (!production || !scene || !shot) throw new Error("That Stage shot is no longer available.");
+      if (!shot.staging) throw new Error("Stage the shot before preparing a playblast.");
+      shown = {
+        title: `Record a playblast for ${shot.title}`,
+        consequence: "Asks the renderer to record the current Stage, then files the MP4, opening frame, and staging pin atomically.",
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "host-file-access",
+        body: {
+          family: "host-action",
+          action: "Record the current Stage",
+          effect: "Renderer-owned temporary paths stay outside the model and are accepted only by the existing version-fenced filing authority.",
+        },
+      };
+      authorityRevision = scene.version;
+      break;
+    }
     default:
       throw new Error("That shared-resource action cannot be projected.");
   }
@@ -2787,6 +3090,101 @@ async function executeSharedResource(
         options,
       );
       return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The production style was updated." } };
+    case "world-chat-production-scene-command": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      const sceneFile = production?.sceneFiles[payload.action.sceneId];
+      if (!scene || !sceneFile) throw new Error("That scene is no longer in this production.");
+      await applySceneCommand(store, {
+        productionId: payload.action.productionId,
+        sceneFile,
+        sceneId: payload.action.sceneId,
+        baseVersion: scene.version,
+        command: sceneCommandFrom(payload.action.command),
+        requestId: action.actionId,
+      });
+      return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${scene.version + 1}`, summary: "The semantic scene command was applied." } };
+    }
+    case "world-chat-production-board-compile":
+    case "world-chat-production-board-export": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      const sceneFile = production?.sceneFiles[payload.action.sceneId];
+      if (!production || !scene || !sceneFile) throw new Error("That scene is no longer in this production.");
+      const png = await compileBoard(store, production, scene, store.getBundle().artifacts);
+      if (payload.kind === "world-chat-production-board-compile") {
+        await landBoard(store, production.meta.id, sceneFile, png, now, {
+          ...options,
+          sceneId: scene.id,
+          baseVersion: scene.version,
+        });
+        return { status: "completed", receipt: { kind: "board", id: scene.id, summary: "The scene board was compiled locally." } };
+      }
+      const file = await exportBoard(store, production.meta.id, scene, png, now, options);
+      return { status: "completed", receipt: { kind: "board-export", id: file, summary: "One immutable board artifact was filed." } };
+    }
+    case "world-chat-production-take-import": {
+      if (!deps.importProductionTake) return { status: "failed", detail: "The desktop image picker is unavailable." };
+      const result = await deps.importProductionTake(payload.action, options);
+      return result.status === "completed"
+        ? { status: "completed", receipt: { kind: "take", id: result.id ?? action.actionId, summary: "The image was recorded as an unselected immutable take." } }
+        : { status: result.status, detail: result.detail };
+    }
+    case "world-chat-production-take-generation": {
+      if (!deps.openProductionTakeGeneration) return { status: "failed", detail: "The production generator is unavailable." };
+      const result = await deps.openProductionTakeGeneration(payload.action, options);
+      return result.status === "completed"
+        ? { status: "completed", receipt: { kind: "bench-session", id: result.id ?? action.actionId, summary: "The generation intent was opened in Bench; no provider ran and no take was selected." } }
+        : { status: "failed", detail: result.detail };
+    }
+    case "world-chat-production-take-review": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const take = production?.takes.find((candidate) => candidate.id === payload.action.takeId);
+      if (!production || !take) throw new Error("That take is no longer in this production.");
+      if (payload.action.review.decision === "accept") {
+        if (take.kind === "frame" || take.kind === "still") {
+          const accepted = await acceptStill(store, production, {
+            takeId: take.id,
+            shotId: payload.action.review.shotId,
+            by: `world-chat:${action.conversationId}`,
+            ...(deps.boundaryFrameMaker ? { toPng: deps.boundaryFrameMaker } : {}),
+            source: options.source,
+            requestId: options.requestId,
+            precondition: options.precondition,
+          });
+          if (!accepted.outcome.ok) throw new Error(accepted.outcome.reason);
+          if ("superseded" in accepted.outcome) return { status: "stale", detail: accepted.outcome.reason };
+        } else {
+          await acceptTake(store, production, {
+            takeId: take.id,
+            shotId: payload.action.review.shotId,
+            by: `world-chat:${action.conversationId}`,
+          }, options);
+        }
+      } else {
+        await rejectTake(store, production, {
+          takeId: take.id,
+          ...(payload.action.review.shotId ? { shotId: payload.action.review.shotId } : {}),
+          by: `world-chat:${action.conversationId}`,
+          citation: payload.action.review.citation,
+        }, options);
+      }
+      return { status: "completed", receipt: { kind: "take-review", id: take.id, summary: `The take was ${payload.action.review.decision === "accept" ? "accepted and selected" : "rejected with its citation"}.` } };
+    }
+    case "world-chat-production-take-trim": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production || production.selections[payload.action.shotId]?.acceptedTakeId !== payload.action.takeId) {
+        throw new Error("That take is no longer selected for this shot.");
+      }
+      await setTrim(store, production, {
+        shotId: payload.action.shotId,
+        trimInSec: payload.action.trimInSec,
+      }, options);
+      return { status: "completed", receipt: { kind: "take-trim", id: payload.action.shotId, summary: "The selected take's trim-in was updated." } };
+    }
+    case "world-chat-production-stage-playblast": {
+      return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
+    }
     default:
       return { status: "failed", detail: "That shared-resource action cannot execute." };
   }
@@ -3331,7 +3729,9 @@ export function worldChatActionAdapters(
             now,
             deps,
           );
-          await removePreparation(store, "world", action.actionId);
+          if (outcome.status !== "awaiting-host") {
+            await removePreparation(store, "world", action.actionId);
+          }
           return outcome;
         } catch (error) {
           if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
@@ -3343,7 +3743,22 @@ export function worldChatActionAdapters(
       },
       deny: (action) => removePreparation(store, "world", action.actionId),
       reconcile: async (action) => {
+        if (action.actionKind === "world-chat-production-take-generation") {
+          const sessionId = `sess_${action.actionId.slice(4)}`;
+          if ((await discoverBenchSessions(store.dir)).some((session) => session.id === sessionId)) {
+            await removePreparation(store, "world", action.actionId);
+            return {
+              status: "completed",
+              receipt: {
+                kind: "bench-session",
+                id: sessionId,
+                summary: "The generation intent was opened in Bench; no provider ran and no take was selected.",
+              },
+            };
+          }
+        }
         const committed = await committedAction(store, action.actionId);
+        if (committed) await removePreparation(store, "world", action.actionId);
         return committed
           ? {
               status: "completed",
@@ -3351,6 +3766,109 @@ export function worldChatActionAdapters(
             }
           : null;
       },
+      ...(actionKind === "world-chat-production-stage-playblast"
+        ? {
+            completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
+              const parsed = ClientMessageSchema.safeParse(value);
+              const message = parsed.success ? parsed.data : null;
+              if (
+                message?.kind !== "conversation-action-stage-playblast-complete" ||
+                message.worldId !== action.worldId ||
+                message.conversationId !== action.conversationId ||
+                message.actionId !== action.actionId
+              ) {
+                await removePreparation(store, "world", action.actionId);
+                return { status: "failed", detail: "The Stage completion did not match this approved action." };
+              }
+              if (message.status !== "completed") {
+                await removePreparation(store, "world", action.actionId);
+                return { status: message.status, detail: message.detail ?? "The Stage recording did not complete." };
+              }
+              const existing = await committedAction(store, action.actionId);
+              if (existing) {
+                await removePreparation(store, "world", action.actionId);
+                return {
+                  status: "completed",
+                  receipt: {
+                    kind: "stage-playblast",
+                    id: existing.commitId,
+                    summary: "The playblast and opening frame were already filed and pinned atomically.",
+                  },
+                };
+              }
+              const parsedPreparation = WorldChatProductionStagePlayblastActionSchema.safeParse(
+                await readPreparation(store, "world", action),
+              );
+              if (!parsedPreparation.success) {
+                await removePreparation(store, "world", action.actionId);
+                return { status: "failed", detail: "The prepared Stage action is unavailable." };
+              }
+              const prepared = parsedPreparation.data;
+              if (
+                message.productionId !== prepared.action.productionId ||
+                message.sceneId !== prepared.action.sceneId ||
+                message.shotId !== prepared.action.shotId ||
+                message.sceneFile === undefined ||
+                message.baseVersion === undefined ||
+                message.stagingVersion === undefined ||
+                message.durationSec === undefined ||
+                message.aspect === undefined ||
+                message.sourcePath === undefined ||
+                message.openingFrameSourcePath === undefined
+              ) {
+                await removePreparation(store, "world", action.actionId);
+                return { status: "failed", detail: "The Stage completion was incomplete or named another target." };
+              }
+              try {
+                const outcome = await filePlayblast(store, {
+                  productionId: message.productionId,
+                  sceneFile: message.sceneFile,
+                  sceneId: message.sceneId,
+                  baseVersion: message.baseVersion,
+                  shotId: message.shotId,
+                  stagingVersion: message.stagingVersion,
+                  sourcePath: message.sourcePath,
+                  openingFrameSourcePath: message.openingFrameSourcePath,
+                  durationSec: message.durationSec,
+                  aspect: message.aspect,
+                  ...(message.lens !== undefined ? { lens: message.lens } : {}),
+                }, {
+                  source: `world-chat:${action.conversationId}:${action.actionId}`,
+                  requestId: action.actionId,
+                  precondition: observationPrecondition(store, action),
+                });
+                await removePreparation(store, "world", action.actionId);
+                return outcome.outcome === "filed"
+                  ? {
+                      status: "completed",
+                      receipt: {
+                        kind: "stage-playblast",
+                        id: outcome.artifacts[0].id,
+                        summary: "The playblast and opening frame were filed and pinned atomically.",
+                      },
+                    }
+                  : { status: "stale", detail: outcome.reason };
+              } catch (error) {
+                const committed = await committedAction(store, action.actionId);
+                await removePreparation(store, "world", action.actionId);
+                if (committed) {
+                  return {
+                    status: "completed",
+                    receipt: {
+                      kind: "stage-playblast",
+                      id: committed.commitId,
+                      summary: "The playblast and opening frame were filed and pinned atomically.",
+                    },
+                  };
+                }
+                if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
+                  return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+                }
+                return { status: "failed", detail: "The host could not file the Stage recording." };
+              }
+            },
+          }
+        : {}),
     };
   };
 
@@ -3388,6 +3906,14 @@ export function worldChatActionAdapters(
     "world-chat-production-scene-delete",
     "world-chat-production-scene-restore",
     "world-chat-production-style",
+    "world-chat-production-scene-command",
+    "world-chat-production-board-compile",
+    "world-chat-production-board-export",
+    "world-chat-production-take-import",
+    "world-chat-production-take-generation",
+    "world-chat-production-take-review",
+    "world-chat-production-take-trim",
+    "world-chat-production-stage-playblast",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(
