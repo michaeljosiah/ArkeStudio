@@ -71,3 +71,5 @@ export * from "./arke-actions.js";
 export * from "./arke-reads.js";
 export * from "./world-chat-actions.js";
 export * from "./harness-env.js";
+
+export * from "./audio.js";

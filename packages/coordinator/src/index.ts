@@ -356,3 +356,10 @@ export {
 } from "./index-db/queries.js";
 export { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./index-db/sqlite.js";
 export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
+
+export * from "./audio/media-tools.js";
+export * from "./audio/qc.js";
+export * from "./audio/storage.js";
+export * from "./audio/rights.js";
+export * from "./audio/dispatch-gate.js";
+export * from "./audio/transcript-comparison.js";

@@ -1,3 +1,4 @@
+import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
@@ -772,6 +773,8 @@ export interface CoordinatorOptions {
    * durations stay unknown, which the spine states rather than guessing around.
    */
   mediaProbe?: MediaProbe;
+  /** Shared local audio foundation; sample/performance consumers use the same host tools. */
+  audioMediaTools?: AudioMediaTools;
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */

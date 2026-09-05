@@ -1,3 +1,4 @@
+import { AudioAssetProvenanceSchema } from "./audio.js";
 import { z } from "zod";
 import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
 import {
@@ -58,6 +59,8 @@ export type TakeCost = z.infer<typeof TakeCostSchema>;
 /** What the world looked like at dispatch — the pair that makes drift computable (§2.4). */
 export const ProvenanceSchema = z
   .object({
+    /** Complete local preparation evidence, frozen by audio consumers rather than a cache pointer. */
+    audioAssets: z.array(AudioAssetProvenanceSchema).optional(),
     canonRevision: z.number().int().min(0),
     sheets: z.record(SlugSchema, z.number().int().min(1)),
     /** Frozen at dispatch; later world-look versions never rewrite this value. */

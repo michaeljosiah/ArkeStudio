@@ -189,3 +189,8 @@ Canon Q&A removes its temporary sandbox. Art-direction and extraction helper san
 `R\.art\` and `R\.extract\` are not currently swept automatically.
 
 Verified against coordinator, provider and desktop code on 2026-08-27.
+
+## Character audio foundation (issue 117)
+
+The shared local audio foundation and the #255/#111 consumer boundaries are documented in
+[the integration notes](architecture/character-audio-foundation.md).

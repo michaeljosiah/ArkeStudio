@@ -1,3 +1,4 @@
+import { audioMediaOptions } from "./media-tools.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
@@ -1123,6 +1124,7 @@ async function initialize(): Promise<{ port: number }> {
           ...boundaryFrameOptions(ffmpegPath()),
         }
       : {}),
+    ...audioMediaOptions(ffmpegPath(), ffprobeResolution().path),
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is
     // unknown, and the cut cannot check a take against the window it was cut for. Wired
     // separately from ffmpeg because a machine may resolve one and not the other, and a missing

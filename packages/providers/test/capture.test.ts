@@ -345,3 +345,34 @@ describe("subprocess calls are captured like HTTP ones", () => {
     assert.equal(unspawnable.failed.length, 1);
   });
 });
+
+it("summarizes JSON media arrays and nested data URIs without changing provider bytes", async () => {
+  const seen = recorder();
+  const data = Buffer.from([1, 2, 3, 4]);
+  const uri = `data:audio/wav;base64,${data.toString("base64")}`;
+  const payload = JSON.stringify({ prompt: "Speak the new line", audio_urls: [uri], nested: { arbitrary: uri },
+    image: `data:image/png;base64,${data.toString("base64")}`, video: `data:video/mp4;base64,${data.toString("base64")}` });
+  let physical = "";
+  const wrapped = captureProviderClient("openai", observed => ({ ...client(observed),
+    async submit() { await observed("https://example.com/generate", { method: "POST", body: payload });
+      return { remoteId: "one", acceptedAt: new Date().toISOString() }; } }),
+    async (_url, init) => { physical = String(init?.body); return new Response(payload, { headers: { "content-type": "application/json" } }); }, seen.capture);
+  await wrapped.submit("key", { model: "test", capability: "video", params: {} });
+  await seen.drain();
+  assert.equal(physical, payload);
+  const captured = seen.started[0]!.body as { audio_urls: Array<{ contentType: string; sizeBytes: number; sha256: string }> };
+  assert.equal(captured.audio_urls[0]!.contentType, "audio/wav");
+  assert.equal(captured.audio_urls[0]!.sizeBytes, 4);
+  assert.equal(captured.audio_urls[0]!.sha256, "sha256:9f64a747e1b97f131fabb6b447296c9b6f0201e79fb3c5356e6c77e89b6a806a");
+  assert.ok(!JSON.stringify([seen.started, seen.finished]).includes(uri));
+  assert.ok(JSON.stringify(seen.started).includes("Speak the new line"));
+});
+
+it("capture storage failure cannot block or repeat physical submission", async () => {
+  const seen = recorder();
+  seen.capture.start = async () => { throw new Error("capture too large"); };
+  let submitted = 0;
+  const wrapped = captureProviderClient("openai", observed => client(observed), async () => { submitted++; return new Response("{}"); }, seen.capture);
+  await wrapped.submit("key", { model: "test", capability: "image", params: { prompt: "portrait" } });
+  assert.equal(submitted, 1);
+});
