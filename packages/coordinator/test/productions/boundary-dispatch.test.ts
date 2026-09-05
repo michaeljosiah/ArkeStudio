@@ -153,7 +153,9 @@ describe("boundary frames through dispatch (issue 154)", () => {
         productionId: production.meta.id,
         sheets: bundle.sheets,
         kits: bundle.referenceKits,
-        scene: { ...base, shots: [shot(1, "first"), shot(2, "second")] },
+        // The chained frame is only consulted where the shot asked to open on it (issue 851),
+        // and staleness is a property of a frame that travels — so the ask is part of the case.
+        scene: { ...base, shots: [shot(1, "first"), { ...shot(2, "second"), continuity: { openOnPrevious: true } }] },
         selections: {
           sh_1: { trimInSec: 0, acceptedTakeId: "tk_01J8E0000000000000000000T2" },
           sh_2: { trimInSec: 0, startFrameArtifactId: staleSource.id },
@@ -169,6 +171,61 @@ describe("boundary frames through dispatch (issue 154)", () => {
       () => composeDispatches(WORLD_ID, production.meta.id, scene, missing, FRAME_MODEL, bundle),
       /start frame is unusable/,
     );
+  });
+
+  /*
+   * Issue 851. The chain is unconditional — accepting shot N files a still onto N+1 — so on a
+   * reference-capable model an unopposed run of accepts walked every later shot off its cast
+   * sheets one at a time. `openOnPrevious` now decides it, and the artifact stays filed either
+   * way, so the answer flips from the checkbox without a re-accept or a redraw.
+   */
+  it("a chained frame travels only where the shot asked to open on one", async () => {
+    const { bundle } = await open();
+    const production = bundle.productions[0]!;
+    const base = production.scenes[0]!;
+    const predecessor = "tk_01J8E0000000000000000000T7";
+    const chained = boundaryArtifact("ar_01J8E0000000000000000000B1", {
+      boundaryExtraction: { sourceTakeId: predecessor, mediaTakeId: predecessor, atSec: null, method: "ffmpeg-frame/1" },
+    });
+    const plan = (openOnPrevious: boolean) =>
+      planScene(
+        {
+          world: bundle.meta,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits,
+          scene: {
+            ...base,
+            shots: [
+              shot(1, "the rail at dusk"),
+              openOnPrevious
+                ? { ...shot(2, "@maren-kest turns"), continuity: { openOnPrevious: true } }
+                : shot(2, "@maren-kest turns"),
+            ],
+          },
+          selections: {
+            sh_1: { trimInSec: 0, acceptedTakeId: predecessor },
+            sh_2: { trimInSec: 0, startFrameArtifactId: chained.id },
+          },
+          model: FRAME_MODEL,
+          artifacts: [chained],
+        },
+        "per-shot",
+      );
+
+    const silent = plan(false);
+    assert.equal(silent.shots[1]!.frame, undefined, "nobody asked for this frame");
+    assert.deepEqual(silent.warnings.framedShots, [], "and nothing is claimed about one");
+    assert.deepEqual(
+      [...new Set(silent.shots[1]!.bound.map((reference) => reference.sheetId))],
+      ["maren-kest"],
+      "the shot keeps its own sheets",
+    );
+
+    const asked = plan(true);
+    assert.equal(asked.shots[1]!.frame?.artifactId, chained.id);
+    assert.deepEqual(asked.shots[1]!.bound, [], "the frame route takes one image; nothing rides along");
+    assert.deepEqual(asked.warnings.framedShots[0]?.setAside, ["maren-kest"], "what stepped aside is named");
   });
 
   it("no frame route means no carriage, no promise, and the references stay", async () => {

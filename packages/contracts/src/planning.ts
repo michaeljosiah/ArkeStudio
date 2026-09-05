@@ -1813,6 +1813,19 @@ function resolveBoundaryFrames(
       states.set(shot.id, { stale: `${artifactId} is not in this world` });
       continue;
     }
+    /*
+     * A chained frame travels only where the shot asked for it (issue 851). Accepting a take
+     * cuts a still out of it and files it onto the next shot unconditionally, and on a
+     * reference-capable model that still then displaces the cast sheets — so an unopposed run of
+     * accepts walks a recurring face off its own reference, one shot at a time, with nobody
+     * told. `openOnPrevious` is the shot's word for this and now decides it, default off on
+     * SPEC-019 R-50's reasoning: most cuts are cuts. The artifact stays filed and the answer is
+     * reversible from the checkbox alone — no re-accept, no redraw.
+     *
+     * A drawn, imported or run frame carries no `boundaryExtraction` and is untouched here: it
+     * was chosen, which is the same distinction `hasOwnFrame` reads (SPEC-036 R-20).
+     */
+    if (artifact.boundaryExtraction !== undefined && shot.continuity?.openOnPrevious !== true) continue;
     if (artifact.kind !== "image") {
       states.set(shot.id, { stale: `${artifactId} is ${artifact.kind}, not an image` });
       continue;

@@ -465,6 +465,27 @@ export function SceneWorkspace({
               {videoPlan.timingWarnings?.map((message,i)=><p key={`warning-${i}`}>{message}</p>)}
               {videoPlan.timingProblems?.map((message,i)=><p role="alert" key={`problem-${i}`}>{message}</p>)}
             </div> : null}
+            {/*
+              What the frame route leaves behind, said before the money moves (issue 851). The
+              planner has always computed this; nothing showed it, so a shot chained onto the
+              previous take's last frame dropped its cast sheets in silence — which is how a
+              recurring face drifts across a scene one accept at a time.
+            */}
+            {videoPlan?.warnings.framedShots.some((entry) => entry.setAside.length > 0) ? (
+              <div aria-label="Generation references">
+                {videoPlan.warnings.framedShots
+                  .filter((entry) => entry.setAside.length > 0)
+                  .map((entry) => (
+                    <p key={entry.shotId}>
+                      Shot {entry.number} opens on a frame ·{" "}
+                      {entry.setAside
+                        .map((sheetId) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId)
+                        .join(", ")}{" "}
+                      not sent
+                    </p>
+                  ))}
+              </div>
+            ) : null}
             {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>Timeline content: {videoPlan.pack.totalSec.toFixed(3)}s in {videoPlan.pack.passes.length} passes. Provider step padding stays outside these picture slots.</p>}
             {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0 || masterAudio.length > 0 || videoAudioProblems.length > 0) && <div aria-label="Scene character audio references">
               <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>

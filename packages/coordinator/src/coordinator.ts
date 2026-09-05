@@ -248,7 +248,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 };
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
-import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
+import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
@@ -7843,6 +7843,46 @@ export class Coordinator {
           );
           this.refreshIfStillOpen(store);
         }
+        return;
+      }
+      case "clear-shot-frame": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        const current = store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId);
+        if (!current?.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === msg.shotId))) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That shot is no longer available.");
+          return;
+        }
+        const cleared = await clearShotFrame(store, msg.productionId, msg.shotId, {
+          requestId: msg.requestId,
+          source: "clear-shot-frame",
+        }).catch((error: unknown) => ({
+          ok: false as const,
+          reason: error instanceof Error ? error.message : String(error),
+        }));
+        if (!cleared.ok) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `That frame could not be cleared: ${cleared.reason}`);
+          this.refreshIfStillOpen(store);
+          return;
+        }
+        if (!this.stillOpen(store)) {
+          this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+          return;
+        }
+        this.emit({
+          at: this.nowIso(),
+          type: "selection.changed",
+          worldId: msg.worldId,
+          productionId: msg.productionId,
+          shotId: msg.shotId,
+          selection: store.getBundle().productions.find((candidate) => candidate.meta.id === msg.productionId)
+            ?.selections[msg.shotId] ?? { trimInSec: 0 },
+        });
+        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "conversation-action-stage-playblast-complete": {

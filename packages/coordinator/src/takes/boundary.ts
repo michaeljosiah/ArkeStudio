@@ -357,3 +357,59 @@ export async function chainBoundaryFrame(
     await rm(toExtendedLength(stagingPath), { force: true }).catch(() => {});
   }
 }
+
+/**
+ * The reverse of the chain (issue 851): drop the start frame a shot holds so it dispatches from
+ * its own references again.
+ *
+ * Both pointers go in one commit. `startFrameTakeId` names footage and only steers, but leaving
+ * it standing beside a cleared picture would be two answers to what the shot opens on — the same
+ * reason a drawn frame nulls it (SPEC-036 R-20).
+ *
+ * The artifact is not deleted. It is the record of what the previous shot ended on, other
+ * consumers may cite it, and a still that has to be re-cut to be reinstated is worse than one
+ * that is simply no longer pointed at.
+ */
+export async function clearShotFrame(
+  store: WorldStore,
+  productionId: string,
+  shotId: string,
+  options: { requestId?: string; source?: string } = {},
+): Promise<{ ok: true; cleared: boolean } | { ok: false; reason: string }> {
+  const selectionsPath = `productions/${productionId}/selections.json`;
+  return store.gateOp(async () => {
+    let raw: string;
+    try {
+      raw = await readFile(toExtendedLength(join(store.dir, selectionsPath)), "utf8");
+    } catch {
+      // No selections file is no frame — the answer the caller wanted, reached already.
+      return { ok: true as const, cleared: false };
+    }
+    const selections = JSON.parse(raw) as Record<string, Record<string, unknown>>;
+    const selection = selections[shotId];
+    if (selection === undefined) return { ok: true as const, cleared: false };
+    const hadArtifact = (selection["startFrameArtifactId"] ?? null) !== null;
+    const hadTake = (selection["startFrameTakeId"] ?? null) !== null;
+    if (!hadArtifact && !hadTake) return { ok: true as const, cleared: false };
+    selections[shotId] = { trimInSec: 0, ...selection, startFrameArtifactId: null, startFrameTakeId: null };
+    await store.commitUnserialised({
+      kind: "clear-shot-frame",
+      source: options.source ?? "clear-shot-frame",
+      files: [
+        {
+          path: selectionsPath,
+          action: "replace",
+          content: JSON.stringify(selections, null, 2) + "\n",
+          baseHash: sha256(raw),
+        },
+      ],
+      // `startFrameArtifactId: null` is still the version-2 selection shape (SPEC-023 R-23), and
+      // a world already carrying frames is already there — but a world whose only frame came
+      // from the legacy take pointer is not, and an older build must refuse it by name rather
+      // than drop the map.
+      raiseSchemaVersion: 2,
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+    return { ok: true as const, cleared: true };
+  });
+}

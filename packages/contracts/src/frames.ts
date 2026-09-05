@@ -2171,6 +2171,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The reverse of the chain (issue 851): drop the still this shot opens on so it dispatches
+   * from its own references again. Nothing else removes one — the frame family only ever files
+   * frames — so a shot handed a boundary still by an accept had no way back short of redrawing
+   * over it. The artifact itself stays on the shelf; this clears the pointer.
+   */
+  z
+    .object({
+      kind: z.literal("clear-shot-frame"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      shotId: ShotIdSchema,
+      requestId: UlidSchema,
+    })
+    .strict(),
+  /**
    * File the playblast and opening frame the Stage rendered onto its shot. The bytes arrive the
    * way a pasted picture does — spooled by the host, which appends their paths — and both
    * artifacts are pinned through one versioned scene write, so a stale scene refuses them by
