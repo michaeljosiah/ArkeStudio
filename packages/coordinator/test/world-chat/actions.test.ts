@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   newId,
+  ModelWorldChatActionSchema,
   orderedShots,
   orderedTrackClips,
   stageShot,
@@ -53,6 +54,7 @@ import {
   productionMetadataFence,
   productionsFence,
   referencesFence,
+  routingFence,
   sceneFence,
   sceneScriptFence,
   scenesFence,
@@ -64,6 +66,8 @@ import {
   timelineFence,
   voicesFence,
   worldMetadataFence,
+  exportsFence,
+  type ArkeExportReadRecord,
 } from "../../src/world-chat/target-reads.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
@@ -89,7 +93,7 @@ async function setup(
     adapters,
     now: NOW,
   });
-  return { store, gate, conversationId, log, lifecycle, adapters, entryContext };
+  return { store, gate, conversationId, log, lifecycle, adapters, entryContext, actionDeps };
 }
 
 async function loaded(log: WorldChatStore) {
@@ -187,6 +191,7 @@ function currentReceipt(
   store: WorldStore,
   requirement: ArkeReadRequirement,
   target?: string,
+  exportRecords: readonly ArkeExportReadRecord[] = [],
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
   const fence = requirement === "world-metadata"
@@ -230,6 +235,10 @@ function currentReceipt(
                                   bundle.productions.find((candidate) => candidate.meta.id === target),
                                   bundle.artifacts,
                                 )
+                              : requirement === "routing"
+                                ? routingFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                                : requirement === "exports"
+                                  ? exportsFence(exportRecords, store.worldId, target === store.worldId ? undefined : target)
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
@@ -915,6 +924,31 @@ describe("World Chat authority adapters", () => {
         .includes("private-host-artifact.txt"),
       false,
     );
+  });
+
+  it("completes a cancelled native chooser without changing its target", async () => {
+    let pickerCalls = 0;
+    const w = await setup({ kind: "world" }, {
+      pickFiles: async () => {
+        pickerCalls += 1;
+        return [];
+      },
+    });
+    const before = w.store.getBundle().artifacts.length;
+    const artifacts = currentReceipt(w.store, "artifacts");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [artifacts],
+      actions: [{ kind: "artifact-import", source: "files", links: [], checkReceiptIds: [artifacts.id] }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const action = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(pickerCalls, 0);
+    assert.equal((await decide(w.lifecycle, w.log, action)).status, "cancelled");
+    assert.equal(pickerCalls, 1);
+    assert.equal(w.store.getBundle().artifacts.length, before);
   });
 
   it("defers pending reference image import to a path-free host action", async () => {
@@ -1759,5 +1793,181 @@ describe("World Chat authority adapters", () => {
     const events = await readFile(join(w.store.dir, ".conversations", w.conversationId, "events.jsonl"), "utf8");
     assert.equal(events.includes("private-playblast.mp4"), false);
     assert.equal(events.includes("private-opening-frame.png"), false);
+  });
+
+  it("applies one semantic routing command only after approval", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const routing = currentReceipt(w.store, "routing", PRODUCTION);
+    const scenes = currentReceipt(w.store, "scenes", PRODUCTION);
+    const before = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.routing;
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [routing, scenes],
+      actions: [{
+        kind: "production-routing",
+        productionId: PRODUCTION,
+        command: { operation: "set-start", sceneId: "sc_04" },
+        checkReceiptIds: [routing.id, scenes.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.deepEqual(
+      w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.routing,
+      before,
+    );
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(card.authority.kind, "routing");
+    assert.equal(card.shown.body.family, "command");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.routing!;
+    assert.equal(after.start, "sc_04");
+    assert.equal(after.version, (before?.version ?? 0) + 1);
+  });
+
+  it("shows complete local export effects and returns only a semantic receipt", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const exportRecords: ArkeExportReadRecord[] = [];
+    let starts = 0;
+    const w = await setup(context, {
+      getExports: () => exportRecords,
+      startProductionExport: async (_action, card) => {
+        starts += 1;
+        return {
+          status: "completed",
+          receipt: { kind: "production-export", id: card.authority.id, summary: "The local production export completed." },
+        };
+      },
+    });
+    const timeline = currentReceipt(w.store, "timeline", PRODUCTION);
+    const episodes = currentReceipt(w.store, "episodes", PRODUCTION);
+    const exports = currentReceipt(w.store, "exports", PRODUCTION, exportRecords);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [timeline, episodes, exports],
+      actions: [{
+        kind: "production-cut-export",
+        productionId: PRODUCTION,
+        scope: { kind: "production" },
+        preset: "review-cut",
+        checkReceiptIds: [timeline.id, episodes.id, exports.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    const shown = JSON.stringify(card.shown);
+    assert.equal(card.shown.body.family, "host-action");
+    assert.match(shown, /Scope:/);
+    assert.match(shown, /Preset:/);
+    assert.match(shown, /Outputs:/);
+    assert.match(shown, /Overwrite\/destructive effects:/);
+    assert.match(shown, /Privacy\/network:/);
+    assert.match(shown, /Cancellation:/);
+    const exportAdapter = worldChatActionAdapters(w.store, w.gate, NOW, w.actionDeps)
+      .find((adapter) => adapter.actionKind === "world-chat-production-cut-export")!;
+    assert.equal(
+      (await exportAdapter.reconcile?.({ ...card, status: "running" }))?.status,
+      "failed",
+      "a restart cannot leave a lost local encode running forever",
+    );
+    assert.equal(starts, 0);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(starts, 1);
+    const settled = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(settled.receipt?.id, card.authority.id);
+    assert.equal(JSON.stringify(settled).includes("C:\\private"), false);
+  });
+
+  it("keeps partial multi-card delivery outcomes independent without claiming rollback", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const exportRecords: ArkeExportReadRecord[] = [];
+    const w = await setup(context, {
+      getExports: () => exportRecords,
+      startProductionExport: async (action, card) => action.preset === "review-cut"
+        ? {
+            status: "completed",
+            receipt: { kind: "production-export", id: card.authority.id, summary: "The review cut completed." },
+          }
+        : { status: "failed", detail: "The master export failed." },
+    });
+    const timeline = currentReceipt(w.store, "timeline", PRODUCTION);
+    const episodes = currentReceipt(w.store, "episodes", PRODUCTION);
+    const exports = currentReceipt(w.store, "exports", PRODUCTION, exportRecords);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [timeline, episodes, exports],
+      actions: (["review-cut", "master"] as const).map((preset) => ({
+        kind: "production-cut-export" as const,
+        productionId: PRODUCTION,
+        scope: { kind: "production" as const },
+        preset,
+        checkReceiptIds: [timeline.id, episodes.id, exports.id],
+      })),
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "failed");
+    const settled = (await loaded(w.log)).actions;
+    assert.deepEqual(settled.map((card) => card.status), ["completed", "failed"]);
+    assert.equal(settled[0]!.receipt?.kind, "production-export");
+    assert.equal(settled[1]!.statusDetail, "The master export failed.");
+  });
+
+  it("cancels only a running export selected from the complete export read", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const exportId = `ex_${ulid()}`;
+    const exportRecords: ArkeExportReadRecord[] = [{
+      id: exportId,
+      worldId: "placeholder",
+      productionId: PRODUCTION,
+      status: "running",
+      percent: 40,
+      output: null,
+      error: null,
+    }];
+    let cancelled = "";
+    const w = await setup(context, {
+      getExports: () => exportRecords,
+      cancelExport: (id) => {
+        cancelled = id;
+        return true;
+      },
+    });
+    exportRecords[0] = { ...exportRecords[0]!, worldId: w.store.worldId };
+    const exports = currentReceipt(w.store, "exports", PRODUCTION, exportRecords);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [exports],
+      actions: [{
+        kind: "production-export-cancel",
+        productionId: PRODUCTION,
+        exportId,
+        checkReceiptIds: [exports.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn, w.actionDeps);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(cancelled, "");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(cancelled, exportId);
+  });
+
+  it("rejects host destinations in model-authored export actions", () => {
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-cut-export",
+      productionId: PRODUCTION,
+      scope: { kind: "production" },
+      preset: "master",
+      destinationPath: "C:\\private\\delivery.mp4",
+      checkReceiptIds: [newId("check")],
+    }));
   });
 });

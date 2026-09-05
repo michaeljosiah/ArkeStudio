@@ -24,7 +24,9 @@ describe("subtitle sidecars beside an export", () => {
         await writeFile(argv[argv.length - 1]!, "rendered");
       },
     };
-    const handle = runExport(worldDir, args, "film.mp4", runner, () => {}, sidecar);
+    const exportId = "ex_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    const handle = runExport(worldDir, args, "film.mp4", runner, () => {}, sidecar, exportId);
+    assert.equal(handle.id, exportId, "an approved conversation action fixes its export identity before encoding");
     const result = await handle.done;
     assert.equal(result.status, "done");
     if (result.status !== "done") return;

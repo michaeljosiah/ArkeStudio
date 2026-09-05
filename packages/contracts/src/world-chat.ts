@@ -2551,6 +2551,49 @@ const exampleWorldActions = {
     },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-routing": {
+    kind: "production-routing",
+    productionId: "saltlight",
+    command: { operation: "add-choice", choice: { id: "ch_answer", from: "sc_04", label: "Answer the bell", to: "sc_05" } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-routing-traversal": {
+    kind: "production-routing-traversal",
+    productionId: "saltlight",
+    choiceId: "ch_answer",
+    from: "sc_04",
+    to: "sc_05",
+    route: ["sc_04"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-branch-canon": {
+    kind: "production-branch-canon",
+    productionId: "saltlight",
+    sceneId: "sc_05",
+    route: ["sc_04", "sc_05"],
+    title: "Maren answers the drowned bell",
+    body: "Maren answered the bell at slack water.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-interactive-export": {
+    kind: "production-interactive-export",
+    productionId: "saltlight",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-cut-export": {
+    kind: "production-cut-export",
+    productionId: "saltlight",
+    scope: { kind: "episode", episodeId: "ep_the-ledger" },
+    preset: "review-cut",
+    subtitles: { trackId: "tr_subtitles", mode: "sidecar", sidecar: "vtt" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-export-cancel": {
+    kind: "production-export-cancel",
+    productionId: "saltlight",
+    exportId: `ex_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */

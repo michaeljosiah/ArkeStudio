@@ -287,6 +287,12 @@ export function ConversationPermissionCard({
   };
 
   const body = <ConversationActionBody action={action} supported={supported} />;
+  const consequences = action.shown.ripples.length > 0 ? (
+    <div className="fy-actioncard__body">
+      <strong>Consequences</strong>
+      <ul>{action.shown.ripples.map((ripple) => <li key={ripple}>{ripple}</li>)}</ul>
+    </div>
+  ) : null;
   return (
     <article
       ref={card}
@@ -307,8 +313,9 @@ export function ConversationPermissionCard({
         <details className="fy-actioncard__details">
           <summary>Review details</summary>
           {body}
+          {consequences}
         </details>
-      ) : body}
+      ) : <>{body}{consequences}</>}
       {action.statusDetail && <p className="fy-actioncard__notice">{action.statusDetail}</p>}
       {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
       {action.decision && (

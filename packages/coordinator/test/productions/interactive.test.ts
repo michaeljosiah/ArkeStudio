@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { migrateLegacyScene, RoutingSchema, type ProductionBundle, type Routing, type Take } from "@arke-studio/contracts";
 import {
   appendTraversal,
   exportInteractive,
+  interactiveExportCompleted,
   interactiveFindings,
   proposeBranchCanon,
   saveRouting,
@@ -189,7 +190,8 @@ describe("interactive video through the coordinator (epic 401)", () => {
       to: "sc_i2",
       route: ["sc_i1"],
     });
-    const result = await exportInteractive(store, production, CLOCK);
+    const exportId = "iv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    const result = await exportInteractive(store, production, CLOCK, { exportId });
     assert.ok(result.ok, `expected export, got ${result.ok ? "" : result.blockers.join("; ")}`);
     const manifest = JSON.parse(await readFile(join(dir, result.dir, "manifest.json"), "utf8")) as {
       routing: Routing;
@@ -206,6 +208,9 @@ describe("interactive video through the coordinator (epic 401)", () => {
     assert.ok(player.includes('"start":"sc_i1"') || player.includes('"start": "sc_i1"'), "the manifest is embedded, so file:// playback works offline");
     assert.ok(!/https?:\/\//.test(player), "self-contained: the player calls no network");
     assert.ok(player.includes("localStorage"), "playback state stays with the viewer");
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), true);
+    await rm(join(dir, result.dir, "player.html"));
+    assert.equal(await interactiveExportCompleted(store, production.meta.id, exportId), false, "a partial package is not recovered as completed");
   });
 
   it("T-13: Interactive export ships equivalent media for legacy and permuted migrated scenes", async () => {

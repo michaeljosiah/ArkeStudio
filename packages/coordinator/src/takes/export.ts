@@ -52,8 +52,10 @@ export function runExport(
    * encode, renamed after it, removed with it on cancellation or failure.
    */
   sidecar?: ExportSidecar,
+  exportId?: string,
 ): ExportHandle {
-  const id = `ex_${ulid()}`;
+  const id = exportId ?? `ex_${ulid()}`;
+  if (!/^ex_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) throw new Error("invalid export id");
   const controller = new AbortController();
   const stage = join(worldDir, ".cache", "exports", `${id}.mp4`);
   const output = join(worldDir, "exports", outName);

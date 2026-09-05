@@ -160,6 +160,10 @@ export function scenesFence(production: ProductionBundle | undefined): string {
   return fence(sortScenes(production?.scenes ?? []));
 }
 
+export function routingFence(production: ProductionBundle | undefined): string {
+  return fence(production?.routing ?? null, production?.routing?.version ?? "absent");
+}
+
 export function sceneFence(production: ProductionBundle | undefined, sceneId: string): string {
   const scene = sceneOf(production, sceneId);
   return fence(scene ?? null, scene?.version ?? "absent");
@@ -418,6 +422,36 @@ function safeExportOutput(output: string | null | undefined): string | null | un
   return parts[0] === "exports" && parts.length > 1 && parts.every((part) => part !== "" && part !== "." && part !== "..")
     ? normalized
     : null;
+}
+
+function safeExportRecord(entry: ArkeExportReadRecord) {
+  return {
+    id: entry.id,
+    worldId: entry.worldId,
+    ...(entry.productionId !== undefined ? { productionId: entry.productionId } : {}),
+    ...(entry.episodeId !== undefined ? { episodeId: entry.episodeId } : {}),
+    status: entry.status,
+    ...(entry.percent !== undefined ? { percent: entry.percent } : {}),
+    ...(entry.output !== undefined ? { output: safeExportOutput(entry.output) } : {}),
+    ...(entry.error !== undefined ? { error: entry.error === null ? null : "export failed" } : {}),
+  };
+}
+
+/** The exact path-free projection signed by list_exports and action observations. */
+export function exportsFence(
+  records: readonly ArkeExportReadRecord[],
+  worldId: string,
+  productionId?: string,
+): string {
+  return fence(records
+    .filter((entry) => entry.worldId === worldId && (productionId === undefined || entry.productionId === productionId))
+    .sort((a, b) => a.id.localeCompare(b.id))
+    // Progress is advisory, not target identity. Including it made a cancellation card stale
+    // every time FFmpeg reported another percent while the person was reading the card.
+    .map((entry) => {
+      const { percent: _percent, ...stable } = safeExportRecord(entry);
+      return stable;
+    }));
 }
 
 export class WorldChatTargetReads {
@@ -733,7 +767,7 @@ export class WorldChatTargetReads {
               ...routing.groups.map((group, index) => ({ key: `group:${padded(index)}:${group.id}`, value: { kind: "group", group } })),
             ]
           : [];
-        revisionOrDigest = fence(routing ?? null, routing?.version ?? "absent");
+        revisionOrDigest = routingFence(productionOf(bundle, productionId));
         break;
       }
       case "list_plans": {
@@ -763,18 +797,9 @@ export class WorldChatTargetReads {
         readTarget = target("exports", productionId ?? lease.worldId);
         rows = [...exports].sort((a, b) => a.id.localeCompare(b.id)).map((entry) => ({
           key: entry.id,
-          value: {
-            id: entry.id,
-            worldId: entry.worldId,
-            ...(entry.productionId !== undefined ? { productionId: entry.productionId } : {}),
-            ...(entry.episodeId !== undefined ? { episodeId: entry.episodeId } : {}),
-            status: entry.status,
-            ...(entry.percent !== undefined ? { percent: entry.percent } : {}),
-            ...(entry.output !== undefined ? { output: safeExportOutput(entry.output) } : {}),
-            ...(entry.error !== undefined ? { error: entry.error === null ? null : "export failed" } : {}),
-          },
+          value: safeExportRecord(entry),
         }));
-        revisionOrDigest = fence(rows.map((row) => row.value));
+        revisionOrDigest = exportsFence(exports, lease.worldId, productionId);
         break;
       }
     }

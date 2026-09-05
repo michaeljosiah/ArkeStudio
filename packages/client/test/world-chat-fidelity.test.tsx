@@ -194,7 +194,7 @@ function renderActionConversation(family: "authored-diff" | "generation" | "take
       title: "Rename this world",
       consequence: "Changes the world name everywhere it appears.",
       affectedTargets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
-      ripples: [],
+      ripples: ["Existing links keep working."],
       permissionReason: "authored-change",
       body: family === "authored-diff"
         ? {
@@ -292,6 +292,8 @@ describe("conversation permission cards", () => {
     const html = renderActionConversation();
     assert.match(html, /Rename this world/);
     assert.match(html, /Changes the world name everywhere it appears/);
+    assert.match(html, /Consequences/);
+    assert.match(html, /Existing links keep working/);
     assert.match(html, /Old name/);
     assert.match(html, /New name/);
     assert.match(html, /<button[^>]*>Approve<\/button>/);

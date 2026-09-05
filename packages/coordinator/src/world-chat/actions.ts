@@ -5,10 +5,12 @@ import {
   ArtDirectionRecordSchema,
   CanonEntrySchema,
   deriveArtDirectionDescription,
+  buildRenderPlan,
   productionFrameRate,
   productionShape,
   SceneRecordSchema,
   orderedShots,
+  routingFindings,
   sceneDeleteBlockers,
   SheetSchema,
   sortScenes,
@@ -56,6 +58,12 @@ import {
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
+  WorldChatProductionRoutingActionSchema,
+  WorldChatProductionTraversalActionSchema,
+  WorldChatProductionBranchCanonActionSchema,
+  WorldChatProductionInteractiveExportActionSchema,
+  WorldChatProductionCutExportActionSchema,
+  WorldChatProductionExportCancelActionSchema,
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
   WorldChatReferenceGenerationActionSchema,
@@ -105,6 +113,7 @@ import {
   type WorldChatVoiceAssignmentAction,
   type WorldChatProductionTakeImportAction,
   type WorldChatProductionTakeGenerationAction,
+  type WorldChatProductionCutExportAction,
   type ModelEditorRequest,
   type ModelSceneEdit,
   type ProposalId,
@@ -146,6 +155,16 @@ import {
   validateEditorRequest,
 } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
+import {
+  appendTraversal,
+  applyRoutingCommand,
+  exportInteractive,
+  hasTraversalRequest,
+  interactiveExportCompleted,
+  interactiveFindings,
+  proposeBranchCanon,
+  saveRouting,
+} from "../productions/interactive.js";
 import {
   createProductionFromPlan,
   deleteScene,
@@ -218,6 +237,7 @@ import {
   productionMetadataFence,
   productionsFence,
   referencesFence,
+  routingFence,
   sceneFence,
   sceneScriptFence,
   scenesFence,
@@ -230,6 +250,8 @@ import {
   takesFence,
   voicesFence,
   worldMetadataFence,
+  exportsFence,
+  type ArkeExportReadRecord,
 } from "./target-reads.js";
 import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
@@ -309,6 +331,12 @@ export interface WorldChatActionAdapterDeps {
     action: WorldChatProductionTakeGenerationAction["action"],
     mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
   ) => Promise<{ status: "completed" | "failed"; id?: string; detail?: string }>;
+  readonly getExports?: () => readonly ArkeExportReadRecord[];
+  readonly startProductionExport?: (
+    action: WorldChatProductionCutExportAction["action"],
+    card: ConversationActionCard,
+  ) => Promise<ConversationActionExecutionOutcome>;
+  readonly cancelExport?: (exportId: string) => boolean;
 }
 
 function completeObservation(
@@ -395,12 +423,19 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
   "audio-spine-command": ["spine"],
+  "production-routing": ["routing", "scenes"],
+  "production-routing-traversal": ["routing", "scenes"],
+  "production-branch-canon": ["routing", "scenes", "canon"],
+  "production-interactive-export": ["routing", "scenes", "takes", "exports"],
+  "production-cut-export": ["timeline", "episodes", "exports"],
+  "production-export-cancel": ["exports"],
 };
 
 function currentWorldObservation(
   store: WorldStore,
   requirement: ArkeReadRequirement,
   target?: string,
+  deps: WorldChatActionAdapterDeps = {},
 ): { target: string; fence: string } | null {
   const bundle = store.getBundle();
   switch (requirement) {
@@ -454,6 +489,18 @@ function currentWorldObservation(
       const productionId = target ?? store.worldId;
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       return { target: productionId, fence: takesFence(production) };
+    }
+    case "routing": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: routingFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
+    case "exports": {
+      if (!deps.getExports) return null;
+      const targetId = target ?? store.worldId;
+      return {
+        target: targetId,
+        fence: exportsFence(deps.getExports(), store.worldId, targetId === store.worldId ? undefined : targetId),
+      };
     }
     default: return null;
   }
@@ -547,6 +594,28 @@ function productionActionTargets(
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
     case "audio-spine-command": return [{ requirement: "spine", target: action.productionId }];
+    case "production-routing":
+    case "production-routing-traversal": return [
+      { requirement: "routing", target: action.productionId },
+      { requirement: "scenes", target: action.productionId },
+    ];
+    case "production-branch-canon": return [
+      { requirement: "routing", target: action.productionId },
+      { requirement: "scenes", target: action.productionId },
+      { requirement: "canon", target: worldId },
+    ];
+    case "production-interactive-export": return [
+      { requirement: "routing", target: action.productionId },
+      { requirement: "scenes", target: action.productionId },
+      { requirement: "takes", target: action.productionId },
+      { requirement: "exports", target: action.productionId },
+    ];
+    case "production-cut-export": return [
+      { requirement: "timeline", target: action.productionId },
+      { requirement: "episodes", target: action.productionId },
+      { requirement: "exports", target: action.productionId },
+    ];
+    case "production-export-cancel": return [{ requirement: "exports", target: action.productionId }];
     default: return [];
   }
 }
@@ -555,6 +624,7 @@ function worldActionObservations(
   store: WorldStore,
   receipts: readonly WorldChatCheckReceipt[],
   action: ModelWorldChatAction,
+  deps: WorldChatActionAdapterDeps = {},
 ): ArkeReadObservation[] {
   const observations = action.checkReceiptIds.map((id) => {
     const receipt = receipts.find((entry) => entry.id === id);
@@ -567,7 +637,7 @@ function worldActionObservations(
       !receipt.target ||
       !receipt.observedRevisionOrDigest
     ) throw new Error("A world action requires the final receipt from a complete target read.");
-    const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id);
+    const current = currentWorldObservation(store, receipt.target.requirement, receipt.target.id, deps);
     if (
       !current ||
       current.target !== receipt.target.id ||
@@ -664,6 +734,12 @@ function preparedWorldPayload(
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
     case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
     case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
+    case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
+    case "production-routing-traversal": return WorldChatProductionTraversalActionSchema.parse({ kind: "world-chat-production-routing-traversal", ...common });
+    case "production-branch-canon": return WorldChatProductionBranchCanonActionSchema.parse({ kind: "world-chat-production-branch-canon", ...common });
+    case "production-interactive-export": return WorldChatProductionInteractiveExportActionSchema.parse({ kind: "world-chat-production-interactive-export", ...common });
+    case "production-cut-export": return WorldChatProductionCutExportActionSchema.parse({ kind: "world-chat-production-cut-export", ...common });
+    case "production-export-cancel": return WorldChatProductionExportCancelActionSchema.parse({ kind: "world-chat-production-export-cancel", ...common });
   }
 }
 
@@ -938,6 +1014,18 @@ function worldActionTargets(
     ];
     case "production-stage-playblast": return [{ kind: "shot", id: action.shotId, label: action.shotId }];
     case "audio-spine-command": return [{ kind: "audio-spine", id: action.productionId, label: "Audio spine" }];
+    case "production-routing": return [{ kind: "routing", id: action.productionId, label: "Branch routing" }];
+    case "production-routing-traversal": return [
+      { kind: "choice", id: action.choiceId, label: action.choiceId },
+      { kind: "routing", id: action.productionId, label: "Branch routing" },
+    ];
+    case "production-branch-canon": return [
+      { kind: "scene", id: action.sceneId, label: action.sceneId },
+      { kind: "canon", id: fallbackId, label: action.title },
+    ];
+    case "production-interactive-export":
+    case "production-cut-export": return [{ kind: "production", id: action.productionId, label: action.productionId }];
+    case "production-export-cancel": return [{ kind: "export", id: action.exportId, label: action.exportId }];
   }
 }
 
@@ -946,6 +1034,7 @@ export function prepareWorldChatActions(
   store: WorldStore,
   lifecycle: ConversationActionLifecycle,
   turn: WorldChatActionTurn,
+  deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
@@ -1038,7 +1127,7 @@ export function prepareWorldChatActions(
             : []),
         ],
         payload,
-        baseObservations: worldActionObservations(store, turn.receipts ?? [], action),
+        baseObservations: worldActionObservations(store, turn.receipts ?? [], action, deps),
         createdAt: turn.at,
       }),
     });
@@ -1284,9 +1373,10 @@ async function editorRequestForAction(store: WorldStore, actionId: string) {
 function observationsCurrent(
   store: WorldStore,
   action: Pick<ConversationActionPrepareIntent, "baseObservations">,
+  deps: WorldChatActionAdapterDeps = {},
 ): { ok: true } | { ok: false; reason: "stale"; detail: string } {
   for (const observation of action.baseObservations) {
-    const current = currentWorldObservation(store, observation.requirement, observation.target);
+    const current = currentWorldObservation(store, observation.requirement, observation.target, deps);
     if (!current) return { ok: false, reason: "stale", detail: `The ${observation.requirement} read can no longer be verified.` };
     if (
       !observation.complete ||
@@ -1300,9 +1390,10 @@ function observationsCurrent(
 function observationPrecondition(
   store: WorldStore,
   action: Pick<ConversationActionPrepareIntent, "baseObservations">,
+  deps: WorldChatActionAdapterDeps = {},
 ): WorldStatePrecondition {
   return () => {
-    const current = observationsCurrent(store, action);
+    const current = observationsCurrent(store, action, deps);
     return current.ok ? null : current.detail;
   };
 }
@@ -2404,7 +2495,13 @@ async function sharedResourceProjection(
             title: `Export the board for ${scene.title}`,
             consequence: "Compiles the current selected frames locally and files one immutable board artifact.",
             affectedTargets: [...intent.targets],
-            ripples: [],
+            ripples: [
+              `Scope: scene ${scene.id}.`,
+              "Preset/output: one PNG board snapshot.",
+              "Overwrite/destructive effects: none; the artifact is immutable.",
+              "Privacy/network: selected local frames are compiled locally and no provider is contacted.",
+              "Cancellation: not supported once the local board compilation begins.",
+            ],
             permissionReason: "export",
             body: {
               family: "host-action",
@@ -2579,6 +2676,161 @@ async function sharedResourceProjection(
         },
       };
       authorityRevision = scene.version;
+      break;
+    }
+    case "world-chat-production-routing": {
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const next = applyRoutingCommand(production.routing, payload.action.command);
+      const knownScenes = new Set(production.scenes.map((scene) => scene.id));
+      const namedScenes = [next.start, ...next.choices.flatMap((choice) => [choice.from, choice.to]), ...next.endings.map((ending) => ending.sceneId), ...next.excluded.map((entry) => entry.sceneId), ...next.groups.flatMap((group) => group.scenes)];
+      const missing = namedScenes.find((sceneId) => !knownScenes.has(sceneId));
+      if (missing) throw new Error(`Scene ${missing} is no longer in this production.`);
+      const findings = routingFindings(next, production.scenes);
+      authority = { kind: "routing", id: intent.actionId };
+      authorityRevision = production.routing?.version ?? 0;
+      shown = {
+        title: `${payload.action.command.operation.replaceAll("-", " ")} in branch routing`,
+        consequence: `Applies one semantic routing command and writes routing v${next.version}.`,
+        affectedTargets: [...intent.targets],
+        ripples: findings.map((finding) => `${finding.severity === "blocks" ? "Blocks publication" : "Warning"}: ${finding.detail}`),
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [{
+            label: payload.action.command.operation.replaceAll("-", " "),
+            detail: clipped(JSON.stringify(payload.action.command), 4_000) ?? undefined,
+          }],
+          expectedResult: `The complete path-free routing graph advances to v${next.version}.`,
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-routing-traversal": {
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const routing = production?.routing;
+      if (!production || !routing) throw new Error("That production has no routing to traverse.");
+      const choice = routing.choices.find((candidate) => candidate.id === payload.action.choiceId);
+      if (!choice || choice.from !== payload.action.from || choice.to !== payload.action.to) {
+        throw new Error("That routing choice no longer has the shown endpoints.");
+      }
+      if (payload.action.route[0] !== routing.start) throw new Error("The traversal route must begin at the routing start.");
+      if (payload.action.route.at(-1) !== choice.from) throw new Error("The traversal route must end at the choice origin.");
+      const invalidStep = payload.action.route.slice(1).find((sceneId, index) =>
+        !routing.choices.some((candidate) => candidate.from === payload.action.route[index] && candidate.to === sceneId));
+      if (invalidStep) throw new Error("The traversal route is not connected by the current choices.");
+      authority = { kind: "routing", id: intent.actionId };
+      authorityRevision = routing.version;
+      shown = {
+        title: `Record traversal of ${choice.label}`,
+        consequence: "Appends one durable preview traversal; it changes no scene, choice, or accepted media.",
+        affectedTargets: [...intent.targets],
+        ripples: ["The evidence may clear the named untraversed-edge and unvisited-route findings."],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [{ label: `${choice.from} to ${choice.to}`, detail: `Route: ${payload.action.route.join(" -> ")}` }],
+          expectedResult: `Choice ${choice.id} has traversal evidence for routing v${routing.version}.`,
+          undoAvailable: false,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-interactive-export": {
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const blockers = (await interactiveFindings(store, production)).filter((finding) => finding.severity === "blocks");
+      authority = { kind: "export", id: `iv_${intent.actionId.slice(4)}` };
+      authorityRevision = production.routing?.version ?? 0;
+      approvalBlockedReason = blockers[0]?.detail;
+      shown = {
+        title: `Export ${production.meta.title} as an interactive package`,
+        consequence: "Creates one self-contained offline web package inside this world's exports, without replacing an existing package.",
+        affectedTargets: [...intent.targets],
+        ripples: [
+          "Scope: complete interactive production.",
+          "Preset: self-hostable web package.",
+          "Outputs: player.html, manifest.json, and accepted scene media.",
+          "Privacy/network: copies accepted media locally; no provider or network target is contacted.",
+          "Cancellation: not supported once the local package copy begins.",
+          ...blockers.map((finding) => `Blocks export: ${finding.detail}`),
+        ],
+        permissionReason: "export",
+        body: {
+          family: "host-action",
+          action: "Build a new local interactive package",
+          effect: "The fixed destination is world-owned and path-free to the model; existing exports are never overwritten.",
+        },
+      };
+      break;
+    }
+    case "world-chat-production-cut-export": {
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const timeline = production.timeline;
+      const spineDelivery = production.spine !== null && (timeline === undefined || timeline.status === "absent");
+      const projected = spineDelivery && payload.action.scope.kind === "production"
+        ? null
+        : buildRenderPlan({
+            production,
+            artifacts: bundle.artifacts,
+            timeline,
+            scope: payload.action.scope,
+            preset: payload.action.preset,
+            ...(payload.action.subtitles ? { subtitles: payload.action.subtitles } : {}),
+          });
+      if (projected?.ok === false) approvalBlockedReason = projected.reason;
+      if (!deps.startProductionExport) approvalBlockedReason ??= "Local video export is unavailable in this host.";
+      const sidecar = payload.action.subtitles && (payload.action.subtitles.mode === "sidecar" || payload.action.subtitles.mode === "burn-in+sidecar")
+        ? payload.action.subtitles.sidecar ?? "srt"
+        : null;
+      authority = { kind: "export", id: `ex_${intent.actionId.slice(4)}` };
+      authorityRevision = timeline?.status === "ready" ? timeline.timeline.revision : 0;
+      const scope = payload.action.scope.kind === "episode" ? `episode ${payload.action.scope.episodeId}` : "complete production";
+      shown = {
+        title: `Export ${scope} as ${payload.action.preset}`,
+        consequence: "Renders the shown delivery scope into a new staged MP4 and publishes it atomically inside this world's exports.",
+        affectedTargets: [...intent.targets],
+        ripples: [
+          `Scope: ${scope}.`,
+          `Preset: ${payload.action.preset}.`,
+          `Outputs: MP4${sidecar ? ` and ${sidecar.toUpperCase()} subtitle sidecar` : ""}.`,
+          "Overwrite/destructive effects: none; each attempt receives a new export identity.",
+          "Privacy/network: local media is read by the local encoder; no provider or release target is contacted.",
+          "Cancellation: supported while the export is queued or running; staged partial files are removed.",
+        ],
+        permissionReason: "export",
+        body: {
+          family: "host-action",
+          action: `Render ${scope} with the ${payload.action.preset} preset`,
+          effect: approvalBlockedReason ?? "Creates only the listed local outputs and returns a path-free export receipt.",
+        },
+      };
+      break;
+    }
+    case "world-chat-production-export-cancel": {
+      const record = deps.getExports?.().find((candidate) =>
+        candidate.id === payload.action.exportId &&
+        candidate.worldId === store.worldId &&
+        candidate.productionId === payload.action.productionId);
+      if (!record) throw new Error("That export is no longer targetable in this production.");
+      if (record.status !== "running") throw new Error("That export is no longer running.");
+      authority = { kind: "export", id: record.id };
+      if (!deps.cancelExport) approvalBlockedReason = "The active export controller is unavailable.";
+      shown = {
+        title: `Cancel export ${record.id}`,
+        consequence: "Requests cancellation and removes staged partial output; completed exports are not deleted.",
+        affectedTargets: [...intent.targets],
+        ripples: ["This does not undo or roll back any other delivery card."],
+        permissionReason: "external-network-action",
+        body: {
+          family: "command",
+          commands: [{ label: "Cancel the running local export" }],
+          expectedResult: "The export settles as cancelled and leaves no partial output.",
+          undoAvailable: false,
+        },
+      };
       break;
     }
     case "world-chat-audio-spine-command": {
@@ -3224,6 +3476,61 @@ async function executeSharedResource(
     case "world-chat-production-stage-playblast": {
       return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
     }
+    case "world-chat-production-routing": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const routing = applyRoutingCommand(production.routing, payload.action.command);
+      await saveRouting(store, production.meta.id, routing, options);
+      return {
+        status: "completed",
+        receipt: { kind: "routing-version", id: `${production.meta.id}:v${routing.version}`, summary: `Routing v${routing.version} was written.` },
+      };
+    }
+    case "world-chat-production-routing-traversal": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const routing = production?.routing;
+      const choice = routing?.choices.find((candidate) => candidate.id === payload.action.choiceId);
+      if (!production || !routing || !choice || choice.from !== payload.action.from || choice.to !== payload.action.to) {
+        throw new Error("That routing choice no longer has the shown endpoints.");
+      }
+      if (payload.action.route[0] !== routing.start) throw new Error("The traversal route must begin at the routing start.");
+      await appendTraversal(store, production.meta.id, {
+        ts: now(),
+        routingVersion: routing.version,
+        choiceId: choice.id,
+        from: choice.from,
+        to: choice.to,
+        route: payload.action.route,
+      }, { requestId: action.actionId, precondition });
+      return {
+        status: "completed",
+        receipt: { kind: "routing-traversal", id: action.actionId, summary: `Traversal evidence was recorded for ${choice.id}.` },
+      };
+    }
+    case "world-chat-production-interactive-export": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const result = await exportInteractive(store, production, now, {
+        exportId: action.authority.id,
+        precondition,
+      });
+      return result.ok
+        ? {
+            status: "completed",
+            receipt: { kind: "interactive-export", id: result.id, summary: "The offline interactive package completed." },
+          }
+        : { status: "failed", detail: result.blockers.join(" ").slice(0, 1_000) };
+    }
+    case "world-chat-production-cut-export":
+      if (!deps.startProductionExport) return { status: "failed", detail: "Local video export is unavailable." };
+      return deps.startProductionExport(payload.action, action);
+    case "world-chat-production-export-cancel":
+      return deps.cancelExport?.(payload.action.exportId)
+        ? {
+            status: "completed",
+            receipt: { kind: "export-cancellation", id: payload.action.exportId, summary: "Cancellation was requested for the running export." },
+          }
+        : { status: "failed", detail: "That export is no longer running in this coordinator." };
     case "world-chat-audio-spine-command": {
       const result = await applyProductionSpineCommand(store, payload.action, {
         source: `world-chat:${action.conversationId}:${action.actionId}`,
@@ -3733,14 +4040,14 @@ export function worldChatActionAdapters(
     return {
       actionKind,
       prepare: async ({ intent, payload }) => {
-        const current = observationsCurrent(store, intent);
+        const current = observationsCurrent(store, intent, deps);
         if (!current.ok) throw new Error(current.detail);
         return sharedResourceProjection(store, intent, parse(payload), deps);
       },
       recoverPreparation: async (intent) => {
         const payload = await readPreparation(store, "world", intent);
         if (!payload) return null;
-        const current = observationsCurrent(store, intent);
+        const current = observationsCurrent(store, intent, deps);
         if (!current.ok) throw new Error(current.detail);
         return sharedResourceProjection(store, intent, parse(payload), deps);
       },
@@ -3748,7 +4055,7 @@ export function worldChatActionAdapters(
       validate: async (action) => {
         const payload = await readPreparation(store, "world", action);
         if (!payload) return { ok: false, reason: "blocked", detail: "The prepared shared-resource action is unavailable." };
-        const current = observationsCurrent(store, action);
+        const current = observationsCurrent(store, action, deps);
         if (!current.ok) {
           await removePreparation(store, "world", action.actionId);
           return current;
@@ -3777,7 +4084,7 @@ export function worldChatActionAdapters(
             gate,
             payload,
             action,
-            observationPrecondition(store, action),
+            observationPrecondition(store, action, deps),
             now,
             deps,
           );
@@ -3807,6 +4114,53 @@ export function worldChatActionAdapters(
                 summary: "The generation intent was opened in Bench; no provider ran and no take was selected.",
               },
             };
+          }
+        }
+        if (action.actionKind === "world-chat-production-routing-traversal" && action.productionId) {
+          if (await hasTraversalRequest(store, action.productionId, action.actionId)) {
+            await removePreparation(store, "world", action.actionId);
+            return {
+              status: "completed",
+              receipt: { kind: "routing-traversal", id: action.actionId, summary: "The traversal evidence was recorded." },
+            };
+          }
+        }
+        if (action.actionKind === "world-chat-production-interactive-export" && action.productionId) {
+          if (await interactiveExportCompleted(store, action.productionId, action.authority.id)) {
+            await removePreparation(store, "world", action.actionId);
+            return {
+              status: "completed",
+              receipt: { kind: "interactive-export", id: action.authority.id, summary: "The offline interactive package completed." },
+            };
+          }
+        }
+        if (action.actionKind === "world-chat-production-cut-export") {
+          const record = deps.getExports?.().find((candidate) => candidate.id === action.authority.id);
+          if (record?.status === "done") {
+            return {
+              status: "completed",
+              receipt: { kind: "production-export", id: record.id, summary: "The local production export completed." },
+            };
+          }
+          if (record?.status === "cancelled") return { status: "cancelled", detail: "The local production export was cancelled." };
+          if (record?.status === "failed") return { status: "failed", detail: "The local production export failed." };
+          if (!record && action.status !== "pending") {
+            return { status: "failed", detail: "No durable local export result survived restart." };
+          }
+        }
+        if (action.actionKind === "world-chat-production-export-cancel") {
+          const record = deps.getExports?.().find((candidate) => candidate.id === action.authority.id);
+          if (action.status === "pending" && record?.status !== "running") {
+            return { status: "stale", detail: "The target export is no longer running." };
+          }
+          if (record?.status === "cancelled") {
+            return {
+              status: "completed",
+              receipt: { kind: "export-cancellation", id: record.id, summary: "The export cancellation completed." },
+            };
+          }
+          if (record?.status === "done" || record?.status === "failed") {
+            return { status: "stale", detail: "The export finished before cancellation could be reconciled." };
           }
         }
         const committed = await committedAction(store, action.actionId);
@@ -3967,6 +4321,11 @@ export function worldChatActionAdapters(
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",
     "world-chat-audio-spine-command",
+    "world-chat-production-routing",
+    "world-chat-production-routing-traversal",
+    "world-chat-production-interactive-export",
+    "world-chat-production-cut-export",
+    "world-chat-production-export-cancel",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
   const canonAction = proposalBacked(
@@ -4041,6 +4400,36 @@ export function worldChatActionAdapters(
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
     },
   );
+  const productionBranchCanon = proposalBacked(
+    "world-chat-production-branch-canon",
+    (value) => WorldChatProductionBranchCanonActionSchema.parse(value),
+    async (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const routing = production?.routing;
+      if (!production || !routing || !production.scenes.some((scene) => scene.id === payload.action.sceneId)) {
+        throw new Error("That branch outcome is no longer in this production.");
+      }
+      if (payload.action.route[0] !== routing.start || payload.action.route.at(-1) !== payload.action.sceneId) {
+        throw new Error("A branch Canon route must run from the routing start to the outcome scene.");
+      }
+      const disconnected = payload.action.route.slice(1).find((sceneId, index) =>
+        !routing.choices.some((choice) => choice.from === payload.action.route[index] && choice.to === sceneId));
+      if (disconnected) throw new Error("The branch Canon route is not connected by the current choices.");
+      const result = await proposeBranchCanon(store, gate, {
+        productionId: production.meta.id,
+        sceneId: payload.action.sceneId,
+        route: payload.action.route,
+        title: payload.action.title,
+        body: payload.action.body,
+      }, {
+        source: `world-chat-action:${intent.actionId}`,
+        conversationId: intent.conversationId,
+        precondition,
+      });
+      return { id: result.proposalId };
+    },
+  );
   const worldMetadata = direct(
     "world-chat-world-metadata",
     (value) => WorldChatWorldMetadataActionSchema.parse(value),
@@ -4106,6 +4495,7 @@ export function worldChatActionAdapters(
     productionEpisode,
     productionChapter,
     productionScene,
+    productionBranchCanon,
     ...sharedResources.map(sharedResource),
   ];
 }

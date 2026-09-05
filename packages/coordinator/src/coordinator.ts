@@ -61,6 +61,8 @@ import {
   type WorldChatReferenceResultUseAction,
   type WorldChatProductionTakeImportAction,
   type WorldChatProductionTakeGenerationAction,
+  type WorldChatProductionCutExportAction,
+  type ConversationActionCard,
   type Job,
   type FrameRunQuote,
   type FrameRunState,
@@ -1362,6 +1364,8 @@ export class Coordinator {
   private readonly exportReads = new Map<string, ArkeExportReadRecord>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /** A conversation card fixes the export identity before the legacy renderer starts. */
+  private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
@@ -1659,6 +1663,7 @@ export class Coordinator {
       beforeInitialSnapshot: async () => {
         const store = this.opts.provider.openStore?.();
         if (!store || this.stopping) return;
+        await this.durableExportReads(store.worldId);
         await recoverConversationActions({
           worldPath: store.dir,
           worldId: store.worldId,
@@ -2063,6 +2068,7 @@ export class Coordinator {
     for (const projection of this.exportReads.values()) {
       if (projection.worldId === worldId) records.set(projection.id, projection);
     }
+    for (const projection of records.values()) this.exportReads.set(projection.id, projection);
     return [...records.values()];
   }
 
@@ -2583,6 +2589,7 @@ export class Coordinator {
       const outcome = await recoverConversations(store.dir, now);
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
+      await this.durableExportReads(store.worldId);
       const actions = await recoverConversationActions({
         worldPath: store.dir,
         worldId: store.worldId,
@@ -7976,12 +7983,14 @@ export class Coordinator {
               exportId,
               status,
               percent,
-              output,
-              error,
+              output: safeExportOutput(output),
+              error: error === null ? null : "export failed",
             });
+          const requestedExportId = this.requestedExportIds.get(exportKey);
+          const attemptId = requestedExportId ?? `ex_${ulid()}`;
           if (!runner) {
             emitProgress(
-              "ex_none",
+              attemptId,
               "failed",
               0,
               null,
@@ -7991,7 +8000,6 @@ export class Coordinator {
           }
           const slateFont = runner.slateFont;
           // A refusal is an attempt with an outcome, including one made before any media probe.
-          const attemptId = `ex_${ulid()}`;
           /*
            * A production cut to a track renders against the song, not against scene order (#253).
            *
@@ -8050,8 +8058,9 @@ export class Coordinator {
               .toISOString()
               .replace(/[-:TZ.]/g, "")
               .slice(0, 14);
+            const attemptSuffix = requestedExportId ?? stamp;
             const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
-            const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${stamp}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${stamp}`;
+            const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${attemptSuffix}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${attemptSuffix}`;
             const handle = runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
@@ -8059,6 +8068,7 @@ export class Coordinator {
               runner,
               (percent) => emitProgress(handle.id, "running", percent, null, null),
               sidecar === null ? undefined : sidecar(stem),
+              requestedExportId,
             );
             this.exports.set(handle.id, handle);
             emitProgress(handle.id, "running", 0, null, null);
@@ -8077,8 +8087,10 @@ export class Coordinator {
                     exportId: handle.id,
                     status: "done",
                     percent: 100,
-                    output: result.output,
-                    ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                    output: safeExportOutput(result.output),
+                    ...(result.sidecar !== undefined && safeExportOutput(result.sidecar) !== null
+                      ? { sidecar: safeExportOutput(result.sidecar)! }
+                      : {}),
                     error: null,
                   });
                 } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
@@ -8171,14 +8183,17 @@ export class Coordinator {
               .replace(/[-:TZ.]/g, "")
               .slice(0, 14);
             const stem = production.episodeFiles[episode.id] ?? episode.id;
+            const attemptSuffix = requestedExportId ?? stamp;
             const handle = runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               // The episode stem keeps filenames collision-free across episodes; the stamp keeps
               // retries from overwriting what a person may already have sent on.
-              `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+              `${msg.productionId}-${stem}-${msg.preset}-${attemptSuffix}.mp4`,
               runner,
               (percent) => emitProgress(handle.id, "running", percent, null, null),
+              undefined,
+              requestedExportId,
             );
             this.exports.set(handle.id, handle);
             emitProgress(handle.id, "running", 0, null, null);
@@ -8289,7 +8304,7 @@ export class Coordinator {
             .toISOString()
             .replace(/[-:TZ.]/g, "")
             .slice(0, 14);
-          const stem = `${msg.productionId}-${msg.preset}-${stamp}`;
+          const stem = `${msg.productionId}-${msg.preset}-${requestedExportId ?? stamp}`;
           const handle = runExport(
             store.dir,
             buildArgs,
@@ -8297,6 +8312,7 @@ export class Coordinator {
             runner,
             (percent) => emitProgress(handle.id, "running", percent, null, null),
             sidecarFor === null ? undefined : sidecarFor(stem),
+            requestedExportId,
           );
           this.exports.set(handle.id, handle);
           emitProgress(handle.id, "running", 0, null, null);
@@ -8316,8 +8332,10 @@ export class Coordinator {
                   exportId: handle.id,
                   status: "done",
                   percent: 100,
-                  output: result.output,
-                  ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                  output: safeExportOutput(result.output),
+                  ...(result.sidecar !== undefined && safeExportOutput(result.sidecar) !== null
+                    ? { sidecar: safeExportOutput(result.sidecar)! }
+                    : {}),
                   error: null,
                 });
               } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
@@ -12782,12 +12800,80 @@ export class Coordinator {
         this.importProductionTakeForConversationAction(store, action, mutation),
       openProductionTakeGeneration: (action, mutation) =>
         this.openProductionTakeGenerationForConversationAction(store, action, mutation),
+      getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      startProductionExport: (action, card) =>
+        this.startProductionExportForConversationAction(store, action, card),
+      cancelExport: (exportId) => {
+        const handle = this.exports.get(exportId);
+        if (!handle) return false;
+        handle.cancel();
+        return true;
+      },
     };
     return [
       ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso(), deps)
         .filter((adapter) => !suppliedKinds.has(adapter.actionKind)),
       ...supplied,
     ];
+  }
+
+  private async startProductionExportForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionCutExportAction["action"],
+    card: ConversationActionCard,
+  ) {
+    const episodeId = action.scope.kind === "episode" ? action.scope.episodeId : undefined;
+    const key = `${store.worldId}:${action.productionId}:${episodeId ?? "production"}`;
+    this.requestedExportIds.set(key, card.authority.id);
+    try {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
+      if (!production) return { status: "failed" as const, detail: "That production is no longer available." };
+      await this.handleClientMessage({
+        kind: "export-cut",
+        worldId: store.worldId,
+        productionId: action.productionId,
+        ...(episodeId !== undefined ? { episodeId } : {}),
+        timelineRevision: production.timeline?.status === "ready" ? production.timeline.timeline.revision : null,
+        preset: action.preset,
+        ...(action.subtitles !== undefined ? { subtitles: action.subtitles } : {}),
+      });
+    } finally {
+      this.requestedExportIds.delete(key);
+    }
+
+    const projection = this.exportReads.get(card.authority.id);
+    if (projection?.status === "failed") return { status: "failed" as const, detail: "The local export was refused." };
+    if (projection?.status === "cancelled") return { status: "cancelled" as const, detail: "The local export was cancelled." };
+    const handle = this.exports.get(card.authority.id);
+    if (!handle) return { status: "failed" as const, detail: "Another export already owns this delivery scope." };
+
+    this.trackBackground(handle.done.then(async (result) => {
+      const lifecycle = new ConversationActionLifecycle({
+        worldPath: store.dir,
+        worldId: store.worldId,
+        adapters: [],
+        now: () => this.nowIso(),
+      });
+      const outcome = result.status === "done"
+        ? {
+            status: "completed" as const,
+            receipt: { kind: "production-export", id: handle.id, summary: "The local production export completed." },
+          }
+        : result.status === "cancelled"
+          ? { status: "cancelled" as const, detail: "The local production export was cancelled." }
+          : { status: "failed" as const, detail: "The local production export failed." };
+      await lifecycle.recordStatus(card.conversationId, card.actionId, outcome.status, {
+        authority: card.authority,
+        authorityRevision: card.authorityRevision,
+        ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+        ...(outcome.status === "completed" ? { receipt: outcome.receipt } : {}),
+      });
+      if (this.stillOpen(store)) {
+        await this.refreshConversations(store);
+        this.transport.broadcastSnapshot();
+      }
+    }));
+    return { status: "running" as const, detail: "The local export is running." };
   }
 
   private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
@@ -12920,7 +13006,9 @@ export class Coordinator {
       sceneVersion: (context) => sceneVersionFor(store, context),
       validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
         applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
-      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn),
+      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn, {
+        getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      }),
       bindActions: async (actions) => {
         // Every binding appends to the same conversation, and proposal staging is also guarded per
         // conversation. Run them in turn; any failed intent remains durable for startup recovery.

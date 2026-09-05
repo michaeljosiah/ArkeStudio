@@ -278,7 +278,9 @@ describe("boards (R-11..R-13, D8, §3.2)", () => {
     assert.ok(landed.board);
     assert.equal(landed.board.version, scene.version, "records the scene version it was compiled from (R-12)");
 
-    await exportBoard(store, production.meta.id, scene, a, CLOCK);
+    const actionId = "act_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    const exported = await exportBoard(store, production.meta.id, scene, a, CLOCK, { requestId: actionId });
+    assert.match(exported, new RegExp(actionId), "a conversation export's immutable filename is bound to its action");
     const afterExport = await readdir(join(dir, "artifacts"));
     const added = afterExport.filter((f) => !artifactsBefore.includes(f));
     assert.equal(added.filter((f) => f.endsWith(".png")).length, 1);

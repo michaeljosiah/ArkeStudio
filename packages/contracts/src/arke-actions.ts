@@ -59,6 +59,7 @@ export const ArkeActionAuthoritySchema = z.enum([
   "job-queue",
   "export",
   "host",
+  "release-target",
 ]);
 export type ArkeActionAuthority = z.infer<typeof ArkeActionAuthoritySchema>;
 
@@ -122,6 +123,7 @@ export const ArkeBlockingSeamSchema = z.enum([
   "coordinator-owned-generation-quote",
   "complete-timeline-read",
   "complete-spine-read",
+  "release-target-connector",
 ]);
 export type ArkeBlockingSeam = z.infer<typeof ArkeBlockingSeamSchema>;
 

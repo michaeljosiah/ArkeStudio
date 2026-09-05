@@ -1255,7 +1255,10 @@ export async function exportBoard(
   options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<string> {
   const stamp = clock().replace(/[-:TZ.]/g, "").slice(0, 14);
-  const file = `board-${productionId}-scene-${scene.number}-v${scene.version}-${stamp}.png`;
+  const actionId = options.requestId && /^act_[0-9A-HJKMNP-TV-Z]{26}$/.test(options.requestId)
+    ? options.requestId
+    : stamp;
+  const file = `board-${productionId}-scene-${scene.number}-v${scene.version}-${actionId}.png`;
   const sidecar: ArtifactSidecar = {
     id: `ar_${ulid()}`,
     kind: "board",

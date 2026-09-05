@@ -16,7 +16,7 @@ import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import type { ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { exportsFence, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -319,6 +319,24 @@ describe("leased retrieval", () => {
       error: "export failed",
     }]);
     h.index?.close();
+  });
+
+  it("keeps an export target stable while only its advisory progress changes", () => {
+    const record: ArkeExportReadRecord = {
+      id: "ex_running",
+      worldId: "world-1",
+      productionId: "saltlight",
+      status: "running",
+      percent: 10,
+      output: null,
+      error: null,
+    };
+    const before = exportsFence([record], record.worldId, record.productionId);
+    const afterProgress = exportsFence([{ ...record, percent: 90 }], record.worldId, record.productionId);
+    const afterTerminal = exportsFence([{ ...record, status: "done", percent: 100 }], record.worldId, record.productionId);
+
+    assert.equal(afterProgress, before);
+    assert.notEqual(afterTerminal, before);
   });
 
   it("keeps every track and clip addressable beyond the old 12-track and 40-clip prompt bounds", async () => {

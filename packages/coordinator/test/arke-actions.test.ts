@@ -8,6 +8,7 @@ import {
 import { z } from "zod";
 import {
   ARKE_AUTHORITY_ACTION_REGISTRY,
+  ARKE_BLOCKED_AUTHORITY_SEAMS,
   ARKE_CLIENT_COMMAND_COMPILE_TIME_PARITY,
   ARKE_CLIENT_COMMAND_REGISTRY,
   findArkeClientCommand,
@@ -95,7 +96,7 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     }
   });
 
-  it("names unsafe command seams and exposes only the typed audio spine authority", () => {
+  it("names unsafe command seams and exposes strict authority actions", () => {
     for (const kind of ["stage-sheet-edit", "save-routing", "save-audio-tracks", "file-artifact"] as const) {
       const descriptor = ARKE_CLIENT_COMMAND_REGISTRY[kind];
       assert.equal(descriptor.classification, "supported-by-arke");
@@ -110,5 +111,20 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(spine.support.reads.state, "available", "the typed spine reader now covers this authority");
     assert.equal(spine.support.execution.state, "available");
     assert.match(modelActionCatalogueText(), /audio-spine-command.*command:/);
+
+    const routing = ARKE_AUTHORITY_ACTION_REGISTRY["production-routing"];
+    assert.equal(routing.authority, "routing");
+    assert.equal(routing.support.execution.state, "available");
+    assert.match(modelActionCatalogueText(), /production-routing.*command:/);
+    const delivery = ARKE_AUTHORITY_ACTION_REGISTRY["production-cut-export"];
+    assert.equal(delivery.authority, "export");
+    assert.deepEqual(delivery.requiredReads, ["timeline", "episodes", "exports"]);
+    assert.equal(modelActionCatalogue().find((entry) => entry.kind === "production-cut-export")?.fields.some(
+      (field) => /path|destination/i.test(field.name),
+    ), false);
+
+    assert.equal(ARKE_BLOCKED_AUTHORITY_SEAMS["world-release-target"]?.authority, "release-target");
+    assert.equal(ARKE_BLOCKED_AUTHORITY_SEAMS["production-release-target"]?.support.execution.state, "blocked");
+    assert.match(modelActionCatalogueText(), /release-target-connector/);
   });
 });

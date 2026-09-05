@@ -292,4 +292,45 @@ describe("World Chat authored action contracts", () => {
       checkReceiptIds: [CHECK],
     }));
   });
+
+  it("admits every semantic routing operation and path-free delivery option", () => {
+    const commands = [
+      { operation: "set-start", sceneId: "sc_01" },
+      { operation: "add-choice", choice: { id: "ch_wait", from: "sc_01", label: "Wait", to: "sc_02" } },
+      { operation: "edit-choice", choiceId: "ch_wait", changes: { label: "Keep waiting" } },
+      { operation: "remove-choice", choiceId: "ch_wait" },
+      { operation: "set-ending", sceneId: "sc_02", title: "The quiet ending" },
+      { operation: "clear-ending", sceneId: "sc_02" },
+      { operation: "exclude-scene", sceneId: "sc_03", reason: "Alternate draft" },
+      { operation: "include-scene", sceneId: "sc_03" },
+      { operation: "add-group", group: { id: "grp_harbour", title: "Harbour", scenes: ["sc_01", "sc_02"] } },
+      { operation: "edit-group", groupId: "grp_harbour", changes: { scenes: ["sc_02"] } },
+      { operation: "remove-group", groupId: "grp_harbour" },
+    ];
+    for (const command of commands) {
+      assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+        kind: "production-routing",
+        productionId: "saltlight",
+        command,
+        checkReceiptIds: [CHECK],
+      }));
+    }
+
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({
+      kind: "production-cut-export",
+      productionId: "saltlight",
+      scope: { kind: "episode", episodeId: "ep_opening" },
+      preset: "review-cut",
+      subtitles: { trackId: "tr_subtitles", mode: "burn-in+sidecar", sidecar: "srt" },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-cut-export",
+      productionId: "saltlight",
+      scope: { kind: "production" },
+      preset: "review-cut",
+      destination: "C:\\private\\delivery.mp4",
+      checkReceiptIds: [CHECK],
+    }));
+  });
 });

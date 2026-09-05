@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ConversationActionSemanticIdSchema } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BibleEditSchema } from "./bible.js";
+import { ExportPresetSchema } from "./cut.js";
 import { ModelEditorRequestSchema, ModelSceneEditSchema } from "./editor-request.js";
 import {
   ArtifactIdSchema,
@@ -21,6 +22,8 @@ import { CapabilitySchema } from "./provider.js";
 import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { AudioSpineCommandSchema } from "./spine.js";
+import { SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
+import { TimelineTrackIdSchema } from "./timeline.js";
 import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
@@ -774,7 +777,7 @@ const ProductionBoardCompileModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
-const ProductionBoardExportModelActionSchema = z
+export const ProductionBoardExportModelActionSchema = z
   .object({
     kind: z.literal("production-board-export"),
     productionId: SlugSchema,
@@ -860,6 +863,121 @@ export const AudioSpineModelActionSchema = z
   })
   .strict();
 export type AudioSpineModelAction = z.infer<typeof AudioSpineModelActionSchema>;
+
+const RoutingChoiceIdSchema = z.string().regex(/^ch_[a-z0-9-]+$/, "expected ch_<slug>");
+const RoutingGroupIdSchema = z.string().regex(/^grp_[a-z0-9-]+$/, "expected grp_<slug>");
+const NonEmptyRoutingChangesSchema = <T extends z.ZodRawShape>(shape: T, message: string) =>
+  z.object(shape).strict().refine((changes) => Object.keys(changes).length > 0, message);
+
+/** Closed semantic edits replace the legacy whole-routing JSON submission. */
+export const RoutingCommandSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("set-start"), sceneId: SceneIdSchema }).strict(),
+  z
+    .object({
+      operation: z.literal("add-choice"),
+      choice: z.object({ id: RoutingChoiceIdSchema, from: SceneIdSchema, label: z.string().trim().min(1), to: SceneIdSchema }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("edit-choice"),
+      choiceId: RoutingChoiceIdSchema,
+      changes: NonEmptyRoutingChangesSchema(
+        { from: SceneIdSchema.optional(), label: z.string().trim().min(1).optional(), to: SceneIdSchema.optional() },
+        "a choice edit must change at least one field",
+      ),
+    })
+    .strict(),
+  z.object({ operation: z.literal("remove-choice"), choiceId: RoutingChoiceIdSchema }).strict(),
+  z.object({ operation: z.literal("set-ending"), sceneId: SceneIdSchema, title: z.string().trim().min(1) }).strict(),
+  z.object({ operation: z.literal("clear-ending"), sceneId: SceneIdSchema }).strict(),
+  z.object({ operation: z.literal("exclude-scene"), sceneId: SceneIdSchema, reason: z.string().trim().min(1) }).strict(),
+  z.object({ operation: z.literal("include-scene"), sceneId: SceneIdSchema }).strict(),
+  z
+    .object({
+      operation: z.literal("add-group"),
+      group: z.object({ id: RoutingGroupIdSchema, title: z.string().trim().min(1), scenes: z.array(SceneIdSchema) }).strict(),
+    })
+    .strict(),
+  z
+    .object({
+      operation: z.literal("edit-group"),
+      groupId: RoutingGroupIdSchema,
+      changes: NonEmptyRoutingChangesSchema(
+        { title: z.string().trim().min(1).optional(), scenes: z.array(SceneIdSchema).optional() },
+        "a group edit must change at least one field",
+      ),
+    })
+    .strict(),
+  z.object({ operation: z.literal("remove-group"), groupId: RoutingGroupIdSchema }).strict(),
+]);
+export type RoutingCommand = z.infer<typeof RoutingCommandSchema>;
+
+export const ProductionRoutingModelActionSchema = z
+  .object({
+    kind: z.literal("production-routing"),
+    productionId: SlugSchema,
+    command: RoutingCommandSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export const ProductionTraversalModelActionSchema = z
+  .object({
+    kind: z.literal("production-routing-traversal"),
+    productionId: SlugSchema,
+    choiceId: RoutingChoiceIdSchema,
+    from: SceneIdSchema,
+    to: SceneIdSchema,
+    route: z.array(SceneIdSchema).min(1),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export const ProductionBranchCanonModelActionSchema = z
+  .object({
+    kind: z.literal("production-branch-canon"),
+    productionId: SlugSchema,
+    sceneId: SceneIdSchema,
+    route: z.array(SceneIdSchema).min(1),
+    title: z.string().trim().min(1).max(160),
+    body: z.string().trim().min(1),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export const ProductionInteractiveExportModelActionSchema = z
+  .object({
+    kind: z.literal("production-interactive-export"),
+    productionId: SlugSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export const ProductionCutExportModelActionSchema = z
+  .object({
+    kind: z.literal("production-cut-export"),
+    productionId: SlugSchema,
+    scope: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("production") }).strict(),
+      z.object({ kind: z.literal("episode"), episodeId: EpisodeIdSchema }).strict(),
+    ]),
+    preset: ExportPresetSchema,
+    subtitles: z
+      .object({
+        trackId: TimelineTrackIdSchema,
+        mode: SubtitleOutputModeSchema,
+        sidecar: SidecarFormatSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+export const ProductionExportCancelModelActionSchema = z
+  .object({
+    kind: z.literal("production-export-cancel"),
+    productionId: SlugSchema,
+    exportId: z.string().regex(/^ex_[0-9A-HJKMNP-TV-Z]{26}$/),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
 
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
@@ -962,6 +1080,12 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionTakeTrimModelActionSchema,
   ProductionStagePlayblastModelActionSchema,
   AudioSpineModelActionSchema,
+  ProductionRoutingModelActionSchema,
+  ProductionTraversalModelActionSchema,
+  ProductionBranchCanonModelActionSchema,
+  ProductionInteractiveExportModelActionSchema,
+  ProductionCutExportModelActionSchema,
+  ProductionExportCancelModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -1049,6 +1173,12 @@ export const WorldChatProductionTakeReviewActionSchema = preparedAction("world-c
 export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-chat-production-take-trim", ProductionTakeTrimModelActionSchema);
 export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
 export const WorldChatAudioSpineActionSchema = preparedAction("world-chat-audio-spine-command", AudioSpineModelActionSchema);
+export const WorldChatProductionRoutingActionSchema = preparedAction("world-chat-production-routing", ProductionRoutingModelActionSchema);
+export const WorldChatProductionTraversalActionSchema = preparedAction("world-chat-production-routing-traversal", ProductionTraversalModelActionSchema);
+export const WorldChatProductionBranchCanonActionSchema = preparedAction("world-chat-production-branch-canon", ProductionBranchCanonModelActionSchema);
+export const WorldChatProductionInteractiveExportActionSchema = preparedAction("world-chat-production-interactive-export", ProductionInteractiveExportModelActionSchema);
+export const WorldChatProductionCutExportActionSchema = preparedAction("world-chat-production-cut-export", ProductionCutExportModelActionSchema);
+export const WorldChatProductionExportCancelActionSchema = preparedAction("world-chat-production-export-cancel", ProductionExportCancelModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -1107,6 +1237,12 @@ export type WorldChatProductionTakeReviewAction = z.infer<typeof WorldChatProduc
 export type WorldChatProductionTakeTrimAction = z.infer<typeof WorldChatProductionTakeTrimActionSchema>;
 export type WorldChatProductionStagePlayblastAction = z.infer<typeof WorldChatProductionStagePlayblastActionSchema>;
 export type WorldChatAudioSpineAction = z.infer<typeof WorldChatAudioSpineActionSchema>;
+export type WorldChatProductionRoutingAction = z.infer<typeof WorldChatProductionRoutingActionSchema>;
+export type WorldChatProductionTraversalAction = z.infer<typeof WorldChatProductionTraversalActionSchema>;
+export type WorldChatProductionBranchCanonAction = z.infer<typeof WorldChatProductionBranchCanonActionSchema>;
+export type WorldChatProductionInteractiveExportAction = z.infer<typeof WorldChatProductionInteractiveExportActionSchema>;
+export type WorldChatProductionCutExportAction = z.infer<typeof WorldChatProductionCutExportActionSchema>;
+export type WorldChatProductionExportCancelAction = z.infer<typeof WorldChatProductionExportCancelActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
 export const WorldChatProposalActionSchema = z
@@ -1213,5 +1349,11 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
   WorldChatAudioSpineActionSchema,
+  WorldChatProductionRoutingActionSchema,
+  WorldChatProductionTraversalActionSchema,
+  WorldChatProductionBranchCanonActionSchema,
+  WorldChatProductionInteractiveExportActionSchema,
+  WorldChatProductionCutExportActionSchema,
+  WorldChatProductionExportCancelActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

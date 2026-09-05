@@ -39,6 +39,12 @@ import {
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
+  WorldChatProductionRoutingActionSchema,
+  WorldChatProductionTraversalActionSchema,
+  WorldChatProductionBranchCanonActionSchema,
+  WorldChatProductionInteractiveExportActionSchema,
+  WorldChatProductionCutExportActionSchema,
+  WorldChatProductionExportCancelActionSchema,
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
   WorldChatReferenceGenerationActionSchema,
@@ -62,6 +68,13 @@ import {
   WorldChatWorldExportActionSchema,
   WorldChatWorldMetadataActionSchema,
   WorldChatAudioSpineActionSchema,
+  ProductionRoutingModelActionSchema,
+  ProductionTraversalModelActionSchema,
+  ProductionBranchCanonModelActionSchema,
+  ProductionInteractiveExportModelActionSchema,
+  ProductionCutExportModelActionSchema,
+  ProductionExportCancelModelActionSchema,
+  ProductionBoardExportModelActionSchema,
   type ArkeActionAuthority,
   type ArkeActionScope,
   type ArkeActionSupport,
@@ -783,6 +796,36 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatAudioSpineActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
+  "world-chat-production-routing": {
+    kind: "world-chat-production-routing",
+    schema: WorldChatProductionRoutingActionSchema,
+    ...action("production", "command", "routing", "authored-change", ["routing", "scenes"]),
+  },
+  "world-chat-production-routing-traversal": {
+    kind: "world-chat-production-routing-traversal",
+    schema: WorldChatProductionTraversalActionSchema,
+    ...action("production", "command", "routing", "authored-change", ["routing", "scenes"]),
+  },
+  "world-chat-production-branch-canon": {
+    kind: "world-chat-production-branch-canon",
+    schema: WorldChatProductionBranchCanonActionSchema,
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["routing", "scenes", "canon"]),
+  },
+  "world-chat-production-interactive-export": {
+    kind: "world-chat-production-interactive-export",
+    schema: WorldChatProductionInteractiveExportActionSchema,
+    ...action("production", "host-action", "export", "export", ["routing", "scenes", "takes", "exports"]),
+  },
+  "world-chat-production-cut-export": {
+    kind: "world-chat-production-cut-export",
+    schema: WorldChatProductionCutExportActionSchema,
+    ...action("production", "host-action", "export", "export", ["timeline", "episodes", "exports"]),
+  },
+  "world-chat-production-export-cancel": {
+    kind: "world-chat-production-export-cancel",
+    schema: WorldChatProductionExportCancelActionSchema,
+    ...action("production", "command", "export", "external-network-action", ["exports"]),
+  },
 } as const;
 
 export interface ArkeBlockedAuthoritySeam {
@@ -802,10 +845,72 @@ export const ARKE_AUTHORITY_ACTION_REGISTRY = {
     schema: AudioSpineModelActionSchema,
     ...action("production", "command", "audio-spine", "authored-change", ["spine"]),
   },
+  "production-routing": {
+    kind: "production-routing",
+    schema: ProductionRoutingModelActionSchema,
+    ...action("production", "command", "routing", "authored-change", ["routing", "scenes"]),
+  },
+  "production-routing-traversal": {
+    kind: "production-routing-traversal",
+    schema: ProductionTraversalModelActionSchema,
+    ...action("production", "command", "routing", "authored-change", ["routing", "scenes"]),
+  },
+  "production-branch-canon": {
+    kind: "production-branch-canon",
+    schema: ProductionBranchCanonModelActionSchema,
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["routing", "scenes", "canon"]),
+  },
+  "production-interactive-export": {
+    kind: "production-interactive-export",
+    schema: ProductionInteractiveExportModelActionSchema,
+    ...action("production", "host-action", "export", "export", ["routing", "scenes", "takes", "exports"]),
+  },
+  "production-board-export": {
+    kind: "production-board-export",
+    schema: ProductionBoardExportModelActionSchema,
+    ...action("production", "host-action", "export", "export", ["scenes", "takes", "artifacts"]),
+  },
+  "production-cut-export": {
+    kind: "production-cut-export",
+    schema: ProductionCutExportModelActionSchema,
+    ...action("production", "host-action", "export", "export", ["timeline", "episodes", "exports"]),
+  },
+  "production-export-cancel": {
+    kind: "production-export-cancel",
+    schema: ProductionExportCancelModelActionSchema,
+    ...action("production", "command", "export", "external-network-action", ["exports"]),
+  },
 } as const;
 
 /** Intended authorities whose semantic boundary is not implemented yet. */
-export const ARKE_BLOCKED_AUTHORITY_SEAMS: Readonly<Record<string, ArkeBlockedAuthoritySeam>> = {};
+export const ARKE_BLOCKED_AUTHORITY_SEAMS: Readonly<Record<string, ArkeBlockedAuthoritySeam>> = {
+  "world-release-target": {
+    kind: "world-release-target",
+    scope: "world",
+    cardFamily: "host-action",
+    authority: "release-target",
+    permissionReason: "external-network-action",
+    requiredReads: ["exports"],
+    support: {
+      preparation: blocked(["release-target-connector"], "No world-scoped ReleaseTarget connector is installed."),
+      reads: blocked(["release-target-connector"], "Release targets cannot be enumerated without a connector."),
+      execution: blocked(["release-target-connector"], "Publishing requires the SPEC-025 ReleaseTarget authority."),
+    },
+  },
+  "production-release-target": {
+    kind: "production-release-target",
+    scope: "production",
+    cardFamily: "host-action",
+    authority: "release-target",
+    permissionReason: "external-network-action",
+    requiredReads: ["production-metadata", "exports"],
+    support: {
+      preparation: blocked(["release-target-connector"], "No production-scoped ReleaseTarget connector is installed."),
+      reads: blocked(["release-target-connector"], "Release targets cannot be enumerated without a connector."),
+      execution: blocked(["release-target-connector"], "Publishing requires the SPEC-025 ReleaseTarget authority."),
+    },
+  },
+};
 
 export const ARKE_ACTION_REGISTRY = Object.freeze({
   clientCommands: ARKE_CLIENT_COMMAND_REGISTRY,
