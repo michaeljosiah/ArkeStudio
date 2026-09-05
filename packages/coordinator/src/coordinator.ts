@@ -347,6 +347,7 @@ import {
   referenceReviewDecision,
 } from "./references/takes.js";
 import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
+import { acceptPropStateReference } from "./references/props.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
@@ -11313,6 +11314,21 @@ export class Coordinator {
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("location-view", msg.sheetId));
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "accept-prop-state": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        // A refusal is the location view's silence: nothing changed, and the candidate is still
+        // on the screen to accept once the reason is dealt with. The client confirms a
+        // replacement before sending `replace`, as it confirms a colliding view name.
+        await acceptPropStateReference(store, {
+          propId: msg.propId,
+          stateId: msg.stateId,
+          selection: msg.selection,
+          ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
+        }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

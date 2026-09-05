@@ -14,6 +14,7 @@ import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema } from "./scene.js";
 
 /**
@@ -1235,6 +1236,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(80),
       establishing: z.boolean().optional(),
       replaceExistingName: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * Accept a candidate or a pending take as one prop state's reference (design turn 105; issue
+   * 535). `replace` is the confirmation a state that already has its reference requires — the
+   * same asking-first that `replaceExistingName` is for a colliding location view.
+   */
+  z
+    .object({
+      kind: z.literal("accept-prop-state"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      stateId: PropStateIdSchema,
+      selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+        z
+          .object({
+            source: z.literal("candidate"),
+            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
+          })
+          .strict(),
+      ]),
+      replace: z.boolean().optional(),
     })
     .strict(),
   /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */

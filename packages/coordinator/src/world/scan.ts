@@ -20,6 +20,7 @@ import {
   type Episode,
   ProductionSchema,
   ProposalSchema,
+  PropSchema,
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
@@ -385,6 +386,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   }
 
   const referenceKits = [];
+  const props = [];
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
   for (const sheetId of await listDir(join(dir, "references"))) {
@@ -393,6 +395,12 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
         ReferenceKitSchema.parse(JSON.parse(raw)),
       );
       if (kit) referenceKits.push(kit);
+    }
+    // A prop keeps the directory shape a sheet's kit does — record, candidates, takes — so the
+    // walk below finds its takes and candidates without learning what a prop is (issue 535).
+    if (await exists(join(dir, "references", sheetId, "prop.json"))) {
+      const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
+      if (prop) props.push(prop);
     }
     const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
@@ -922,6 +930,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     canon,
     referenceKits,
     referenceCandidates,
+    props,
     referenceTakes,
     referenceReviews,
     artifacts,

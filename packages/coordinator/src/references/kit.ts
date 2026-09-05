@@ -60,6 +60,18 @@ async function writeKit(
       baseHash: baseRaw === null ? null : sha256(baseRaw),
     },
   ];
+  await commitReferenceRecord(store, files, review);
+}
+
+/**
+ * Land a reference record — a kit, or a prop's record (issue 535) — with the review that
+ * accepts it in the same commit, or on its own when nothing is being decided.
+ */
+export async function commitReferenceRecord(
+  store: WorldStore,
+  files: import("../world/commit.js").CommitFileInput[],
+  review?: ReviewDecision,
+): Promise<void> {
   if (!review) {
     await store.commit({ kind: "kit-edit", source: "form", files });
     return;

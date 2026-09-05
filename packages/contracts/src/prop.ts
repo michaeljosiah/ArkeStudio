@@ -24,7 +24,8 @@ export const PropStateReferenceSchema = z
   .object({
     id: z.string().min(1),
     file: z.string().min(1),
-    prompt: z.string().min(1),
+    /** Absent for a reference brought in by hand: an upload was asked for by nobody. */
+    prompt: z.string().min(1).optional(),
     sourceJobId: JobIdSchema.optional(),
     sourceTakeId: TakeIdSchema.optional(),
     acceptedAt: IsoDateTimeSchema,

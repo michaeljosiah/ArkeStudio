@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { PropStateProvenanceSchema } from "./prop.js";
+import { PropIdSchema, PropStateIdSchema, PropStateProvenanceSchema } from "./prop.js";
 import {
   IsoDateTimeSchema,
   JobIdSchema,
@@ -28,6 +28,8 @@ export const TakeKindSchema = z.enum([
   "look",
   /** One accepted angle on a location (#243) — an immutable take, like a main photo. */
   "location-view",
+  /** One accepted reference for a prop state (design turn 105; issue 535). */
+  "prop-state",
 ]);
 export type TakeKind = z.infer<typeof TakeKindSchema>;
 
@@ -120,6 +122,8 @@ export const TakeSchema = z
     coversShots: z.array(ShotIdSchema),
     kind: TakeKindSchema,
     reference: z.object({ sheetId: SlugSchema }).strict().optional(),
+    /** A prop-state take names its prop and state instead of a sheet (issue 535). */
+    prop: z.object({ propId: PropIdSchema, stateId: PropStateIdSchema }).strict().optional(),
     provider: z.string().min(1),
     model: z.string().min(1),
     provenance: ProvenanceSchema,
