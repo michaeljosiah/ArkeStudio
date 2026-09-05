@@ -1,3 +1,4 @@
+import { ShotPromptProposalDiff } from "../components/prompt-review.js";
 import type {
   CanonEntry,
   Job,
@@ -285,6 +286,7 @@ export function ProposalPanel({
               {t.fields.map((f) => (
                 <div key={f.field} className="dom-review__field">
                   <div className="dom-review__name">{f.field}</div>
+                  {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} />}
                   {f.before !== null && (
                     <div className="dom-review__was">
                       <span className="dom-review__tag mono">was</span>
