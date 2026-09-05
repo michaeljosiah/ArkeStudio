@@ -7507,9 +7507,17 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    seconds are what the hook is for. An unwritten episode is an unexposed frame
    at the same size — a dashed card reads as broken, a blank frame reads as
    waiting — and carries its number and nothing else. */
-.fy-seasonrack { display: flex; align-items: flex-start; gap: 12px; }
+/* A season of twelve must not be a season of seven squeezed. Tiles keep a width worth
+   looking at and wrap to the next row; `flex: 1 1 0` divided the row by the episode count,
+   so a long season shrank every frame past reading and pushed the last one off the edge. */
+.fy-seasonrack {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  align-items: start;
+  gap: 18px 12px;
+}
 .fy-seasontile {
-  flex: 1 1 0; min-width: 0; padding: 0; border: 0; background: none;
+  min-width: 0; padding: 0; border: 0; background: none;
   color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .fy-seasontile__frame {
@@ -7529,9 +7537,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
     color-mix(in srgb, var(--media-overlay-bg) 55%, transparent) 46%,
     transparent);
 }
+/* Clamped: a long hook otherwise fills the frame it is written over and buries the picture. */
 .fy-seasontile__hook {
   position: absolute; left: 9px; right: 9px; bottom: 9px;
   color: var(--media-overlay-fg); font: 400 10.5px/1.4 var(--font-sans);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
 /* The number is the whole of an empty tile, so it is set at the size of the thing missing. */
 .fy-seasontile__num {

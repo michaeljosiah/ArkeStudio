@@ -12,6 +12,7 @@ import {
   type SeasonFinding,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
+import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
@@ -40,6 +41,30 @@ import { sceneIsComplete } from "./scene-workspace/completion.js";
 
 /** Two digits, so the board reads as an ordered season rather than a list. */
 const pad = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * Arke's edge on a page that has one (design turns 120 and 122): the docked panel, or the strip
+ * it collapses to.
+ *
+ * `dock.onPutAway` is optional and the season and the episode both omitted it, so on the two
+ * pages here the assistant could not be dismissed at all — a third of the frame the person had
+ * no way to reclaim. The strip is not a new control either: it is the scene workspace's own
+ * `.fy-sw__rail`, lifted unchanged, because somebody who learned the affordance on a scene must
+ * meet the same one here.
+ */
+function ArkeEdge({ children }: { children: (putAway: () => void) => ReactNode }) {
+  const [docked, setDocked] = useState(true);
+  if (docked) return <>{children(() => setDocked(false))}</>;
+  return (
+    <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDocked(true)}>
+      <span className="fy-sw__rail-dot" aria-hidden="true" />
+      <span className="fy-sw__rail-label">Ask Arke</span>
+      <span className="fy-sw__rail-pin">
+        <Pin size={13} />
+      </span>
+    </button>
+  );
+}
 
 /**
  * The frame an episode is drawn at (design turn 120) — the first frame filed anywhere in it.
@@ -254,7 +279,7 @@ export function DevelopmentWorkspace() {
       */}
       <EpisodesBoard />
     </div>
-      <SeasonDock />
+      <ArkeEdge>{(putAway) => <SeasonDock onPutAway={putAway} />}</ArkeEdge>
     </div>
   );
 }
@@ -267,7 +292,7 @@ export function DevelopmentWorkspace() {
  * The thread is the same thread — same context, same points, same wrap-up, same gate — so this
  * is where it is shown, not what it is.
  */
-function SeasonDock() {
+function SeasonDock({ onPutAway }: { onPutAway: () => void }) {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const staged =
@@ -279,7 +304,7 @@ function SeasonDock() {
     <ProductionConversation
       worldId={worldId}
       productionId={prodId}
-      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}` }}
+      dock={{ title: `Arke · ${production?.meta.title ?? "…"}`, subject: `season · ${version}`, onPutAway }}
       openingNote="opening…"
       emptyLine="Let’s shape the season. What is it about?"
       placeholder="Ask about the season"
@@ -303,7 +328,7 @@ function SeasonDock() {
 }
 
 /** The same panel one level down (design turn 100), with the episode as its subject. */
-function EpisodeDock({ episode }: { episode: Episode }) {
+function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () => void }) {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const stem = production?.episodeFiles[episode.id];
@@ -317,7 +342,7 @@ function EpisodeDock({ episode }: { episode: Episode }) {
       worldId={worldId}
       productionId={prodId}
       entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
-      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}` }}
+      dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
       openingNote="opening…"
       emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
       placeholder="Ask about the episode"
@@ -759,7 +784,7 @@ export function EpisodeDetailScreen() {
       )}
       <SingleActFeedback result={edit.result} undoLabel="Restore episode" onUndo={edit.undo} />
     </div>
-      <EpisodeDock episode={episode} />
+      <ArkeEdge>{(putAway) => <EpisodeDock episode={episode} onPutAway={putAway} />}</ArkeEdge>
     </div>
   );
 }
