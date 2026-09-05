@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { NavLink, useNavigate, useParams } from "react-router";
 import {
+  orderedShots,
   seasonFindings,
   sortScenes,
   legacySceneView,
@@ -10,6 +11,7 @@ import {
   type SceneRecord,
   type SeasonFinding,
 } from "@arke-studio/contracts";
+import { mediaUrl } from "../lib/media.js";
 import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
@@ -39,6 +41,144 @@ import { sceneIsComplete } from "./scene-workspace/completion.js";
 /** Two digits, so the board reads as an ordered season rather than a list. */
 const pad = (n: number) => String(n).padStart(2, "0");
 
+/**
+ * The frame an episode is drawn at (design turn 120) — the first frame filed anywhere in it.
+ *
+ * The board is a rack of the format's own shape, so a written episode shows the picture it
+ * already has. There is no separate "episode key art" to choose from and inventing one would be
+ * a second artifact to keep in step with the shots; the first frame the episode covered is the
+ * one it opens on, which is what a rack of thumbnails is read for.
+ */
+function episodeFrame(
+  production: ProductionBundle,
+  artifacts: readonly ArtifactSidecar[],
+  slug: string | undefined,
+  episode: Episode,
+): string | null {
+  if (slug === undefined) return null;
+  for (const sceneId of episode.scenes) {
+    const scene = production.scenes.find((candidate) => candidate.id === sceneId);
+    if (scene === undefined) continue;
+    for (const shot of orderedShots(scene)) {
+      const selection = production.selections[shot.id];
+      const artifactId = selection?.startFrameArtifactId;
+      const artifact = artifactId === undefined ? undefined : artifacts.find((a) => a.id === artifactId);
+      if (artifact !== undefined) return mediaUrl(slug, `artifacts/${artifact.file}`);
+      const accepted = selection?.acceptedTakeId;
+      const take = accepted === undefined ? undefined : production.takes.find((t) => t.id === accepted);
+      if ((take?.kind === "frame" || take?.kind === "still") && take.media !== undefined) {
+        return mediaUrl(slug, `productions/${production.meta.id}/takes/${take.id}/${take.media}`);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * One tile of the rack. Written, staged and unwritten are the same box at the same size.
+ *
+ * The frame is the control and it is a link where it navigates (turn 92: a tile always opens
+ * its page), so the reorder arrows have to be siblings of it rather than children — a button
+ * inside a button is neither valid nor reachable by keyboard.
+ */
+function SeasonTile({
+  number,
+  title,
+  hook,
+  cliff,
+  scenes,
+  frame,
+  state,
+  to,
+  onOpen,
+  controls,
+}: {
+  number: number | null;
+  title?: string;
+  hook?: string;
+  cliff?: string;
+  scenes?: number;
+  frame?: string | null;
+  state: "written" | "staged" | "blank";
+  to?: string;
+  onOpen?: () => void;
+  controls?: ReactNode;
+}) {
+  const label = number === null ? "··" : pad(number);
+  const bare = state !== "written" || !frame;
+  const described =
+    state === "blank"
+      ? `Episode ${label}, not written yet`
+      : `Episode ${label}${title === undefined ? "" : `, ${title}`}${state === "staged" ? ", staged" : ""}`;
+  const inner = (
+    <div
+      className={`fy-seasontile__frame${bare ? " fy-seasontile__frame--bare" : ""}${
+        state === "staged" ? " fy-seasontile__frame--staged" : ""
+      }`}
+    >
+      {state === "written" && frame ? (
+        <>
+          <img className="fy-seasontile__img" src={frame} alt="" />
+          <span className="fy-seasontile__scrim" aria-hidden="true" />
+          {hook === undefined ? null : <span className="fy-seasontile__hook">{hook}</span>}
+        </>
+      ) : (
+        <>
+          {state === "staged" ? <span className="fy-seasontile__flag">STAGED</span> : null}
+          <span className="fy-seasontile__num" aria-hidden="true">
+            {label}
+          </span>
+        </>
+      )}
+    </div>
+  );
+  return (
+    <div className="fy-seasontile">
+      <div style={{ position: "relative" }}>
+        {to === undefined ? (
+          <button type="button" className="fy-seasontile__press" aria-label={described} onClick={onOpen}>
+            {inner}
+          </button>
+        ) : (
+          <NavLink to={to} className="fy-seasontile__press" aria-label={described}>
+            {inner}
+          </NavLink>
+        )}
+        {controls}
+      </div>
+      {/* An unwritten tile carries its number and nothing else: the empty frame is already the
+          sentence, and four copies of an instruction is noise on a board of seven. */}
+      {state === "blank" ? null : (
+        <div className="fy-seasontile__cap">
+          <div className="fy-seasontile__name">
+            <span className="fy-mono" style={{ color: "var(--neutral-400)" }}>
+              {label}
+            </span>
+            <span
+              style={{
+                font: "600 13px/1.3 var(--font-sans)",
+                ...(title === undefined ? { color: "var(--muted-foreground)" } : {}),
+              }}
+            >
+              {title ?? "No title yet"}
+            </span>
+          </div>
+          {state === "staged" ? (
+            <div className="fy-seasontile__wait">waiting on the gate</div>
+          ) : (
+            <>
+              <div className="fy-seasontile__cliff">{cliff ?? ""}</div>
+              <div className="fy-seasontile__scenes">
+                {scenes ?? 0} scene{scenes === 1 ? "" : "s"}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -60,23 +200,24 @@ export function DevelopmentWorkspace() {
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
+      {/*
+        The counts were six outlined pills repeating what the rail and the board already say
+        (turn 120). What survives is a seven-segment meter in episode order — the rack's own
+        shape at header size — filled for written and amber for staged.
+      */}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
-        <span className="fy-h1row__meta">{season ? `season v${season.version}` : "no season record yet"}</span>
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <span className="fy-pill">{declared} episodes</span>
-        <span className="fy-pill">{written} written</span>
-        <span className="fy-pill">
-          {production.scenes.length} scene{production.scenes.length === 1 ? "" : "s"}
-        </span>
-        {defaults?.episodeSecondsMin !== undefined && defaults.episodeSecondsMax !== undefined && (
-          <span className="fy-pill">
-            {defaults.episodeSecondsMin}–{defaults.episodeSecondsMax}s each
+        <span style={{ flex: 1 }} />
+        <span style={{ textAlign: "right" }}>
+          <span className="fy-seasonmeter" aria-hidden="true">
+            {Array.from({ length: declared }, (_, i) => (
+              <span key={i} {...(i < written ? { "data-state": "written" } : {})} />
+            ))}
           </span>
-        )}
-        {defaults?.hookWindowSec !== undefined && <span className="fy-pill">hook in {defaults.hookWindowSec}s</span>}
-        {defaults?.episodeEnding !== undefined && <span className="fy-pill">{defaults.episodeEnding}</span>}
+          <span className="fy-h1row__meta" style={{ display: "block", marginTop: 6 }}>
+            {written} of {declared} written
+          </span>
+        </span>
       </div>
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
           Inheritance is shown, not hidden (turn 48): the Series engine is read-only here, and
@@ -256,100 +397,60 @@ function EpisodesBoard() {
     [ids[index], ids[target]] = [ids[target]!, ids[index]!];
     reorderEpisodes(worldId, prodId, ids);
   };
+  const artifacts: readonly ArtifactSidecar[] = world?.artifacts ?? [];
+  const slug = world?.meta.slug;
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 14 }}>
+      <div className="fy-seasonrack">
         {episodes.map((episode, index) => (
-          <div key={episode.id} className="fy-draftcard" style={{ cursor: "pointer" }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span className="fy-mono">{pad(episode.order)}</span>
-              {/*
-                One control, one destination (turn 92). This branched on whether anything was
-                written, which reads as thoughtful and is unpredictable: the same click landed in
-                two places according to state a person cannot see before clicking. The page says
-                what is written, or that nothing is, and offers the one way into the thread.
-
-                A link rather than a button, because it goes somewhere: middle-click, copy link
-                and keyboard all work, and where a tile leads becomes a thing a test can read.
-              */}
-              <NavLink
-                to={`/w/${worldId}/p/${prodId}/episodes/${episode.id}`}
-                className="fy-linkbtn"
-                style={{ font: "600 14px var(--font-sans)", textAlign: "left" }}
-              >
-                {episode.title}
-              </NavLink>
-              <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
-                <button type="button" className="fy-linkbtn" aria-label="Move earlier" onClick={() => move(index, -1)}>
+          <SeasonTile
+            key={episode.id}
+            number={episode.order}
+            title={episode.title}
+            state="written"
+            frame={episodeFrame(production!, artifacts, slug, episode)}
+            {...(episode.promise?.opens ? { hook: episode.promise.opens } : {})}
+            {...(episode.promise?.closes ? { cliff: episode.promise.closes } : {})}
+            scenes={episode.scenes.length}
+            to={`/w/${worldId}/p/${prodId}/episodes/${episode.id}`}
+            controls={
+              <span className="fy-seasontile__move">
+                <button type="button" aria-label="Move earlier" onClick={() => move(index, -1)}>
                   ↑
                 </button>
-                <button type="button" className="fy-linkbtn" aria-label="Move later" onClick={() => move(index, 1)}>
+                <button type="button" aria-label="Move later" onClick={() => move(index, 1)}>
                   ↓
                 </button>
               </span>
-            </div>
-            {/* The card says its gaps in words (turn 53): never a colour doing the work alone. */}
-            <div className="fy-mono" style={{ marginTop: 10 }}>
-              HOOK · {episode.promise?.opens ? episode.promise.opens.slice(0, 60) : "NO HOOK YET"}
-            </div>
-            <div className="fy-mono" style={{ marginTop: 4 }}>
-              CLIFF · {episode.promise?.closes ? episode.promise.closes.slice(0, 60) : "NO ENDING YET"}
-            </div>
-            <div style={{ marginTop: 10 }}>
-              <Badge tone="outline">
-                {episode.scenes.length} scene{episode.scenes.length === 1 ? "" : "s"}
-              </Badge>
-            </div>
-          </div>
+            }
+          />
         ))}
         {/* Started, and waiting on the gate (turn 92): the tile the press changed. */}
         {started.map((one) => (
-          <div key={one.id} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
-            <span className="fy-mono">{one.order === null ? "··" : pad(one.order)}</span>
-            <span style={{ font: "600 13.5px var(--font-sans)" }}>{one.title}</span>
-            <span style={{ font: "400 12px/1.5 var(--font-sans)", color: "var(--muted-foreground)" }}>
-              Started. Waiting on the gate.
-            </span>
-            <span style={{ flex: 1 }} />
-            <span className="fy-mono" style={{ color: "var(--warning)" }}>
-              STAGED · NOT WRITTEN YET
-            </span>
-          </div>
+          <SeasonTile key={one.id} number={one.order} title={one.title} state="staged" />
         ))}
         {[...startingOpen]
           .filter((order) => !started.some((one) => one.order === order))
           .map((order) => (
-            <div key={`starting-${order}`} className="fy-emptycard" style={{ display: "grid", gap: 6, minHeight: 118 }}>
-              <span className="fy-mono">{pad(order)}</span>
-              <span style={{ font: "600 13.5px var(--font-sans)" }}>Episode {pad(order)}</span>
-              <span style={{ flex: 1 }} />
-              <span className="fy-mono">STARTING…</span>
-            </div>
+            <SeasonTile key={`starting-${order}`} number={order} title={`Episode ${pad(order)}`} state="staged" />
           ))}
         {/*
-          Making an episode happens in the grid, where the others already are (turn 87): no screen
-          asks for a title before there is anything to title, so opening a blank tile stages the
+          Making an episode happens in the rack, where the others already are (turn 87): no screen
+          asks for a title before there is anything to title, so opening a blank frame stages the
           episode under its number and the conversation is what names it. The tile writes it live
           (issue 728): the press is the decision, and a proposal here waited on a screen elsewhere.
         */}
         {blanks.map((order) => (
-          <button
+          <SeasonTile
             key={`blank-${order}`}
-            type="button"
-            className="fy-emptycard"
-            style={{ display: "grid", gap: 8, textAlign: "left", cursor: "pointer", minHeight: 118 }}
-            onClick={() => {
+            number={order}
+            state="blank"
+            onOpen={() => {
               if (!worldId || !prodId) return;
               createEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
               setStarting((prev) => new Set(prev).add(order));
             }}
-          >
-            <span className="fy-mono">{pad(order)}</span>
-            <span style={{ font: "400 12.5px var(--font-sans)", color: "var(--muted-foreground)" }}>
-              Not written yet.
-            </span>
-            <span className="fy-mono">OPEN TO START IT</span>
-          </button>
+          />
         ))}
       </div>
       {(blanks.length > 0 || started.length > 0) && (
