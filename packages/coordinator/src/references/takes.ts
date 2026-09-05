@@ -449,9 +449,26 @@ export async function recordUploadedPropTake(
       take.params["uploadedCandidate"] === candidatePath,
   );
   if (existing) return existing;
-  const now = store.now();
   const media = basename(candidatePath);
-  const take: Take = {
+  const take = uploadedPropTake(store, propId, stateId, media, { uploadedCandidate: candidatePath });
+  await store.gateOp(() =>
+    writeTakeDirectory(store, propId, take, async (dir) => {
+      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+    }),
+  );
+  return take;
+}
+
+function uploadedPropTake(
+  store: WorldStore,
+  propId: string,
+  stateId: string,
+  media: string,
+  params: Record<string, unknown>,
+): Take {
+  const bundle = store.getBundle();
+  const now = store.now();
+  return {
     id: `tk_${ulid()}` as Take["id"],
     coversShots: [],
     kind: "prop-state",
@@ -464,15 +481,31 @@ export async function recordUploadedPropTake(
       artDirectionVersion: bundle.artDirection.version,
     },
     references: [],
-    params: { uploadedCandidate: candidatePath },
+    params,
     cost: { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" },
     dispatchedAt: now,
     completedAt: now,
     media,
   };
+}
+
+/**
+ * A prop-state reference brought in by hand (issue 537): lands as a pending take under the prop,
+ * exactly as a location view lands, for the accept to read by take id — never straight as the
+ * reference, because accepting is where "already has one" gets asked.
+ */
+export async function recordUploadedPropImage(
+  store: WorldStore,
+  propId: string,
+  stateId: string,
+  media: string,
+  data: Uint8Array,
+): Promise<Take> {
+  if (basename(media) !== media || media === "." || media === "..") throw new Error(`unsafe media name ${media}`);
+  const take = uploadedPropTake(store, propId, stateId, media, { uploadedFile: media });
   await store.gateOp(() =>
     writeTakeDirectory(store, propId, take, async (dir) => {
-      await placeMedia(join(store.dir, candidatePath), join(dir, media));
+      await atomicWriteFile(join(dir, media), data);
     }),
   );
   return take;

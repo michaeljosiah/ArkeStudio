@@ -18,6 +18,7 @@ import {
   type Shot,
   type ShotFraming,
   legacySceneView,
+  resolvePropStates,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
 import { Button, Callout, Textarea, cx } from "../components/ui.js";
@@ -680,6 +681,47 @@ export function ShotSheetScreen() {
               </button>
             </div>
           </div>
+
+          {(() => {
+            // The shot's own control is the one durable value (design turn 105; issue 537): shown
+            // plainly, changed in place, never behind a toggle, and never carried to another shot.
+            const cited = world.props.length === 0 ? [] : resolvePropStates(shot, world.props);
+            if (cited.length === 0) return null;
+            return (
+              <div className="fy-sheetsec">
+                <div className="fy-sheetlabel">
+                  Props <span className="fy-mono">this shot only · never carries to other scenes</span>
+                </div>
+                <div className="fy-sheetrefs">
+                  {cited.map((entry) => {
+                    const prop = world.props.find((candidate) => candidate.id === entry.propId)!;
+                    return (
+                      <label key={entry.propId} className="fy-sheetref">
+                        <span className="fy-mono">PROP</span>
+                        <span style={{ flex: 1, minWidth: 0, font: "500 11.5px var(--font-sans)" }}>{entry.propName}</span>
+                        <select
+                          aria-label={`${entry.propName} state for this shot`}
+                          value={entry.stateId ?? ""}
+                          onChange={(e) => {
+                            const stateId = e.target.value;
+                            const others = (shot.propStates ?? []).filter((s) => s.propId !== entry.propId);
+                            patch({ propStates: stateId === "" ? others : [...others, { propId: entry.propId, stateId }] });
+                          }}
+                        >
+                          <option value="">unresolved</option>
+                          {prop.states.map((state) => (
+                            <option key={state.id} value={state.id}>
+                              {state.name} · {state.reference ? "has a reference" : "no ref yet"}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           <div className="fy-sheetsec">
             <div className="fy-sheetlabel">

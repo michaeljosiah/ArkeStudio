@@ -2969,6 +2969,19 @@ export function GenerateScreen() {
                 take {takes.indexOf(take) + 1} · {take.model} · {seconds(shot?.durationSec)}
                 {take.completedAt ? ` · finished ${take.completedAt.slice(11, 16)}` : ""}
               </span>
+              {(take.provenance.propStates ?? []).length === 0 ? null : (
+                // The five fields frozen at dispatch (design turn 105; issue 536), named rather
+                // than by id — what this take was made with, not what the shot says now.
+                <span className="fy-mono" data-testid="take-prop-provenance" style={{ display: "block" }}>
+                  {take.provenance.propStates!
+                    .map((entry) => {
+                      const prop = world?.props.find((candidate) => candidate.id === entry.propId);
+                      const state = prop?.states.find((candidate) => candidate.id === entry.stateId);
+                      return `prop: ${prop?.name ?? entry.propId} · state: ${state?.name ?? entry.stateId ?? "unresolved"} · ref: ${entry.referenceId ?? "none"} · resolved: ${entry.resolutionSource} · override: ${entry.overrideSource ?? "none"}`;
+                    })
+                    .join("  ")}
+                </span>
+              )}
               <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className={`fy-dot fy-dot--${decisionTone(decisions[take.id])}`} />
                 <span className="fy-mono">{decisions[take.id] ?? "pending"}</span>

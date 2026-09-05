@@ -4262,3 +4262,28 @@ export function sendAttachFilesCorrelated(worldId: string, links?: string[]): st
   } as ClientMessage);
   return requestId;
 }
+
+// ---- props (design turn 105; issues 535, 537) --------------------------------------------
+
+export function createProp(worldId: string, name: string): void {
+  send({ kind: "create-prop", worldId, name });
+}
+
+export function addPropState(worldId: string, propId: string, name: string): void {
+  send({ kind: "add-prop-state", worldId, propId, name });
+}
+
+/** The host picker lands one image as a pending take under the prop; accepting is a second, asked step. */
+export function importPropStateCandidate(worldId: string, propId: string, stateId: string): void {
+  send({ kind: "import-prop-state-candidate", worldId, propId, stateId });
+}
+
+export function acceptPropState(
+  worldId: string,
+  propId: string,
+  stateId: string,
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
+  replace = false,
+): void {
+  send({ kind: "accept-prop-state", worldId, propId, stateId, selection, ...(replace ? { replace: true } : {}) });
+}
