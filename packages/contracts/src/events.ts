@@ -80,6 +80,7 @@ export const QueueCommandSchema = z.enum([
   "voice-line",
   "read-sheet-section",
   "read-bible-section",
+  "read-prose",
   "generate-world-image",
   "upload-world-image",
   "generate-master-look",
@@ -578,12 +579,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       worldId: UlidSchema,
       /**
        * Absent for a bible read, which belongs to the world rather than to anybody in it
-       * (2026-08-24). Every other purpose still names a sheet; the client keys these by
-       * `requestId`, so nothing downstream was using this to find the reply.
+       * (2026-08-24), and for every `prose` read, which addresses a canon entry, a scene, a
+       * production record or a conversation reply instead (issue 857). Candidate previews and
+       * sheet sections still name a sheet; the client keys these by `requestId`, so nothing
+       * downstream was using this to find the reply.
        */
       sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section", "bible-section"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "bible-section", "prose"]),
       sectionHeading: z.string().min(1).optional(),
       /**
        * Which piece of a long read this is, and how many there are (2026-08-24).

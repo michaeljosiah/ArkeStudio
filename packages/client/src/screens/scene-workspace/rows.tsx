@@ -32,6 +32,7 @@ import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./se
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
 import { finalizationRetryJobId, frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
+import { ReadAloudButton } from "../../components/read-aloud.js";
 import { Grid2x2, Grip, ImageMark, Lines, More, Plus } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
@@ -1154,6 +1155,16 @@ function Row({
           onClick={(event) => event.stopPropagation()}
         >
           <button type="button" disabled={shot.description.trim() === ""} onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
+          {/*
+            The script is written in place, so read-aloud sits with the row's other buttons rather
+            than hovering over the text (issue 857) — a speaker inside an editor fights the caret,
+            which is the same call the bible made about its own document.
+          */}
+          <ReadAloudButton
+            source={{ of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }}
+            title={`Shot ${shot.number} · script`}
+            text={shot.description}
+          />
           <button
             ref={variantsTrigger}
             type="button"

@@ -121,6 +121,7 @@ import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
 import { AppChrome } from "../components/chrome.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
+import { ReadAloud } from "../components/read-aloud.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { productionModel } from "../components/dispatch-bar.js";
@@ -1968,22 +1969,38 @@ function OverviewStoryScreen() {
         <div className="fy-story__log">
           {story ? (
             <div style={{ display: "grid", gap: 14 }}>
-              <div className="fy-draftcard">
+              {/*
+                The overview is one document, and its cards are the blocks it is read in
+                (issue 857). Each carries its own read-aloud rather than the screen carrying one:
+                a logline and a treatment are not the same length of listen, and the press should
+                say which of them it is starting.
+              */}
+              <div className="fy-draftcard fy-texthost">
                 <div className="fy-eyebrow-sm">LOGLINE</div>
                 <div className="fy-draftcard__logline">“{story.logline}”</div>
+                <ReadAloud
+                  source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
+                  title={`${production?.meta.title ?? "Overview"} · logline`}
+                  text={story.logline ?? ""}
+                />
               </div>
               {spineLines.length > 0 && (
-                <div className="fy-draftcard">
+                <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">SPINE</div>
                   {spineLines.map((line) => (
                     <div key={line} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
                       {line}
                     </div>
                   ))}
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "spine" }}
+                    title={`${production?.meta.title ?? "Overview"} · spine`}
+                    text={story.spine ?? ""}
+                  />
                 </div>
               )}
               {(story.acts ?? []).length > 0 && (
-                <div className="fy-draftcard">
+                <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">ACTS</div>
                   {(story.acts ?? []).map((act, i) => (
                     <div key={act.title} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
@@ -1991,16 +2008,28 @@ function OverviewStoryScreen() {
                       {act.summary ? ` — ${act.summary}` : ""}
                     </div>
                   ))}
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "acts" }}
+                    title={`${production?.meta.title ?? "Overview"} · acts`}
+                    text={(story.acts ?? [])
+                      .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
+                      .join(" ")}
+                  />
                 </div>
               )}
               {production?.treatment && (
-                <div className="fy-draftcard">
+                <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">TREATMENT</div>
                   <div
                     style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}
                   >
                     {production.treatment}
                   </div>
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "treatment" }}
+                    title={`${production.meta.title} · treatment`}
+                    text={production.treatment}
+                  />
                 </div>
               )}
             </div>

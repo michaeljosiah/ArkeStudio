@@ -20,6 +20,7 @@ import {
   voiceJobFormat,
   voiceJobReadIdentity,
   voiceTargetKey,
+  type ProseReadSource,
   type ProviderCallRecord,
   ProviderIdSchema,
   type ProviderId,
@@ -2788,7 +2789,7 @@ export function requestVoicePreview(
 export function readSheetSection(
   worldId: string,
   sheetId: string,
-  sectionHeading: "Essence" | "Appearance",
+  sectionHeading: string,
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
 ): string {
@@ -2817,6 +2818,29 @@ export function readBibleSection(
     kind: "read-bible-section",
     worldId,
     sectionHeading,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
+ * The same for the world's other authored prose — a canon entry, a scene, a shot's script, the
+ * production overview, the season, the Series, one of Arke's replies (issue 857).
+ *
+ * One sender rather than seven, because the source is a named address and the frame carries it
+ * whole; every screen's call is the same two lines the bible's was.
+ */
+export function readProse(
+  worldId: string,
+  source: ProseReadSource,
+  requestId = queueRequest("read-prose"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-prose",
+    worldId,
+    source,
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
   });

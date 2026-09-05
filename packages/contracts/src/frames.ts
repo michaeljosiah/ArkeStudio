@@ -26,6 +26,7 @@ import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
+import { ProseReadSourceSchema } from "./prose.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
@@ -96,9 +97,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       sheetId: SlugSchema,
-      // The reader names a section — the prose never travels; the server reads the authoritative
-      // sheet. A character's Essence and Appearance are the descriptive prose worth hearing.
-      sectionHeading: z.enum(["Essence", "Appearance"]),
+      /*
+       * The reader names a section — the prose never travels; the server reads the authoritative
+       * sheet.
+       *
+       * Free text, not the closed `Essence | Appearance` pair it began as (issue 857). The pair
+       * was honest while those were the only two sections anyone had drawn a control beside, but
+       * it also meant a location's Look, a faction's Wants and a character's Relationships could
+       * not be heard at all — prose people read, on screens with no way to listen. The set a
+       * sheet actually offers is whatever its shape declares, so the check that matters is the
+       * bible's: is the section there, and does it have words in it.
+       */
+      sectionHeading: z.string().min(1),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
@@ -114,6 +124,33 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Asked for by an author who had the whole arc in the bible and no way to hear it: the sheets
    * could be read aloud and the one long-form document in the world could not.
    */
+  /**
+   * Read a piece of the world's other authored prose aloud (issue 857).
+   *
+   * Read-aloud reached the bible and the sheets and nothing else, which left the text people
+   * spend a working session inside — a canon entry, a scene's script, a season's answer, Arke's
+   * own replies — with no way to listen to it. It is an access feature before it is a
+   * convenience, and the default narrator reads on this machine for nothing, so the usual
+   * objection to widening a control does not apply here.
+   *
+   * One frame with a named source rather than five, which is the opposite call from the one the
+   * bible got, and for the reason stated there: the objection to folding two frames together was
+   * a `sheetId` that is sometimes absent and an enum that is sometimes free text. A discriminated
+   * source has neither — each arm names exactly the ids that address its own record, and adding a
+   * sixth kind of prose adds an arm rather than a frame, a queue command and a handler.
+   *
+   * The prose still never travels: every arm is an address, and the coordinator reads the
+   * authoritative record off disk. A source that no longer resolves is a refusal, not a guess.
+   */
+  z
+    .object({
+      kind: z.literal("read-prose"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      source: ProseReadSourceSchema,
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("read-bible-section"),

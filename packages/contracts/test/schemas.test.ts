@@ -1334,9 +1334,11 @@ describe("domain events and frames", () => {
       sheetId: "maren-kest",
       sectionHeading: "Appearance",
     }));
-    // The reader names a readable section: one outside the set, or prose smuggled in a stray
-    // field, is refused — the server reads the authoritative sheet, never the client's text.
-    assert.throws(() => ClientMessageSchema.parse({
+    // Any section the sheet's shape declares, not the Essence/Appearance pair this began as
+    // (issue 857): whether the sheet actually carries it is the server's answer, because only
+    // the server has the sheet. What stays refused is a nameless section — and prose smuggled
+    // in a stray field, because the server reads the authoritative sheet, never the client's text.
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
       kind: "read-sheet-section",
       requestId: WORLD_ID,
       worldId: WORLD_ID,
@@ -1348,7 +1350,50 @@ describe("domain events and frames", () => {
       requestId: WORLD_ID,
       worldId: WORLD_ID,
       sheetId: "maren-kest",
+      sectionHeading: "",
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-sheet-section",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      sheetId: "maren-kest",
       sectionHeading: "Appearance",
+      text: "renderer prose must not travel",
+    }));
+    /*
+     * The prose read is an address too (issue 857): a source the union admits, and nothing else.
+     * The point of the discriminated source is that each arm names exactly the ids that reach its
+     * record — so a canon read cannot carry a shot id, and no arm can carry the words.
+     */
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
+      kind: "read-prose",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      source: { of: "canon", canonId: "CANON-002" },
+    }));
+    assert.doesNotThrow(() => ClientMessageSchema.parse({
+      kind: "read-prose",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      source: { of: "story", productionId: "saltlight", field: "treatment" },
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-prose",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      source: { of: "canon", canonId: "CANON-002", shotId: "sh_0002" },
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-prose",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      source: { of: "season", productionId: "saltlight", field: "direction" },
+    }));
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "read-prose",
+      requestId: WORLD_ID,
+      worldId: WORLD_ID,
+      source: { of: "canon", canonId: "CANON-002" },
       text: "renderer prose must not travel",
     }));
     assert.doesNotThrow(() =>
