@@ -46,6 +46,16 @@ export class ConversationIntegrityError extends Error {
   }
 }
 
+export class ConversationSequenceError extends Error {
+  constructor(
+    readonly expected: number,
+    readonly actual: number,
+  ) {
+    super(`Conversation sequence moved from ${expected} to ${actual}.`);
+    this.name = "ConversationSequenceError";
+  }
+}
+
 function sha256(text: string): string {
   return `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
@@ -242,7 +252,7 @@ export class WorldChatStore {
    */
   append(
     event: WorldChatStoredEvent,
-    options: { at: string; requestId?: string } = { at: new Date().toISOString() },
+    options: { at: string; requestId?: string; expectedSeq?: number } = { at: new Date().toISOString() },
   ): Promise<AppendResult> {
     let result!: AppendResult;
     return this.writer.queue
@@ -260,6 +270,9 @@ export class WorldChatStore {
         }
 
         const current = await this.inspectTail();
+        if (options.expectedSeq !== undefined && current.seq !== options.expectedSeq) {
+          throw new ConversationSequenceError(options.expectedSeq, current.seq);
+        }
         const seen = this.writer.tail;
         if (seen && (current.size !== seen.size || current.digest !== seen.digest)) {
           throw new ConversationIntegrityError({

@@ -15,12 +15,37 @@ import { CapabilitySchema } from "./provider.js";
 // world.json (§2.3.1)
 // ---------------------------------------------------------------------------
 
+/** The world-scoped prose fields an author may change without changing world identity. */
+export const WorldAuthoredFieldsSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    logline: z.string().trim().min(1).optional(),
+    tone: z.string().trim().min(1).optional(),
+    genre: z.string().trim().min(1).optional(),
+  })
+  .strict();
+export type WorldAuthoredFields = z.infer<typeof WorldAuthoredFieldsSchema>;
+
+/** Optional authored fields may be cleared; later registered fields inherit set support by default. */
+export const WorldAuthoredFieldChangesSchema = WorldAuthoredFieldsSchema
+  .partial()
+  .extend({
+    logline: z.string().trim().min(1).nullable().optional(),
+    tone: z.string().trim().min(1).nullable().optional(),
+    genre: z.string().trim().min(1).nullable().optional(),
+  })
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, "a world metadata action must change at least one field");
+export type WorldAuthoredFieldChanges = z.infer<typeof WorldAuthoredFieldChangesSchema>;
+
 export const WorldMetaSchema = z
   .object({
     /** ULID, never the slug — global records (queue, ledger) key on it (§2.3.1). */
     worldId: UlidSchema,
     slug: SlugSchema,
     schemaVersion: z.number().int().min(1),
+    // Persisted worlds predate authored-field write validation. Keep this read path permissive;
+    // the narrower schema above governs new World Chat writes without hiding an older world.
     name: z.string().min(1),
     logline: z.string().optional(),
     tone: z.string().optional(),

@@ -6,6 +6,7 @@ import {
   ArtDirectionRecordSchema,
   DEFAULT_AUDIO_POLICY,
   type AudioPolicy,
+  type KeyArtIntent,
   CHARACTER_ROLE_MAX,
   ChapterFrontmatterSchema,
   EpisodeSchema,
@@ -43,7 +44,11 @@ import {
   parseSceneRecord,
   readSceneRecord,
 } from "../productions/scene-record.js";
-import type { WorldStore } from "../world/store.js";
+import {
+  WorldStateStaleError,
+  type WorldStatePrecondition,
+  type WorldStore,
+} from "../world/store.js";
 import {
   draftStagingPath,
   readDraftOperations,
@@ -53,6 +58,7 @@ import {
 } from "./draft-journal.js";
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
+import { projectReview, type ReviewProjection } from "./review.js";
 
 /**
  * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
@@ -212,7 +218,7 @@ export class DraftUnresolvedError extends Error {
 export type AcceptOutcome =
   | { status: "accepted"; result: CommitResult; ripples: RippleItem[] }
   | { status: "no-op" }
-  | { status: "stale"; stalePaths: string[] }
+  | { status: "stale"; stalePaths: string[]; detail?: string }
   | { status: "needs-reconfirm"; authoritative: RipplePreview; signature: string }
   | { status: "pending-review" }
   | { status: "unresolved-conflicts"; count: number }
@@ -243,16 +249,27 @@ export type AcceptOutcome =
  * check on each target's recorded base is untouched, so a file edited underneath this press is
  * still refused; so are a retired target, an unresolved conflict, and an over-long role.
  */
-export async function acceptDecided(gate: ProposalManager, proposalId: string): Promise<AcceptOutcome> {
-  const first = await gate.accept(proposalId, {});
-  if (first.status !== "needs-reconfirm") return first;
-  /*
-   * Once, and only once.
-   *
-   * A second refusal is no longer this press's own consequences arriving — something else changed
-   * the world between these two calls, and that is exactly the case the reconfirmation is for.
-   */
-  return gate.accept(proposalId, { confirmRipples: first.signature });
+export async function acceptDecided(
+  gate: ProposalManager,
+  proposalId: string,
+  precondition?: WorldStatePrecondition,
+): Promise<AcceptOutcome> {
+  try {
+    const first = await gate.accept(proposalId, { precondition });
+    if (first.status !== "needs-reconfirm") return first;
+    /*
+     * Once, and only once.
+     *
+     * A second refusal is no longer this press's own consequences arriving — something else changed
+     * the world between these two calls, and that is exactly the case the reconfirmation is for.
+     */
+    return await gate.accept(proposalId, { confirmRipples: first.signature, precondition });
+  } catch (error) {
+    if (error instanceof WorldStateStaleError) {
+      return { status: "stale", stalePaths: [], detail: error.detail };
+    }
+    throw error;
+  }
 }
 
 /** Apply a person's look fields over an existing proposal without accepting its unread fields. */
@@ -302,7 +319,7 @@ export function explainAcceptRefusal(outcome: AcceptOutcome): string {
       return `${first.path}: ${first.message}${others > 0 ? `, and ${others} more like it` : ""}`;
     }
     case "stale":
-      return `the world moved underneath it — ${outcome.stalePaths.join(", ")} changed while this was being written`;
+      return outcome.detail ?? `the world moved underneath it — ${outcome.stalePaths.join(", ")} changed while this was being written`;
     case "no-op":
       return "nothing in it differs from what the world already says";
     case "needs-reconfirm":
@@ -399,7 +416,7 @@ export class ProposalManager {
   // ---- lifecycle -----------------------------------------------------------
 
   /** Materialise a proposal: copies, bases, `_base/` snapshots, reservation, preview (R-1, R-2). */
-  async stage(input: StageInput): Promise<Proposal> {
+  async stage(input: StageInput, precondition?: WorldStatePrecondition): Promise<Proposal> {
     return this.store.gateOp(async () => {
       /*
        * One open look proposal, enforced where it is actually atomic.
@@ -500,7 +517,7 @@ export class ProposalManager {
       await this.writeManifest(proposal);
       await this.refreshPreview(proposal);
       return proposal;
-    });
+    }, precondition);
   }
 
   /**
@@ -631,15 +648,23 @@ export class ProposalManager {
      * `environmental-only` — a policy reverted by an unrelated edit to the description, with
      * nothing said and nothing to notice until a clip came back with music under it.
      */
-    policy?: { audio?: AudioPolicy; failureModes?: readonly string[] },
+    policy?: { audio?: AudioPolicy; failureModes?: readonly string[]; keyArtIntent?: KeyArtIntent | null },
+    options: {
+      source?: string;
+      precondition?: WorldStatePrecondition;
+      origin?: StageInput["origin"];
+      decision?: ProposalDecision;
+    } = {},
   ): Promise<Proposal> {
     const bundle = this.store.getBundle();
     const current = bundle.artDirection;
     const acceptedAt = current.acceptedAt ?? bundle.meta.created;
+    const keyArtIntent = policy && "keyArtIntent" in policy ? policy.keyArtIntent : current.keyArtIntent;
     const proposed = ArtDirectionRecordSchema.parse({
       version: current.version + 1,
       description,
       ...(masterLook ? { masterLook } : {}),
+      ...(keyArtIntent !== undefined ? { keyArtIntent } : {}),
       acceptedAt: this.store.now(),
       audio: policy?.audio ?? current.audio,
       failureModes: [...(policy?.failureModes ?? current.failureModes)],
@@ -649,6 +674,7 @@ export class ProposalManager {
           version: current.version,
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+          ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
           acceptedAt,
           // The outgoing policy, kept with the version it belonged to. Reading history to explain
           // an old take is the whole reason these fields are on history at all.
@@ -657,17 +683,22 @@ export class ProposalManager {
         },
       ],
     });
-    return this.stage({
-      kind: "art-direction",
-      summary: `Change world look to v${current.version + 1}`,
-      source: "form",
-      targets: [
-        {
-          path: ART_DIRECTION_PATH,
-          content: `${JSON.stringify(proposed, null, 2)}\n`,
-        },
-      ],
-    });
+    return this.stage(
+      {
+        kind: "art-direction",
+        summary: `Change world look to v${current.version + 1}`,
+        source: options.source ?? "form",
+        ...(options.origin ? { origin: options.origin } : {}),
+        ...(options.decision ? { decision: options.decision } : {}),
+        targets: [
+          {
+            path: ART_DIRECTION_PATH,
+            content: `${JSON.stringify(proposed, null, 2)}\n`,
+          },
+        ],
+      },
+      options.precondition,
+    );
   }
 
   /** Editor write (chat or form — one proposal, R-14). Refreshes the advisory preview. */
@@ -923,7 +954,10 @@ export class ProposalManager {
 
   // ---- accept --------------------------------------------------------------
 
-  async accept(proposalId: string, opts: { confirmRipples?: string } = {}): Promise<AcceptOutcome> {
+  async accept(
+    proposalId: string,
+    opts: { confirmRipples?: string; precondition?: WorldStatePrecondition } = {},
+  ): Promise<AcceptOutcome> {
     return this.store.gateOp(async () => {
       // §11.4.1: recover first, then refuse while anything remains unresolved. Accepting past an
       // edit whose outcome is unknown would write a version of the file that nobody reviewed.
@@ -1093,7 +1127,7 @@ export class ProposalManager {
       });
       await this.retire(proposalId, result.commitId);
       return { status: "accepted", result, ripples: authoritative.items };
-    });
+    }, opts.precondition);
   }
 
   /**
@@ -1628,6 +1662,55 @@ export class ProposalManager {
     return ProposalSchema.parse(JSON.parse(raw));
   }
 
+  /** The authority-owned preview used by conversation cards; no staged payload crosses with it. */
+  async project(proposalId: string): Promise<{ proposal: Proposal; review: ReviewProjection; ripple: RipplePreview | null }> {
+    const proposal = await this.readManifest(proposalId);
+    const proposed = new Map<string, string | null>();
+    const base = new Map<string, string | null>();
+    for (const target of proposal.targets) {
+      proposed.set(target.path, await this.readProposalFile(proposalId, target.path));
+      base.set(target.path, await this.readProposalFile(proposalId, `_base/${target.path}`));
+    }
+    return {
+      proposal,
+      review: projectReview({
+        proposal,
+        proposed: (path) => proposed.get(path) ?? null,
+        base: (path) => base.get(path) ?? null,
+      }),
+      ripple: await this.readPreview(proposalId),
+    };
+  }
+
+  /** Read-only preflight. `accept` repeats these fences under the gate immediately before write. */
+  async validatePending(proposalId: string, expectedDraftRevision: number): Promise<{ ok: true } | { ok: false; stale: boolean; detail: string }> {
+    const proposal = await this.readManifest(proposalId);
+    if (proposal.draftRevision !== expectedDraftRevision) {
+      return { ok: false, stale: true, detail: "The proposal changed after this card was prepared." };
+    }
+    if ((proposal.openChoices ?? []).length > 0) {
+      return { ok: false, stale: false, detail: "This proposal still has an open choice." };
+    }
+    if (proposal.pendingReview) {
+      return { ok: false, stale: false, detail: "This proposal must be reviewed again after its rebase." };
+    }
+    if ((proposal.conflicts ?? []).some((conflict) => conflict.resolution === undefined)) {
+      return { ok: false, stale: false, detail: "This proposal still has an unresolved conflict." };
+    }
+    for (const target of proposal.targets) {
+      const live = await this.readLive(target.path);
+      if (live !== null && isRetired(target.path, live)) {
+        return { ok: false, stale: true, detail: "A target of this proposal has been retired." };
+      }
+      const found = live === null ? null : sha256(live);
+      if (target.baseHash === null ? live === null : found === target.baseHash) continue;
+      const proposed = await this.readProposalFile(proposalId, target.path);
+      if (proposed !== null && live !== null && !changesAnything(target.path, live, proposed)) continue;
+      return { ok: false, stale: true, detail: "The world changed after this proposal was prepared." };
+    }
+    return { ok: true };
+  }
+
   private async writePreview(proposalId: string, preview: RipplePreview): Promise<void> {
     await atomicWriteFile(
       join(this.proposalDir(proposalId), "ripple.json"),
@@ -1772,14 +1855,20 @@ function currentLookRecord(resolved: {
   version: number;
   description: string;
   masterLook?: string;
+  keyArtIntent?: KeyArtIntent | null;
   acceptedAt?: string;
-  history: ReadonlyArray<{ version: number; description: string; masterLook?: string; acceptedAt: string }>;
+  audio: AudioPolicy;
+  failureModes: readonly string[];
+  history: ReadonlyArray<{ version: number; description: string; masterLook?: string; keyArtIntent?: KeyArtIntent | null; acceptedAt: string; audio: AudioPolicy; failureModes: readonly string[] }>;
 }): unknown {
   return {
     version: resolved.version,
     description: resolved.description,
     ...(resolved.masterLook ? { masterLook: resolved.masterLook } : {}),
+    ...(resolved.keyArtIntent !== undefined ? { keyArtIntent: resolved.keyArtIntent } : {}),
     acceptedAt: resolved.acceptedAt ?? new Date(0).toISOString(),
+    audio: resolved.audio,
+    failureModes: resolved.failureModes,
     history: resolved.history,
   };
 }
@@ -1814,12 +1903,17 @@ function restateArtDirection(mine: string, live: string, base: string | null, no
     const saw = base !== null ? ArtDirectionRecordSchema.parse(JSON.parse(base)) : null;
     const sawAudio = saw?.audio ?? DEFAULT_AUDIO_POLICY;
     const sawModes = saw?.failureModes ?? [];
+    const sawKeyArt = saw?.keyArtIntent;
     const editedAudio = JSON.stringify(proposed.audio) !== JSON.stringify(sawAudio);
     const editedModes = JSON.stringify(proposed.failureModes) !== JSON.stringify(sawModes);
+    const editedKeyArt = JSON.stringify(proposed.keyArtIntent) !== JSON.stringify(sawKeyArt);
     const rebased = ArtDirectionRecordSchema.parse({
       version: current.version + 1,
       description: proposed.description,
       ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+      ...((editedKeyArt ? proposed.keyArtIntent : current.keyArtIntent) !== undefined
+        ? { keyArtIntent: editedKeyArt ? proposed.keyArtIntent : current.keyArtIntent }
+        : {}),
       acceptedAt: now,
       audio: editedAudio ? proposed.audio : current.audio,
       failureModes: editedModes ? proposed.failureModes : current.failureModes,
@@ -1829,6 +1923,7 @@ function restateArtDirection(mine: string, live: string, base: string | null, no
           version: current.version,
           description: current.description,
           ...(current.masterLook ? { masterLook: current.masterLook } : {}),
+          ...(current.keyArtIntent !== undefined ? { keyArtIntent: current.keyArtIntent } : {}),
           acceptedAt: current.acceptedAt,
           audio: current.audio,
           failureModes: current.failureModes,

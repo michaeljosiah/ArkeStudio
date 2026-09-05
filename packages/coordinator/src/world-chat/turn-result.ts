@@ -6,6 +6,7 @@ import {
   type BibleEdit,
   type ModelEditorRequest,
   type ModelSceneEdit,
+  type ModelWorldChatAction,
   type CandidateChecks,
   type CandidateEvidence,
   type CandidateGroup,
@@ -84,6 +85,8 @@ export interface AcceptedTurn {
   editorRequests: readonly ModelEditorRequest[];
   /** Scene edits this turn described, still unapplied (SPEC-036 R-38); the runner lands them against the version it showed. */
   sceneEdits: readonly ModelSceneEdit[];
+  /** Exact authored operations this turn described, still unprepared. */
+  actions: readonly ModelWorldChatAction[];
 }
 
 export type ValidationOutcome =
@@ -261,6 +264,14 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
     }
   }
 
+  for (const { draft } of draftsWithOperations(result)) {
+    for (const ref of temporaryLinkRefs(draft)) {
+      if (!temporaryIds.has(ref.temporaryId)) {
+        problems.push(problem("unknown-temporary-reference", "A proposition referred to a same-turn entity that does not exist."));
+      }
+    }
+  }
+
   /**
    * Step 5: evidence, and step 6: receipts.
    *
@@ -310,6 +321,13 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       }
     }
   }
+  for (const action of result.actions) {
+    for (const id of action.checkReceiptIds) {
+      if (!receiptIds.has(id)) {
+        problems.push(problem("foreign-receipt", "A cited action read was not produced by this turn."));
+      }
+    }
+  }
 
   // Step 9: group membership and atomicity.
   for (const op of result.groupOperations) {
@@ -335,6 +353,16 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const candidates: WorldChangeCandidate[] = [];
   const tombstones: CandidateTombstone[] = [];
   const idByTemporary = new Map<string, CandidateId>();
+  const revisionByTemporary = new Map<string, number>();
+
+  // Plan every create before building any snapshot. A proposition may cite a later create in the
+  // same result, so resolving while walking operations would make meaning depend on array order.
+  for (const op of result.candidateOperations) {
+    if (op.op !== "create") continue;
+    const duplicate = findByStructure(op.candidate, input.existing);
+    idByTemporary.set(op.temporaryId, duplicate?.id ?? (newId("cand") as CandidateId));
+    revisionByTemporary.set(op.temporaryId, duplicate ? duplicate.revision + 1 : 1);
+  }
 
   for (const op of result.candidateOperations) {
     switch (op.op) {
@@ -343,19 +371,17 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
         // and a proposition the model has already made is an update rather than a second card.
         if (suppressedByTombstone(op.candidate, input.tombstones)) continue;
         const duplicate = findByStructure(op.candidate, input.existing);
+        const draft = resolveTemporaryReferences(op.candidate, idByTemporary, revisionByTemporary);
         if (duplicate) {
-          candidates.push(snapshot(duplicate, op.candidate, input, at, duplicate.revision + 1));
-          idByTemporary.set(op.temporaryId, duplicate.id);
+          candidates.push(snapshot(duplicate, draft, input, at, duplicate.revision + 1));
           continue;
         }
-        const id = newId("cand") as CandidateId;
-        idByTemporary.set(op.temporaryId, id);
-        candidates.push(fresh(id, op.candidate, input, at));
+        candidates.push(fresh(idByTemporary.get(op.temporaryId)!, draft, input, at));
         break;
       }
       case "update": {
         const existing = byId.get(op.candidateId)!;
-        candidates.push(snapshot(existing, op.candidate, input, at, existing.revision + 1));
+        candidates.push(snapshot(existing, resolveTemporaryReferences(op.candidate, idByTemporary, revisionByTemporary), input, at, existing.revision + 1));
         break;
       }
       case "withdraw": {
@@ -380,7 +406,10 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
         const inherited = intentEvidenceOf(existing);
         for (const replacement of op.replacements) {
           const id = newId("cand") as CandidateId;
-          candidates.push({ ...fresh(id, replacement, input, at, inherited), splitFrom: existing.id });
+          candidates.push({
+            ...fresh(id, resolveTemporaryReferences(replacement, idByTemporary, revisionByTemporary), input, at, inherited),
+            splitFrom: existing.id,
+          });
         }
         break;
       }
@@ -388,6 +417,26 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const groups = buildGroups(result, input, idByTemporary, candidates);
+  bindGroupMembers(result, input, candidates, groups);
+  const candidatesById = new Map(input.existing.map((candidate) => [candidate.id, candidate]));
+  for (const candidate of candidates) candidatesById.set(candidate.id, candidate);
+  for (const candidate of candidates) {
+    for (const ref of storedLinkRefs(candidate.draft)) {
+      const target = candidatesById.get(ref.candidateId);
+      if (
+        !candidate.groupId ||
+        !target?.groupId ||
+        candidate.groupId !== target.groupId ||
+        target.revision !== ref.revision
+      ) {
+        problems.push(problem(
+          "unbound-pending-reference",
+          "A same-turn entity reference must remain pinned inside one atomic group.",
+        ));
+      }
+    }
+  }
+  if (problems.length > 0) return { ok: false, problems: dedupeProblems(problems) };
   // Carried through untouched: the schema has already bounded them, and whether they *apply* is
   // a question about the file on disk, which only the caller holding the store can answer.
   return {
@@ -400,8 +449,123 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       bibleEdits: result.bibleEdits,
       editorRequests: result.editorRequests,
       sceneEdits: result.sceneEdits,
+      actions: result.actions,
     },
   };
+}
+
+function draftsWithOperations(result: WorldChatTurnResult): Array<{ draft: ModelCandidateDraft }> {
+  return result.candidateOperations.flatMap((op) =>
+    op.op === "create" || op.op === "update"
+      ? [{ draft: op.candidate }]
+      : op.op === "split"
+        ? op.replacements.map((draft) => ({ draft }))
+        : [],
+  );
+}
+
+function temporaryLinkRefs(draft: ModelCandidateDraft): Array<{ temporaryId: string }> {
+  const found: Array<{ temporaryId: string }> = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record["kind"] === "pending-entity") {
+      const ref = record["ref"] as Record<string, unknown> | undefined;
+      if (typeof ref?.["temporaryId"] === "string") found.push({ temporaryId: ref["temporaryId"] });
+    }
+    for (const child of Object.values(record)) visit(child);
+  };
+  visit(draft);
+  return found;
+}
+
+function storedLinkRefs(draft: WorldChangeCandidate["draft"]): Array<{ candidateId: string; revision: number }> {
+  const found: Array<{ candidateId: string; revision: number }> = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (value === null || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record["kind"] === "pending-entity") {
+      const ref = record["ref"] as { candidateId?: string; revision?: number } | undefined;
+      if (typeof ref?.candidateId === "string" && typeof ref.revision === "number") {
+        found.push({ candidateId: ref.candidateId, revision: ref.revision });
+      }
+    }
+    for (const child of Object.values(record)) visit(child);
+  };
+  visit(draft);
+  return found;
+}
+
+/** Replace model-only temporary references before the candidate crosses the durable schema. */
+function resolveTemporaryReferences(
+  draft: ModelCandidateDraft,
+  ids: ReadonlyMap<string, CandidateId>,
+  revisions: ReadonlyMap<string, number>,
+): ModelCandidateDraft {
+  const replace = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(replace);
+    if (value === null || typeof value !== "object") return value;
+    const record = value as Record<string, unknown>;
+    if (record["kind"] === "pending-entity") {
+      const ref = record["ref"] as { temporaryId?: string } | undefined;
+      if (typeof ref?.temporaryId === "string") {
+        return {
+          kind: "pending-entity",
+          ref: { candidateId: ids.get(ref.temporaryId)!, revision: revisions.get(ref.temporaryId)! },
+        };
+      }
+    }
+    return Object.fromEntries(Object.entries(record).map(([key, child]) => [key, replace(child)]));
+  };
+  return replace(draft) as ModelCandidateDraft;
+}
+
+/** Candidate snapshots carry group membership because save/materialise operate from the candidate. */
+function bindGroupMembers(
+  result: WorldChatTurnResult,
+  input: ValidateInput,
+  candidates: WorldChangeCandidate[],
+  groups: readonly CandidateGroup[],
+): void {
+  const touched = new Set(
+    result.groupOperations.flatMap((op) => op.op === "create" ? [] : [op.groupId]),
+  );
+  const membership = new Map<string, CandidateGroupId>();
+  for (const group of groups) {
+    if (group.status !== "live") continue;
+    for (const member of group.members) membership.set(member.candidateId, group.id);
+  }
+  const affected = new Set<string>(membership.keys());
+  for (const candidate of input.existing) {
+    if (candidate.groupId && touched.has(candidate.groupId)) affected.add(candidate.id);
+  }
+  for (const candidateId of affected) {
+    const index = candidates.findLastIndex((candidate) => candidate.id === candidateId);
+    const current = index >= 0 ? candidates[index]! : input.existing.find((candidate) => candidate.id === candidateId);
+    if (!current) continue;
+    const groupId = membership.get(candidateId);
+    const next = { ...current };
+    if (index < 0) next.revision = current.revision + 1;
+    if (groupId) next.groupId = groupId;
+    else delete next.groupId;
+    if (groupId) {
+      const group = groups.find((candidate) => candidate.id === groupId);
+      if (group) {
+        group.members = group.members.map((member) =>
+          member.candidateId === candidateId ? { ...member, revision: next.revision } : member);
+      }
+    }
+    if (index >= 0) candidates[index] = next;
+    else candidates.push(next);
+  }
 }
 
 function resolvableMember(
@@ -462,7 +626,6 @@ function fresh(
   // Keeping both would put the model's account of its searching next to the real one, where the
   // difference between them is exactly what must not be blurred (§8.3.1).
   const { title, rationale, settledness, evidence, checkReceiptIds, ...payload } = draft;
-  void checkReceiptIds;
   // Intent travels with the proposition, not with the turn that last touched it: the original ask
   // is still why this exists, and wrap-up refuses anything that cannot show one. A revision that
   // states its own intent keeps it; only a revision that does not inherits.
@@ -481,7 +644,20 @@ function fresh(
     rationale,
     sourceMessageIds: [...new Set(reasons.filter((e) => e.kind === "message").map((e) => e.messageId))],
     evidence: reasons,
-    checks: input.checksFor(draft),
+    checks: {
+      ...input.checksFor(draft),
+      targetReads: checkReceiptIds.flatMap((id) => {
+        const receipt = input.receiptsThisRun.find((entry) => entry.id === id);
+        return receipt?.tool === "target-read" &&
+          (receipt.status === "complete" || receipt.status === "empty") &&
+          receipt.complete === true &&
+          receipt.nextCursor === null &&
+          receipt.target !== undefined &&
+          receipt.observedRevisionOrDigest !== undefined
+          ? [{ checkId: receipt.id, target: receipt.target, observedRevisionOrDigest: receipt.observedRevisionOrDigest }]
+          : [];
+      }),
+    },
     createdAt: at,
     updatedAt: at,
   } as WorldChangeCandidate;
@@ -533,7 +709,7 @@ function buildGroups(
     // A media opportunity never lands atomically with authored change (§5.9): it is an idea, not
     // a file, so binding it to a group would make the group's promise untrue.
     const withoutMedia = members.filter((m) => {
-      const candidate = candidates.find((c) => c.id === m.candidateId);
+      const candidate = candidates.find((c) => c.id === m.candidateId) ?? input.existing.find((c) => c.id === m.candidateId);
       return candidate?.classification !== "media.image-opportunity";
     });
     if (withoutMedia.length < 2) continue;

@@ -8,6 +8,7 @@ import {
   ChatEventIdSchema,
   CheckReceiptIdSchema,
   ConversationIdSchema,
+  ConversationActionIdSchema,
   EpisodeIdSchema,
   FrameRunIdSchema,
   IsoDateTimeSchema,
@@ -33,6 +34,17 @@ import {
 } from "./editor-request.js";
 import { ShotAudioSchema, ShotFramingSchema } from "./scene.js";
 import { SHEET_SHAPES } from "./sheet-shapes.js";
+import {
+  ConversationActionBindingSchema,
+  ConversationActionCardSchema,
+  ConversationActionDecisionSchema,
+  ConversationActionPrepareIntentSchema,
+  ConversationActionReceiptSchema,
+  ConversationActionStatusSchema,
+  ConversationActionUndoLinkSchema,
+} from "./arke-actions.js";
+import { ArkeReadTargetSchema } from "./arke-reads.js";
+import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -87,6 +99,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "active-run",
   "wrap-up-in-flight",
   "unresolved-proposals",
+  "pending-actions",
 ]);
 export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema>;
 
@@ -323,6 +336,8 @@ export const CheckToolSchema = z.enum([
    * the shape and blind to the direction. Widening the enum keeps every stored receipt readable.
    */
   "get-production",
+  /** A typed complete-target read; `target` below identifies the concrete authority. */
+  "target-read",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */
@@ -344,9 +359,43 @@ export const WorldChatCheckReceiptSchema = z
         .strict(),
     ),
     searchedCount: z.number().int().min(0).optional(),
+    /** Present together on target reads; optional so every stored search receipt remains readable. */
+    target: ArkeReadTargetSchema.optional(),
+    observedRevisionOrDigest: z.string().min(1).max(200).optional(),
+    complete: z.boolean().optional(),
+    nextCursor: z.string().min(1).max(2_000).nullable().optional(),
     at: IsoDateTimeSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((receipt, context) => {
+    const targetFields = [
+      receipt.target,
+      receipt.observedRevisionOrDigest,
+      receipt.complete,
+      receipt.nextCursor,
+    ];
+    const present = targetFields.filter((field) => field !== undefined).length;
+    if (
+      receipt.tool === "target-read" &&
+      (receipt.status === "complete" || receipt.status === "empty") &&
+      present !== targetFields.length
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "a target-read receipt must carry its target, fence, completeness and next cursor" });
+    }
+    if (receipt.tool === "target-read" && present !== 0 && present !== targetFields.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "target read fields must be present together" });
+    }
+    if (
+      receipt.tool === "target-read" &&
+      present === targetFields.length &&
+      receipt.complete !== (receipt.nextCursor === null)
+    ) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "a target read is complete exactly when it has no next cursor" });
+    }
+    if (receipt.tool !== "target-read" && present !== 0) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "target read fields belong only to target-read receipts" });
+    }
+  });
 export type WorldChatCheckReceipt = z.infer<typeof WorldChatCheckReceiptSchema>;
 
 export const CheckCategorySchema = z.enum(["canon-search", "sheet-search", "target-read", "related-read"]);
@@ -392,6 +441,18 @@ export const CandidateChecksSchema = z
         })
         .strict(),
     ),
+    /** Final-page target receipts cited by the model and verified by the coordinator for this turn. */
+    targetReads: z
+      .array(
+        z
+          .object({
+            checkId: CheckReceiptIdSchema,
+            target: ArkeReadTargetSchema,
+            observedRevisionOrDigest: z.string().min(1).max(200),
+          })
+          .strict(),
+      )
+      .optional(),
     likelyDuplicates: z.array(WorldChatEntityRefSchema),
     possibleAmendments: z.array(WorldChatEntityRefSchema),
     contradictionCandidates: z.array(WorldChatEntityRefSchema),
@@ -961,6 +1022,7 @@ export const WorldChatNotCarriedSchema = z
       "role-too-long",
       "unknown-section",
       "changes-nothing",
+      "incomplete-read",
     ]),
   })
   .strict();
@@ -1061,8 +1123,10 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
       candidates: z.array(WorldChangeCandidateSchema),
       groups: z.array(CandidateGroupSchema),
       tombstones: z.array(CandidateTombstoneSchema),
+      /** Defaults keep every turn written before SPEC-041 readable. */
+      actionPrepareIntents: z.array(ConversationActionPrepareIntentSchema).optional(),
       /**
-       * The Bible edit this turn landed, if it made one (master §4.5).
+       * Legacy pointer for Bible edits written before model-originated changes moved behind cards.
        *
        * Recorded with the reply for the same reason the propositions are: the reply says "I've
        * written that down", and a crash that kept the sentence but lost the record of which
@@ -1221,6 +1285,47 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("deletion.intent-recorded"), requestId: z.string().min(1) }).strict(),
+  z.object({ type: z.literal("action.prepare-intent"), intent: ConversationActionPrepareIntentSchema }).strict(),
+  z.object({ type: z.literal("action.prepared"), binding: ConversationActionBindingSchema }).strict(),
+  z
+    .object({
+      type: z.literal("action.prepare-failed"),
+      actionId: ConversationActionIdSchema,
+      detail: z.string().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.decision-recorded"),
+      actionId: ConversationActionIdSchema,
+      decision: ConversationActionDecisionSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.status-changed"),
+      actionId: ConversationActionIdSchema,
+      expectedStatus: ConversationActionStatusSchema,
+      status: ConversationActionStatusSchema,
+      detail: z.string().min(1).max(1_000).optional(),
+      receipt: ConversationActionReceiptSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.superseded"),
+      actionId: ConversationActionIdSchema,
+      supersededBy: ConversationActionIdSchema,
+      detail: z.string().min(1).max(1_000).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("action.undo-linked"),
+      actionId: ConversationActionIdSchema,
+      undo: ConversationActionUndoLinkSchema,
+    })
+    .strict(),
 ]);
 export type WorldChatStoredEvent = z.infer<typeof WorldChatStoredEventSchema>;
 
@@ -1261,6 +1366,8 @@ export const WorldChatSummarySchema = z
     pointCount: z.number().int().min(0),
     /** Proposals from its wrap-up that are still awaiting a decision. */
     openProposalCount: z.number().int().min(0),
+    /** Cards still requiring attention or execution. Absent in pre-SPEC-041 snapshots. */
+    pendingActionCount: z.number().int().min(0).optional(),
     reopened: z.boolean().optional(),
     /** What its wrap-up could not carry, so the approvals screen can say so. */
     notCarried: z.array(WorldChatNotCarriedSchema).default([]),
@@ -1307,6 +1414,7 @@ export const WorldChatLoadedSchema = z
     /** True when older messages exist before `messages[0]`. */
     hasMore: z.boolean(),
     candidates: z.array(WorldChangeCandidateSchema),
+    actions: z.array(ConversationActionCardSchema).default([]),
     /** Bench sessions prepared from media candidates, keyed by candidate id. */
     mediaHandoffs: z.record(CandidateIdSchema, WorldChatMediaHandoffSchema).default({}),
     groups: z.array(CandidateGroupSchema),
@@ -1398,13 +1506,53 @@ export const ModelCandidateCommonSchema = z.object({
   checkReceiptIds: z.array(CheckReceiptIdSchema),
 });
 
+/** A temporary id is only meaningful inside the turn result that created it. */
+const TemporaryIdSchema = z.string().min(1).max(64);
+
+/** Model output may point at another create in this result before either has a durable id. */
+export const ModelWorldChatLinkRefSchema = z.union([
+  WorldChatLinkRefSchema,
+  z.object({ kind: z.literal("pending-entity"), ref: z.object({ temporaryId: TemporaryIdSchema }).strict() }).strict(),
+]);
+export type ModelWorldChatLinkRef = z.infer<typeof ModelWorldChatLinkRefSchema>;
+
 export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", [
-  ModelCandidateCommonSchema.extend(CanonCreatePayload).strict(),
-  ModelCandidateCommonSchema.extend(CanonAmendPayload).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...CanonCreatePayload,
+    draft: CanonCreatePayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema) }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    classification: z.literal("canon.amend"),
+    target: CanonAmendPayload.target,
+    draft: z
+      .object({
+        type: CanonEntryTypeSchema.optional(),
+        title: z.string().min(1).max(160).optional(),
+        statement: z.string().min(1).optional(),
+        links: z.array(ModelWorldChatLinkRefSchema).optional(),
+      })
+      .strict()
+      .refine((draft) => Object.keys(draft).length > 0, "an amendment must change at least one field"),
+  }).strict(),
   ModelCandidateCommonSchema.extend(CanonThreadPayload).strict(),
-  ModelCandidateCommonSchema.extend(SheetCreatePayload).strict(),
-  ModelCandidateCommonSchema.extend(SheetEditPayload).strict(),
-  ModelCandidateCommonSchema.extend(RelationshipChangePayload).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...SheetCreatePayload,
+    draft: SheetCreatePayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema) }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...SheetEditPayload,
+    draft: SheetEditPayload.draft.extend({ links: z.array(ModelWorldChatLinkRefSchema).optional() }).strict(),
+  }).strict(),
+  ModelCandidateCommonSchema.extend({
+    ...RelationshipChangePayload,
+    draft: RelationshipChangePayload.draft.extend({
+      from: ModelWorldChatLinkRefSchema,
+      to: ModelWorldChatLinkRefSchema,
+      proseEdits: z.array(
+        RelationshipChangePayload.draft.shape.proseEdits.element.extend({ sheet: ModelWorldChatLinkRefSchema }).strict(),
+      ),
+    }).strict(),
+  }).strict(),
   ModelCandidateCommonSchema.extend(ArtDirectionChangePayload).strict(),
   ModelCandidateCommonSchema.extend(ImageOpportunityPayload).strict(),
   ModelCandidateCommonSchema.extend(DevelopmentOverviewPayload).strict(),
@@ -1416,9 +1564,6 @@ export const ModelCandidateDraftSchema = z.discriminatedUnion("classification", 
   ModelCandidateCommonSchema.extend(UndecidedPayload).strict(),
 ]);
 export type ModelCandidateDraft = z.infer<typeof ModelCandidateDraftSchema>;
-
-/** A temporary id is only meaningful inside the turn result that created it. */
-const TemporaryIdSchema = z.string().min(1).max(64);
 
 export const ModelCandidateRefSchema = z.union([
   z.object({ candidateId: CandidateIdSchema, revision: z.number().int().min(1) }).strict(),
@@ -1501,6 +1646,7 @@ export const TURN_RESULT_BOUNDS = {
   reply: 8_000,
   candidateOperations: 12,
   groupOperations: 6,
+  actions: 12,
 } as const;
 
 export const WorldChatTurnResultSchema = z
@@ -1509,29 +1655,30 @@ export const WorldChatTurnResultSchema = z
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
     /**
-     * Edits to the author's Bible, applied by the coordinator when the turn lands (master §4.5).
+     * Edits to the author's Bible, prepared by the coordinator for a permission card.
      *
      * Here rather than on the retrieval tool surface, which is read-only by contract (#70 §9.2)
      * and confines the harness to its scratch directory (§18.3). Both stay true: the model
-     * describes the edit, the coordinator performs it, and the one path that writes the file is
-     * also the path that versions and snapshots it.
+     * describes the edit, the coordinator validates and prepares it, and approval uses the one
+     * path that writes, versions and snapshots the file.
      *
      * Defaulted rather than required, so a turn that touches nothing may omit it entirely.
      */
     bibleEdits: z.array(BibleEditSchema).max(BIBLE_EDIT_BOUNDS.edits).default([]),
     /**
-     * Editor requests this turn stages (SPEC-039 R-27, issue 684): exact timeline commands the
-     * coordinator validates against the live base and writes as pending records. The reply is
-     * prose about them; the record is what a person accepts or rejects. Defaulted like the bible
-     * edits, so a turn that asks for nothing omits it.
+     * Editor requests this turn proposes (SPEC-039 R-27, issue 684): exact timeline commands the
+     * coordinator validates against the live base and stages only after the completed turn and
+     * its preparation intent are durable. Defaulted like the Bible edits.
      */
     editorRequests: z.array(ModelEditorRequestSchema).max(EDITOR_REQUEST_BOUNDS.perTurn).default([]),
     /**
-     * Scene edits this turn makes (SPEC-036 R-38): a rename the coordinator lands at once
-     * through the header's own version-fenced write, with no card — a title is a label, and the
-     * person is looking at it. Only in a scene thread. Defaulted like the others.
+     * Scene edits this turn proposes: a rename prepared against the version shown to the model,
+     * then landed through the header's own fenced write only after approval. Only in a scene
+     * thread. Defaulted like the others.
      */
     sceneEdits: z.array(ModelSceneEditSchema).max(SCENE_EDIT_BOUNDS.perTurn).default([]),
+    /** Exact world-authoring operations prepared as permission cards; none writes during the turn. */
+    actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
   .strict();
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
@@ -1595,6 +1742,8 @@ export type WorldChatPoint = z.infer<typeof WorldChatPointSchema>;
 export const WorldChatTranscriptMessageSchema = z
   .object({
     id: MessageIdSchema,
+    /** Present on current projections so a durable card can remain beside the turn that made it. */
+    turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
@@ -1638,6 +1787,7 @@ export const WorldChatWorkspaceSchema = z
     /** True when older messages exist before the first one here. */
     hasMore: z.boolean().default(false),
     points: z.array(WorldChatPointSchema),
+    actions: z.array(ConversationActionCardSchema).default([]),
     /**
      * How many events this conversation has, so wrap-up can be refused when it has moved on.
      *
@@ -2004,7 +2154,459 @@ const exampleTurnResult = {
   bibleEdits: [],
   editorRequests: [],
   sceneEdits: [],
+  actions: [],
 } satisfies WorldChatTurnResult;
+
+const exampleWorldActions = {
+  "world-metadata": {
+    kind: "world-metadata",
+    changes: { logline: "At slack water, a bell-keeper must answer a drowned city before it answers her." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  canon: {
+    kind: "canon",
+    change: {
+      operation: "amend",
+      entryId: "CANON-012",
+      changes: { statement: "The harbour bells ring only at slack water.", links: ["maren-kest"] },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "canon-retire": {
+    kind: "canon-retire",
+    entryId: "CANON-012",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "canon-restore": {
+    kind: "canon-restore",
+    entryId: "CANON-012",
+    version: 4,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  sheet: {
+    kind: "sheet",
+    change: {
+      operation: "edit",
+      sheetType: "character",
+      sheetId: "maren-kest",
+      changes: { billing: "lead", sections: [{ heading: "Relationships", body: "Sera Kest raised her." }] },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "sheet-retire": {
+    kind: "sheet-retire",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "sheet-restore": {
+    kind: "sheet-restore",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    version: 3,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "art-direction": {
+    kind: "art-direction",
+    changes: {
+      description: "Painterly salt-air naturalism with bold colour scripting.",
+      audio: { music: "environmental-only", subtitles: "never" },
+      failureModes: ["Hands stay whole and countable."],
+      keyArtIntent: {
+        subject: "Maren beneath the slack-water bells",
+        characters: ["Maren Kest"],
+        location: "The Vigil",
+      },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "art-direction-restore": {
+    kind: "art-direction-restore",
+    version: 2,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-import": {
+    kind: "artifact-import",
+    source: "files",
+    links: ["maren-kest"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-metadata": {
+    kind: "artifact-metadata",
+    change: { operation: "set-owner", artifactId: `ar_${EXAMPLE_ULID}`, productionId: "saltlight" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction": {
+    kind: "artifact-extraction",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction-stop": {
+    kind: "artifact-extraction-stop",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-extraction-review": {
+    kind: "artifact-extraction-review",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    candidateHash: "0123456789abcdef",
+    decision: "accept",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "artifact-reference": {
+    kind: "artifact-reference",
+    artifactId: `ar_${EXAMPLE_ULID}`,
+    key: "main-photo--maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-import": {
+    kind: "reference-import",
+    change: { operation: "location-view-candidate", sheetId: "the-vigil" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-result-use": {
+    kind: "reference-result-use",
+    change: { operation: "accept-character-look", sheetId: "maren-kest", takeId: `tk_${EXAMPLE_ULID}` },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-review": {
+    kind: "reference-review",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    decision: "reject",
+    field: "identity",
+    note: "The face no longer matches the anchor.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-change": {
+    kind: "reference-change",
+    change: { operation: "attach-look", sheetId: "maren-kest", lookId: `tk_${EXAMPLE_ULID}`, scope: { kind: "production", productionId: "saltlight" } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-tile-lock": {
+    kind: "reference-tile-lock",
+    sheetId: "maren-kest",
+    angle: "head-front",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-compile": {
+    kind: "reference-compile",
+    sheetId: "maren-kest",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-style": {
+    kind: "reference-style",
+    sheetId: "maren-kest",
+    style: "Salt-air naturalism with restrained colour.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-generation": {
+    kind: "reference-generation",
+    request: { operation: "character-looks", sheetId: "maren-kest", lookKind: "costume", mode: "stay-close", prompt: "A weathered harbour coat.", count: 2 },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-image-import": {
+    kind: "reference-image-import",
+    target: { surface: "staged-reference", key: "main-photo--maren-kest" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-world-image-result-use": {
+    kind: "reference-world-image-result-use",
+    candidateIndex: 1,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-master-look-result-use": {
+    kind: "reference-master-look-result-use",
+    candidateIndex: 1,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "reference-image-discard": {
+    kind: "reference-image-discard",
+    target: { surface: "world-image" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-assignment": {
+    kind: "voice-assignment",
+    sheetType: "character",
+    sheetId: "maren-kest",
+    voice: { provider: "voxa", model: "kokoro-82m", voiceId: "af-heart", label: "Heart" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-audition": {
+    kind: "voice-audition",
+    sheetId: "maren-kest",
+    voice: { provider: "voxa", model: "kokoro-82m", voiceId: "af-heart", label: "Heart" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-clone": {
+    kind: "voice-clone",
+    name: "Maren",
+    description: "Low, measured, and weathered by salt air.",
+    sheetId: "maren-kest",
+    recordingGesture: "required",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "voice-clip-review": {
+    kind: "voice-clip-review",
+    productionId: "saltlight",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    review: {
+      decision: "reject",
+      shotId: "sh_01",
+      citation: { sheet: "maren-kest", field: "Voice", note: "The delivery is too formal." },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "world-archive": {
+    kind: "world-archive",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "world-export": {
+    kind: "world-export",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-create": {
+    kind: "production-create",
+    production: {
+      title: "Bell Watch: Season One",
+      medium: "video",
+      productionKind: "series",
+      seriesTitle: "Bell Watch",
+      aspect: "16:9",
+      frameRate: 24,
+      defaults: { episodeCount: 8, episodeSecondsMax: 180 },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-metadata": {
+    kind: "production-metadata",
+    productionId: "saltlight",
+    changes: { title: "Saltlight: The Bell Watch", status: "writing", aspect: "2:1", frameRate: 25 },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-model": {
+    kind: "production-model",
+    productionId: "saltlight",
+    capability: "video",
+    modelId: "seedance-2.5",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-series": {
+    kind: "production-series",
+    productionId: "bell-watch-season-1",
+    change: {
+      operation: "edit",
+      seriesId: "bell-watch",
+      changes: { engine: "Every night, the watch answers one bell that should not ring." },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-overview": {
+    kind: "production-overview",
+    productionId: "saltlight",
+    changes: { logline: "The drowned bell rings one night early." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-season": {
+    kind: "production-season",
+    productionId: "bell-watch-season-1",
+    changes: {
+      question: "Who is ringing the drowned bell?",
+      defaults: { episodeCount: 8 },
+      arcs: [{ id: "maren-answers", title: "Maren answers", setup: "ep_the-ledger", payoff: "ep_below" }],
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-episode": {
+    kind: "production-episode",
+    productionId: "bell-watch-season-1",
+    change: {
+      operation: "edit",
+      episodeId: "ep_the-ledger",
+      changes: {
+        promise: { opens: "The fourteenth page is gone." },
+        release: { title: "The Missing Night", tags: ["mystery", "harbour"] },
+      },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-chapter": {
+    kind: "production-chapter",
+    productionId: "saltlight",
+    change: { operation: "edit", chapterId: "the-vigil", changes: { body: "Maren opens the ledger to the missing night." } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene": {
+    kind: "production-scene",
+    productionId: "saltlight",
+    change: {
+      operation: "replace-script",
+      sceneId: "sc_04",
+      blocks: [{ id: "blk_the-empty-page", kind: "action", text: "Maren opens the ledger to the 14th." }],
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-episode-order": {
+    kind: "production-episode-order",
+    productionId: "bell-watch-season-1",
+    orderedIds: ["ep_the-ledger", "ep_below"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-chapter-order": {
+    kind: "production-chapter-order",
+    productionId: "saltlight",
+    orderedIds: ["the-vigil", "below-the-bells"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-order": {
+    kind: "production-scene-order",
+    productionId: "saltlight",
+    orderedIds: ["sc_04", "sc_05"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-delete": {
+    kind: "production-scene-delete",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-restore": {
+    kind: "production-scene-restore",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    version: 2,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-style": {
+    kind: "production-style",
+    productionId: "saltlight",
+    style: "Bleached documentary realism.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-command": {
+    kind: "production-scene-command",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    command: { kind: "set-prompt-override", shotId: "sh_001", text: "Salt-lit close-up of the missing page." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-board-compile": {
+    kind: "production-board-compile",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-board-export": {
+    kind: "production-board-export",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-take-import": {
+    kind: "production-take-import",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    shotId: "sh_001",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-take-generation": {
+    kind: "production-take-generation",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    target: { kind: "shot", shotId: "sh_001" },
+    mode: "video",
+    retakeOf: `tk_${EXAMPLE_ULID}`,
+    instruction: "Keep the performance and make the camera steadier.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-take-review": {
+    kind: "production-take-review",
+    productionId: "saltlight",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    review: { decision: "accept", shotId: "sh_001" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-take-trim": {
+    kind: "production-take-trim",
+    productionId: "saltlight",
+    shotId: "sh_001",
+    takeId: `tk_${EXAMPLE_ULID}`,
+    trimInSec: 0.5,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-stage-playblast": {
+    kind: "production-stage-playblast",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    shotId: "sh_001",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "audio-spine-command": {
+    kind: "audio-spine-command",
+    productionId: "saltlight",
+    baseRevision: 2,
+    command: {
+      kind: "set-anchor",
+      shotId: "sh_001",
+      anchor: { startSec: 12, endSec: 18, clipAudio: { mode: "mute" } },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-routing": {
+    kind: "production-routing",
+    productionId: "saltlight",
+    command: { operation: "add-choice", choice: { id: "ch_answer", from: "sc_04", label: "Answer the bell", to: "sc_05" } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-routing-traversal": {
+    kind: "production-routing-traversal",
+    productionId: "saltlight",
+    choiceId: "ch_answer",
+    from: "sc_04",
+    to: "sc_05",
+    route: ["sc_04"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-branch-canon": {
+    kind: "production-branch-canon",
+    productionId: "saltlight",
+    sceneId: "sc_05",
+    route: ["sc_04", "sc_05"],
+    title: "Maren answers the drowned bell",
+    body: "Maren answered the bell at slack water.",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-interactive-export": {
+    kind: "production-interactive-export",
+    productionId: "saltlight",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-cut-export": {
+    kind: "production-cut-export",
+    productionId: "saltlight",
+    scope: { kind: "episode", episodeId: "ep_the-ledger" },
+    preset: "review-cut",
+    subtitles: { trackId: "tr_subtitles", mode: "sidecar", sidecar: "vtt" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-export-cancel": {
+    kind: "production-export-cancel",
+    productionId: "saltlight",
+    exportId: `ex_${EXAMPLE_ULID}`,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "bench-generation": {
+    kind: "bench-generation",
+    sessionId: `sess_${EXAMPLE_ULID}`,
+    composer: {
+      mode: "image",
+      provider: "fal",
+      model: "fal-ai/flux/dev",
+      params: { kind: "image", aspect: "16:9", count: 2 },
+      brief: "Two salt-stained ledger studies on a black quay.",
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+} satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
 const exampleEditorRequest = {
@@ -2052,6 +2654,7 @@ export const WORLD_CHAT_SHAPE_EXAMPLES = {
   groupOperation: exampleGroupOperation,
   turnResult: exampleTurnResult,
   bibleEdits: exampleBibleEdits,
+  worldActions: exampleWorldActions,
 } as const;
 
 /**
@@ -2213,9 +2816,9 @@ export function worldChatResultShapeGuide(): string {
 
 Return one JSON object and nothing else — no prose around it, no markdown fences:
 
-{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...]}
+{"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}; all are [] when there is nothing to record.
+reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn}, sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions}; all are [] when there is nothing to record.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
@@ -2261,22 +2864,22 @@ ${sheetSectionRule()}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}
 - ${draftPayloadLine("art-direction.change")}
-  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one.
+  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one. First call get_art_direction through arke-world and put its final complete checkReceiptId in checkReceiptIds; without that complete fenced read this whole replacement is refused.
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   Use this for media the person could generate. medium is image or video. Use concept-image for a free image, concept-video for a free video, and shot-video when the target is a shot. The Studio proposes the brief; it never claims the media already exists.
   fields: ${draftFieldCatalogue("media.image-opportunity")}
 - ${draftPayloadLine("development.overview")}
-  The production's structured overview as it should now read. Only in a production, episode or scene conversation.
+  The production's structured overview as it should now read. Only in a production, episode or scene conversation. acts replaces the whole ordered act list; before carrying acts, page get_story to complete=true and cite the final checkReceiptId.
   fields: ${draftFieldCatalogue("development.overview")}
 - ${draftPayloadLine("development.season")}
-  The season's question, ending, direction and arcs. The episode envelope's defaults are a form's to change, never a conversation's.
+  The season's question, ending, direction and arcs. arcs replaces the whole arc list; before carrying arcs, page get_season to complete=true and cite the final checkReceiptId. The episode envelope's defaults are a form's to change, never a conversation's.
   fields: ${draftFieldCatalogue("development.season")}
 - ${draftPayloadLine("development.episode")}
-  target.episodeId absent creates a new episode; present amends the one named. scenes is the whole ordered membership when carried.
+  target.episodeId absent creates a new episode; present amends the one named. scenes is the whole ordered membership when carried. Before replacing an existing episode's scenes, page list_episodes to complete=true and cite the final checkReceiptId.
   fields: ${draftFieldCatalogue("development.episode")}
 - ${draftPayloadLine("development.scene-script")}
-  blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes.
+  blocks is the whole ordered script as it should now read; block ids are stable and shots cite them, so keep an existing block's id when only its text changes. First page get_scene_script through arke-world to complete=true and put the final checkReceiptId in checkReceiptIds. Never replace a script from a partial page.
   fields: ${draftFieldCatalogue("development.scene-script")}
 - ${draftPayloadLine("development.shot")}
   One shot inside a scene. target.shotId present amends that shot; absent adds a shot at the end of the scene. Carry only the fields that change — an amendment is not a rewrite, and a field you omit is left exactly as it is. The shot's id and its number are not yours to set: identity is minted once and the storyboard's drag is what reorders. Write description with @mentions for every character and location it shows, camera as a complete value naming a fixture the location supports and what the camera faces before the size and movement, and audio as an object, never a sentence.
@@ -2310,7 +2913,7 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, grounded answers do not come from it, and a candidate may never cite it as evidence. Other generation paths may use it only as non-binding creative intent.
 
-You may edit it, and edits land immediately — there is no accept step. Every edit cuts a version and can be undone, which is why it needs no permission; it is not a licence to tidy. Edit it when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
+You may propose edits to it. Each edit is shown on a permission card and writes only after the person's Approve; approval cuts a version and can be undone. This is not a licence to tidy. Propose an edit when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
 
 op is one of set-section | append-to-section | remove-section | replace-document.
 
@@ -2318,14 +2921,27 @@ op is one of set-section | append-to-section | remove-section | replace-document
 - append-to-section adds to the end of a section that already exists: ${JSON.stringify(exampleBibleEdits["append-to-section"])}
 - remove-section takes one out: ${JSON.stringify(exampleBibleEdits["remove-section"])}
 - replace-document rewrites the whole thing: {"op": "replace-document", "text": "..."}
+  Before replace-document, page get_bible through arke-world to complete=true; a partial Bible read cannot authorize a whole replacement.
 
 heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
 
 Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
 
+### World actions
+
+Actions wait for Approve and cite final complete reads.
+
+- world-metadata changes name, logline, tone or genre.
+- canon: create(entryType,title,statement,links); amend(entryId,changes); open-thread(title,question,consideredEntryIds); settle-thread(entryId,resolvedType,statement); set-status(entryId,change); set-considered-entries(entryId,consideredEntryIds). Types: rule|lore|location|faction|timeline|tone.
+- canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
+- sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
+- sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
+- art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
+- production-* never replans creation; prose uses proposals; order and script ids stay stable.
+
 ### Editor requests
 
-Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request stages exact timeline commands for them to accept or reject on a card beside the timeline. Nothing you write in reply changes the timeline. Only their Accept does, and it applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
+Only in a production, episode or scene thread, and only when the person asks for a change to the cut: an editor request prepares exact timeline commands for a permission card. Nothing you write in reply changes or stages anything on the timeline. Only the person's Approve applies every command or none, as one undoable step. The timeline you may address is described in the thread's context — its clip ids, tracks and frames. A request naming a clip that is not there, or one that cannot apply, is refused, and a refusal rejects the whole turn, so name only what you were shown.
 
 ${JSON.stringify(exampleEditorRequest)}
 
@@ -2333,7 +2949,7 @@ summary says what moves, what goes and what comes, in their terms — never "imp
 
 ### Scene edits
 
-Only in a scene thread, and only that scene: a scene edit renames it, and it lands at once — no card, no accept step — because a title is a label the person is looking at. Rename when they ask for a name, or when the scene is still called Untitled and what they have said makes its name plain; otherwise leave the name alone. The title reads in the header as \`Scene 7 · The tide answers\`, so give the name only, short and in their register. A rename against a scene that changed while you were answering is refused, and a refusal rejects the whole turn.
+Only in a scene thread, and only that scene: a scene edit proposes a rename on a permission card, and the title changes only after the person's Approve. Rename when they ask for a name, or when the scene is still called Untitled and what they have said makes its name plain; otherwise leave the name alone. The title reads in the header as \`Scene 7 · The tide answers\`, so give the name only, short and in their register. A rename against a scene that changed while you were answering is refused, and a refusal rejects the whole turn.
 
 ${JSON.stringify(exampleSceneEdit)}
 

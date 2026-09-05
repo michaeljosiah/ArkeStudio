@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   newId,
+  migrateLegacyScene,
   type ChatAttachmentId,
   type ConversationId,
   type RunId,
   type WorldChatAttachment,
   type WorldChatCheckReceipt,
+  type ProductionTimeline,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
@@ -14,6 +16,7 @@ import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
+import { exportsFence, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -28,7 +31,10 @@ import { tempDir } from "../tmp.js";
 
 const NOW = () => "2026-08-06T10:00:00Z";
 
-async function harness(options: { withIndex?: boolean } = {}) {
+async function harness(options: {
+  withIndex?: boolean;
+  exports?: (worldId: string) => readonly ArkeExportReadRecord[];
+} = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
   const index = options.withIndex === false ? null : WorldIndex.open(worldDir, bundle);
@@ -54,13 +60,14 @@ async function harness(options: { withIndex?: boolean } = {}) {
     getIndex: () => index,
     attachments,
     findAttachment: async (_lease, id) => known.get(id) ?? null,
+    ...(options.exports ? { getExports: () => options.exports!(bundle.meta.worldId) } : {}),
     now: NOW,
   });
 
   const mint = (allowed: ChatAttachmentId[] = []) =>
     leases.mint({ worldId: bundle.meta.worldId, conversationId, runId, allowedAttachmentIds: allowed });
 
-  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId };
+  return { retrieval, leases, mint, state, attachments, conversationId, known, index, runId, bundle };
 }
 
 describe("leased retrieval", () => {
@@ -201,6 +208,182 @@ describe("leased retrieval", () => {
     );
     h.index?.close();
   });
+
+  it("pages a 200-block script without first-N truncation and issues completeness only at the end", async () => {
+    const h = await harness();
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const scene = production.scenes.find((entry) => entry.id === "sc_04")!;
+    scene.script = {
+      blocks: Array.from({ length: 200 }, (_, index) => ({
+        id: `blk_line-${String(index).padStart(3, "0")}`,
+        kind: "action" as const,
+        text: `Line ${index}`,
+      })),
+    };
+    const token = h.mint().token;
+    const seen: string[] = [];
+    let cursor: string | null | undefined;
+    let calls = 0;
+    do {
+      const { result, receipt } = await h.retrieval.call(token, "get_scene_script", {
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        limit: 20,
+        ...(cursor ? { cursor } : {}),
+      });
+      const page = result as { items: Array<{ id: string }>; nextCursor: string | null; complete: boolean };
+      seen.push(...page.items.map((item) => item.id));
+      cursor = page.nextCursor;
+      calls += 1;
+      assert.equal(receipt.tool, "target-read");
+      assert.equal(receipt.target?.requirement, "scenes");
+      assert.equal(receipt.complete, cursor === null);
+      assert.equal(receipt.nextCursor, cursor);
+    } while (cursor !== null);
+
+    assert.equal(calls, 10);
+    assert.equal(seen.length, 200);
+    assert.equal(new Set(seen).size, 200);
+    h.index?.close();
+  });
+
+  it("rejects a page cursor when the fenced target changes", async () => {
+    const h = await harness();
+    const scene = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!.scenes.find((entry) => entry.id === "sc_04")!;
+    scene.script = {
+      blocks: Array.from({ length: 3 }, (_, index) => ({ id: `blk_row-${index}`, kind: "action" as const, text: `Before ${index}` })),
+    };
+    const token = h.mint().token;
+    const first = await h.retrieval.call(token, "get_scene_script", {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      limit: 1,
+    });
+    const cursor = (first.result as { nextCursor: string }).nextCursor;
+    scene.script.blocks[1]!.text = "Changed between pages";
+
+    await assert.rejects(
+      () => h.retrieval.call(token, "get_scene_script", {
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        cursor,
+      }),
+      /changed while it was being read/,
+    );
+    h.index?.close();
+  });
+
+  it("includes graph flow authority in a complete scene read", async () => {
+    const h = await harness();
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const sceneIndex = production.scenes.findIndex((entry) => entry.id === "sc_04");
+    const scene = production.scenes[sceneIndex]!;
+    if (!("shots" in scene)) throw new Error("fixture scene was already graph-backed");
+    production.scenes[sceneIndex] = migrateLegacyScene(scene) as never;
+
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "get_scene", {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      limit: 20,
+    });
+    const page = result as { items: Array<{ kind?: string; flow?: { nodes: unknown[]; edges: unknown[] } }> };
+    const structure = page.items.find((item) => item.kind === "scene-flow");
+    assert.ok(structure?.flow);
+    assert.ok(structure.flow.nodes.length > 0);
+    assert.ok(structure.flow.edges.length > 0);
+    assert.equal(receipt.complete, true);
+    h.index?.close();
+  });
+
+  it("returns durable export identity without exposing host paths or raw failures", async () => {
+    const h = await harness({
+      exports: (worldId) => [{
+        id: "ex_finished",
+        worldId,
+        productionId: "saltlight",
+        status: "failed",
+        percent: 40,
+        output: "C:\\Users\\author\\secret.mp4",
+        error: "ffmpeg failed beside C:\\Users\\author\\secret.mp4",
+      }],
+    });
+    const { result } = await h.retrieval.call(h.mint().token, "list_exports", { productionId: "saltlight" });
+    const page = result as { items: Array<{ id: string; output: string | null; error: string | null }> };
+    assert.deepEqual(page.items, [{
+      id: "ex_finished",
+      worldId: h.bundle.meta.worldId,
+      productionId: "saltlight",
+      status: "failed",
+      percent: 40,
+      output: null,
+      error: "export failed",
+    }]);
+    h.index?.close();
+  });
+
+  it("keeps an export target stable while only its advisory progress changes", () => {
+    const record: ArkeExportReadRecord = {
+      id: "ex_running",
+      worldId: "world-1",
+      productionId: "saltlight",
+      status: "running",
+      percent: 10,
+      output: null,
+      error: null,
+    };
+    const before = exportsFence([record], record.worldId, record.productionId);
+    const afterProgress = exportsFence([{ ...record, percent: 90 }], record.worldId, record.productionId);
+    const afterTerminal = exportsFence([{ ...record, status: "done", percent: 100 }], record.worldId, record.productionId);
+
+    assert.equal(afterProgress, before);
+    assert.notEqual(afterTerminal, before);
+  });
+
+  it("keeps every track and clip addressable beyond the old 12-track and 40-clip prompt bounds", async () => {
+    const h = await harness();
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    const timeline: ProductionTimeline = {
+      schemaVersion: 1,
+      revision: 1,
+      frameRate: 24,
+      history: { undo: [], redo: [] },
+      mix: { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 },
+      library: [],
+      tracks: Array.from({ length: 13 }, (_, trackIndex) => ({
+        id: `tr_extra_${trackIndex}`,
+        kind: "picture" as const,
+        name: `Track ${trackIndex}`,
+        order: trackIndex,
+        muted: false,
+        clips: Array.from({ length: 4 }, (_, clipIndex) => ({
+          id: `cl_extra_${trackIndex}_${clipIndex}`,
+          startFrame: clipIndex * 24,
+          durationFrames: 24,
+          sourceInFrames: 0,
+          source: { kind: "shot" as const, shotId: "sh_001", sceneNumber: 1, shotNumber: 1, label: "Shot" },
+        })),
+      })),
+    };
+    production.timeline = { status: "ready", timeline };
+    const token = h.mint().token;
+    const items: Array<{ kind: string; clip?: { id: string } }> = [];
+    let cursor: string | null | undefined;
+    do {
+      const { result } = await h.retrieval.call(token, "get_timeline", {
+        productionId: "saltlight",
+        limit: 20,
+        ...(cursor ? { cursor } : {}),
+      });
+      const page = result as { items: typeof items; nextCursor: string | null };
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor !== null);
+
+    assert.equal(items.filter((item) => item.kind === "track").length, 13);
+    assert.equal(items.filter((item) => item.kind === "clip").length, 52);
+    assert.ok(items.some((item) => item.clip?.id === "cl_extra_12_3"));
+    h.index?.close();
+  });
 });
 
 describe("leased attachment reads", () => {
@@ -310,6 +493,8 @@ describe("the served surface", () => {
     assert.ok(names.includes("search_sheets"));
     assert.ok(names.includes("get_attachment_text"));
     assert.ok(names.includes("get_production"), "the production read reaches leased callers (round 3)");
+    assert.ok(names.includes("get_scene_script"), "complete target reads are leased");
+    assert.ok(names.includes("get_timeline"), "the full timeline can be paged without entering prompts");
 
     const ambient = await rpc(server.url()!, "tools/list");
     const ambientNames = (ambient.body as { result: { tools: Array<{ name: string }> } }).result.tools.map(

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationIdSchema, SlugSchema } from "./ids.js";
+import { ConversationActionIdSchema, ConversationIdSchema, SceneIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 import {
   PICTURE_TRACK_ID,
   TimelineClipIdSchema,
@@ -13,6 +13,7 @@ import {
   type TimelineClip,
   type TimelineClipCommand,
   type TimelineCommand,
+  type TimelineSelectionChange,
   type TimelineState,
 } from "./timeline.js";
 
@@ -30,7 +31,7 @@ import {
  */
 
 export const EDITOR_REQUEST_BOUNDS = {
-  /** Requests one turn may stage; a conversation that wants more says so over more turns. */
+  /** Requests one turn may prepare; a conversation that wants more says so over more turns. */
   perTurn: 2,
   commands: 50,
   summary: 500,
@@ -49,11 +50,9 @@ export type EditorRequestStatus = z.infer<typeof EditorRequestStatusSchema>;
 /**
  * Arke's scene edits (SPEC-036 R-38).
  *
- * Unlike an editor request, a scene edit is not carded: a title is a label, not a change anyone
- * needs to review, and the person is looking at it. The model describes the edit in a typed field,
- * the coordinator lands it through the same version-fenced `edit-scene` write the header uses, and
- * a scene that moved between the prompt and the answer refuses back to the model as a corrective
- * problem — the bible-edit discipline, one record over. Only in a scene thread, only that scene.
+ * The model describes the edit in a typed field and the coordinator prepares a permission card
+ * against the exact scene version the model saw. Approval lands it through the same version-fenced
+ * `edit-scene` write the header uses. Only in a scene thread, only that scene.
  */
 export const SCENE_EDIT_BOUNDS = {
   /** Edits one turn may carry; a rename is one, and nothing else is offered yet. */
@@ -87,6 +86,8 @@ export const EditorRequestSchema = z
     id: EditorRequestIdSchema,
     productionId: SlugSchema,
     conversationId: ConversationIdSchema,
+    /** Conversation permission action that prepared this record; absent on older records. */
+    actionId: ConversationActionIdSchema.optional(),
     /** The revision the commands were prepared against; null when they would materialise the first assembly. */
     baseRevision: z.number().int().min(0).nullable(),
     sourceFingerprint: TimelineSourceFingerprintSchema,
@@ -114,10 +115,22 @@ export const EditorRequestFileSchema = z
   .strict();
 export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
-/** What the person has selected while they talk to Arke (R-26): the subject of "this" and "the selected clip". */
+/** What the person has selected while they talk to Arke (R-26): the subject of "this". */
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),
+  z.object({ kind: z.literal("scene"), sceneId: SceneIdSchema }).strict(),
+  z.object({ kind: z.literal("shot"), sceneId: SceneIdSchema, shotId: ShotIdSchema }).strict(),
+  z.object({ kind: z.literal("board"), sceneId: SceneIdSchema, memberShotIds: z.array(ShotIdSchema).min(1) }).strict(),
+  z
+    .object({
+      kind: z.literal("edge"),
+      sceneId: SceneIdSchema,
+      fromShotId: ShotIdSchema.nullable(),
+      toShotId: ShotIdSchema.nullable(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("take"), takeId: TakeIdSchema }).strict(),
 ]);
 export type WorldChatSubject = z.infer<typeof WorldChatSubjectSchema>;
 
@@ -139,6 +152,8 @@ export interface EditorRequestDigest {
   /** The frames the request touches, over every clip before and after. */
   range: { startFrame: number; endFrame: number } | null;
   storyOrderChanges: boolean;
+  /** Exact net effects shown on the permission card; no command-specific preview list is maintained. */
+  effects: Array<{ label: string; detail?: string }>;
 }
 
 export type EditorRequestPreview =
@@ -169,18 +184,22 @@ function pictureShotOrder(timeline: ProductionTimeline): string {
 export function previewEditorRequest(
   base: ProductionTimeline,
   commands: readonly TimelineCommand[],
-  options: { sourceLength?: Parameters<typeof applyTimelineCommands>[2] extends infer O ? (O extends { sourceLength?: infer S } ? S : never) : never } = {},
+  options: {
+    sourceLength?: Parameters<typeof applyTimelineCommands>[2] extends infer O ? (O extends { sourceLength?: infer S } ? S : never) : never;
+    selections?: readonly TimelineSelectionChange[];
+  } = {},
 ): EditorRequestPreview {
   const switches = commands.filter((command): command is Extract<TimelineCommand, { kind: "switch-take" }> => command.kind === "switch-take");
   const clipCommands = commands.filter((command): command is TimelineClipCommand => command.kind !== "switch-take");
   let next: ProductionTimeline;
   try {
     next =
-      clipCommands.length === 0
+      clipCommands.length === 0 && (options.selections?.length ?? 0) === 0
         ? base
         : applyTimelineCommands(base, clipCommands, {
             label: "request",
             ...(options.sourceLength !== undefined ? { sourceLength: options.sourceLength } : {}),
+            ...(options.selections !== undefined ? { selections: options.selections } : {}),
           });
   } catch (error) {
     return {
@@ -199,8 +218,9 @@ export function previewEditorRequest(
     mix: false,
     range: null,
     storyOrderChanges: pictureShotOrder(base) !== pictureShotOrder(next),
+    effects: [],
   };
-  const entry = clipCommands.length === 0 ? undefined : next.history.undo.at(-1);
+  const entry = next === base ? undefined : next.history.undo.at(-1);
   if (entry !== undefined && entry.kind === "change") {
     let start = Number.POSITIVE_INFINITY;
     let end = Number.NEGATIVE_INFINITY;
@@ -212,6 +232,14 @@ export function previewEditorRequest(
         if (before.startFrame !== after.startFrame) digest.moved.push(clipLabel(after));
         else digest.changed.push(clipLabel(after));
       }
+      const clip = after ?? before!;
+      const state = (value: TimelineClip | null) => value === null
+        ? "not present"
+        : `${change.trackId}, frames ${value.startFrame}-${value.startFrame + value.durationFrames}, source ${value.sourceInFrames}-${value.sourceInFrames + value.durationFrames}${value.gainDb === undefined ? "" : `, ${value.gainDb} dB`}${value.audio === undefined ? "" : `, audio ${value.audio}`}`;
+      digest.effects.push({
+        label: `${before === null ? "Add" : after === null ? "Remove" : "Change"} ${clipLabel(clip)} (${clip.id})`,
+        detail: `${state(before)} -> ${state(after)}`,
+      });
       for (const clip of [before, after]) {
         if (clip === null) continue;
         start = Math.min(start, clip.startFrame);
@@ -222,9 +250,39 @@ export function previewEditorRequest(
     digest.tracks = entry.tracks.map((change) =>
       change.after === null ? `removes ${change.trackId}` : change.before === null ? `adds ${change.trackId}` : `changes ${change.trackId}`,
     );
+    for (const change of entry.tracks) {
+      digest.effects.push({
+        label: `${change.before === null ? "Add" : change.after === null ? "Remove" : "Change"} track ${change.trackId}`,
+        detail: `${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`,
+      });
+    }
     digest.cues = entry.cues.length;
+    for (const change of entry.cues) {
+      const cue = change.after ?? change.before!;
+      digest.effects.push({
+        label: `${change.before === null ? "Add" : change.after === null ? "Remove" : "Change"} subtitle ${cue.id}`,
+        detail: `${JSON.stringify(change.before)} -> ${JSON.stringify(change.after)}`,
+      });
+    }
     digest.mix = entry.mix !== undefined;
+    if (entry.mix !== undefined) {
+      digest.effects.push({ label: "Change the production mix", detail: `${JSON.stringify(entry.mix.before)} -> ${JSON.stringify(entry.mix.after)}` });
+    }
+    if (entry.library !== undefined) {
+      const key = (item: (typeof entry.library.before)[number]) => item.kind === "shot" ? `shot ${item.shotId}` : `artifact ${item.artifactId}`;
+      const before = new Set(entry.library.before.map(key));
+      const after = new Set(entry.library.after.map(key));
+      for (const item of after) if (!before.has(item)) digest.effects.push({ label: `Add ${item} to the Library` });
+      for (const item of before) if (!after.has(item)) digest.effects.push({ label: `Remove ${item} from the Library` });
+    }
+    for (const change of entry.selections) {
+      digest.effects.push({
+        label: `Switch take for ${change.shotId}`,
+        detail: `${change.before?.acceptedTakeId ?? "no selected take"} -> ${change.after?.acceptedTakeId ?? "no selected take"}`,
+      });
+    }
   }
+  if (digest.storyOrderChanges) digest.effects.push({ label: "Change Picture story order", detail: `${pictureShotOrder(base)} -> ${pictureShotOrder(next)}` });
   return { ok: true, timeline: next, digest };
 }
 

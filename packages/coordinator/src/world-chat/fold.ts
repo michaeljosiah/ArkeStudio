@@ -2,6 +2,11 @@ import type {
   BibleEditRecord,
   CandidateGroup,
   CandidateTombstone,
+  ConversationActionCard,
+  ConversationActionBinding,
+  ConversationActionPrepareIntent,
+  ConversationActionRecord,
+  ConversationActionStatus,
   ConversationId,
   WorldChangeCandidate,
   WorldChatAttachment,
@@ -13,6 +18,7 @@ import type {
   WorldChatStatus,
   WorldChatSummary,
 } from "@arke-studio/contracts";
+import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 
 /**
  * The event log, folded into the workspace a screen renders (#70 §7.2).
@@ -39,6 +45,42 @@ export interface FoldResult {
 }
 
 const MAX_MESSAGES = 50;
+
+const ACTION_STATUS_TRANSITIONS: Record<ConversationActionStatus, readonly ConversationActionStatus[]> = {
+  // Recovery may discover that the bound authority was decided through its original surface.
+  pending: ["completed", "failed", "cancelled", "stale"],
+  approved: ["awaiting-host", "queued", "running", "completed", "failed", "cancelled", "stale"],
+  "awaiting-host": ["completed", "failed", "cancelled", "stale"],
+  queued: ["running", "completed", "failed", "cancelled"],
+  running: ["completed", "failed", "cancelled"],
+  completed: [],
+  failed: [],
+  cancelled: [],
+  denied: [],
+  stale: [],
+  superseded: [],
+};
+
+function bindingMatchesIntent(
+  binding: ConversationActionBinding,
+  intent: ConversationActionPrepareIntent,
+): boolean {
+  return binding.actionId === intent.actionId &&
+    binding.conversationId === intent.conversationId &&
+    binding.turnId === intent.turnId &&
+    binding.worldId === intent.worldId &&
+    binding.productionId === intent.productionId &&
+    binding.actorId === intent.actorId &&
+    binding.scope === intent.scope &&
+    binding.actionKind === intent.actionKind &&
+    binding.authorityKind === intent.authorityKind &&
+    binding.cardFamily === intent.cardFamily &&
+    binding.payloadDigest === intent.payloadDigest &&
+    binding.createdAt === intent.createdAt &&
+    stableJson(binding.targets) === stableJson(intent.targets) &&
+    stableJson(binding.baseObservations) === stableJson(intent.baseObservations) &&
+    stableJson(binding.dependencies) === stableJson(intent.dependencies);
+}
 
 export function foldConversation(
   id: ConversationId,
@@ -79,6 +121,10 @@ export function foldConversation(
   const groups = new Map<string, CandidateGroup>();
   const attachments = new Map<string, WorldChatAttachment>();
   const tombstones = new Map<string, CandidateTombstone>();
+  const actionIntents = new Map<string, ConversationActionPrepareIntent>();
+  const failedActionIntents = new Set<string>();
+  const actions = new Map<string, ConversationActionRecord>();
+  const preparedBindings = new Map<string, ConversationActionBinding>();
   const runs = new Map<string, WorldChatRun>();
   const proposalIds = new Set<string>();
   const resolvedProposals = new Set<string>();
@@ -97,6 +143,61 @@ export function foldConversation(
       // the panel showing something the conversation has already moved past.
     }
     candidates.set(next.id, next);
+  }
+
+  function applyActionIntent(intent: ConversationActionPrepareIntent, atSeq: number): void {
+    const prior = actionIntents.get(intent.actionId);
+    if (prior && stableJson(prior) !== stableJson(intent)) {
+      problems.push({
+        kind: "interior-corruption",
+        detail: `Action ${intent.actionId} has two different preparation intents.`,
+        atSeq,
+      });
+      return;
+    }
+    if (intent.conversationId !== id) {
+      problems.push({
+        kind: "interior-corruption",
+        detail: `Action ${intent.actionId} names a different conversation.`,
+        atSeq,
+      });
+      return;
+    }
+    actionIntents.set(intent.actionId, intent);
+  }
+
+  function applyActionStatus(
+    actionId: string,
+    expectedStatus: ConversationActionStatus,
+    nextStatus: ConversationActionStatus,
+    atSeq: number,
+    detail?: string,
+    receipt?: ConversationActionRecord["receipt"],
+  ): void {
+    const action = actions.get(actionId);
+    if (!action) return;
+    if (action.status !== expectedStatus) {
+      problems.push({
+        kind: "interior-corruption",
+        detail: `Action ${actionId} expected ${expectedStatus} but was ${action.status}.`,
+        atSeq,
+      });
+      return;
+    }
+    if (!ACTION_STATUS_TRANSITIONS[expectedStatus].includes(nextStatus)) {
+      problems.push({
+        kind: "interior-corruption",
+        detail: `Action ${actionId} cannot move from ${expectedStatus} to ${nextStatus}.`,
+        atSeq,
+      });
+      return;
+    }
+    actions.set(actionId, {
+      ...action,
+      status: nextStatus,
+      ...(detail ? { statusDetail: detail } : {}),
+      ...(receipt ? { receipt } : {}),
+    });
   }
 
   for (const envelope of events) {
@@ -175,6 +276,17 @@ export function foldConversation(
           tombstones.set(t.structuralKey, t);
           const c = candidates.get(t.candidateId);
           if (c) candidates.set(t.candidateId, { ...c, status: "withdrawn" });
+        }
+        for (const intent of e.actionPrepareIntents ?? []) {
+          if (intent.turnId !== e.message.turnId) {
+            problems.push({
+              kind: "interior-corruption",
+              detail: `Action ${intent.actionId} names a different turn from the reply that prepared it.`,
+              atSeq: envelope.seq,
+            });
+            continue;
+          }
+          applyActionIntent(intent, envelope.seq);
         }
         break;
       case "bench.outcome-recorded":
@@ -292,6 +404,117 @@ export function foldConversation(
         break;
       case "deletion.intent-recorded":
         break;
+      case "action.prepare-intent":
+        applyActionIntent(e.intent, envelope.seq);
+        break;
+      case "action.prepared": {
+        const preparedBefore = preparedBindings.get(e.binding.actionId);
+        if (preparedBefore) {
+          if (stableJson(preparedBefore) !== stableJson(e.binding)) {
+            problems.push({
+              kind: "interior-corruption",
+              detail: `Action ${e.binding.actionId} was prepared twice with different immutable content.`,
+              atSeq: envelope.seq,
+            });
+          }
+          break;
+        }
+        if (conversationActionDigest(e.binding.shown) !== e.binding.previewDigest) {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Action ${e.binding.actionId} does not match its shown preview digest.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        const intent = actionIntents.get(e.binding.actionId);
+        if (!intent) {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Action ${e.binding.actionId} was prepared without a durable intent.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        if (!bindingMatchesIntent(e.binding, intent)) {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Action ${e.binding.actionId} does not match its durable preparation intent.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        preparedBindings.set(e.binding.actionId, e.binding);
+        actions.set(e.binding.actionId, { ...e.binding });
+        failedActionIntents.delete(e.binding.actionId);
+        break;
+      }
+      case "action.prepare-failed":
+        if (!actions.has(e.actionId)) failedActionIntents.add(e.actionId);
+        break;
+      case "action.decision-recorded": {
+        const action = actions.get(e.actionId);
+        if (!action) break;
+        // An approved host action can later become stale. Its dismissal is a new decision;
+        // the original approval remains in the log, while the card shows the final denial.
+        if (action.decision && !(action.status === "stale" && e.decision.decision === "deny")) break;
+        if (e.decision.expectedConversationSeq !== envelope.seq - 1) {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Action ${e.actionId} was decided against sequence ${e.decision.expectedConversationSeq}, not ${envelope.seq - 1}.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        if (action.status !== e.decision.expectedStatus) {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Action ${e.actionId} was decided from ${action.status}, not ${e.decision.expectedStatus}.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        if (e.decision.decision === "approve" && action.status !== "pending") {
+          problems.push({
+            kind: "interior-corruption",
+            detail: `Stale action ${e.actionId} cannot be approved; it must be prepared again.`,
+            atSeq: envelope.seq,
+          });
+          break;
+        }
+        actions.set(e.actionId, {
+          ...action,
+          decision: e.decision,
+          status: e.decision.decision === "approve" ? "approved" : "denied",
+        });
+        break;
+      }
+      case "action.status-changed":
+        applyActionStatus(
+          e.actionId,
+          e.expectedStatus,
+          e.status,
+          envelope.seq,
+          e.detail,
+          e.receipt,
+        );
+        break;
+      case "action.superseded": {
+        const action = actions.get(e.actionId);
+        if (!action || (action.status !== "pending" && action.status !== "stale")) break;
+        actions.set(e.actionId, {
+          ...action,
+          status: "superseded",
+          supersededBy: e.supersededBy,
+          ...(e.detail ? { statusDetail: e.detail } : {}),
+        });
+        break;
+      }
+      case "action.undo-linked": {
+        const action = actions.get(e.actionId);
+        if (action && !action.undo) actions.set(e.actionId, { ...action, undo: e.undo });
+        break;
+      }
     }
   }
 
@@ -326,6 +549,21 @@ export function foldConversation(
       ? messages
       : messages.filter((m) => (messageSeq.get(m.id) ?? 0) < options.before!);
   const shown = windowed.slice(Math.max(0, windowed.length - limit));
+
+  // Intent order is transcript order. Authority preparation may finish out of order, but that
+  // must not move cards away from the turn position at which they were proposed.
+  const actionCards = projectActionCards(
+    [...actionIntents.keys()].flatMap((actionId) => {
+      const action = actions.get(actionId);
+      return action ? [action] : [];
+    }),
+  );
+  const unresolvedActionIntent = [...actionIntents.keys()].some(
+    (actionId) => !actions.has(actionId) && !failedActionIntents.has(actionId),
+  );
+  const actionInFlight = actionCards.some((action) =>
+    ["pending", "approved", "awaiting-host", "queued", "running"].includes(action.status),
+  );
 
   const view: WorldChatLoaded = {
     id,
@@ -366,6 +604,7 @@ export function foldConversation(
     ),
     hasMore: shown.length < windowed.length,
     candidates: [...candidates.values()],
+    actions: actionCards,
     mediaHandoffs,
     groups: [...groups.values()],
     attachments: [...attachments.values()],
@@ -385,10 +624,55 @@ export function foldConversation(
         ? "wrap-up-in-flight"
         : proposalIds.size > 0
           ? "unresolved-proposals"
+          : unresolvedActionIntent || actionInFlight
+            ? "pending-actions"
           : null,
     problems,
   };
   return { view, problems, tombstones: [...tombstones.values()], needsInterruptedRunRepair };
+}
+
+function projectActionCards(records: readonly ConversationActionRecord[]): ConversationActionCard[] {
+  const byId = new Map(records.map((action) => [action.actionId, action]));
+  return records.map((action) => {
+    const blocking = action.dependencies
+      .map((dependency) => byId.get(dependency))
+      .find((dependency) => dependency?.status !== "completed");
+    const blockedReason = action.approvalBlockedReason ?? (blocking
+      ? dependencyBlockReason(blocking)
+      : action.dependencies.some((dependency) => !byId.has(dependency))
+        ? "A required action is no longer available."
+        : undefined);
+    const availableDecisions = action.status === "pending"
+      ? blockedReason
+        ? (["deny"] as const)
+        : (["approve", "deny"] as const)
+      : action.status === "stale"
+        ? (["deny"] as const)
+        : ([] as const);
+    return {
+      ...action,
+      availableDecisions: [...availableDecisions],
+      ...(blockedReason ? { blockedReason } : {}),
+    };
+  });
+}
+
+function dependencyBlockReason(dependency: ConversationActionRecord): string {
+  switch (dependency.status) {
+    case "failed":
+      return `Required action ${dependency.actionId} failed.`;
+    case "cancelled":
+      return `Required action ${dependency.actionId} was cancelled.`;
+    case "denied":
+      return `Required action ${dependency.actionId} was denied.`;
+    case "stale":
+      return `Required action ${dependency.actionId} became stale.`;
+    case "superseded":
+      return `Required action ${dependency.actionId} was superseded.`;
+    default:
+      return `Waiting for ${dependency.actionId} to complete.`;
+  }
 }
 
 /**
@@ -423,6 +707,9 @@ export function summarise(view: WorldChatLoaded): WorldChatSummary {
     ...(view.entryContext ? { entryContext: view.entryContext } : {}),
     pointCount: view.candidates.filter((c) => c.status === "live").length,
     openProposalCount: view.proposalIds.length,
+    pendingActionCount: view.actions.filter((action) =>
+      ["pending", "approved", "awaiting-host", "queued", "running"].includes(action.status),
+    ).length,
     ...(view.reopened ? { reopened: true } : {}),
     notCarried: view.notCarried,
     ...(view.deletionBlock ? { deletionBlock: view.deletionBlock } : {}),

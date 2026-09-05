@@ -155,7 +155,7 @@ export async function saveBible(
 export async function applyTurnBibleEdits(
   store: WorldStore,
   edits: readonly BibleEdit[],
-  options: { source: string; baseVersion: number },
+  options: { source: string; baseVersion: number; requestId?: string },
 ): Promise<BibleEditRecord | null> {
   if (edits.length === 0) return null;
 
@@ -174,6 +174,7 @@ export async function applyTurnBibleEdits(
   const result = await store.commit({
     kind: "bible-edit",
     source: options.source,
+    ...(options.requestId ? { requestId: options.requestId } : {}),
     files: [
       {
         path: BIBLE_PATH,

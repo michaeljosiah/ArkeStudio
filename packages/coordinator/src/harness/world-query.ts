@@ -6,6 +6,7 @@ import { LeaseDeniedError } from "../world-chat/lease.js";
 import { productionRecord } from "../world-chat/production-record.js";
 import type { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import type { WorldStore } from "../world/store.js";
+import { TARGET_READ_TOOLS } from "../world-chat/target-tool-catalog.js";
 
 /**
  * The read-only world-query tool, served over MCP streamable HTTP (SPEC-005 §2.5.1, D2, D3).
@@ -56,6 +57,16 @@ function citation(receipt: WorldChatCheckReceipt): Record<string, unknown> {
       observedVersion: c.observedVersion,
       contentHash: c.contentHash,
     })),
+    ...(receipt.target !== undefined
+      ? {
+          targetRead: {
+            target: receipt.target,
+            observedRevisionOrDigest: receipt.observedRevisionOrDigest,
+            complete: receipt.complete,
+            nextCursor: receipt.nextCursor,
+          },
+        }
+      : {}),
   };
 }
 
@@ -131,9 +142,10 @@ const TOOLS = [
   },
 ] as const;
 
-/** The World Chat surface (#70 §9.2): the five above, plus sheet search and attachment text. */
+/** The World Chat surface (#70 §9.2): ambient reads plus leased complete-target tools. */
 const WORLD_CHAT_TOOLS = [
   ...TOOLS,
+  ...TARGET_READ_TOOLS,
   {
     name: "search_sheets",
     description:

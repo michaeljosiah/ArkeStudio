@@ -398,6 +398,7 @@ export function projectWorkspace(
     initiative: loaded.initiative ?? "collaborate",
     messages: loaded.messages.map((m) => ({
       id: m.id,
+      turnId: m.turnId,
       role: m.role,
       text: m.text,
       receipts: (receiptsByMessage.get(m.id) ?? []).map(wordReceipt),
@@ -410,6 +411,7 @@ export function projectWorkspace(
     hasMore: loaded.hasMore,
     seq: loaded.seq,
     points: projectPoints(loaded.candidates, { ...options, mediaHandoffs: loaded.mediaHandoffs }),
+    actions: loaded.actions,
     attachments: loaded.attachments.map((a) => ({
       id: a.id,
       fileName: a.fileName,

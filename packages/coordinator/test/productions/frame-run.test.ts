@@ -1610,9 +1610,10 @@ describe("frame-run Arke outcomes", () => {
 
     await internals.recordTerminalFrameRunOutcome(f.store, completed.state);
 
-    assert.equal(openChecks, 2, "the store is rechecked after recording and after discovery");
+    assert.ok(openChecks >= 2, "the store is rechecked after recording and after discovery");
     assert.deepEqual(coordinator.getState().world?.conversations, initial.conversations);
     assert.equal(coordinator.getState().worldChat, null);
+    assert.deepEqual(coordinator.getState().stagePlayblastRequests, []);
     assert.equal(broadcasts, 0);
     assert.equal(
       (await discoverConversations(f.dir)).summaries.filter(

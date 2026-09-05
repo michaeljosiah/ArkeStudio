@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import type { ChatAttachmentId, ConversationId, RunId } from "@arke-studio/contracts";
+import { TARGET_READ_TOOL_NAMES } from "./target-tool-catalog.js";
 
 /**
  * Run-scoped read leases over the world (#70 §9.1).
@@ -82,6 +83,7 @@ export const LEASED_OPERATIONS = [
   "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.
   "get_production",
+  ...TARGET_READ_TOOL_NAMES,
 ] as const;
 
 export type LeasedOperation = (typeof LEASED_OPERATIONS)[number];

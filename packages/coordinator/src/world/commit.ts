@@ -64,6 +64,8 @@ export interface CommitFileInput {
   action: "replace" | "create" | "delete";
   /** Full proposed content for replace/create. The committer stamps version fields itself. */
   content?: string;
+  /** Binary, unversioned files carry base64 in the journal and land as their original bytes. */
+  encoding?: "base64";
   /** sha256 of the base content this change was drafted against; null for create (R-27). */
   baseHash: string | null;
   /**
@@ -121,6 +123,7 @@ export interface CommitResult {
 
 interface JournalFile {
   path: string;
+  encoding?: "base64";
   action: "replace" | "create" | "delete";
   baseHash: string | null;
   newHash: string | null;
@@ -161,6 +164,14 @@ export interface PendingCommit {
 }
 
 const COMMIT_DIR = ".commit";
+
+function fileBytes(content: string, encoding?: "base64"): string | Buffer {
+  return encoding === "base64" ? Buffer.from(content, "base64") : content;
+}
+
+function fileHash(content: string, encoding?: "base64"): string {
+  return sha256(fileBytes(content, encoding));
+}
 
 // ---------------------------------------------------------------------------
 // Path classification — which track a file belongs to (§2.6)
@@ -304,6 +315,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       return (
         before.description !== after.description ||
         before.masterLook !== after.masterLook ||
+        JSON.stringify(before.keyArtIntent) !== JSON.stringify(after.keyArtIntent) ||
         JSON.stringify(before.audio) !== JSON.stringify(after.audio) ||
         JSON.stringify(before.failureModes) !== JSON.stringify(after.failureModes)
       );
@@ -338,9 +350,9 @@ export class Committer {
     return join(this.worldDir, fromPortable(portable));
   }
 
-  private async readLive(portable: string): Promise<string | null> {
+  private async readLive(portable: string, encoding?: "base64"): Promise<string | null> {
     try {
-      return await readFile(toExtendedLength(this.abs(portable)), "utf8");
+      return await readFile(toExtendedLength(this.abs(portable)), encoding ?? "utf8");
     } catch {
       return null;
     }
@@ -360,6 +372,9 @@ export class Committer {
       if (f.action !== "delete" && typeof f.content !== "string") {
         throw new CommitPlanError(`${f.path}: ${f.action} requires content`);
       }
+      if (f.encoding !== undefined && classify(f.path).track !== "unversioned") {
+        throw new CommitPlanError(`${f.path}: binary content cannot bypass versioned records`);
+      }
       if (f.committedBase !== undefined && f.action === "create") {
         throw new CommitPlanError(`${f.path}: a committed base is only valid for an outside edit`);
       }
@@ -369,12 +384,13 @@ export class Committer {
     const worldRaw = await this.readLive("world.json");
     if (worldRaw === null) throw new CommitPlanError("world.json missing — not a world");
     const worldDoc = JsonFile.parse(worldRaw);
+    const worldBefore = { ...worldDoc.value };
     const stale: CommitStaleError["stale"] = [];
     const liveByPath = new Map<string, string | null>();
     for (const f of input.files) {
-      const live = await this.readLive(f.path);
+      const live = await this.readLive(f.path, f.encoding);
       liveByPath.set(f.path, live);
-      const found = live === null ? null : sha256(live);
+      const found = live === null ? null : fileHash(live, f.encoding);
       if (f.action === "create") {
         if (live !== null) stale.push({ path: f.path, expected: null, found });
       } else if (found !== f.baseHash) {
@@ -499,6 +515,7 @@ export class Committer {
                 version: baseRecord.version,
                 description: baseRecord.description,
                 ...(baseRecord.masterLook ? { masterLook: baseRecord.masterLook } : {}),
+                ...(baseRecord.keyArtIntent !== undefined ? { keyArtIntent: baseRecord.keyArtIntent } : {}),
                 acceptedAt: baseRecord.acceptedAt,
                 audio: baseRecord.audio,
                 failureModes: baseRecord.failureModes,
@@ -512,6 +529,7 @@ export class Committer {
             version: toVersion,
             description: proposed.description,
             ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
+            ...(proposed.keyArtIntent !== undefined ? { keyArtIntent: proposed.keyArtIntent } : {}),
             acceptedAt: at,
             audio: proposed.audio,
             failureModes: proposed.failureModes,
@@ -522,6 +540,7 @@ export class Committer {
           fieldsChanged = [
             ...(baseRecord?.description !== next.description ? ["description"] : []),
             ...(baseRecord?.masterLook !== next.masterLook ? ["master-look"] : []),
+            ...(JSON.stringify(baseRecord?.keyArtIntent) !== JSON.stringify(next.keyArtIntent) ? ["key-art-intent"] : []),
             ...(JSON.stringify(baseRecord?.audio) !== JSON.stringify(next.audio) ? ["audio-policy"] : []),
             ...(JSON.stringify(baseRecord?.failureModes ?? []) !== JSON.stringify(next.failureModes)
               ? ["failure-modes"]
@@ -554,8 +573,8 @@ export class Committer {
         entity: f.path.replace(/\.(md|json)$/, ""),
         path: f.path,
         contentHashBefore:
-          f.committedBaseHash !== undefined ? f.committedBaseHash : base === null ? null : sha256(base),
-        contentHashAfter: newContent === null ? null : sha256(newContent),
+          f.committedBaseHash !== undefined ? f.committedBaseHash : base === null ? null : fileHash(base, f.encoding),
+        contentHashAfter: newContent === null ? null : fileHash(newContent, f.encoding),
         ...(f.action === "delete" ? { deleted: true } : {}),
         fromVersion,
         ...(toVersion !== undefined ? { toVersion } : {}),
@@ -568,9 +587,10 @@ export class Committer {
 
       files.push({
         path: f.path,
+        ...(f.encoding ? { encoding: f.encoding } : {}),
         action: f.action,
         baseHash: f.baseHash,
-        newHash: newContent !== null ? sha256(newContent) : null,
+        newHash: newContent !== null ? fileHash(newContent, f.encoding) : null,
         historyPrev,
         historyNew,
         ...(base !== null ? { prevContent: base } : {}),
@@ -647,15 +667,34 @@ export class Committer {
     }
     // The caller's own fields last, so a rename cannot be undone by bookkeeping above it —
     // and `id`, `slug` and `schemaVersion` are refused by name rather than quietly dropped.
+    const clearedWorldFields: string[] = [];
     if (input.worldFields) {
       for (const [key, value] of Object.entries(input.worldFields)) {
         if (key === "id" || key === "slug" || key === "schemaVersion" || key === "canonRevision") {
           throw new Error(`world.${key} is not a label and cannot be set this way`);
         }
-        worldUpdates[key] = value;
+        if (value === null) clearedWorldFields.push(key);
+        else worldUpdates[key] = value;
       }
     }
     worldDoc.set(worldUpdates);
+    for (const key of clearedWorldFields) delete worldDoc.value[key];
+    worldDoc.set({});
+    WorldMetaSchema.parse(worldDoc.value);
+    if (input.worldFields) {
+      const fieldsChanged = Object.keys(input.worldFields).filter(
+        (key) => JSON.stringify(worldBefore[key]) !== JSON.stringify(worldDoc.value[key]),
+      );
+      changes.push({
+        ts: at,
+        commitId,
+        entity: "world",
+        fieldsChanged,
+        source: input.source,
+        canonRevisionAfter: revisionTo,
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+      });
+    }
     const worldNew = worldDoc.serialize();
 
     const journal: Journal = {
@@ -695,7 +734,7 @@ export class Committer {
       // staging
       for (const f of files) {
         if (f.newContent !== undefined) {
-          await atomicWriteFile(this.abs(`${COMMIT_DIR}/staging/${commitId}/${f.path}`), f.newContent);
+          await atomicWriteFile(this.abs(`${COMMIT_DIR}/staging/${commitId}/${f.path}`), fileBytes(f.newContent, f.encoding));
         }
       }
       await atomicWriteFile(this.abs(`${COMMIT_DIR}/staging/${commitId}/world.json`), worldNew);
@@ -711,8 +750,8 @@ export class Committer {
       }
       const moved: CommitStaleError["stale"] = [];
       for (const f of input.files) {
-        const live = await this.readLive(f.path);
-        const found = live === null ? null : sha256(live);
+        const live = await this.readLive(f.path, f.encoding);
+        const found = live === null ? null : fileHash(live, f.encoding);
         if ((f.action === "create" && live !== null) || (f.action !== "create" && found !== f.baseHash)) {
           moved.push({ path: f.path, expected: f.action === "create" ? null : f.baseHash, found });
         }
@@ -757,10 +796,10 @@ export class Committer {
 
     let i = 0;
     for (const f of journal.files) {
-      const live = await this.readLive(f.path);
+      const live = await this.readLive(f.path, f.encoding);
       if (f.action === "delete") {
         if (live !== null) await unlink(toExtendedLength(this.abs(f.path)));
-      } else if (live === null || sha256(live) !== f.newHash) {
+      } else if (live === null || fileHash(live, f.encoding) !== f.newHash) {
         await mkdir(toExtendedLength(dirname(this.abs(f.path))), { recursive: true });
         await renameWithRetry(staging(f.path), this.abs(f.path));
       }

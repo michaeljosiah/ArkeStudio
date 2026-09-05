@@ -21,6 +21,7 @@ import {
   dismissWorldChatRipples,
   openWorldChat,
   openWorldChatMedia,
+  promoteWorldChatAttachment,
   sendWorldChat,
   unarchiveWorldChat,
   useStore,
@@ -90,6 +91,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
+  "pending-actions": "its actions are still waiting",
 };
 
 /**
@@ -683,6 +685,7 @@ export function WorldChatScreen() {
       id: a.id,
       file: attachmentChipLabel(a),
       kind: a.kind,
+      promoted: a.promoted,
     }));
 
   return (
@@ -817,6 +820,12 @@ export function WorldChatScreen() {
                   }
                 : {})}
               onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
+              {...(worldId && conversationId
+                ? {
+                    onPromoteAttachment: (attachmentId: string) =>
+                      promoteWorldChatAttachment(worldId, conversationId, attachmentId),
+                  }
+                : {})}
               /*
                * Nothing may be said to a conversation that is being turned into proposals.
                *

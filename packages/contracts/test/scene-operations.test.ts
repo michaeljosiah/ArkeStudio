@@ -14,6 +14,9 @@ import {
   nextShotIdIn,
   orderedShots,
   SceneOperationRefused,
+  SceneCommandSchema,
+  ModelWorldChatActionSchema,
+  newId,
   setBoardOverride,
   setBoardPrompt,
   clearBoardPrompt,
@@ -34,6 +37,21 @@ const shot = (id: string, number: number, over: Record<string, unknown> = {}) =>
   description: `Beat ${number}.`,
   durationSec: 4,
   ...over,
+});
+
+it("insert-shot commands cannot supply renderer-owned Stage output pins", () => {
+  const command = { kind: "insert-shot", at: { after: "sh_12" }, shot: {
+    title: "New shot", description: "A new beat.", durationSec: 4,
+  } };
+  const action = { kind: "production-scene-command", productionId: "saltlight", sceneId: "sc_04",
+    command, checkReceiptIds: [newId("check")] };
+  assert.ok(SceneCommandSchema.safeParse(command).success);
+  assert.ok(ModelWorldChatActionSchema.safeParse(action).success);
+  const withPin = { ...command, shot: { ...command.shot, staging: {
+    version: 1, keys: [], playblast: { artifactId: newId("ar"), version: 1 },
+  } } };
+  assert.equal(SceneCommandSchema.safeParse(withPin).success, false);
+  assert.equal(ModelWorldChatActionSchema.safeParse({ ...action, command: withPin }).success, false);
 });
 
 const legacy = (ids: string[]): Scene =>

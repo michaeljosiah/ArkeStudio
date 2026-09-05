@@ -81,4 +81,30 @@ describe("the composer", () => {
     assert.ok(html.includes("the-tapes.zip"));
     assert.ok(html.includes("the studio has no use for a .zip yet"), "with the reason on it");
   });
+
+  it("offers to file private evidence until it has been promoted", () => {
+    const privateChip = renderToString(
+      <Composer
+        value=""
+        onChange={noop}
+        onSubmit={noop}
+        placeholder="…"
+        attachments={[{ id: "a1", file: "map.txt", kind: "document", promoted: false }]}
+        onPromoteAttachment={noop}
+      />,
+    );
+    const filedChip = renderToString(
+      <Composer
+        value=""
+        onChange={noop}
+        onSubmit={noop}
+        placeholder="…"
+        attachments={[{ id: "a1", file: "map.txt · filed in world", kind: "document", promoted: true }]}
+        onPromoteAttachment={noop}
+      />,
+    );
+    assert.ok(privateChip.includes("File in world"));
+    assert.ok(!filedChip.includes("File in world"));
+    assert.ok(filedChip.includes("filed in world"));
+  });
 });

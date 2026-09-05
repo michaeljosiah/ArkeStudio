@@ -58,6 +58,15 @@ import {
   previewLineFor,
   type ConversationId,
   type WorldChatCheckReceipt,
+  type WorldChatReferenceImageDiscardAction,
+  type WorldChatReferenceImageImportAction,
+  type WorldChatReferenceImportAction,
+  type WorldChatReferenceResultUseAction,
+  type WorldChatProductionTakeImportAction,
+  type WorldChatProductionTakeGenerationAction,
+  type WorldChatProductionCutExportAction,
+  type WorldChatBenchGenerationAction,
+  type ConversationActionCard,
   type WorldChatContext,
   type Job,
   type FrameRunQuote,
@@ -93,6 +102,7 @@ import {
   COMFYUI_WEIGHTS_COMPONENT_PREFIX,
   isComfyUiWeightsComponent,
   orderedShots,
+  applyBibleEdits,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -227,7 +237,7 @@ import { chainBoundaryFrame, type BoundaryFrameMaker } from "./takes/boundary.js
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
 import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
-import { decideEditorRequest, EditorRequestRefused, stageEditorRequests } from "./productions/editor-requests.js";
+import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
 import {
   acceptStill,
@@ -287,12 +297,16 @@ import {
   wavSeconds,
 } from "./voice/library.js";
 import { atomicWriteFile } from "./world/atomic.js";
-import { applyTurnBibleEdits, readBible, restoreBible, saveBible } from "./world/bible.js";
+import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError } from "./world/commit.js";
+import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
+import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
+
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
 import { readContainedImageReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
@@ -334,6 +348,7 @@ import {
   designate,
   landGrid,
   lockTile,
+  chooseAnchor,
   readKit,
   promoteCharacterLook,
   setStyleOverride,
@@ -345,6 +360,8 @@ import {
   recordReferenceTake,
   recordUploadedCharacterSheetTake,
   recordUploadedLocationViewTake,
+  recordUploadedMainPhotoTake,
+  recordUploadedReferenceTake,
   referenceReviewDecision,
   recordUploadedPropImage,
 } from "./references/takes.js";
@@ -357,7 +374,7 @@ import {
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
 import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
-import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
+import { diagnosticsBoundary, scrubAbsolutePaths, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
 import {
@@ -414,7 +431,7 @@ import { QueryLeaseRegistry } from "./world-chat/lease.js";
 import { WorldChatRetrieval } from "./world-chat/retrieval.js";
 import {
   AttachmentError,
-  CHAT_DOCUMENT_EXTENSIONS,
+  CHAT_ATTACHMENT_EXTENSIONS,
   refuseUnreadable,
   WorldChatAttachmentStore,
   MAX_TEXT_PER_RUN_CHARS,
@@ -422,6 +439,19 @@ import {
 import { planFor } from "./world-chat/check-plan.js";
 import { createRunScratch, removeRunScratch } from "./world-chat/run-scratch.js";
 import { projectWorkspace } from "./world-chat/project.js";
+import {
+  ConversationActionLifecycle,
+  conversationActionDigest,
+  recoverConversationActions,
+  type ConversationActionAuthorityAdapter,
+  type ConversationActionLifecycleOptions,
+} from "./arke-actions/lifecycle.js";
+import {
+  prepareWorldChatActions,
+  worldChatActionAdapters,
+  type WorldChatActionAdapterDeps,
+} from "./world-chat/actions.js";
+import { makeConversationSummariser } from "./world-chat/summarisation.js";
 import { blockingDependencies, explainBlocked, routeFor as mediaRouteFor } from "./world-chat/media.js";
 import { contradictionCandidates, refsForCanon, refsForSheet, ripplesForCanonEntry, searchCanon } from "./index-db/queries.js";
 import {
@@ -439,9 +469,32 @@ import { ReadModel } from "./read-model.js";
 import { ChildSupervisor, type SupervisorStatus } from "./supervisor.js";
 import { Transport } from "./transport.js";
 import type { WorldProvider } from "./world-provider.js";
-import type { WorldStore } from "./world/store.js";
+import type { WorldStatePrecondition, WorldStore } from "./world/store.js";
 
 type SingleActResult = Extract<DomainEvent, { type: "single-act.result" }>;
+type ExportProgressEvent = Extract<DomainEvent, { type: "export.progress" }>;
+
+function safeExportOutput(output: string | null): string | null {
+  if (output === null) return null;
+  const normalized = output.replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[0] === "exports" && parts.length > 1 && parts.every((part) => part !== "" && part !== "." && part !== "..")
+    ? normalized
+    : null;
+}
+
+function exportReadRecord(event: ExportProgressEvent): ArkeExportReadRecord {
+  return {
+    id: event.exportId,
+    worldId: event.worldId,
+    productionId: event.productionId,
+    ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
+    status: event.status,
+    percent: event.percent,
+    output: safeExportOutput(event.output),
+    error: event.error === null ? null : "export failed",
+  };
+}
 
 function blockedReason(outcome: AcceptOutcome): Extract<DomainEvent, { type: "proposal.blocked" }>["reason"] {
   switch (outcome.status) {
@@ -578,6 +631,8 @@ export interface CoordinatorOptions {
   provider: WorldProvider;
   observeEvent?: (event: DomainEvent) => void;
   adapter: HarnessAdapter | null;
+  /** Existing domain authorities exposed through the shared SPEC-041 decision lifecycle. */
+  conversationActionAdapters?: readonly ConversationActionAuthorityAdapter[];
   changeLogPath: string;
   appVersion: string;
   /** Optional NDJSON seeds so fixtures light the Activity screens (jobs.jsonl / ledger.jsonl). */
@@ -705,6 +760,8 @@ export interface CoordinatorOptions {
    * Absent → attaching says so instead of doing nothing.
    */
   pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
+  /** Choosing an artifact import folder; like pickFiles, the host path never reaches the renderer. */
+  pickFolder?: () => Promise<string | null>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
   dispatchClients?: Record<string, DispatchClient>;
   /** SPEC-013 R-19: the local encoder for exports; absent → exports state the reason. */
@@ -1371,8 +1428,12 @@ export class Coordinator {
   private readonly voiceService: VoiceService | null;
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
+  /** Safe read projections for the target-read surface; output paths remain world-relative. */
+  private readonly exportReads = new Map<string, ArkeExportReadRecord>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /** A conversation card fixes the export identity before the legacy renderer starts. */
+  private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
   private readonly openingWorlds = new Map<string, Promise<void>>();
   /** Cancels the media backfill (issue 283) — optional migration work nothing should wait for. */
@@ -1672,6 +1733,19 @@ export class Coordinator {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
         }
         return replayed;
+      },
+      beforeInitialSnapshot: async () => {
+        const store = this.opts.provider.openStore?.();
+        if (!store || this.stopping) return;
+        await this.durableExportReads(store.worldId);
+        await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+        if (!this.stillOpen(store)) return;
+        // Recovery may find nothing to append while the durable card log is still newer than the
+        // process projection (for example, after a crash between binding and broadcast).
+        await this.refreshConversations(store);
+        if (!this.stillOpen(store)) return;
+        const conversationId = this.readModel.getState().worldChat?.conversationId;
+        if (conversationId) await this.openWorldChat(store, conversationId, conversationId);
       },
       onMessage: (msg) => {
         if (this.stopping) return;
@@ -2014,6 +2088,9 @@ export class Coordinator {
   /** Validate, fold, log, broadcast — the one path every event takes (R-3). */
   emit(event: DomainEvent): void {
     const parsed = DomainEventSchema.parse(event);
+    if (parsed.type === "export.progress") {
+      this.exportReads.set(parsed.exportId, exportReadRecord(parsed));
+    }
     this.readModel.apply(parsed);
     if (
       parsed.type !== "health.changed" &&
@@ -2025,6 +2102,8 @@ export class Coordinator {
       // A correlated form receipt: proposal and commit events remain the durable account.
       parsed.type !== "sheet.edit-result" &&
       parsed.type !== "single-act.result" &&
+      // The conversation log is the durable action audit; this is only its correlated UI receipt.
+      parsed.type !== "conversation-action.decision-result" &&
       // A form preflight response is recomputed from the live index and has no domain lifecycle.
       parsed.type !== "canon.contradictions" &&
       // Transient too — and a device flow's instructions carry the one-time code, which an
@@ -2050,6 +2129,23 @@ export class Coordinator {
     } catch {
       /* host observers cannot interrupt domain event delivery */
     }
+  }
+
+  private async durableExportReads(worldId: string): Promise<readonly ArkeExportReadRecord[]> {
+    const records = new Map<string, ArkeExportReadRecord>();
+    for (const record of await this.changeLog.readAll()) {
+      const parsed = DomainEventSchema.safeParse(record["event"]);
+      if (!parsed.success || parsed.data.type !== "export.progress" || parsed.data.worldId !== worldId) continue;
+      const projection = exportReadRecord(parsed.data);
+      records.set(projection.id, projection.status === "running"
+        ? { ...projection, status: "failed", error: "export interrupted" }
+        : projection);
+    }
+    for (const projection of this.exportReads.values()) {
+      if (projection.worldId === worldId) records.set(projection.id, projection);
+    }
+    for (const projection of records.values()) this.exportReads.set(projection.id, projection);
+    return [...records.values()];
   }
 
   /**
@@ -2576,7 +2672,16 @@ export class Coordinator {
       const outcome = await recoverConversations(store.dir, now);
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
-      if (outcome.repaired.length > 0 || outcome.sweptTombstones.length > 0 || wrapUps.repaired.length > 0) {
+      await this.durableExportReads(store.worldId);
+      const actions = await recoverConversationActions(this.conversationActionLifecycleOptions(store));
+      if (
+        outcome.repaired.length > 0 ||
+        outcome.sweptTombstones.length > 0 ||
+        wrapUps.repaired.length > 0 ||
+        actions.prepared > 0 ||
+        actions.reconciled > 0 ||
+        actions.failed > 0
+      ) {
         // Counts only. Conversation identities are operational state and do not enter the log
         // (R-45, §18.2) — what a reader needs from this line is that repair happened at all.
         void this.appLog?.append({
@@ -2585,6 +2690,9 @@ export class Coordinator {
           runs: outcome.repaired.length,
           tombstones: outcome.sweptTombstones.length,
           wrapUps: wrapUps.repaired.length,
+          actionPreparations: actions.prepared,
+          actionReconciliations: actions.reconciled,
+          actionFailures: actions.failed,
         });
       }
       // Repairs are appended events, and nothing else would notice them: `.conversations` is
@@ -4271,12 +4379,52 @@ export class Coordinator {
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
+      case "conversation-action-decide": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) {
+          this.emit({
+            at: this.nowIso(),
+            type: "conversation-action.decision-result",
+            worldId: msg.worldId,
+            conversationId: msg.conversationId,
+            actionId: msg.actionId,
+            requestId: msg.requestId,
+            disposition: "refused",
+            reason: "wrong-world",
+            detail: "No matching world is open.",
+            deduplicated: false,
+          });
+          return;
+        }
+        const result = await this.conversationActionLifecycle(store).decide(msg);
+        if (!this.stillOpen(store)) return;
+        this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
+        await this.refreshConversations(store);
+        if (!this.stillOpen(store)) return;
+        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
+          await this.openWorldChat(store, msg.conversationId);
+        } else {
+          this.transport.broadcastSnapshot();
+        }
+        return;
+      }
       case "world-chat-send": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
         const service = new WorldChatService(store.dir);
         const log = new WorldChatStore(conversationDir(store.dir, msg.conversationId));
         if (!(await log.readMeta())) return;
+        const currentConversation = await service.load(msg.conversationId);
+        const entryContext = currentConversation?.entryContext ?? { kind: "world" as const };
+        const contextExists = entryContext.kind === "attachment"
+          ? currentConversation?.attachments.some((attachment) => attachment.id === entryContext.attachmentId) === true
+          : worldChatContextExists(store.getBundle(), entryContext);
+        if (
+          !currentConversation ||
+          !contextExists ||
+          msg.subject !== undefined &&
+          !worldChatSubjectExists(store.getBundle(), entryContext, msg.subject)
+        ) return;
 
         /**
          * A conversation is named by the first thing said in it.
@@ -4702,6 +4850,7 @@ export class Coordinator {
       case "world-chat-create": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
+        if (msg.entryContext !== undefined && !worldChatContextExists(store.getBundle(), msg.entryContext)) return;
         // The first conversation crosses the schema boundary (#70 §4.1, issue #403): older
         // builds must refuse this world rather than export `.conversations` they do not know
         // to exclude. The raise is durable before the conversation directory exists.
@@ -4783,12 +4932,43 @@ export class Coordinator {
           });
           return;
         }
-        // Only what a conversation can actually read is offered (§13.2). Cancelling the dialog
-        // is an answer: nothing is said and nothing happens.
-        const paths = await pick({ accept: CHAT_DOCUMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
+        // Known media is retained with an explicit unreadable capability rather than disappearing.
+        // Cancelling the dialog is an answer: nothing is said and nothing happens.
+        const paths = await pick({ accept: CHAT_ATTACHMENT_EXTENSIONS }).catch(() => [] as readonly string[]);
         for (const sourcePath of paths) {
           await this.attachToWorldChat(store, msg.conversationId, sourcePath);
         }
+        await this.openWorldChat(store, msg.conversationId);
+        return;
+      }
+      case "world-chat-promote-attachment": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const loaded = await new WorldChatService(store.dir).load(msg.conversationId);
+        const attachment = loaded?.attachments.find((one) => one.id === msg.attachmentId);
+        if (!attachment) return;
+        const attachments = new WorldChatAttachmentStore(store.dir, () => this.nowIso());
+        try {
+          await attachments.promote(msg.conversationId, attachment, msg.requestId, async ({ sourcePath }) => {
+            const outcome = await fileArtifact(store, {
+              sourcePath,
+              importedFrom: `world-chat:${msg.conversationId}/${msg.attachmentId}`,
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            if (outcome.outcome === "filed" || outcome.outcome === "deduplicated") return outcome.artifact.id;
+            throw new Error(outcome.reason);
+          });
+        } catch {
+          this.emit({
+            at: this.nowIso(),
+            type: "world-chat.attachment-refused",
+            conversationId: msg.conversationId,
+            name: attachment.fileName,
+            reason: "this could not be filed in the world",
+          });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
         await this.openWorldChat(store, msg.conversationId);
         return;
       }
@@ -6410,18 +6590,7 @@ export class Coordinator {
           {
             // Plan status is folded from the journal joined with live queue facts, so the probe
             // comes from here rather than from the write path reaching for the dispatcher.
-            activePlans: async (productionId) => {
-              const plans = await listPlans(store, productionId).catch(() => []);
-              const active: Array<{ planId: string; sceneId: string; status: string }> = [];
-              for (const plan of plans) {
-                const state = await planState(store, plan, this.planDriverDeps()).catch(() => null);
-                if (state === null) continue;
-                if (state.status === "authorized" || state.status === "active") {
-                  active.push({ planId: plan.planId, sceneId: plan.sceneId, status: state.status });
-                }
-              }
-              return active;
-            },
+            activePlans: (productionId) => this.activeScenePlans(store, productionId),
           },
         ).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
@@ -7593,6 +7762,18 @@ export class Coordinator {
         }
         return;
       }
+      case "conversation-action-stage-playblast-complete": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await this.conversationActionLifecycle(store).completeHostAction({
+          conversationId: msg.conversationId,
+          actionId: msg.actionId,
+          payload: msg,
+        });
+        await this.refreshConversationOutcome(store, msg.conversationId);
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "accept-take": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
@@ -7923,12 +8104,14 @@ export class Coordinator {
               exportId,
               status,
               percent,
-              output,
-              error,
+              output: safeExportOutput(output),
+              error: error === null ? null : scrubAbsolutePaths(this.secrets.scrub(error)),
             });
+          const requestedExportId = this.requestedExportIds.get(exportKey);
+          const attemptId = requestedExportId ?? `ex_${ulid()}`;
           if (!runner) {
             emitProgress(
-              "ex_none",
+              attemptId,
               "failed",
               0,
               null,
@@ -7938,7 +8121,6 @@ export class Coordinator {
           }
           const slateFont = runner.slateFont;
           // A refusal is an attempt with an outcome, including one made before any media probe.
-          const attemptId = `ex_${ulid()}`;
           /*
            * A production cut to a track renders against the song, not against scene order (#253).
            *
@@ -7997,8 +8179,9 @@ export class Coordinator {
               .toISOString()
               .replace(/[-:TZ.]/g, "")
               .slice(0, 14);
+            const attemptSuffix = requestedExportId ?? stamp;
             const episodeStem = msg.episodeId !== undefined ? (production.episodeFiles[msg.episodeId] ?? msg.episodeId) : null;
-            const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${stamp}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${stamp}`;
+            const stem = episodeStem === null ? `${msg.productionId}-${msg.preset}-${attemptSuffix}` : `${msg.productionId}-${episodeStem}-${msg.preset}-${attemptSuffix}`;
             const handle = runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
@@ -8006,6 +8189,7 @@ export class Coordinator {
               runner,
               (percent) => emitProgress(handle.id, "running", percent, null, null),
               sidecar === null ? undefined : sidecar(stem),
+              requestedExportId,
             );
             this.exports.set(handle.id, handle);
             emitProgress(handle.id, "running", 0, null, null);
@@ -8024,8 +8208,10 @@ export class Coordinator {
                     exportId: handle.id,
                     status: "done",
                     percent: 100,
-                    output: result.output,
-                    ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                    output: safeExportOutput(result.output),
+                    ...(result.sidecar !== undefined && safeExportOutput(result.sidecar) !== null
+                      ? { sidecar: safeExportOutput(result.sidecar)! }
+                      : {}),
                     error: null,
                   });
                 } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
@@ -8118,14 +8304,17 @@ export class Coordinator {
               .replace(/[-:TZ.]/g, "")
               .slice(0, 14);
             const stem = production.episodeFiles[episode.id] ?? episode.id;
+            const attemptSuffix = requestedExportId ?? stamp;
             const handle = runExport(
               store.dir,
               (stage) => buildFfmpegArgs(plan, store.dir, stage, slateFont),
               // The episode stem keeps filenames collision-free across episodes; the stamp keeps
               // retries from overwriting what a person may already have sent on.
-              `${msg.productionId}-${stem}-${msg.preset}-${stamp}.mp4`,
+              `${msg.productionId}-${stem}-${msg.preset}-${attemptSuffix}.mp4`,
               runner,
               (percent) => emitProgress(handle.id, "running", percent, null, null),
+              undefined,
+              requestedExportId,
             );
             this.exports.set(handle.id, handle);
             emitProgress(handle.id, "running", 0, null, null);
@@ -8236,7 +8425,7 @@ export class Coordinator {
             .toISOString()
             .replace(/[-:TZ.]/g, "")
             .slice(0, 14);
-          const stem = `${msg.productionId}-${msg.preset}-${stamp}`;
+          const stem = `${msg.productionId}-${msg.preset}-${requestedExportId ?? stamp}`;
           const handle = runExport(
             store.dir,
             buildArgs,
@@ -8244,6 +8433,7 @@ export class Coordinator {
             runner,
             (percent) => emitProgress(handle.id, "running", percent, null, null),
             sidecarFor === null ? undefined : sidecarFor(stem),
+            requestedExportId,
           );
           this.exports.set(handle.id, handle);
           emitProgress(handle.id, "running", 0, null, null);
@@ -8263,8 +8453,10 @@ export class Coordinator {
                   exportId: handle.id,
                   status: "done",
                   percent: 100,
-                  output: result.output,
-                  ...(result.sidecar !== undefined ? { sidecar: result.sidecar } : {}),
+                  output: safeExportOutput(result.output),
+                  ...(result.sidecar !== undefined && safeExportOutput(result.sidecar) !== null
+                    ? { sidecar: safeExportOutput(result.sidecar)! }
+                    : {}),
                   error: null,
                 });
               } else if (result.status === "cancelled") emitProgress(handle.id, "cancelled", 0, null, null);
@@ -8289,7 +8481,10 @@ export class Coordinator {
       case "editor-request-decide": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
+        let actionConversation: ConversationId | undefined;
         try {
+          const request = await readEditorRequest(store, msg.productionId, msg.requestId);
+          if (request?.actionId) actionConversation = request.conversationId;
           await decideEditorRequest(store, {
             productionId: msg.productionId,
             requestId: msg.requestId,
@@ -8310,6 +8505,10 @@ export class Coordinator {
             productionId: msg.productionId,
             reason: reason.slice(0, 500),
           });
+        }
+        if (actionConversation) {
+          await this.conversationActionLifecycle(store).recoverConversation(actionConversation);
+          await this.refreshConversationOutcome(store, actionConversation);
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -8525,13 +8724,17 @@ export class Coordinator {
           .replace(/[-:TZ.]/g, "")
           .slice(0, 14);
         const target = join(this.opts.appRoot, "exports", `${store.getBundle().meta.slug}-${stamp}`);
-        await exportWorld(store.dir, target).catch((err) => {
+        const exported = await exportWorld(store.dir, target).then(
+          () => true,
+          (err) => {
           void this.appLog?.append({
             kind: "world-export.failed",
             message: err instanceof Error ? err.message : String(err),
           });
-        });
-        void this.appLog?.append({ kind: "world-export.done", target });
+            return false;
+          },
+        );
+        if (exported) void this.appLog?.append({ kind: "world-export.done", exportId: basename(target) });
         return;
       }
       // ---- the bench (issue 305) ------------------------------------------
@@ -9167,6 +9370,20 @@ export class Coordinator {
           worldId: msg.worldId,
         });
         return answer(prompt, prompt === null ? "the art director had no answer this time" : undefined);
+      }
+      case "bible-helper-run": {
+        // This frame shipped ahead of its coordinator seam. A correlated refusal is the honest
+        // result until that read-only helper exists; silence leaves the editor waiting forever.
+        this.emit({
+          at: this.nowIso(),
+          type: "bible.helper-answered",
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          helper: msg.helper,
+          options: null,
+          reason: "Bible helpers are not available in this build.",
+        });
+        return;
       }
       case "bench-draft-lyrics": {
         // The same one-turn harness call the enhancer makes, and the same discipline: the
@@ -11852,6 +12069,8 @@ export class Coordinator {
         return;
       }
     }
+    const unhandled: never = msg;
+    return unhandled;
   }
 
   /**
@@ -12304,6 +12523,21 @@ export class Coordinator {
     if (bench) this.readModel.setBench({ worldId, session: bench.session });
     this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
     this.transport.broadcastSnapshot();
+    // Dispatch itself refreshes Bench while holding the action execution lock. Reconcile in the
+    // background so fast completions wait for that dispatch's durable queued outcome.
+    this.trackBackground(this.reconcileBenchConversationActions(store, sessionId));
+  }
+
+  private async reconcileBenchConversationActions(store: WorldStore, sessionId: SessionId): Promise<void> {
+    const { activeActions } = await discoverConversations(store.dir);
+    if (this.stopping || !this.stillOpen(store)) return;
+    const lifecycle = this.conversationActionLifecycle(store);
+    for (const action of activeActions) {
+      if (action.actionKind !== "world-chat-bench-generation" || action.authority.id !== sessionId) continue;
+      if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
+        await this.refreshConversationOutcome(store, action.conversationId);
+      }
+    }
   }
 
   /**
@@ -12381,12 +12615,722 @@ export class Coordinator {
     return outcome.artifact.id;
   }
 
+  private async extractArtifactForConversationAction(
+    store: WorldStore,
+    artifactId: string,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ found: number; dropped: number; outcome: string }> {
+    const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
+    if (!artifact) throw new Error("That artifact is no longer in this world.");
+    if (this.reading.has(artifactId)) throw new Error("That artifact is already being read.");
+    const control = new AbortController();
+    this.reading.set(artifactId, control);
+    try {
+      const text = await extractText(store, artifact);
+      if (text === null) return { found: 0, dropped: 0, outcome: "no-text" };
+      let extractor = this.opts.extractor ?? null;
+      if (!extractor && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+        extractor = makeAdapterExtractor(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+        );
+      }
+      if (!extractor) return { found: 0, dropped: 0, outcome: "unavailable" };
+      const raw = await extractor(text, artifact.file, control.signal);
+      const batch = verifyCandidates(raw, text, artifact.extraction?.decided ?? [], artifact.production);
+      await storeBatch(store, artifact, batch, mutation);
+      this.refreshIfStillOpen(store);
+      return {
+        found: batch.verified.length,
+        dropped: batch.droppedCount,
+        outcome: batch.verified.length > 0 ? "found" : "nothing",
+      };
+    } finally {
+      this.reading.delete(artifactId);
+    }
+  }
+
+  private async importReferenceForConversationAction(
+    store: WorldStore,
+    change: WorldChatReferenceImportAction["action"]["change"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }> {
+    const sheet = store.getBundle().sheets.find((candidate) => candidate.id === change.sheetId);
+    if (!sheet) return { status: "failed", detail: "That sheet is no longer available." };
+    if (change.operation === "location-view-candidate" && sheet.type !== "location") {
+      return { status: "failed", detail: "A location view can only be imported for a location." };
+    }
+    if (change.operation !== "location-view-candidate" && sheet.type !== "character") {
+      return { status: "failed", detail: "That reference can only be imported for a character." };
+    }
+
+    let take = store.getBundle().referenceTakes.find((candidate) =>
+      candidate.reference?.sheetId === change.sheetId && candidate.params["requestId"] === mutation.requestId,
+    );
+    let recorded = false;
+    if (!take) {
+      const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }) ?? [];
+      if (chosen.length === 0) return { status: "cancelled", detail: "No image was selected." };
+      if (chosen.length !== 1) return { status: "failed", detail: ONE_IMAGE_ONLY };
+      if (!this.stillOpen(store)) return { status: "cancelled", detail: "That world is no longer open." };
+      const picked = await readPickedImage(chosen[0]!);
+      if ("error" in picked) return { status: "failed", detail: picked.error };
+      const media = `${change.operation}-upload-${Date.now().toString(36)}${picked.extension}`;
+      const options = { requestId: mutation.requestId, precondition: mutation.precondition };
+      take = change.operation === "location-view-candidate"
+        ? await recordUploadedLocationViewTake(store, change.sheetId, media, picked.data, options)
+        : change.operation === "character-sheet"
+          ? await recordUploadedCharacterSheetTake(store, change.sheetId, media, picked.data, options)
+          : await recordUploadedMainPhotoTake(store, change.sheetId, media, picked.data, options);
+      recorded = true;
+    }
+
+    if (change.operation === "location-view-candidate" || change.operation === "main-photo-candidate") {
+      this.refreshIfStillOpen(store);
+      return { status: "completed", id: take.id };
+    }
+    const currentSheet = store.getBundle().sheets.find((candidate) => candidate.id === change.sheetId);
+    if (!currentSheet) return { status: "failed", detail: "That sheet is no longer available." };
+    const acceptanceMutation = recorded
+      ? { source: mutation.source, requestId: mutation.requestId }
+      : mutation;
+    if (change.operation === "main-photo") {
+      const accepted = await acceptMainPhoto(
+        store,
+        currentSheet,
+        store.getBundle(),
+        { source: "take", takeId: take.id },
+        null,
+        { commitAnchor: (owned, sheetId, input) => chooseAnchor(owned, sheetId, input, acceptanceMutation) },
+      );
+      if (accepted.status === "failed") return { status: "failed", detail: accepted.error };
+    } else {
+      if (this.characterSheetJobRunning(store.worldId, change.sheetId)) {
+        return { status: "failed", detail: "A generated character sheet is still running for that character." };
+      }
+      await acceptCharacterSheet(store, currentSheet, {
+        file: `takes/${take.id}/${take.media}`,
+        takeId: take.id,
+        sheetVersion: take.provenance.sheets[change.sheetId] ?? currentSheet.version,
+        artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
+        review: referenceReviewDecision(store.now(), take, "accept"),
+      }, acceptanceMutation);
+    }
+    this.refreshIfStillOpen(store);
+    return { status: "completed", id: take.id };
+  }
+
+  private async importProductionTakeForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionTakeImportAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }> {
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
+    const scene = production?.scenes.find((candidate) => candidate.id === action.sceneId);
+    if (!production || !scene || !orderedShots(scene).some((shot) => shot.id === action.shotId)) {
+      return { status: "failed", detail: "That shot is no longer in this scene." };
+    }
+    const takeId = `tk_${mutation.requestId.slice(4)}` as never;
+    const existing = production.takes.find((take) => take.id === takeId);
+    if (existing) return { status: "completed", id: existing.id };
+    const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }) ?? [];
+    if (chosen.length === 0) return { status: "cancelled", detail: "No image was selected." };
+    if (chosen.length !== 1) return { status: "failed", detail: ONE_IMAGE_ONLY };
+    if (!this.stillOpen(store)) return { status: "cancelled", detail: "That world is no longer open." };
+    const picked = await readPickedImage(chosen[0]!);
+    if ("error" in picked) return { status: "failed", detail: picked.error };
+    const take = await recordUploadedShotFrameTake(
+      store,
+      action.productionId,
+      action.shotId,
+      `upload-${mutation.requestId.slice(-8).toLowerCase()}${picked.extension}`,
+      picked.data,
+      { takeId, ...mutation },
+    );
+    this.refreshIfStillOpen(store);
+    return { status: "completed", id: take.id };
+  }
+
+  private async openProductionTakeGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionTakeGenerationAction["action"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "failed"; id?: string; detail?: string }> {
+    const stale = mutation.precondition();
+    if (stale) return { status: "failed", detail: stale };
+    const settings = this.appSettings ? await this.appSettings.load() : null;
+    const reader = worldFileReader(store.dir);
+    const prepared = await prepareBenchSubject(store.getBundle(), {
+      productionId: action.productionId,
+      sceneId: action.sceneId,
+      subject: action.target,
+      mode: action.mode,
+      settings,
+      manifest: this.opts.manifest ?? null,
+      sources: {
+        read: reader.read,
+        durationSec: (path) =>
+          measureDurationSec(store, path, this.opts.mediaProbe ?? null, { signal: store.closingSignal }),
+      },
+    });
+    if (!prepared.ok) return { status: "failed", detail: prepared.reason };
+    const moved = mutation.precondition();
+    if (moved) return { status: "failed", detail: moved };
+    const brief = [
+      prepared.prefill.composer.brief,
+      ...(action.retakeOf ? [`Retake ${action.retakeOf}.`] : []),
+      ...(action.instruction ? [action.instruction] : []),
+    ].filter((line) => line.trim() !== "").join("\n\n");
+    const sessionId = `sess_${mutation.requestId.slice(4)}` as SessionId;
+    const opened = await openSubjectBenchSession(store.dir, sessionId, this.nowIso(), {
+      ...prepared.prefill,
+      composer: { ...prepared.prefill.composer, brief },
+    });
+    const session = (await opened.store.fold()) ?? opened.session;
+    this.readModel.setBench({ worldId: store.worldId, session });
+    this.readModel.setBenchSessions(await discoverBenchSessions(store.dir));
+    this.transport.broadcastSnapshot();
+    return { status: "completed", id: sessionId };
+  }
+
+  private async importReferenceImageForConversationAction(
+    store: WorldStore,
+    target: WorldChatReferenceImageImportAction["action"]["target"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "cancelled" | "failed"; id?: string; detail?: string }> {
+    const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }) ?? [];
+    if (chosen.length === 0) return { status: "cancelled", detail: "No image was selected." };
+    if (chosen.length !== 1) return { status: "failed", detail: ONE_IMAGE_ONLY };
+    if (!this.stillOpen(store)) return { status: "cancelled", detail: "That world is no longer open." };
+    const picked = await readPickedImage(chosen[0]!);
+    if ("error" in picked) return { status: "failed", detail: picked.error };
+    const dir = target.surface === "world-image"
+      ? WORLD_IMAGE_DIR
+      : target.surface === "master-look"
+        ? MASTER_LOOK_DIR
+        : stagedReferenceDir(target.key);
+    const stem = target.surface === "staged-reference" ? "reference" : "candidate";
+    await store.gateOp(async () => {
+      await rm(toExtendedLength(join(store.dir, dir)), { recursive: true, force: true });
+      await atomicWriteFile(join(store.dir, dir, `${stem}-${mutation.requestId}${picked.extension}`), picked.data);
+    }, mutation.precondition);
+    await store.commit({ kind: "world-chat-reference-image-import", source: mutation.source, files: [], requestId: mutation.requestId });
+    this.refreshIfStillOpen(store);
+    return { status: "completed", id: `${target.surface}:${mutation.requestId}` };
+  }
+
+  private async useReferenceCandidateForConversationAction(
+    store: WorldStore,
+    change: WorldChatReferenceResultUseAction["action"]["change"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<{ status: "completed" | "failed"; id?: string; detail?: string }> {
+    if (
+      (change.operation !== "choose-anchor" && change.operation !== "accept-location-view") ||
+      change.selection.source !== "candidate"
+    ) return { status: "failed", detail: "That result is not a pending file candidate." };
+    const bundle = store.getBundle();
+    const sheet = bundle.sheets.find((candidate) => candidate.id === change.sheetId);
+    const candidatePath = bundle.referenceCandidates[change.sheetId]?.[change.selection.candidateIndex - 1];
+    if (!sheet || !candidatePath) return { status: "failed", detail: "That reference candidate is no longer available." };
+    const file = basename(candidatePath);
+
+    if (change.operation === "choose-anchor") {
+      if (sheet.type !== "character") return { status: "failed", detail: "An identity anchor belongs to a character." };
+      const result = await acceptMainPhoto(
+        store,
+        sheet,
+        bundle,
+        { source: "candidate", file },
+        null,
+        {
+          recordUpload: (owned, sheetId, path) =>
+            recordUploadedReferenceTake(owned, sheetId, path, {
+              requestId: `${mutation.requestId}:take`,
+              precondition: mutation.precondition,
+            }),
+          commitAnchor: (owned, sheetId, input) => chooseAnchor(owned, sheetId, input, {
+            source: mutation.source,
+            requestId: mutation.requestId,
+          }),
+        },
+      );
+      if (result.status === "failed") return { status: "failed", detail: result.error };
+      this.refreshIfStillOpen(store);
+      return { status: "completed", id: mutation.requestId };
+    }
+
+    if (sheet.type !== "location") return { status: "failed", detail: "A location view belongs to a location." };
+    const job = this.jobQueue?.listJobs().find((candidate) =>
+      candidate.status === "succeeded" &&
+      candidate.target.kind === "location-view-candidate" &&
+      candidate.target.id?.startsWith(`${change.sheetId}/`) === true &&
+      candidate.landedFiles?.includes(candidatePath) === true);
+    const ledgerEntry = job && this.ledger
+      ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
+      : undefined;
+    const take = job ? await recordReferenceTake(store, job, ledgerEntry) : null;
+    if (!take?.media) return { status: "failed", detail: "That location candidate has no recoverable take." };
+    const frozen = take.params["provenance"] as { sheets?: Record<string, number> } | undefined;
+    const sheetVersion = frozen?.sheets?.[change.sheetId] ?? take.provenance.sheets[change.sheetId];
+    if (sheetVersion === undefined) return { status: "failed", detail: "That take does not record the location version it depicts." };
+    await acceptLocationView(store, sheet, {
+      id: `lv_${take.id.slice(3)}`,
+      name: change.name,
+      file: `takes/${take.id}/${take.media}`,
+      takeId: take.id,
+      sheetVersion,
+      artDirectionVersion: take.provenance.artDirectionVersion ?? store.getBundle().artDirection.version,
+      ...(change.establishing !== undefined ? { establishing: change.establishing } : {}),
+      ...(change.replaceExistingName !== undefined ? { replaceExistingName: change.replaceExistingName } : {}),
+      review: referenceReviewDecision(store.now(), take, "accept"),
+    }, { source: mutation.source, requestId: mutation.requestId });
+    await this.dropStagedReference(store, stagedReferenceKey("location-view", change.sheetId));
+    this.refreshIfStillOpen(store);
+    return { status: "completed", id: take.id };
+  }
+
+  private async useWorldImageForConversationAction(
+    store: WorldStore,
+    candidateIndex: number,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<boolean> {
+    const candidate = store.getBundle().keyArtCandidates[candidateIndex - 1];
+    if (!candidate || !await adoptKeyArtCandidate(store, candidate, mutation.precondition, mutation)) return false;
+    await this.dropStagedReference(store, stagedReferenceKey("world-image"));
+    this.refreshIfStillOpen(store);
+    await this.refreshWorldList();
+    return true;
+  }
+
+  private async useMasterLookForConversationAction(
+    store: WorldStore,
+    candidateIndex: number,
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<boolean> {
+    const gate = this.opts.provider.gate?.();
+    const candidate = store.getBundle().masterLookCandidates[candidateIndex - 1];
+    if (!gate || !candidate) return false;
+    const direction = store.getBundle().artDirection;
+    const file = masterLookFile(direction.version + 1, extname(candidate).toLowerCase() || ".png");
+    await store.gateOp(async () => {
+      await mkdir(toExtendedLength(join(store.dir, MASTER_LOOK_DIR_ACCEPTED)), { recursive: true });
+      await copyFile(
+        toExtendedLength(join(store.dir, fromPortable(candidate))),
+        toExtendedLength(join(store.dir, fromPortable(file))),
+      );
+    }, mutation.precondition);
+    const proposal = await gate.stageArtDirectionChange(direction.description, file, undefined, {
+      source: mutation.source,
+      precondition: mutation.precondition,
+    });
+    const outcome = await gate.accept(proposal.id, { precondition: mutation.precondition });
+    if (outcome.status !== "accepted") {
+      await store.ownedWrite(() => rm(toExtendedLength(join(store.dir, fromPortable(file))), { force: true }));
+      return false;
+    }
+    await store.ownedWrite(() => rm(toExtendedLength(join(store.dir, MASTER_LOOK_DIR)), { recursive: true, force: true }));
+    await this.dropStagedReference(store, stagedReferenceKey("master-look"));
+    this.refreshIfStillOpen(store);
+    return true;
+  }
+
+  private async discardReferenceImageForConversationAction(
+    store: WorldStore,
+    target: WorldChatReferenceImageDiscardAction["action"]["target"],
+    mutation: { source: string; requestId: string; precondition: WorldStatePrecondition },
+  ): Promise<boolean> {
+    const dir = target.surface === "world-image"
+      ? WORLD_IMAGE_DIR
+      : target.surface === "master-look"
+        ? MASTER_LOOK_DIR
+        : stagedReferenceDir(target.key);
+    await store.gateOp(
+      () => rm(toExtendedLength(join(store.dir, dir)), { recursive: true, force: true }),
+      mutation.precondition,
+    );
+    await store.commit({ kind: "world-chat-reference-image-discard", source: mutation.source, files: [], requestId: mutation.requestId });
+    this.refreshIfStillOpen(store);
+    return true;
+  }
+
+  private async quoteBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatBenchGenerationAction["action"],
+    createdAt: string,
+  ) {
+    const bench = await this.benchFor(store.worldId, action.sessionId);
+    if (!bench) throw new Error("That Bench session is no longer available.");
+    const model = this.opts.manifest?.models.find((candidate) =>
+      candidate.provider === action.composer.provider && candidate.id === action.composer.model) ?? null;
+    const subjectRouting = subjectSessionReferenceRouting(bench.session, model);
+    const session = {
+      ...bench.session,
+      composer: {
+        ...action.composer,
+        activeTokens: subjectRouting?.activeTokens ?? bench.session.composer.activeTokens,
+        keyframeTokens: subjectRouting?.keyframeTokens ?? bench.session.composer.keyframeTokens,
+      },
+    };
+    const revision = (await bench.store.read()).length;
+    const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
+      worldId: store.worldId,
+      requestId: `quote-${createdAt}`,
+      at: createdAt,
+      recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
+    });
+    if (!plan.ok) throw new Error(plan.reason);
+    const estimatedMicroUsd = plan.inputs.reduce((total, input) => total + input.estimatedMicroUsd, 0);
+    const snapshot = plan.reserved[0]!.request;
+    const references = [...snapshot.references, ...snapshot.keyframes]
+      .filter((reference, index, all) => all.findIndex((candidate) => candidate.token === reference.token) === index)
+      .map((reference) => ({ id: reference.token, role: reference.label ?? reference.subjectRole ?? reference.kind }));
+    const params = action.composer.params;
+    const quantity = "count" in params ? params.count : 1;
+    const localCharge = estimatedMicroUsd === 0 && PROVIDERS[action.composer.provider as ProviderId]?.local === true;
+    const quoteExpiresAt = new Date(Date.parse(createdAt) + 15 * 60_000).toISOString();
+    const quoteDigest = conversationActionDigest({
+      sessionId: action.sessionId,
+      revision,
+      composer: action.composer,
+      activeTokens: session.composer.activeTokens,
+      keyframeTokens: session.composer.keyframeTokens,
+      estimatedMicroUsd,
+      quoteExpiresAt,
+      inputs: plan.inputs.map((input) => ({
+        capability: input.capability,
+        provider: input.provider,
+        model: input.model,
+        params: input.params,
+        estimatedMicroUsd: input.estimatedMicroUsd,
+      })),
+    });
+    const medium = action.composer.mode === "image" ? "image" as const
+      : action.composer.mode === "video" ? "video" as const
+        : "audio" as const;
+    const dimensions = params.kind === "image"
+      ? [params.aspect, params.tier].filter(Boolean).join(" · ") || undefined
+      : params.kind === "video"
+        ? [params.aspect, params.resolution].filter(Boolean).join(" · ") || undefined
+        : undefined;
+    const durationSec = params.kind === "video" ? params.durationSec : undefined;
+    const audioPolicy = params.kind === "video"
+      ? params.sound === true ? "Generate picture with provider audio" : params.sound === false ? "Silent output" : "Provider default"
+      : action.composer.mode === "voice" ? "Spoken audio" : action.composer.mode === "music" ? "Music audio" : undefined;
+    return {
+      authorityRevision: revision,
+      body: {
+        family: "generation" as const,
+        medium,
+        purpose: bench.session.subject ? "Production Bench take" : "Bench exploration",
+        prompt: action.composer.brief || "No creative brief",
+        exclusions: [],
+        references,
+        provider: action.composer.provider,
+        model: action.composer.model,
+        options: Object.entries(params)
+          .filter(([label]) => label !== "kind" && label !== "count")
+          .map(([label, value]) => ({ label, value: typeof value === "string" ? value : JSON.stringify(value) })),
+        quantity,
+        output: bench.session.subject ? "Immutable unselected production takes" : "Immutable Bench takes",
+        ...(dimensions ? { dimensions } : {}),
+        ...(durationSec ? { durationSec } : {}),
+        ...(audioPolicy ? { audioPolicy } : {}),
+        privacy: references.length > 0
+          ? [`${references.length} attached reference${references.length === 1 ? "" : "s"} will be sent to the configured provider runtime.`]
+          : ["The complete creative brief will be sent to the configured provider runtime."],
+        cost: localCharge
+          ? "No provider charge"
+          : `$${(estimatedMicroUsd / 1_000_000).toFixed(4)} estimated; actual cost may differ`,
+        quoteDigest,
+        quoteExpiresAt,
+        estimatedMicroUsd,
+        currency: "USD" as const,
+        estimateMayVary: !localCharge,
+        deterministicInputs: [
+          `Bench revision ${revision}`,
+          ...(references.length > 0 ? ["Attached references are content-hash pinned"] : []),
+          ...(bench.session.subject ? ["Production subject and provenance are frozen at dispatch"] : []),
+        ],
+        cancellationSupported: true,
+      },
+    };
+  }
+
+  private async dispatchBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: WorldChatBenchGenerationAction["action"],
+    actionId: string,
+  ) {
+    await this.handleClientMessage({
+      kind: "bench-dispatch",
+      worldId: store.worldId,
+      sessionId: action.sessionId,
+      requestId: actionId,
+      composer: action.composer,
+    });
+    const bench = await this.benchFor(store.worldId, action.sessionId);
+    const takes = bench?.session.takes.filter((take) =>
+      take.requestId === actionId || take.requestId.startsWith(`${actionId}/`)) ?? [];
+    return takes.length > 0
+      ? { status: "queued" as const, detail: `${takes.length} Bench item${takes.length === 1 ? "" : "s"} reserved and queued.` }
+      : { status: "failed" as const, detail: "Bench did not reserve any work for this approval." };
+  }
+
+  private async reconcileBenchGenerationForConversationAction(
+    store: WorldStore,
+    action: ConversationActionCard,
+  ) {
+    const bench = await this.benchFor(store.worldId, action.authority.id as SessionId);
+    const takes = bench?.session.takes.filter((take) =>
+      take.requestId === action.actionId || take.requestId.startsWith(`${action.actionId}/`)) ?? [];
+    if (takes.length === 0) return null;
+    const active = takes.filter((take) => !["succeeded", "failed", "cancelled"].includes(take.status));
+    if (active.length > 0) {
+      return action.status === "approved" || action.status === "queued"
+        ? { status: "running" as const, detail: `${takes.length - active.length} of ${takes.length} items finished; ${active[0]!.id} is in flight.` }
+        : null;
+    }
+    const completed = takes.filter((take) => take.status === "succeeded" && take.media).length;
+    const failed = takes.filter((take) => take.status === "failed" || (take.status === "succeeded" && !take.media)).length;
+    const cancelled = takes.filter((take) => take.status === "cancelled").length;
+    if (completed === 0) {
+      return cancelled === takes.length
+        ? { status: "cancelled" as const, detail: `All ${cancelled} generation items were cancelled.` }
+        : { status: "failed" as const, detail: `${failed} failed and ${cancelled} were cancelled; no result completed.` };
+    }
+    const knownActualCosts = takes.map((take) => take.cost?.actualMicroUsd);
+    const actualMicroUsd = knownActualCosts.every((cost) => cost !== undefined && cost !== null)
+      ? knownActualCosts.reduce<number>((total, cost) => total + (cost ?? 0), 0)
+      : null;
+    return {
+      status: "completed" as const,
+      receipt: {
+        kind: "bench-generation",
+        id: action.authority.id,
+        summary: `${completed} completed, ${failed} failed, and ${cancelled} cancelled. Results remain unselected.`,
+        generation: {
+          authorized: takes.length,
+          completed,
+          failed,
+          cancelled,
+          unattempted: 0,
+          actualMicroUsd,
+          results: takes.map((take) => ({
+            id: take.id,
+            medium: take.request.mode === "image" ? "image" as const : take.request.mode === "video" ? "video" as const : "audio" as const,
+            status: take.status === "succeeded" && take.media ? "completed" as const
+              : take.status === "cancelled" ? "cancelled" as const : "failed" as const,
+            description: `${take.request.mode} Bench take ${take.n}`,
+            ...(take.media ? { mediaPath: `${sessionMediaDir(action.authority.id as SessionId, take.id)}/${take.media.file}` } : {}),
+            ...(take.error ? { detail: take.error } : {}),
+          })),
+        },
+      },
+    };
+  }
+
   /**
    * The runner for the open world, built once and kept (#70 §8).
    *
    * Kept rather than rebuilt per command because it holds the in-flight runs: a runner made
    * fresh for a cancel would have no record of the turn it was asked to stop.
    */
+  private conversationActionAdapters(
+    store: WorldStore,
+    archivedAt?: (path: string) => void,
+  ): readonly ConversationActionAuthorityAdapter[] {
+    const supplied = this.opts.conversationActionAdapters ?? [];
+    const suppliedKinds = new Set(supplied.map((adapter) => adapter.actionKind));
+    const archive = this.opts.provider.archiveWorld?.bind(this.opts.provider);
+    const deps: WorldChatActionAdapterDeps = {
+      activePlans: (productionId) => this.activeScenePlans(store, productionId),
+      ...(this.opts.pickFiles ? { pickFiles: this.opts.pickFiles } : {}),
+      ...(this.opts.pickFolder ? { pickFolder: this.opts.pickFolder } : {}),
+      ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+      extractArtifact: (artifactId, mutation) =>
+        this.extractArtifactForConversationAction(store, artifactId, mutation),
+      stopExtraction: (artifactId) => this.reading.get(artifactId)?.abort(),
+      importReference: (change, mutation) =>
+        this.importReferenceForConversationAction(store, change, mutation),
+      importReferenceImage: (target, mutation) =>
+        this.importReferenceImageForConversationAction(store, target, mutation),
+      useWorldImage: (candidateIndex, mutation) =>
+        this.useWorldImageForConversationAction(store, candidateIndex, mutation),
+      useMasterLook: (candidateIndex, mutation) =>
+        this.useMasterLookForConversationAction(store, candidateIndex, mutation),
+      useReferenceCandidate: (change, mutation) =>
+        this.useReferenceCandidateForConversationAction(store, change, mutation),
+      discardReferenceImage: (target, mutation) =>
+        this.discardReferenceImageForConversationAction(store, target, mutation),
+      ...(archive
+        ? {
+            archiveWorld: async () => {
+              const name = store.getBundle().meta.name;
+              const { folder } = await archive(store.worldId);
+              archivedAt?.(folder);
+              this.readModel.setWorld(null);
+              this.readModel.setWorlds(await this.opts.provider.listWorlds());
+              this.emit({
+                at: this.nowIso(),
+                type: "world.archived",
+                worldId: store.worldId,
+                name,
+                folder: basename(folder),
+              });
+              this.transport.broadcastSnapshot();
+              return { id: store.worldId };
+            },
+          }
+        : {}),
+      ...(this.opts.appRoot
+        ? {
+            exportWorld: async (actionId) => {
+              const exportId = `${store.getBundle().meta.slug}-${actionId}`;
+              const target = join(this.opts.appRoot!, "exports", exportId);
+              await exportWorld(store.dir, target);
+              void this.appLog?.append({ kind: "world-export.done", exportId });
+              return { id: exportId };
+            },
+          }
+        : {}),
+      inFlightWorldJobs: () => (this.jobQueue?.listJobs() ?? []).filter((job) =>
+        job.worldId === store.worldId &&
+        job.status !== "succeeded" &&
+        job.status !== "failed" &&
+        job.status !== "cancelled",
+      ).length,
+      voiceAvailable: async (voice) => {
+        if (!this.voiceService) return false;
+        const catalogue = await this.voiceService.catalogue(
+          store.getBundle().clonedVoices,
+          await this.comfyUiVoiceAvailability(),
+        );
+        return catalogue.some((candidate) =>
+          candidate.provider === voice.provider &&
+          candidate.model === voice.model &&
+          candidate.voiceId === voice.voiceId &&
+          candidate.unavailableReason === undefined &&
+          supportsVoiceUse(candidate, "line"),
+        );
+      },
+      ...(this.opts.boundaryFrameMaker ? { boundaryFrameMaker: this.opts.boundaryFrameMaker } : {}),
+      importProductionTake: (action, mutation) =>
+        this.importProductionTakeForConversationAction(store, action, mutation),
+      openProductionTakeGeneration: (action, mutation) =>
+        this.openProductionTakeGenerationForConversationAction(store, action, mutation),
+      getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      getJobs: () => this.jobQueue?.listJobs() ?? [],
+      quoteBenchGeneration: (action, createdAt) =>
+        this.quoteBenchGenerationForConversationAction(store, action, createdAt),
+      dispatchBenchGeneration: (action, actionId) =>
+        this.dispatchBenchGenerationForConversationAction(store, action, actionId),
+      reconcileBenchGeneration: (action) =>
+        this.reconcileBenchGenerationForConversationAction(store, action),
+      startProductionExport: (action, card) =>
+        this.startProductionExportForConversationAction(store, action, card),
+      cancelExport: (exportId) => {
+        const handle = this.exports.get(exportId);
+        if (!handle) return false;
+        handle.cancel();
+        return true;
+      },
+    };
+    return [
+      ...worldChatActionAdapters(store, this.opts.provider.gate?.() ?? null, () => this.nowIso(), deps)
+        .filter((adapter) => !suppliedKinds.has(adapter.actionKind)),
+      ...supplied,
+    ];
+  }
+
+  private async startProductionExportForConversationAction(
+    store: WorldStore,
+    action: WorldChatProductionCutExportAction["action"],
+    card: ConversationActionCard,
+  ) {
+    const episodeId = action.scope.kind === "episode" ? action.scope.episodeId : undefined;
+    const key = `${store.worldId}:${action.productionId}:${episodeId ?? "production"}`;
+    this.requestedExportIds.set(key, card.authority.id);
+    try {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === action.productionId);
+      if (!production) return { status: "failed" as const, detail: "That production is no longer available." };
+      await this.handleClientMessage({
+        kind: "export-cut",
+        worldId: store.worldId,
+        productionId: action.productionId,
+        ...(episodeId !== undefined ? { episodeId } : {}),
+        timelineRevision: production.timeline?.status === "ready" ? production.timeline.timeline.revision : null,
+        preset: action.preset,
+        ...(action.subtitles !== undefined ? { subtitles: action.subtitles } : {}),
+      });
+    } finally {
+      this.requestedExportIds.delete(key);
+    }
+
+    const projection = this.exportReads.get(card.authority.id);
+    if (projection?.status === "failed") return { status: "failed" as const, detail: "The local export was refused." };
+    if (projection?.status === "cancelled") return { status: "cancelled" as const, detail: "The local export was cancelled." };
+    const handle = this.exports.get(card.authority.id);
+    if (!handle) return { status: "failed" as const, detail: "Another export already owns this delivery scope." };
+
+    this.trackBackground(handle.done.then(async (result) => {
+      const lifecycle = new ConversationActionLifecycle({
+        worldPath: store.dir,
+        worldId: store.worldId,
+        adapters: [],
+        now: () => this.nowIso(),
+      });
+      const outcome = result.status === "done"
+        ? {
+            status: "completed" as const,
+            receipt: { kind: "production-export", id: handle.id, summary: "The local production export completed." },
+          }
+        : result.status === "cancelled"
+          ? { status: "cancelled" as const, detail: "The local production export was cancelled." }
+          : { status: "failed" as const, detail: "The local production export failed." };
+      await lifecycle.recordStatus(card.conversationId, card.actionId, outcome.status, {
+        authority: card.authority,
+        authorityRevision: card.authorityRevision,
+        ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+        ...(outcome.status === "completed" ? { receipt: outcome.receipt } : {}),
+      });
+      if (this.stillOpen(store)) {
+        await this.refreshConversations(store);
+        this.transport.broadcastSnapshot();
+      }
+    }));
+    return { status: "running" as const, detail: "The local export is running." };
+  }
+
+  private async activeScenePlans(store: WorldStore, productionId: string) {
+    const plans = await listPlans(store, productionId).catch(() => []);
+    const active: Array<{ planId: string; sceneId: string; status: string }> = [];
+    for (const plan of plans) {
+      const state = await planState(store, plan, this.planDriverDeps()).catch(() => null);
+      if (state?.status === "authorized" || state?.status === "active") {
+        active.push({ planId: plan.planId, sceneId: plan.sceneId, status: state.status });
+      }
+    }
+    return active;
+  }
+
+  private conversationActionLifecycleOptions(store: WorldStore): ConversationActionLifecycleOptions {
+    let worldPath = store.dir;
+    return {
+      worldPath: () => worldPath,
+      worldId: store.worldId,
+      adapters: this.conversationActionAdapters(store, (path) => {
+        worldPath = path;
+      }),
+      now: () => this.nowIso(),
+      isWorldOpen: () => !this.stopping && this.stillOpen(store),
+    };
+  }
+
+  private conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle {
+    return new ConversationActionLifecycle(this.conversationActionLifecycleOptions(store));
+  }
+
   private worldChatRunner(store: WorldStore, conversationId: ConversationId): WorldChatRunner {
     /*
      * Cached per world, but only while it is the same open store.
@@ -12418,6 +13362,20 @@ export class Coordinator {
         Math.max(MAX_TEXT_PER_RUN_CHARS, budgetFor(this.opts.adapter?.knownInputTokenLimit?.() ?? undefined)),
       getBundle: () => this.opts.provider.openStore?.()?.getBundle() ?? null,
       getIndex: () => this.opts.provider.openStore?.()?.getIndex() ?? null,
+      getPlans: (productionId) => listPlans(store, productionId),
+      getJobs: () => this.jobQueue?.listJobs() ?? [],
+      getExports: () => this.durableExportReads(store.worldId),
+      getChapterBody: async (productionId, chapterFile) => {
+        try {
+          const raw = await readFile(
+            toExtendedLength(join(store.dir, "productions", productionId, "chapters", `${chapterFile}.md`)),
+            "utf8",
+          );
+          return MarkdownFile.parse(raw).body;
+        } catch {
+          return null;
+        }
+      },
       attachments,
       findAttachment: async (lease, id) => {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
@@ -12439,6 +13397,14 @@ export class Coordinator {
       },
     });
 
+    const actionLifecycle = this.conversationActionLifecycle(store);
+    const summarise = this.opts.adapter?.readiness().ready
+      ? makeConversationSummariser(
+          this.opts.adapter,
+          this.sessionInput,
+          this.opts.appRoot ? join(this.opts.appRoot, ".summary") : `${this.opts.changeLogPath}.summary`,
+        )
+      : undefined;
     const runner = new WorldChatRunner({
       adapter: this.opts.adapter ?? null,
       /*
@@ -12471,16 +13437,28 @@ export class Coordinator {
         const current = await readBible(store.dir);
         return { version: current.version, text: current.text };
       },
-      applyBibleEdits: ({ edits, baseVersion }) =>
-        applyTurnBibleEdits(store, edits, { source: "world-chat", baseVersion }),
-      // Validated and written by the coordinator, never by the model (SPEC-039 R-27..R-29).
-      stageEditorRequests: async ({ conversationId, entryContext, requests, dryRun }) => {
-        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), ...(dryRun === true ? { dryRun: true } : {}) });
+      validateBibleEdits: async ({ edits, baseVersion }) => {
+        const current = await readBible(store.dir);
+        if (current.version !== baseVersion) throw new BibleStaleError(baseVersion, current.version);
+        applyBibleEdits(current.text, edits);
       },
-      // A rename lands through the header's own fenced write, straight in (SPEC-036 R-38).
+      validateEditorRequests: async ({ conversationId, entryContext, requests }) => {
+        await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), dryRun: true });
+      },
       sceneVersion: (context) => sceneVersionFor(store, context),
-      applySceneEdits: ({ entryContext, edits, baseVersion, dryRun }) =>
-        applySceneEdits(store, { entryContext, edits, baseVersion, ...(dryRun === true ? { dryRun: true } : {}) }),
+      validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
+        applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),
+      prepareActions: (turn) => prepareWorldChatActions(store, actionLifecycle, turn, {
+        getExports: () => [...this.exportReads.values()].filter((entry) => entry.worldId === store.worldId),
+      }),
+      bindActions: async (actions) => {
+        // Every binding appends to the same conversation, and proposal staging is also guarded per
+        // conversation. Run them in turn; any failed intent remains durable for startup recovery.
+        for (const action of actions) {
+          await actionLifecycle.bindIntent(action.intent, action.payload).catch(() => {});
+        }
+      },
+      ...(summarise ? { summarise } : {}),
       prepare: async ({ conversationId, runId, attachmentIds }) => {
         const lease = leases.mint({
           worldId: store.worldId,
@@ -12644,14 +13622,23 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
-    const { summaries } = await discoverConversations(store.dir);
+    const { summaries, activeActions } = await discoverConversations(store.dir);
+    if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
+    this.readModel.setStagePlayblastRequests(activeActions.flatMap((action) => {
+      if (action.actionKind !== "world-chat-production-stage-playblast" || action.status !== "awaiting-host" || !action.productionId) return [];
+      const shotId = action.targets.find((target) => target.kind === "shot")?.id;
+      // The observation fallback supports cards prepared before scene targets were included.
+      const prefix = `${action.productionId}:`;
+      const sceneId = action.targets.find((target) => target.kind === "scene")?.id ??
+        action.baseObservations.find((observation) => observation.requirement === "scenes" && observation.target.startsWith(prefix))?.target.slice(prefix.length);
+      return shotId && sceneId ? [{ worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, productionId: action.productionId, sceneId, shotId }] : [];
+    }));
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
-    const { summaries } = await discoverConversations(store.dir);
+    await this.refreshConversations(store);
     if (!this.stillOpen(store)) return;
-    this.readModel.setConversations(summaries);
     if (this.getState().worldChat?.conversationId === conversationId) {
       await this.openWorldChat(store, conversationId);
     } else {
@@ -12717,9 +13704,17 @@ export class Coordinator {
    * sheet renamed since the conversation happened should read under its current name — the panel
    * describes what the studio understands about the world as it is now, not as it was.
    */
-  private async openWorldChat(store: WorldStore, conversationId: ConversationId): Promise<void> {
+  private async openWorldChat(
+    store: WorldStore,
+    conversationId: ConversationId,
+    onlyIfStillSelected?: ConversationId,
+  ): Promise<void> {
     const service = new WorldChatService(store.dir);
     const loaded = await service.load(conversationId);
+    if (
+      !this.stillOpen(store) ||
+      (onlyIfStillSelected !== undefined && this.readModel.getState().worldChat?.conversationId !== onlyIfStillSelected)
+    ) return;
     if (!loaded) {
       this.readModel.setWorldChat(null);
       this.transport.broadcastSnapshot();

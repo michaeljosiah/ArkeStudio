@@ -1,4 +1,4 @@
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   newId,
@@ -9,10 +9,12 @@ import {
   type WorldChatLoaded,
   type WorldChatSummary,
 } from "@arke-studio/contracts";
+import { renameWithRetry } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { readCheckpoint, shouldCheckpoint, writeCheckpoint } from "./checkpoint.js";
 import { foldConversation, summarise } from "./fold.js";
-import { conversationDir, conversationsDir, WorldChatStore } from "./store.js";
+import { ConversationSequenceError, conversationDir, conversationsDir, WorldChatStore } from "./store.js";
+import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
 
 /**
  * Creating, reading and disposing of conversations (#70 phase 1, §15.1).
@@ -40,6 +42,7 @@ const REASONS: Record<WorldChatDeletionBlock, string> = {
   "wrap-up-in-flight": "This conversation is being turned into proposals. Wait for that to finish.",
   "unresolved-proposals":
     "Proposals from this conversation are still waiting on a decision. Accept or discard them first.",
+  "pending-actions": "Actions from this conversation are still waiting. Deny or cancel them before deleting.",
 } as const;
 
 export interface CreateOptions {
@@ -169,17 +172,37 @@ export class WorldChatService {
    * so a tombstone found at startup explains why it is there.
    */
   async delete(id: ConversationId, requestId: string): Promise<void> {
-    const blocked = await this.blockedFromDeletion(id);
-    if (blocked) throw new ConversationInUseError(blocked);
-
     const store = this.store(id);
-    if (!(await store.readMeta())) return; // already gone: a repeated Delete is not an error
-    await store.append({ type: "deletion.intent-recorded", requestId }, { at: this.now() });
+    for (;;) {
+      const meta = await store.readMeta();
+      if (!meta) return; // already gone: a repeated Delete is not an error
+      const events = (await store.read()).events;
+      const blocked = foldConversation(meta.id, meta.createdAt, events).view.deletionBlock;
+      if (blocked) throw new ConversationInUseError(blocked);
+      try {
+        const appended = await store.append(
+          { type: "deletion.intent-recorded", requestId },
+          { at: this.now(), requestId, expectedSeq: events.reduce((seq, event) => Math.max(seq, event.seq), 0) },
+        );
+        if (
+          appended.envelope.event.type !== "deletion.intent-recorded" ||
+          appended.envelope.event.requestId !== requestId
+        ) {
+          throw new Error("That deletion request ID was already used by another operation.");
+        }
+        break;
+      } catch (error) {
+        if (error instanceof ConversationSequenceError) continue;
+        throw error;
+      }
+    }
     await store.drain();
 
     const tomb = join(conversationsDir(this.worldPath), ".deleted", `${id}-${requestId}`);
     await mkdir(toExtendedLength(join(tomb, "..")), { recursive: true });
-    await rename(toExtendedLength(store.dir), toExtendedLength(tomb));
+    await renameWithRetry(store.dir, tomb);
+    // The transcript and rich preview may now go, but the minimal approval audit may not.
+    await preserveConversationActionTombstones(this.worldPath, tomb);
     // Past the rename the conversation is gone as far as the app is concerned; the bytes are
     // reclaimed here if they can be, and by the startup sweep if they cannot.
     await rm(toExtendedLength(tomb), { recursive: true, force: true }).catch(() => {});

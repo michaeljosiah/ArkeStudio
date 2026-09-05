@@ -63,6 +63,9 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       // Named even though it is rarely set: a look that quietly loses its master image would
       // otherwise change every generation with nothing on screen to show for it.
       if (record.masterLook) fields.set("Master look", record.masterLook);
+      if ("keyArtIntent" in record) {
+        fields.set("Key art intent", record.keyArtIntent ? JSON.stringify(record.keyArtIntent) : "None");
+      }
       policyFields(fields, record);
       return { label: `World look v${record.version}`, kind: "art direction", fields };
     } catch {
@@ -192,7 +195,11 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       label: entry.title,
       kind: entry.status === "open" ? "open thread" : `canon · ${entry.type}`,
       fields: new Map([
+        ["Type", entry.type],
         ["Title", entry.title],
+        ["Status", entry.status],
+        ["Links", entry.links.join(", ") || "None"],
+        ["Retired", entry.retired ? "Yes" : "No"],
         ["Statement", entry.body],
       ]),
     };
@@ -210,9 +217,19 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
   const parsed = SheetSchema.safeParse({ ...doc.data, type, sections: doc.sections() });
   if (!parsed.success) return null;
   const sheet = parsed.data;
-  const fields = new Map<string, string>([["Name", sheet.name]]);
-  if (sheet.role !== undefined) fields.set("Role", sheet.role);
-  if (sheet.region !== undefined) fields.set("Region", sheet.region);
+  const fields = new Map<string, string>([
+    ["Name", sheet.name],
+    ["Status", sheet.status],
+    ["Role", sheet.role ?? "None"],
+    ["Billing", sheet.billing ?? "None"],
+    ["Region", sheet.region ?? "None"],
+    ["Canon rules", sheet.canonRules.join(", ") || "None"],
+    ["Links", sheet.links.join(", ") || "None"],
+    ["Owner", sheet.production ?? "World"],
+    ["Origin", sheet.origin ? `${sheet.origin.sheet} v${sheet.origin.version}` : "None"],
+    ["Voice", sheet.voice ? JSON.stringify(sheet.voice) : "None"],
+    ["Retired", sheet.retired ? "Yes" : "No"],
+  ]);
   for (const section of sheet.sections) fields.set(section.heading, section.body);
   return { label: sheet.name, kind: `${type} sheet · v${sheet.version}`, fields };
 }
@@ -273,6 +290,9 @@ function inheritedLookBase(proposedRaw: string): { label: string; kind: string; 
     if (!previous) return null;
     const fields = new Map<string, string>([["Look", previous.description]]);
     if (previous.masterLook) fields.set("Master look", previous.masterLook);
+    if ("keyArtIntent" in previous) {
+      fields.set("Key art intent", previous.keyArtIntent ? JSON.stringify(previous.keyArtIntent) : "None");
+    }
     policyFields(fields, previous);
     return { label: `World look v${previous.version}`, kind: "art direction", fields };
   } catch {

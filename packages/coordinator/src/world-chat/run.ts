@@ -2,7 +2,6 @@ import {
   newId,
   REFUSED_TOOLS_MAX,
   type BibleEdit,
-  type BibleEditRecord,
   type CandidateChecks,
   type ConversationId,
   type HarnessAdapter,
@@ -30,6 +29,8 @@ import { correctiveMessage, validateTurnResult, type TurnProblem } from "./turn-
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
+import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
+import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
 
 /**
  * One turn: a message goes out, a reply and its propositions come back (#70 §8).
@@ -141,30 +142,22 @@ export interface RunDeps {
    * version it returns is what the next write is checked against.
    */
   bible?: () => Promise<{ version: number; text: string }>;
-  /**
-   * Apply this turn's bible edits, or throw.
-   *
-   * `baseVersion` is the version the prompt was built from, so a bible that moved between the
-   * prompt and the answer is refused rather than overwritten — the same guard the commit
-   * primitive applies to every other authored file (SPEC-002 R-27).
-   */
-  applyBibleEdits?: (input: {
+  /** Validate this turn's Bible edits against the exact text/version shown, without writing. */
+  validateBibleEdits?: (input: {
     edits: readonly BibleEdit[];
     baseVersion: number;
-  }) => Promise<BibleEditRecord | null>;
+  }) => Promise<void>;
   /**
-   * Stage this turn's editor requests as pending records (SPEC-039 R-27..R-29), or throw.
+   * Validate this turn's editor requests against their live base, without staging them.
    *
    * The coordinator validates every command against the live base before a record exists and
    * only for the production the thread is about; a refusal here rejects the turn as a corrective
    * problem, the same way a bible edit that does not resolve does.
    */
-  stageEditorRequests?: (input: {
+  validateEditorRequests?: (input: {
     conversationId: ConversationId;
     entryContext: WorldChatContext | undefined;
     requests: readonly ModelEditorRequest[];
-    /** Validate everything and write nothing: the pass that runs before the bible is written. */
-    dryRun?: boolean;
   }) => Promise<void>;
   /**
    * The version of the scene a scene thread is about, read when the prompt is built (SPEC-036
@@ -173,17 +166,19 @@ export interface RunDeps {
    */
   sceneVersion?: (context: WorldChatContext | undefined) => number | null;
   /**
-   * Land this turn's scene edits, or throw. Straight in, with no card: the coordinator writes
-   * them through the header's own `edit-scene`, and a scene that moved refuses back here as a
-   * corrective problem rather than being overwritten.
+   * Validate this turn's scene edits and their version fence, without writing.
    */
-  applySceneEdits?: (input: {
+  validateSceneEdits?: (input: {
     entryContext: WorldChatContext | undefined;
     edits: readonly ModelSceneEdit[];
     baseVersion: number | null;
-    /** Check the fence and write nothing: the pass that runs before the bible is written. */
-    dryRun?: boolean;
   }) => Promise<void>;
+  /** Build digest-bound intents before the assistant event is appended. This callback must be pure. */
+  prepareActions?: (turn: WorldChatActionTurn) => readonly PreparedWorldChatAction[];
+  /** Bind authority records only after the assistant event and all its intents are durable. */
+  bindActions?: (actions: readonly PreparedWorldChatAction[]) => Promise<void>;
+  /** Separate bounded model pass; its output is context only and failure leaves the prior summary. */
+  summarise?: ConversationSummariser;
   /** What the conversation was opened about, worded for the model (#70 phase 6). */
   describeEntry?: (context: NonNullable<WorldChatLoaded["entryContext"]>) => string;
   /**
@@ -810,7 +805,10 @@ export class WorldChatRunner {
 
     const revalidated = outcome.turn.candidates.map((candidate) => ({
       ...candidate,
-      checks: checksByDraft.get(candidate as unknown as ModelCandidateDraft) ?? candidate.checks,
+      checks: {
+        ...(checksByDraft.get(candidate as unknown as ModelCandidateDraft) ?? candidate.checks),
+        ...(candidate.checks.targetReads !== undefined ? { targetReads: candidate.checks.targetReads } : {}),
+      },
     }));
 
     /*
@@ -822,7 +820,7 @@ export class WorldChatRunner {
      */
     const requests = outcome.turn.editorRequests;
     if (requests.length > 0) {
-      if (!this.deps.stageEditorRequests) {
+      if (!this.deps.validateEditorRequests || !this.deps.prepareActions || !this.deps.bindActions) {
         return {
           ok: false,
           problems: [
@@ -834,7 +832,7 @@ export class WorldChatRunner {
         };
       }
       try {
-        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests, dryRun: true });
+        await this.deps.validateEditorRequests({ conversationId, entryContext: folded.entryContext, requests });
       } catch (err) {
         return {
           ok: false,
@@ -871,7 +869,7 @@ export class WorldChatRunner {
      */
     const sceneEdits = outcome.turn.sceneEdits;
     if (sceneEdits.length > 0) {
-      if (!this.deps.applySceneEdits) {
+      if (!this.deps.validateSceneEdits || !this.deps.prepareActions || !this.deps.bindActions) {
         return {
           ok: false,
           problems: [
@@ -883,20 +881,18 @@ export class WorldChatRunner {
         };
       }
       try {
-        await this.deps.applySceneEdits({
+        await this.deps.validateSceneEdits({
           entryContext: folded.entryContext,
           edits: sceneEdits,
           baseVersion: sceneBaseVersion,
-          dryRun: true,
         });
       } catch (err) {
         return { ok: false, problems: [{ code: "scene-edit", safeMessage: sceneEditProblem(err) }] };
       }
     }
 
-    let bibleEdit: BibleEditRecord | null = null;
     if (outcome.turn.bibleEdits.length > 0) {
-      if (!this.deps.applyBibleEdits) {
+      if (!this.deps.validateBibleEdits || !this.deps.prepareActions || !this.deps.bindActions) {
         return {
           ok: false,
           problems: [
@@ -908,7 +904,7 @@ export class WorldChatRunner {
         };
       }
       try {
-        bibleEdit = await this.deps.applyBibleEdits({
+        await this.deps.validateBibleEdits({
           edits: outcome.turn.bibleEdits,
           baseVersion: bibleBaseVersion,
         });
@@ -919,43 +915,51 @@ export class WorldChatRunner {
       }
     }
 
-    if (requests.length > 0 && this.deps.stageEditorRequests) {
-      try {
-        await this.deps.stageEditorRequests({ conversationId, entryContext: folded.entryContext, requests });
-      } catch (err) {
-        return {
-          ok: false,
-          problems: [
-            {
-              code: "editor-request",
-              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
-            },
-          ],
-        };
-      }
+    if (outcome.turn.actions.length > 0 && (!this.deps.prepareActions || !this.deps.bindActions)) {
+      return {
+        ok: false,
+        problems: [{ code: "action-unavailable", safeMessage: "World changes are unavailable in this conversation. Answer without changing the world." }],
+      };
     }
 
-    // The rename, last of the durable writes and before the record of the turn (see above).
-    if (sceneEdits.length > 0 && this.deps.applySceneEdits) {
-      try {
-        await this.deps.applySceneEdits({ entryContext: folded.entryContext, edits: sceneEdits, baseVersion: sceneBaseVersion });
-      } catch (err) {
-        return { ok: false, problems: [{ code: "scene-edit", safeMessage: sceneEditProblem(err) }] };
-      }
+    const completedRun = runFrom(events, runId);
+    let actions: readonly PreparedWorldChatAction[] = [];
+    try {
+      actions = this.deps.prepareActions?.({
+        conversationId,
+        turnId: completedRun.turnId,
+        entryContext: folded.entryContext,
+        existingCandidates: folded.candidates,
+        existingGroups: folded.groups,
+        candidates: revalidated,
+        groups: outcome.turn.groups,
+        bibleEdits: outcome.turn.bibleEdits,
+        bibleBaseVersion,
+        sceneEdits,
+        sceneBaseVersion,
+        editorRequests: requests,
+        actions: outcome.turn.actions,
+        receipts: this.deps.receiptsFor(runId),
+        at,
+      }) ?? [];
+    } catch {
+      return {
+        ok: false,
+        problems: [{ code: "action-preparation", safeMessage: "The requested change could not be prepared safely. Answer without it." }],
+      };
     }
-
     await store.append(
       {
         type: "turn.completed",
         message: {
           id: newId("msg") as MessageId,
-          turnId: newId("turn") as TurnId,
+          turnId: completedRun.turnId,
           role: "studio",
           text: outcome.turn.reply,
           attachmentIds: [],
           createdAt: this.deps.now(),
         },
-        run: { ...runFrom(events, runId), status: "completed", endedAt: this.deps.now() },
+        run: { ...completedRun, status: "completed", endedAt: this.deps.now() },
         receipts: [...this.deps.receiptsFor(runId)],
         // Written only when there were refusals, and capped at the schema's bound rather than
         // left to reject the whole turn: an answer that survived validation must not be lost
@@ -964,10 +968,14 @@ export class WorldChatRunner {
         candidates: revalidated,
         groups: outcome.turn.groups,
         tombstones: outcome.turn.tombstones,
-        ...(bibleEdit ? { bibleEdit } : {}),
+        ...(actions.length > 0 ? { actionPrepareIntents: actions.map((action) => action.intent) } : {}),
       },
       { at },
     );
+    if (actions.length > 0) await this.deps.bindActions?.(actions);
+    if (this.deps.summarise) {
+      void refreshConversationSummary(store, this.deps.summarise).catch(() => {});
+    }
     return { ok: true, reply: outcome.turn.reply };
   }
 
@@ -1127,6 +1135,18 @@ ${assembled.entryContext}`);
 /** What the person has selected while they talk (SPEC-039 R-26), worded for the model. */
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
-  const named = subject.kind === "timeline-clip" ? `clip ${subject.clipId}` : `track ${subject.trackId}`;
-  return ` They have ${named} selected on the timeline; that is what "this" and "the selected clip" mean.`;
+  const named = subject.kind === "timeline-clip"
+    ? `clip ${subject.clipId} on the timeline`
+    : subject.kind === "timeline-track"
+      ? `track ${subject.trackId} on the timeline`
+      : subject.kind === "scene"
+        ? `scene ${subject.sceneId}`
+        : subject.kind === "shot"
+          ? `shot ${subject.shotId} in scene ${subject.sceneId}`
+          : subject.kind === "board"
+            ? `the board containing shots ${subject.memberShotIds.join(", ")} in scene ${subject.sceneId}`
+            : subject.kind === "edge"
+              ? `the scene edge from ${subject.fromShotId ?? "the opening"} to ${subject.toShotId ?? "the ending"} in scene ${subject.sceneId}`
+              : `take ${subject.takeId}`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
 }

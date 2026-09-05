@@ -4,6 +4,7 @@ import type { WorldChatRun } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
+import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
 
 /**
  * What startup has to put right before anything new can happen (#70 phase 1, §7.2).
@@ -44,7 +45,7 @@ export async function recoverConversations(
 
   for (const entry of entries) {
     if (entry === ".deleted") {
-      outcome.sweptTombstones.push(...(await sweepTombstones(join(root, entry))));
+      outcome.sweptTombstones.push(...(await sweepTombstones(worldPath, join(root, entry))));
       continue;
     }
     if (entry.startsWith(".")) continue;
@@ -84,7 +85,7 @@ async function repairInterruptedRun(dir: string, now: () => string): Promise<boo
  * The rename is the authoritative moment of a deletion, so anything under `.deleted` is already
  * gone as far as the app is concerned — this is only reclaiming the bytes.
  */
-async function sweepTombstones(deletedDir: string): Promise<string[]> {
+async function sweepTombstones(worldPath: string, deletedDir: string): Promise<string[]> {
   let entries: string[];
   try {
     entries = await readdir(toExtendedLength(deletedDir));
@@ -94,6 +95,7 @@ async function sweepTombstones(deletedDir: string): Promise<string[]> {
   const swept: string[] = [];
   for (const entry of entries) {
     try {
+      await preserveConversationActionTombstones(worldPath, join(deletedDir, entry));
       await rm(toExtendedLength(join(deletedDir, entry)), { recursive: true, force: true });
       swept.push(entry);
     } catch {

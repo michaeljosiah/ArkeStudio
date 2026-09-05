@@ -2,6 +2,7 @@ import {
   EDITOR_REQUEST_BOUNDS,
   editorRequestStaleness,
   previewEditorRequest,
+  migrateLegacyCut,
   seedSpinePictureTimeline,
   seedFirstPictureTimeline,
   sourceLengthFramesFor,
@@ -13,9 +14,10 @@ import {
   type ModelEditorRequest,
   type ProductionBundle,
   type ProductionTimeline,
+  type TimelineSelectionChange,
   type WorldChatContext,
 } from "@arke-studio/contracts";
-import { applyTimelineCommand, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
+import { applyTimelineCommand, refuseUnknownLibraryItems, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
 import { EditorRequestFileInvalid, readRequestFile, requestFileInput } from "./editor-request-file.js";
@@ -90,19 +92,88 @@ function requestBase(
   if (state?.status === "invalid") throw new EditorRequestRefused("the timeline is invalid and cannot take a request");
   if (state?.status === "ready") {
     const fingerprint = currentSourceFingerprint(store, production) ?? storyTimelineFingerprint(production);
-    return { timeline: state.timeline, baseRevision: state.timeline.revision, sourceFingerprint: fingerprint };
+    return {
+      timeline: migrateLegacyCut(state.timeline, production, store.getBundle().artifacts).timeline,
+      baseRevision: state.timeline.revision,
+      sourceFingerprint: fingerprint,
+    };
   }
   const spine = production.spine;
   if (spine !== null) {
     const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
     if (measured === null) throw new EditorRequestRefused("this production is cut to a song; open it on the timeline before requesting edits");
     return {
-      timeline: seedSpinePictureTimeline(production, spine, measured),
+      timeline: migrateLegacyCut(seedSpinePictureTimeline(production, spine, measured), production, store.getBundle().artifacts).timeline,
       baseRevision: null,
       sourceFingerprint: spineTimelineFingerprint(production, spine, measured),
     };
   }
-  return { timeline: seedFirstPictureTimeline(production), baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production) };
+  return {
+    timeline: migrateLegacyCut(seedFirstPictureTimeline(production), production, store.getBundle().artifacts).timeline,
+    baseRevision: null,
+    sourceFingerprint: storyTimelineFingerprint(production),
+  };
+}
+
+function previewAgainstProduction(
+  store: WorldStore,
+  production: ProductionBundle,
+  request: ModelEditorRequest,
+  now: string,
+) {
+  const base = requestBase(store, production);
+  const artifacts = store.getBundle().artifacts;
+  let selections = production.selections;
+  for (const command of request.commands) {
+    if (command.kind !== "switch-take") continue;
+    try {
+      selections = applyTakeAcceptance(production, artifacts, selections, {
+        takeId: command.takeId,
+        shotId: command.shotId,
+        by: "user",
+        at: now,
+      }).selections;
+    } catch (error) {
+      return { base, preview: { ok: false as const, reason: error instanceof Error ? error.message : String(error) } };
+    }
+  }
+  const selectionChanges: TimelineSelectionChange[] = [];
+  for (const shotId of new Set([...Object.keys(production.selections), ...Object.keys(selections)])) {
+    const before = production.selections[shotId] ?? null;
+    const after = selections[shotId] ?? null;
+    if (JSON.stringify(before) !== JSON.stringify(after)) selectionChanges.push({ shotId, before, after });
+  }
+  const bounded: ProductionBundle = { ...production, selections };
+  try {
+    refuseUnrenderablePlacements(request.commands, base.timeline, bounded, artifacts);
+    refuseUnknownLibraryItems(request.commands, bounded, artifacts);
+  } catch (error) {
+    return {
+      base,
+      preview: {
+        ok: false as const,
+        reason: error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error),
+      },
+    };
+  }
+  return {
+    base,
+    preview: previewEditorRequest(base.timeline, request.commands, {
+      sourceLength: sourceLengthFramesFor(bounded, artifacts),
+      selections: selectionChanges,
+    }),
+  };
+}
+
+export function previewProductionEditorRequest(
+  store: WorldStore,
+  productionId: string,
+  request: ModelEditorRequest,
+  now: string,
+) {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) return { ok: false as const, reason: `production ${productionId} is not in this world` };
+  return previewAgainstProduction(store, production, request, now).preview;
 }
 
 /**
@@ -117,6 +188,7 @@ export async function stageEditorRequests(
   store: WorldStore,
   input: {
     conversationId: EditorRequest["conversationId"];
+    actionId?: EditorRequest["actionId"];
     entryContext: WorldChatContext | undefined;
     requests: readonly ModelEditorRequest[];
     now: string;
@@ -131,8 +203,6 @@ export async function stageEditorRequests(
     const dryRun = input.dryRun === true;
     const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
     if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
-    const base = requestBase(store, production);
-    const artifacts = store.getBundle().artifacts;
     const { raw, file } = await readRequests(store, productionId);
     const staged: EditorRequest[] = [];
     const added: EditorRequest[] = [];
@@ -140,31 +210,7 @@ export async function stageEditorRequests(
       const cannot = (reason: string): never => {
         throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${reason}`);
       };
-      // A take switch is not a clip command; the preview counts it. It is run through the same
-      // acceptance rules Accept will apply, so a switch to a take that does not exist or does
-      // not cover the shot is refused now rather than staged as a card that can never land —
-      // and the takes it lands are the ones the trims below are judged against (round seven).
-      let selections = production.selections;
-      for (const command of request.commands) {
-        if (command.kind !== "switch-take") continue;
-        try {
-          selections = applyTakeAcceptance(production, artifacts, selections, {
-            takeId: command.takeId,
-            shotId: command.shotId,
-            by: "user",
-            at: input.now,
-          }).selections;
-        } catch (error) {
-          cannot(error instanceof Error ? error.message : String(error));
-        }
-      }
-      const bounded: ProductionBundle = { ...production, selections };
-      try {
-        refuseUnrenderablePlacements(request.commands, base.timeline, bounded, artifacts);
-      } catch (error) {
-        cannot(error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error));
-      }
-      const preview = previewEditorRequest(base.timeline, request.commands, { sourceLength: sourceLengthFramesFor(bounded, artifacts) });
+      const { base, preview } = previewAgainstProduction(store, production, request, input.now);
       if (!preview.ok) cannot(preview.reason);
       /*
        * The same request twice is one record. A turn's corrective retry runs this again with
@@ -186,6 +232,7 @@ export async function stageEditorRequests(
         id: `req_${ulid()}`,
         productionId,
         conversationId: input.conversationId,
+        ...(input.actionId ? { actionId: input.actionId } : {}),
         baseRevision: base.baseRevision,
         sourceFingerprint: base.sourceFingerprint,
         commands: [...request.commands],
@@ -208,6 +255,42 @@ export async function stageEditorRequests(
     });
     return staged;
   });
+}
+
+export async function readEditorRequest(
+  store: WorldStore,
+  productionId: string,
+  requestId: string,
+): Promise<EditorRequest | null> {
+  const { file } = await readRequests(store, productionId);
+  return file.requests.find((request) => request.id === requestId) ?? null;
+}
+
+export async function readEditorRequestByAction(
+  store: WorldStore,
+  productionId: string,
+  actionId: string,
+): Promise<EditorRequest | null> {
+  const { file } = await readRequests(store, productionId);
+  return file.requests.find((request) => request.actionId === actionId) ?? null;
+}
+
+export async function validateEditorRequest(
+  store: WorldStore,
+  productionId: string,
+  requestId: string,
+): Promise<{ ok: true; request: EditorRequest } | { ok: false; stale: boolean; detail: string }> {
+  const request = await readEditorRequest(store, productionId, requestId);
+  if (!request) return { ok: false, stale: true, detail: "The editor request is no longer available." };
+  if (request.status !== "pending") {
+    return { ok: false, stale: true, detail: `The editor request is already ${request.status}.` };
+  }
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) return { ok: false, stale: true, detail: "The production is no longer available." };
+  const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
+  return stale === null
+    ? { ok: true, request }
+    : { ok: false, stale: true, detail: `The timeline changed after this request was prepared: ${stale}`.slice(0, 1_000) };
 }
 
 async function writeStatus(

@@ -383,6 +383,18 @@ export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaO
   return () => worldChatMediaListeners.delete(listener);
 }
 
+export type ConversationActionDecisionResult = Extract<
+  DomainEvent,
+  { type: "conversation-action.decision-result" }
+>;
+const conversationActionDecisionListeners = new Set<(answer: ConversationActionDecisionResult) => void>();
+export function subscribeConversationActionDecision(
+  listener: (answer: ConversationActionDecisionResult) => void,
+): () => void {
+  conversationActionDecisionListeners.add(listener);
+  return () => conversationActionDecisionListeners.delete(listener);
+}
+
 export type LyricsDrafted = Extract<DomainEvent, { type: "bench.lyrics-drafted" }>;
 const lyricsDraftedListeners = new Set<(answer: LyricsDrafted) => void>();
 export function subscribeLyricsDrafted(listener: (answer: LyricsDrafted) => void): () => void {
@@ -974,6 +986,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
+    }
+    if (event.type === "conversation-action.decision-result") {
+      for (const listener of conversationActionDecisionListeners) listener(event);
     }
     if (event.type === "bench.lyrics-drafted") {
       for (const listener of lyricsDraftedListeners) listener(event);
@@ -3254,7 +3269,7 @@ export async function cancelStageExport(jobId: string): Promise<void> {
 }
 
 export async function stagePlayblast(
-  target: Extract<AttachTarget, { kind: "stage-playblast" }>,
+  target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -3266,6 +3281,22 @@ export async function stagePlayblast(
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
   }
+}
+
+export function failStagePlayblastAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  detail: string,
+): void {
+  send({
+    kind: "conversation-action-stage-playblast-complete",
+    worldId,
+    conversationId,
+    actionId,
+    status: "failed",
+    detail: detail.slice(0, 1_000) || "The Stage recording failed.",
+  });
 }
 
 export function importShotFrame(worldId: string, productionId: string, shotId: string): void {
@@ -3785,6 +3816,28 @@ export function sendWorldChat(
   });
 }
 
+/** Decide exactly the card and conversation revision currently on screen. */
+export function decideConversationAction(
+  worldId: string,
+  conversationId: string,
+  actionId: string,
+  expectedConversationSeq: number,
+  expectedStatus: "pending" | "stale",
+  decision: "approve" | "deny",
+): string | null {
+  const requestId = ulid();
+  return send({
+    kind: "conversation-action-decide",
+    worldId,
+    conversationId,
+    actionId,
+    expectedConversationSeq,
+    expectedStatus,
+    decision,
+    requestId,
+  }) ? requestId : null;
+}
+
 /** Accept or reject one of Arke's editor requests (SPEC-039 R-29): the only boundary that lands or discards it. */
 export function decideEditorRequest(worldId: string, productionId: string, requestId: string, decision: "accept" | "reject"): void {
   send({ kind: "editor-request-decide", worldId, productionId, requestId, decision });
@@ -3948,6 +4001,17 @@ export function deleteWorldChat(worldId: string, conversationId: string): void {
 /** Ask the host's picker for documents to hand to this conversation, privately. */
 export function worldChatAttachFiles(worldId: string, conversationId: string): void {
   send({ kind: "world-chat-attach-files", worldId, conversationId });
+}
+
+/** Explicitly file one private conversation attachment into the world's artifact shelf. */
+export function promoteWorldChatAttachment(worldId: string, conversationId: string, attachmentId: string): void {
+  send({
+    kind: "world-chat-promote-attachment",
+    worldId,
+    conversationId,
+    attachmentId,
+    requestId: crypto.randomUUID(),
+  });
 }
 
 /**

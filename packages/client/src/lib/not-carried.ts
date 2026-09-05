@@ -37,5 +37,7 @@ export function explainNotCarried(reason: WorldChatNotCarried["reason"]): string
       return "It writes under a heading the sheet does not have — ask for it under one of the sheet's own sections and it will land";
     case "changes-nothing":
       return "It says what is already recorded — nothing in it would change";
+    case "incomplete-read":
+      return "It would replace a list the Studio did not finish reading — ask again so it can read the complete current record";
   }
 }

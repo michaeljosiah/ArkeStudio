@@ -113,6 +113,7 @@ function workspaceWith(message: Partial<WorldChatWorkspace["messages"][number]>)
     retrievalUnavailable: false,
     attachments: [],
     seq: 1,
+    actions: [],
     points: [],
     messages: [{
       id: "msg_01J8F3K2QW9VZX4N7M0RTYB6HC",
