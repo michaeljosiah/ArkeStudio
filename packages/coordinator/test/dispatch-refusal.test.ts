@@ -84,12 +84,12 @@ describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => 
       appVersion: "test",
       manifest: SHIPPED_MANIFEST,
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
     await client.open();
     try {
       // The protocol opens with a hello; nothing is served before one.
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => f.kind === "snapshot", "the opening snapshot");
 
       // Veo 3.1 makes 4s, 6s or 8s and nothing longer. Per shot, a 22s shot is refused at
@@ -121,7 +121,7 @@ describe("a dispatch the coordinator refuses (adversarial pass on #150)", () => 
 
       // Still serving: a refused frame is a refused frame, not the end of the session.
       const before = client.frames.length;
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => client.frames.length > before && f.kind === "snapshot", "a snapshot after the refusal");
     } finally {
       // A failed assertion must not leave the server listening: an open handle hangs the runner

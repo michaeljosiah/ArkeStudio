@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -23,9 +24,17 @@ interface Connection {
   socket: WebSocket;
   seq: number;
   helloed: boolean;
+  refused: boolean;
+}
+
+export interface TransportAuth {
+  /** A fresh 32-byte capability, supplied by the host; never included in snapshots or logs. */
+  token: string;
+  allowedOrigins: readonly string[];
 }
 
 export interface TransportOptions {
+  auth: TransportAuth;
   getSnapshot(): ClientState;
   /** Transient state that must be replayed after a fresh snapshot, such as held permissions. */
   getInitialEvents?(): DomainEvent[];
@@ -75,21 +84,47 @@ export class Transport {
   private http: Server | null = null;
   private readonly connections = new Set<Connection>();
 
-  constructor(private readonly opts: TransportOptions) {}
+  constructor(private readonly opts: TransportOptions) {
+    if (!/^[a-f0-9]{64}$/.test(opts.auth.token)) throw new Error("transport requires a 32-byte session capability");
+    if (opts.auth.allowedOrigins.includes("*")) throw new Error("transport origins must be explicit");
+  }
+
+  private authenticated(token: unknown): boolean {
+    return typeof token === "string" && /^[a-f0-9]{64}$/.test(token)
+      && timingSafeEqual(Buffer.from(token, "hex"), Buffer.from(this.opts.auth.token, "hex"));
+  }
+
+  private allowedOrigin(origin: string | undefined): boolean {
+    // Native clients need no Origin, but still need the capability. Browsers must name an
+    // explicitly allowed origin. Electron uses file:// for WS and null for file-page fetches.
+    // CORS is not authentication.
+    return origin === undefined || this.opts.auth.allowedOrigins.includes(origin);
+  }
 
   /** Bind to loopback on the given port (0 → allocated); resolves with the actual port. */
   async start(port = 0, host = "127.0.0.1"): Promise<number> {
     if (this.wss) throw new Error("transport already started");
     const server = createServer((req, res) => {
       void (async () => {
-        // Loopback-only server; the renderer's dev origin differs, so CORS opens reads.
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Vary", "Origin");
+        res.setHeader("Referrer-Policy", "no-referrer");
+        let url: URL;
+        try { url = new URL(req.url ?? "/", "http://127.0.0.1"); }
+        catch { res.writeHead(400).end(); return; }
+        const token = req.headers.authorization?.replace(/^Bearer /, "") ?? url.searchParams.get("token");
+        if (!this.authenticated(token) || !this.allowedOrigin(req.headers.origin)) {
+          this.opts.log?.("refused unauthenticated media request");
+          res.writeHead(401).end("session authentication required");
+          return;
+        }
+        if (req.headers.origin !== undefined) res.setHeader("Access-Control-Allow-Origin", req.headers.origin);
         if (req.method !== "GET" || !req.url || !this.opts.serveFile) {
           res.writeHead(404).end();
           return;
         }
         try {
-          const hit = await this.opts.serveFile(decodeURIComponent(req.url.split("?")[0] ?? ""));
+          const hit = await this.opts.serveFile(decodeURIComponent(url.pathname));
           if (!hit) {
             res.writeHead(404).end();
             return;
@@ -131,7 +166,7 @@ export class Transport {
     this.http = server;
     const wss = new WebSocketServer({ server });
     this.wss = wss;
-    wss.on("connection", (socket) => this.accept(socket));
+    wss.on("connection", (socket, request) => this.accept(socket, request.headers.origin));
     server.listen(port, host);
     await once(server, "listening");
     const address = server.address();
@@ -139,10 +174,23 @@ export class Transport {
     return address.port;
   }
 
-  private accept(socket: WebSocket): void {
-    const conn: Connection = { socket, seq: 0, helloed: false };
+  private accept(socket: WebSocket, origin: string | undefined): void {
+    const conn: Connection = { socket, seq: 0, helloed: false, refused: false };
+    const refuse = () => {
+      conn.refused = true;
+      conn.helloed = false;
+      this.opts.log?.("refused unauthenticated WebSocket session");
+      socket.close(1008, "session authentication required");
+    };
     this.connections.add(conn);
+    socket.on("close", () => this.connections.delete(conn));
+    socket.on("error", () => this.connections.delete(conn));
+    if (!this.allowedOrigin(origin)) {
+      refuse();
+      return;
+    }
     socket.on("message", (data) => {
+      if (conn.refused) return;
       let msg: ClientMessage;
       let parsedJson: unknown;
       try {
@@ -151,6 +199,15 @@ export class Transport {
         // Bytes that are not JSON are a transport fault; fail loudly rather than guessing.
         socket.close(1002, "malformed client message");
         return;
+      }
+      // Check before schema parsing: a missing/invalid capability must close, not be treated
+      // as harmless version skew. No pipelined command may follow a refused hello.
+      const candidate = parsedJson as { kind?: unknown; token?: unknown } | null;
+      if (!conn.helloed || candidate?.kind === "hello") {
+        if (candidate?.kind !== "hello" || !this.authenticated(candidate.token)) {
+          refuse();
+          return;
+        }
       }
       try {
         msg = ClientMessageSchema.parse(parsedJson);
@@ -179,8 +236,6 @@ export class Transport {
       }
       this.opts.onMessage?.(msg);
     });
-    socket.on("close", () => this.connections.delete(conn));
-    socket.on("error", () => this.connections.delete(conn));
   }
 
   private sendFrame(conn: Connection, frame: Frame): void {

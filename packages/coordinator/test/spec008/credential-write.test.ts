@@ -85,11 +85,11 @@ describe("a credential write is always answered (R-6, issue #227)", () => {
       appVersion: "test",
       appRoot: root,
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
     await client.open();
     try {
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => f.kind === "snapshot", "the opening snapshot");
       client.send({ kind: "set-credential", provider: "openai", key: KEY });
       await client.until(
@@ -124,11 +124,11 @@ describe("a credential write is always answered (R-6, issue #227)", () => {
       cipher: devCipher(),
       credentialsFileName: "credentials.dev.dat",
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
     await client.open();
     try {
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => f.kind === "snapshot", "the opening snapshot");
       client.send({ kind: "set-credential", provider: "openai", key: KEY });
       await client.until(

@@ -55,8 +55,21 @@ npm install          # npm workspaces monorepo, Node >= 20
 npm run typecheck    # every workspace
 npm run lint         # oxlint
 npm test             # every workspace with tests
+npm run dev:coordinator # start the local coordinator first (separate terminal)
 npm run dev          # client dev server
 ```
+
+For browser development, open the **Arke session** link printed by Vite. It carries this launch's
+capability in the URL fragment; the browser removes the fragment credential and keeps it in tab
+session storage. The ordinary Vite URL does not grant a coordinator session. After restarting the
+coordinator, restart Vite and use its new link. The gitignored `.dev/transport-<port>.json` handoff
+is only for local development; it is never served as HTML or included in a build. The packaged
+app instead keeps its capability in Electron main/preload and attaches media credentials in headers.
+
+For a custom coordinator port, set `VITE_ARKE_WS` in the client terminal to its loopback WebSocket
+URL. For a custom Vite port/origin, set `ARKE_DEV_ORIGIN` to that exact origin in both terminals
+(and `PORT` separately for each server). The defaults allow `http://localhost:5173` and
+`http://127.0.0.1:5173`.
 
 Run those four before you push. CI runs the same ones, so a green local run is a green CI run.
 

@@ -108,11 +108,11 @@ describe("deleting a job from Activity reaches the queue (SPEC-014 R-13)", () =>
       // Any dispatch surface at all is enough for the queue to exist; nothing here submits.
       dispatchClients: {},
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
     await client.open();
     try {
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       const opening = await client.until((f) => f.kind === "snapshot", "the opening snapshot");
       assert.equal(opening.kind, "snapshot");
       if (opening.kind !== "snapshot") return;
@@ -134,7 +134,7 @@ describe("deleting a job from Activity reaches the queue (SPEC-014 R-13)", () =>
       // A job still in flight is not history: the same message on it does nothing at all.
       const before = client.frames.length;
       client.send({ kind: "delete-job", jobId: running.id });
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       const after = await client.until(
         (f) => f.kind === "snapshot" && client.frames.indexOf(f) >= before,
         "a snapshot after the deletion",

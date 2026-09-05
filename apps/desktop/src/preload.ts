@@ -12,7 +12,7 @@ function argValue(name: string): string | null {
   return hit ? hit.slice(prefix.length) : null;
 }
 
-const initialPort = argValue("arke-ws-port");
+// The session arrives over private startup IPC, never process arguments or the public bridge.
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
 type ThemePreference = "system" | "light" | "dark";
 type ResolvedTheme = "light" | "dark";
@@ -25,10 +25,11 @@ const startupTheme = {
   preference: themePreference,
   resolved: resolvedTheme,
 } satisfies { preference: ThemePreference; resolved: ResolvedTheme };
-let wsUrl = initialPort ? `ws://127.0.0.1:${initialPort}` : null;
-let httpBase = initialPort ? `http://127.0.0.1:${initialPort}` : null;
+let wsUrl: string | null = null;
+let httpBase: string | null = null;
+let sessionToken: string | null = null;
 type StartupState = { status: "initializing" } | { status: "ready" } | { status: "failed"; detail: string };
-let startupState: StartupState = initialPort ? { status: "ready" } : { status: "initializing" };
+let startupState: StartupState = { status: "initializing" };
 const startupListeners = new Set<(state: StartupState) => void>();
 
 /**
@@ -69,8 +70,9 @@ let socket: WebSocket | null = null;
 const frameListeners = new Set<FrameListener>();
 const statusListeners = new Set<StatusListener>();
 
-ipcRenderer.on("arke:startup-state", (_event, state: StartupState & { port?: number }) => {
-  if (state.status === "ready" && typeof state.port === "number") {
+ipcRenderer.on("arke:startup-state", (_event, state: StartupState & { port?: number; token?: string }) => {
+  if (state.status === "ready" && typeof state.port === "number" && typeof state.token === "string") {
+    sessionToken = state.token;
     wsUrl = `ws://127.0.0.1:${state.port}`;
     httpBase = `http://127.0.0.1:${state.port}`;
     startupState = { status: "ready" };
@@ -157,12 +159,18 @@ const bridge = {
   },
 
   send(json: string): void {
-    if (socket && socket.readyState === WebSocket.OPEN) socket.send(json);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      const message = JSON.parse(json) as { kind?: string };
+      socket.send(message.kind === "hello" ? JSON.stringify({ ...message, token: sessionToken }) : json);
+    }
   },
 
   subscribe(onFrame: FrameListener, onStatus: StatusListener): void {
     frameListeners.add(onFrame);
     statusListeners.add(onStatus);
+    // Startup IPC may connect before the renderer bundle subscribes (especially on reload).
+    if (socket?.readyState === WebSocket.OPEN) onStatus("open");
+    else if (socket?.readyState === WebSocket.CONNECTING) onStatus("connecting");
   },
 
   onActivateActivity(listener: () => void): () => void {
