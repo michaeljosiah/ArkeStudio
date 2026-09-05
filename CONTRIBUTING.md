@@ -51,9 +51,10 @@ corporate agreement is a different document.
 ## Getting set up
 
 ```bash
-npm install          # npm workspaces monorepo, Node >= 20
+npm ci               # npm workspaces monorepo, Node >= 22.12 (CI uses Node 22)
 npm run typecheck    # every workspace
 npm run lint         # oxlint
+npm run build        # client and desktop
 npm test             # every workspace with tests
 npm run dev:coordinator # start the local coordinator first (separate terminal)
 npm run dev          # client dev server
@@ -71,7 +72,10 @@ URL. For a custom Vite port/origin, set `ARKE_DEV_ORIGIN` to that exact origin i
 (and `PORT` separately for each server). The defaults allow `http://localhost:5173` and
 `http://127.0.0.1:5173`.
 
-Run those four before you push. CI runs the same ones, so a green local run is a green CI run.
+Run lint, typecheck, build and tests before pushing code changes. CI checks Windows and Linux;
+local success does not establish correctness on the other platform. For focused tests, fixtures,
+native runtime checks and documentation-only validation, see [the testing guide](docs/development/testing.md).
+Start with [the developer index](docs/development/README.md) for code navigation and shared agent guidance.
 
 ## How changes are shaped
 

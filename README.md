@@ -117,6 +117,10 @@ managed route is a convenience, never the only easy path.
 
 ## How this is built
 
+For a first code-reading session, start with [AGENTS.md](AGENTS.md) and the
+[developer index](docs/development/README.md): package relationships, workflow traces,
+test selection and generated-file ownership.
+
 Arke is specified before it is written. [`docs/specification.md`](docs/specification.md) is
 the master product spec; [`docs/specifications/`](docs/specifications) breaks it into
 capability specs, each with its requirements, its design reasoning and its decision log.
@@ -153,13 +157,13 @@ every dispatch, real currency shown before spend, and durable execution tracking
 Cloud — access your worlds anywhere. Sync, collaborate, create" but integration with Aonik
 (the platform foundation) is not yet complete.
 
-**The audience journey is not yet started.** Series vocabulary, episodes, publishing and personal
-sync are designed but not built. Arke can build a world and generate governed media from it, but
-cannot yet produce a complete season or get work to an audience.
+**The audience journey is incomplete.** Episode creation and episode detail/chat screens have
+implementation, but do not yet establish a complete season-production and audience-publishing
+workflow. See the [implementation status notes](docs/development/status.md) for evidence and limits.
 
-This repository holds the code, the specifications and the design system. For more on the vision,
-roadmap and principles, see [`docs/vision.html`](https://github.com/michaeljosiah/ArkeStudio/blob/main/docs/vision.html)
-and the specification in [`docs/specification.md`](docs/specification.md).
+This repository holds the code, the specifications and the design system. For the product's
+direction and requirements, see the [master specification](docs/specification.md) and its linked
+capability specifications.
 
 ## Contributing
 

@@ -2,7 +2,10 @@
 
 An npm workspaces monorepo — `packages/*` and `apps/*` — on Windows, shipped as an Electron
 desktop app. This file covers the things that have actually cost sessions time here. It is not a
-tour of the architecture; read the code and `docs/specifications/` for that.
+tour of the architecture. Start with [AGENTS.md](AGENTS.md) and the
+[developer code map](docs/development/code-map.md) for navigation, then the relevant spec.
+This file is the shared operational reference for all coding agents; keep these rules here
+rather than duplicating them in package guides.
 
 ## Never hand-roll branch or worktree deletion
 
@@ -48,6 +51,7 @@ from `git stash list`, and restore with `git stash apply <sha>`, never `pop`.
 ```
 npm run lint        # oxlint packages apps — note: NOT scripts/
 npm run typecheck   # tsc --noEmit per workspace
+npm run build       # client and desktop build
 npm test            # node --test per workspace
 ```
 

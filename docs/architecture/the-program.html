@@ -515,13 +515,15 @@
       <section id="tests">
         <h2>Tests</h2>
         <p>
-          There are <strong>232 test files</strong> across the repository, unevenly spread: 137 of
-          them cover the engine and 56 cover the window.
+          Tests live under each workspace's <code>test/</code> directory. The coordinator suites
+          cover domain behavior and persistence; client suites cover screens and state; desktop
+          suites cover platform integration and delivery helpers.
         </p>
         <p>
-          For the engine, test code very nearly matches source code by volume —
-          <strong>39,860 lines of test against 43,645 lines of engine</strong>, roughly nine lines
-          of test for every ten of code. Across the whole repository it is 63,867 against 107,956.
+          The <a href="../development/testing.md">developer testing guide</a> explains focused
+          commands, fixtures and platform checks. The <a href="../development/code-map.md">code
+          map</a> connects feature entry points to relevant suites. File counts alone do not show
+          whether a behavior is covered or whether its tests pass.
         </p>
         <p>
           The contributing guide names four places where a mistake is <em>expensive and quiet</em>

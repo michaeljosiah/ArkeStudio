@@ -13,7 +13,7 @@
     "apps/*"
   ],
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "npm run dev --workspace @arke-studio/client",
