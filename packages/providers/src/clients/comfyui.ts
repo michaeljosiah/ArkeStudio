@@ -1,4 +1,5 @@
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
   callerParamNames,
   comfyUiRecipeById,
@@ -56,11 +57,11 @@ export type ComfyUiPreflight = (
 ) => Promise<{ ok: true } | { ok: false; reason: string }>;
 
 /**
- * The oldest engine the shipped recipes run on (D14): the release that introduced the core
- * node set the video recipe stands on. An engine that answers with less is incompatible with
- * its version named, never generically unavailable.
+ * The provider's floor — the oldest engine whose API shape this client drives (D14, D17). It is
+ * declared once, in contracts, and shared with the engine service (issue 592); the recipes' own
+ * requirements live on the recipes. Re-exported so every existing reader keeps its import.
  */
-export const COMFYUI_VERSION_FLOOR = "0.3.45";
+export { COMFYUI_VERSION_FLOOR };
 
 function isRedirect(status: number): boolean {
   return status >= 300 && status < 400;
@@ -68,17 +69,7 @@ function isRedirect(status: number): boolean {
 
 /** "0.33.1" ≥ "0.3.45"? Numeric segment compare; anything unparseable compares as unknown. */
 export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSION_FLOOR): boolean | null {
-  const parse = (v: string): number[] | null => {
-    const m = /^v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(v.trim());
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)] : null;
-  };
-  const a = parse(version);
-  const b = parse(floor);
-  if (a === null || b === null) return null;
-  for (let i = 0; i < 3; i++) {
-    if (a[i]! !== b[i]!) return a[i]! > b[i]!;
-  }
-  return true;
+  return meetsComfyUiVersion(version, floor);
 }
 
 /**
@@ -324,6 +315,31 @@ export class ComfyUiClient implements ProviderClient {
    * The compatibility probe (D14): `/system_stats` must answer with a version at or above the
    * floor. What it cannot prove — files, nodes — is readiness's business, not this probe's.
    */
+  /** The last version an engine reported to this client, for failure reasons to carry (R-19). */
+  private engineVersionSeen: string | null = null;
+
+  /** One reading of `/system_stats`' version, or null when the engine cannot be asked right now. */
+  private async engineVersion(signal?: AbortSignal): Promise<string | null> {
+    const raw = this.baseUrl();
+    const base = raw === null ? null : ComfyUiClient.origin(raw);
+    if (base === null) return null;
+    try {
+      const answer = await jsonRequest(this.fetchImpl, this.id, `${base}/system_stats`, {
+        signal: signal ?? AbortSignal.timeout(3_000),
+      });
+      if (answer.status >= 400) return null;
+      const version = (answer.body as { system?: { comfyui_version?: unknown } } | null)?.system?.comfyui_version;
+      return typeof version === "string" && version.length > 0 ? version : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** ` · ComfyUI x.y.z` when an engine has been seen, so a failure names the pairing it happened on. */
+  private onEngine(): string {
+    return this.engineVersionSeen === null ? "" : ` · ComfyUI ${this.engineVersionSeen}`;
+  }
+
   async validateKey(): Promise<CapabilityProbe[]> {
     const capabilities = ["image", "video", "voice-tts"] as const;
     // Not `require()`: this one answers rather than throws when nothing is configured, so it
@@ -591,6 +607,29 @@ export class ComfyUiClient implements ProviderClient {
       }
     }
     // R-10 said no references before commit; this is the backstop for a mis-planned dispatch.
+    /*
+     * The engine version frozen at enqueue is re-read from the engine now (R-19; issue 592): a
+     * job either runs on the version recorded against it or never reaches /prompt. Asked only
+     * when there is a frozen value to hold it to — the engine service's preflight already keeps
+     * an engine below a recipe's floor from getting this far — and the reading is kept so a
+     * failure after submission can say which engine it happened on.
+     */
+    if (frozen?.engineVersion !== undefined) {
+      const live = await this.engineVersion(request.signal);
+      if (live !== null) {
+        this.engineVersionSeen = live;
+        if (compareComfyUiVersions(live, frozen.engineVersion) !== 0) {
+          throw new ProviderRequestRejectedError(
+            `comfyui: this job was priced against ComfyUI ${frozen.engineVersion}, and the engine now reports ${live} — it was refused before /prompt rather than run on a version nobody reviewed`,
+          );
+        }
+        if (meetsComfyUiVersion(live, recipe.engine.minVersion) !== true) {
+          throw new ProviderRequestRejectedError(
+            `comfyui: ${recipe.displayName} needs ComfyUI ${recipe.engine.minVersion} or later — this engine reports ${live}`,
+          );
+        }
+      }
+    }
     const durable = request.params["references"];
     if ((Array.isArray(durable) && durable.length > 0) || (request.imageReferences?.length ?? 0) > 0) {
       throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes no reference images`);
@@ -629,7 +668,7 @@ export class ComfyUiClient implements ProviderClient {
       const named =
         errors && Object.keys(errors).length > 0 ? ` (${Object.keys(errors).length} node(s) reported invalid)` : "";
       // A 4xx from /prompt proves the engine rejected the graph before queueing anything.
-      throw new ProviderRequestRejectedError(`comfyui: the engine rejected the prompt (HTTP ${status})${named}`);
+      throw new ProviderRequestRejectedError(`comfyui: the engine rejected the prompt (HTTP ${status})${named}${this.onEngine()}`);
     }
     // What this prompt is doing, in the recipe's own words. Recorded here because `poll` knows
     // only a prompt id, and the alternative — the node id the socket sends — is exactly what R-1
@@ -679,7 +718,10 @@ export class ComfyUiClient implements ProviderClient {
     }
     const status = entry.status;
     if (status?.status_str === "error") {
-      return { state: "failed", error: historyError(status.messages) ?? "comfyui: the engine reported an execution error" };
+      return {
+        state: "failed",
+        error: `${historyError(status.messages) ?? "comfyui: the engine reported an execution error"}${this.onEngine()}`,
+      };
     }
     if (status?.completed === true) return { state: "succeeded" };
     // Present in history but not completed: the engine is finalising. Keep polling.

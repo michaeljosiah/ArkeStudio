@@ -6141,6 +6141,23 @@ export class Coordinator {
         await this.refreshComfyUi();
         return;
       }
+      case "comfyui-update-runtime": {
+        const service = this.opts.comfyui?.service;
+        if (!service || !this.setup || !this.appSettings) return;
+        // Stop only the managed child (SPEC-021 R-20): a user-directed engine is supervised
+        // identically and is somebody else's work, and the case this serves is a stale managed tree
+        // behind a selected user engine. The swap runs with the files closed; the engine comes back
+        // through the same path Settings uses, and only if it was the one stopped.
+        const stopped = await service.stopManagedSupervision().catch(() => false);
+        await this.setup.updateTree("comfyui-runtime").catch(() => false);
+        await this.setup.detect().catch(() => {});
+        if (stopped) {
+          const settings = await this.appSettings.load();
+          await service.applySettings(settings.comfyui).catch(() => {});
+        }
+        await this.refreshComfyUi();
+        return;
+      }
       case "repair-voice-models": {
         const repaired = await Promise.all([
           this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro),

@@ -31,6 +31,7 @@ import {
   clearVoxaExecutable,
   openEngineLog,
   openModelFolder,
+  updateComfyUiRuntime,
   refreshComfyUi,
   restartComfyUi,
   repairVoiceModels,
@@ -373,6 +374,31 @@ export function ComfyUiDetail() {
           )}
         </div>
       </div>
+      {/* Managed currency (SPEC-021 R-20): read from the tree itself, stated, offered — never applied.
+          Shown whichever engine is selected, since a stale managed tree behind a user URL is the case
+          this exists to find. */}
+      {managedRuntime?.currency === "behind" && managedRuntime.installedVersion !== undefined && (
+        <div className="fy-set__why" data-testid="comfyui-managed-update">
+          <span className="fy-set__dot fy-set__dot--warn" />
+          <span>
+            Arke-managed v{managedRuntime.installedVersion} installed · v{managedRuntime.pinnedVersion} available
+          </span>
+          <button
+            type="button"
+            className="fy-set__link"
+            disabled={managedRuntime.state !== "present"}
+            onClick={() => updateComfyUiRuntime()}
+          >
+            Update
+          </button>
+        </div>
+      )}
+      {managedRuntime?.currency === "unknown" && managedRuntime.state === "present" && (
+        <div className="fy-set__why">
+          <span className="fy-set__dot" />
+          <span>Arke-managed · installed version unknown · v{managedRuntime.pinnedVersion} pinned</span>
+        </div>
+      )}
       {engine?.detail && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />
@@ -499,6 +525,7 @@ export function ComfyUiDetail() {
                 <div className="fy-set__caps fy-set__caps--tokens">
                   {recipe.capability} · v{recipe.recipeVersion}
                 </div>
+                {recipe.untested !== undefined && <div className="fy-set__caps">{recipe.untested}</div>}
               </div>
               {weights?.state === "available" && (
                 <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>

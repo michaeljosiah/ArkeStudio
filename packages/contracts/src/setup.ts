@@ -86,6 +86,16 @@ export const SetupComponentSchema = z
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
     /**
+     * Managed-runtime currency for a `tree` component (SPEC-021 R-20; issue 592): the version the
+     * installed tree itself records, the version this release pins, and how they compare. `unknown`
+     * is a tree whose version could not be read — never treated as behind, since a missing reading
+     * proves only that nothing could be read, and offering a six-gigabyte replacement on that is
+     * the failure R-20 names. Reported and offered, never applied.
+     */
+    installedVersion: z.string().min(1).optional(),
+    pinnedVersion: z.string().min(1).optional(),
+    currency: z.enum(["current", "behind", "unknown"]).optional(),
+    /**
      * The manifest models this component makes available (SPEC-033 R-39). Declared, so that a
      * capability row can say whether a model is installed without inferring a chain from an
      * identifier's prefix — the same class of mistake as `ollama-gemma4-12b` naming its runtime.
