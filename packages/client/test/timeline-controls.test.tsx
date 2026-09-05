@@ -270,15 +270,10 @@ describe("durable Picture controls (#678)", () => {
         [...screen.container.querySelectorAll("#assembly-did li")].map((item) => item.textContent),
         assembly.notes,
       );
-      // The banner is a summary, not a door: the Arke pane is still reached through its own tab.
-      const arke = [...screen.container.querySelectorAll<HTMLButtonElement>("[role='tab']")].find(
-        (candidate) => candidate.textContent?.trim() === "Arke",
-      );
-      assert.ok(arke, "the real Arke tab remains");
-      assert.equal(arke.getAttribute("aria-selected"), "false");
-      await act(async () => arke.click());
-      assert.equal(arke.getAttribute("aria-selected"), "true");
-      assert.ok(screen.container.querySelector("[role='tabpanel'][aria-labelledby='cut-arke-tab']"));
+      // The banner is a summary, not a door — and since design turn 122 there is no door to be:
+      // Arke is under the Inspector on the same edge, never behind a tab that hides it.
+      assert.equal(screen.container.querySelectorAll("[role='tab']").length, 0, "no tabs on the edge");
+      assert.ok(screen.container.querySelector("#cut-arke-panel"), "the real Arke pane is present");
       assert.match(
         CSS,
         /\.fy-cutside__panel--arke\s*\{[^}]*flex-direction:\s*column/,

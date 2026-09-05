@@ -6056,12 +6056,14 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 
 
 .fy-cutside { min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--background); display: flex; flex-direction: column; }
-.fy-cutside__tabs { min-height: 43px; flex: none; display: flex; align-items: end; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--border); }
-.fy-cutside__tabs > [role="tab"] { height: 43px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted-foreground); padding: 0 1px; font: 500 11.5px var(--font-sans); cursor: pointer; }
-.fy-cutside__tabs > [role="tab"][aria-selected="true"] { border-bottom-color: var(--foreground); color: var(--foreground); }
+/* Inspector above, Arke below, one edge (design turn 122). The Inspector is capped at half so
+   the composer can never be pushed off the screen; Arke takes the rest and keeps its floor. */
+.fy-cutside__head { min-height: 38px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.fy-cutside__headlabel { font: 500 11.5px var(--font-sans); color: var(--muted-foreground); }
 .fy-cutside__close { margin: auto 0 auto auto; }
 .fy-cutside__panel { flex: 1; min-height: 0; overflow-y: auto; }
-.fy-cutside__panel--arke { display: flex; flex-direction: column; overflow: hidden; }
+.fy-cutside__panel--inspect { flex: 0 1 auto; max-height: 50%; }
+.fy-cutside__panel--arke { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border); }
 .fy-cutinspect { padding: 16px 15px; }
 .fy-cutinspect__eyebrow { font: 500 8.5px var(--font-mono); letter-spacing: .1em; color: var(--neutral-400); }
 .fy-cutinspect h2 { margin: 5px 0 14px; font: 600 15px/1.3 var(--font-sans); letter-spacing: -.015em; }
@@ -7497,3 +7499,79 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-arkenotes { padding: 10px 12px 6px; border-bottom: 1px solid var(--border); }
 .fy-arkenotes__list { margin: 4px 0 0; padding-left: 14px; }
 .fy-movekind__note { font-size: 9px; color: var(--muted-foreground); margin-left: 4px; }
+
+/* ── The season rack (design turn 120) ────────────────────────────────────────
+   A microdrama's episodes were seven bordered paragraphs, which would read the
+   same for a podcast. An episode is drawn at 9:16 because that is the shape it
+   will be watched in, and its hook sits on the frame because the first three
+   seconds are what the hook is for. An unwritten episode is an unexposed frame
+   at the same size — a dashed card reads as broken, a blank frame reads as
+   waiting — and carries its number and nothing else. */
+.fy-seasonrack { display: flex; align-items: flex-start; gap: 12px; }
+.fy-seasontile {
+  flex: 1 1 0; min-width: 0; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.fy-seasontile__frame {
+  position: relative; width: 100%; aspect-ratio: 9 / 16; overflow: hidden;
+  border-radius: 8px; background: var(--neutral-900); box-shadow: var(--shadow-sm);
+}
+.fy-seasontile__frame--bare {
+  box-sizing: border-box; background: var(--secondary);
+  border: 1px solid var(--border); box-shadow: none;
+}
+.fy-seasontile__frame--staged { border-color: var(--warning); }
+.fy-seasontile__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.fy-seasontile__scrim {
+  position: absolute; inset: auto 0 0; height: 104px;
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--media-overlay-bg) 88%, transparent),
+    color-mix(in srgb, var(--media-overlay-bg) 55%, transparent) 46%,
+    transparent);
+}
+.fy-seasontile__hook {
+  position: absolute; left: 9px; right: 9px; bottom: 9px;
+  color: var(--media-overlay-fg); font: 400 10.5px/1.4 var(--font-sans);
+}
+/* The number is the whole of an empty tile, so it is set at the size of the thing missing. */
+.fy-seasontile__num {
+  position: absolute; left: 9px; bottom: 6px; opacity: .55;
+  font: 500 34px/1 var(--font-mono); color: var(--neutral-400);
+}
+.fy-seasontile__frame--staged .fy-seasontile__num { color: var(--warning); opacity: .38; }
+.fy-seasontile__flag {
+  position: absolute; left: 8px; top: 8px; display: inline-flex; align-items: center; gap: 4px;
+  font: 500 9px var(--font-mono); letter-spacing: .06em; color: var(--warning);
+}
+/* Fixed bands, so the scene counts sit on one line across the rack: a title that wraps must
+   not push its own row out of step with the others. */
+.fy-seasontile__cap { margin-top: 10px; }
+.fy-seasontile__name { display: flex; align-items: baseline; gap: 6px; height: 36px; overflow: hidden; }
+.fy-seasontile__cliff {
+  height: 32px; overflow: hidden; margin-top: 4px;
+  font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground);
+}
+.fy-seasontile__scenes {
+  display: flex; align-items: center; gap: 5px; margin-top: 7px;
+  font: 400 10px var(--font-mono); color: var(--neutral-400);
+}
+.fy-seasontile__wait { margin-top: 4px; font: 400 10px var(--font-mono); color: var(--warning); }
+/* The rack's own shape at header size, in episode order. */
+.fy-seasonmeter { display: flex; justify-content: flex-end; gap: 3px; }
+.fy-seasonmeter > span { width: 16px; height: 5px; border-radius: 2px; background: var(--border); }
+.fy-seasonmeter > span[data-state="written"] { background: var(--foreground); }
+.fy-seasonmeter > span[data-state="staged"] { background: var(--warning); }
+.fy-seasontile__press {
+  display: block; width: 100%; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.fy-seasontile__press:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 9px; }
+/* Reorder sits on the frame, outside the link: a control inside a link is neither valid nor
+   reachable, and the arrows are the one thing here that acts without navigating. */
+.fy-seasontile__move { position: absolute; right: 6px; top: 6px; display: flex; gap: 2px; }
+.fy-seasontile__move > button {
+  width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; cursor: pointer;
+  background: var(--media-control-bg); color: var(--media-control-fg); opacity: .88;
+  font: 500 11px var(--font-sans); line-height: 1;
+}
+.fy-seasontile__move > button:hover { opacity: 1; }

@@ -4762,8 +4762,6 @@ function CutInspector({
   selection,
   selectedClip,
   selectedTrack,
-  filmSec,
-  clipCount,
   savedPictureOrder,
   frameRate,
   commandsDisabled,
@@ -4772,7 +4770,6 @@ function CutInspector({
   subtitleView,
   onViewSubtitles,
   onTranscribe,
-  onOpenExport,
   onFill,
   mintClipId,
 }: {
@@ -4786,8 +4783,6 @@ function CutInspector({
   /** The selected clip on any timeline track, when the selection is one. */
   selectedClip: TimelineClip | null;
   selectedTrack: TimelineTrack | null;
-  filmSec: number;
-  clipCount: number;
   savedPictureOrder: boolean;
   frameRate: FrameRate;
   commandsDisabled: boolean;
@@ -4797,7 +4792,6 @@ function CutInspector({
   onViewSubtitles: (trackId: TimelineTrackId | null) => void;
   onTranscribe: ((trackId: TimelineTrackId, language: string) => void) | null;
   /** The export sheet (R-24): the cut view's preset row opens it. */
-  onOpenExport: () => void;
   /** A gap in the `Needs a decision` list selects its clip, where the takes are chosen (R-22). */
   onFill: (clipId: TimelineClipId) => void;
   mintClipId: () => TimelineClipId;
@@ -4970,18 +4964,23 @@ function CutInspector({
     <div className="fy-cutinspect">
       <div className="fy-cutinspect__eyebrow">CUT</div>
       <h2>{production?.meta.title ?? "Opening production…"}</h2>
-      <div className="fy-cutinspect__rows">
-        <InspectorRow label="Duration">{runtimeSeconds(filmSec)}</InspectorRow>
-        <InspectorRow label="Clips">{clipCount}</InspectorRow>
-        <InspectorRow label="Lanes">{timeline === null ? "—" : `${timeline.tracks.length}`}</InspectorRow>
-        <InspectorRow label="Aspect">{production ? `${productionAspect(production.meta)} · ${productionFrameRate(production.meta)} fps` : "not loaded"}</InspectorRow>
-        <InspectorRow label="Source">
-          {spineCut ? "accepted takes · master track" : cut && isMediaOnly(cut) && (production?.scenes.length ?? 0) === 0 ? "placed clips" : "accepted takes"}
-        </InspectorRow>
-        <InspectorRow label="Coverage">{cut ? `${cut.covered} of ${storyShotCount(production)} shots` : "not loaded"}</InspectorRow>
-      </div>
+      {/*
+        Two of the three things design turn 122 sends away have gone, because neither is the
+        selection: the cut's own summary — duration, clips, lanes, coverage — is the header two
+        inches away, and `Export preset` belongs behind `Export film`, which is where a person
+        goes to change it; it was here because the pane had room, which is the worst reason for
+        anything to be anywhere.
+
+        `Needs a decision` stays, against the turn, and the turn is what is wrong until the
+        build catches up. It argued the list was the gap's third statement and could go because
+        the gap is selectable and selecting it settles it — but `Fill` exists nowhere else in
+        the editor, so this list is the only route from "a gap exists" to the clip with its takes
+        shown. It goes when the gap carries its own control in the lane, which is what 121 drew.
+
+        What stays besides is authoring: the mix and the subtitle sources are things this panel
+        *does*, not things it reports.
+      */}
       {cut !== null && spineCut === null && (() => {
-        // The target's `Needs a decision`: every shot on the timeline that still plays as a gap.
         const open = (cut as ResolvedPictureCut).entries.filter((entry) => entry.hole !== true && entry.media === null);
         if (open.length === 0) return null;
         return (
@@ -5001,17 +5000,6 @@ function CutInspector({
           </div>
         );
       })()}
-      <div className="fy-cutinspect__rows">
-        <div className="fy-cutinspect__row">
-          <span>Export preset</span>
-          <strong>
-            Review cut{" "}
-            <button type="button" className="fy-takepick__use" onClick={onOpenExport}>
-              Change
-            </button>
-          </strong>
-        </div>
-      </div>
       {timeline !== null && <MixPanel mix={timeline.mix} disabled={commandsDisabled} onCommands={onCommands} />}
       {timeline !== null && (
         <SubtitleSources
@@ -5450,7 +5438,6 @@ export function CutScreen() {
   const slug = world?.meta.slug;
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
-  const [rightTab, setRightTab] = useState<"inspector" | "arke">("inspector");
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [rightOpen, setRightOpen] = useState(false);
   const [tool, setTool] = useState<EditorTool>("select");
@@ -5724,7 +5711,6 @@ export function CutScreen() {
   // Escape has something to clear only after a click. A selection that no longer exists reads as none.
   const activeSelection: CutSelection | null = selectedExists ? selected : null;
   const revealDetails = () => {
-    setRightTab("inspector");
     setLibraryOpen(false);
     setRightOpen(true);
     if (
@@ -5745,7 +5731,6 @@ export function CutScreen() {
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   const selectOverlay = (id: string) => {
     setSelected({ kind: "overlay", id });
-    setRightTab("inspector");
     setLibraryOpen(false);
     setRightOpen(true);
     if (editorMediaMatches("(max-width: 899px)")) {
@@ -6298,7 +6283,9 @@ export function CutScreen() {
               if (opening) queueMicrotask(() => focusFirstControl(rightPanelRef.current));
             }}
           >
-            {rightTab === "arke" ? "Arke" : "Inspector"}
+            {/* A control that renames itself after whichever tab was last open cannot be
+                learned: it read `Inspector` on the day you wanted Arke (turn 122). */}
+            Details
           </button>
         </header>
         {notice}
@@ -6664,27 +6651,18 @@ export function CutScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
-        <div className="fy-cutside__tabs" role="tablist" aria-label="Editor details">
-          <button
-            type="button"
-            id="cut-inspector-tab"
-            role="tab"
-            aria-selected={rightTab === "inspector"}
-            aria-controls="cut-inspector-panel"
-            onClick={() => setRightTab("inspector")}
-          >
-            Inspector
-          </button>
-          <button
-            type="button"
-            id="cut-arke-tab"
-            role="tab"
-            aria-selected={rightTab === "arke"}
-            aria-controls="cut-arke-panel"
-            onClick={() => setRightTab("arke")}
-          >
-            Arke
-          </button>
+        {/*
+          Inspector and Arke stack rather than tabbing (design turn 122). Tabs assert that two
+          things are alternatives; a property sheet scoped to the selection and a collaborator
+          scoped to the whole cut are not, and tabbing them means consulting one costs the other
+          at exactly the moment both are wanted — a clip selected, and something to say about it.
+
+          The Inspector is capped at half the edge and scrolls inside it, so a selection with a
+          lot to author can never push the composer off the screen: it is the one control here
+          that must not need scrolling to reach.
+        */}
+        <div className="fy-cutside__head">
+          <span className="fy-cutside__headlabel">Details</span>
           <button
             type="button"
             className="fy-cutside__close"
@@ -6697,13 +6675,7 @@ export function CutScreen() {
             &times;
           </button>
         </div>
-        {rightTab === "inspector" ? (
-          <div
-            className="fy-cutside__panel"
-            id="cut-inspector-panel"
-            role="tabpanel"
-            aria-labelledby="cut-inspector-tab"
-          >
+        <div className="fy-cutside__panel fy-cutside__panel--inspect" id="cut-inspector-panel">
             <CutInspector
               worldId={worldId}
               prodId={prodId}
@@ -6718,13 +6690,10 @@ export function CutScreen() {
               subtitleView={subtitleView}
               onViewSubtitles={setSubtitleChoice}
               onTranscribe={timelineRevision !== null && !commandsDisabled ? transcribe : null}
-              filmSec={filmSec}
-              clipCount={clipCount}
               savedPictureOrder={timelineState.status === "ready"}
               frameRate={frameRate}
               commandsDisabled={commandsDisabled}
               onCommands={sendCommands}
-              onOpenExport={() => setExportOpen(true)}
               onFill={(clipId) => {
                 selectPicture(clipId);
                 const clip = allClips.find((candidate) => candidate.clip.id === clipId);
@@ -6733,13 +6702,7 @@ export function CutScreen() {
               mintClipId={mintClipId}
             />
           </div>
-        ) : (
-          <div
-            className="fy-cutside__panel fy-cutside__panel--arke"
-            id="cut-arke-panel"
-            role="tabpanel"
-            aria-labelledby="cut-arke-tab"
-          >
+        <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel">
             {assembly !== null && (
               <div className="fy-arkenotes" data-testid="arke-notes">
                 <div className="fy-cutinspect__eyebrow">{assembly.label.toUpperCase()}</div>
@@ -6775,8 +6738,7 @@ export function CutScreen() {
                 ) : undefined
               }
             />
-          </div>
-        )}
+        </div>
       </aside>
     </div>
   );
