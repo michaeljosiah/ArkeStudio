@@ -1,3 +1,4 @@
+import { CharacterVoiceSamplePanel } from "../components/character-voice-sample.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -1463,6 +1464,8 @@ function VoiceCard({
 }) {
   const voice = sheet.voice;
   const world = useWorld();
+  const sample = world?.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
+  const sampleClip: Clip | null = sample ? { id: `${sheet.id}/${sample.file}`, url: mediaUrl(worldSlug, `references/${sheet.id}/${sample.file}`), title: `${sheet.name} · assigned voice reference` } : null;
   const provider = voice ? providerIdOf(voice.provider) : null;
   const candidates = useVoiceCandidates()[sheet.id];
   const voiceAudio = useVoiceAudio();
@@ -1537,7 +1540,7 @@ function VoiceCard({
       <div className="fy-voicecard">
         {/* Not generated, and generating would charge: the price goes on the control rather than
           behind it (R-10). Everything else is the plain circle. */}
-        {voice && provider !== "kokoro" && !clip ? (
+        {sampleClip ? <ClipPlayButton large clip={sampleClip} label={`Hear ${sheet.name}’s assigned voice reference`} /> : voice && provider !== "kokoro" && !clip ? (
           <Button variant="ghost" disabled={busy} onClick={() => start()}>
             {busy
               ? "Preparing…"
@@ -1557,16 +1560,16 @@ function VoiceCard({
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="fy-voicecard__label">
-            {voice ? (voice.label ?? voice.provider) : "No voice assigned"}
+            {sample ? "Character voice reference assigned" : voice ? (voice.label ?? voice.provider) : "No voice assigned"}
           </div>
           <div className="fy-voicecard__meta">
             {result?.status === "failed" && result.error
               ? result.error
-              : voice
-                ? `${voice.provider} · rides with every dialogue render`
-                : "dialogue renders stay silent until one is chosen"}
+              : sample ? "Recorded sample · compatible scene models" : voice
+                ? `${voice.provider} · text-to-speech assignment`
+                : "Assign a recorded reference or choose a text-to-speech voice"}
           </div>
-          {voice && (
+          {voice && !sample && (
             <div style={{ color: "var(--neutral-400)", marginTop: 6, overflow: "hidden" }}>
               <Wave
                 seed={`${voice.provider}/${voiceModel ?? "legacy"}/${voice.voiceId}`}
@@ -1577,7 +1580,7 @@ function VoiceCard({
           )}
         </div>
         <div className="fy-voicecard__side">
-          <Button onClick={onChange}>{voice ? "Change voice" : "Choose voice"}</Button>
+          <Button onClick={onChange}>Manage voice</Button>
         </div>
       </div>
       {uploadConfirmation && (
@@ -2599,6 +2602,8 @@ export function VoicePickerScreen() {
                 </span>
               )}
             </div>
+            {world && sheet && <CharacterVoiceSamplePanel key={`${world.meta.worldId}/${sheet.id}`} world={world} sheet={sheet} />}
+            <h2>Text-to-speech voice</h2>
             <DegradedBanner component="voice" />
             <VoiceCandidatesPanel worldId={worldId} sheetId={sheetId} sheetPath={sheetPath} />
             {manualRefusal !== null && <p className="fy-refusal">{manualRefusal}</p>}

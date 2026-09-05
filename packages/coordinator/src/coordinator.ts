@@ -1,3 +1,4 @@
+import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -11648,6 +11649,46 @@ export class Coordinator {
           ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "resume-character-voice-sample":
+      case "prepare-character-voice-sample":
+      case "accept-character-voice-sample":
+      case "clear-character-voice-sample":
+      case "withdraw-character-voice-sample": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open this character's world first.");
+          if (msg.kind === "prepare-character-voice-sample" || msg.kind === "resume-character-voice-sample") {
+            if (msg.kind === "prepare-character-voice-sample" && !this.opts.audioMediaTools) throw new Error("Audio preparation needs the configured FFmpeg and ffprobe tools.");
+            const review = msg.kind === "resume-character-voice-sample" ? await resumeCharacterSample(store, msg.sheetId, msg.operationId) : await prepareCharacterSample(store, this.opts.audioMediaTools!, msg);
+            this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
+              worldId: msg.worldId, sheetId: msg.sheetId, status: "prepared", review });
+          } else {
+            if (msg.kind === "accept-character-voice-sample") await acceptCharacterSample(store, msg);
+            else if (msg.kind === "clear-character-voice-sample") await clearCharacterSample(store, msg.sheetId, msg.expectedHash);
+            else await withdrawCharacterSample(store, msg.sheetId, msg.expectedHash);
+            await this.refreshWorldSnapshot(msg.worldId);
+            this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
+              worldId: msg.worldId, sheetId: msg.sheetId, status: msg.kind === "accept-character-voice-sample" ? "assigned" :
+                msg.kind === "clear-character-voice-sample" ? "cleared" : "withdrawn" });
+          }
+        } catch {
+          this.emit({ at: new Date().toISOString(), type: "voice.sample-result", requestId: msg.requestId,
+            worldId: msg.worldId, sheetId: msg.sheetId, status: "refused",
+            reason: "The voice sample could not be saved or prepared. Check the source, audio tools, reviewed warnings and current character, then try again. Existing audio is unchanged." });
+        }
+        return;
+      }
+      case "generate-character-voice-sample": {
+        const store = this.opts.provider.openStore?.();
+        const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
+        if (!store || store.worldId !== msg.worldId || !model) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Open the character's world and choose an available speech-video model.");
+          return;
+        }
+        try { await this.enqueueBatch(msg.requestId, msg.kind, [characterSpeakingRequest(store, model, msg)]); }
+        catch { this.rejectEnqueue(msg.requestId, msg.kind, "Check the accepted character photo, supported duration and current estimate before generating."); }
         return;
       }
       case "generate-character-sheet": {

@@ -36,13 +36,24 @@ export async function audioWorldPath(root: string, portable: string, createParen
   return cursor;
 }
 
-export type AudioSourceRequest = { kind: "artifact"; artifactId: string; range?: AudioRange } |
+export type AudioSourceRequest = { kind: "legacy-character-sample"; sheetId: string; range?: AudioRange } |
+  { kind: "artifact"; artifactId: string; range?: AudioRange } |
   { kind: "production-take"; productionId: string; takeId: string; range: AudioRange };
 
 export async function resolveAudioSource(store: Pick<WorldStore, "dir" | "getBundle" | "closingSignal">, request: AudioSourceRequest) {
   const bundle = store.getBundle();
   let file: string, source: AudioSourceRef, physicalRange: AudioRange | undefined;
-  if (request.kind === "artifact") {
+  if (request.kind === "legacy-character-sample") {
+    SlugSchema.parse(request.sheetId);
+    const sample = bundle.referenceKits.find(k => k.sheetId === request.sheetId)?.designatedVoiceSample;
+    if (!sample || "schemaVersion" in sample) throw new Error("audio-source-changed");
+    file = `references/${request.sheetId}/${sample.file}`;
+    const hash = (await hashAudioFile(await audioWorldPath(store.dir, file), store.closingSignal)).hash;
+    physicalRange = request.range === undefined ? undefined : AudioRangeSchema.parse(request.range);
+    source = AudioSourceRefSchema.parse({ kind: request.kind, sheetId: request.sheetId, sourceFile: sample.file,
+      legacySource: sample.source, legacyDesignatedAt: sample.designatedAt, sourceMediaHash: hash,
+      ...(physicalRange ? { range: physicalRange } : {}) });
+  } else if (request.kind === "artifact") {
     ArtifactIdSchema.parse(request.artifactId);
     const artifact = bundle.artifacts.find(a => a.id === request.artifactId);
     if (!artifact || bundle.artifacts.some(a => a.supersedes === artifact.id)) throw new Error("audio-source-unavailable");

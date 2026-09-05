@@ -1,3 +1,4 @@
+import { CharacterVoiceSampleSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { IsoDateTimeSchema, JobIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
 
@@ -208,15 +209,14 @@ export const ReferenceKitSchema = z
      * with none carries no audio reference, and the absence is stated rather than resolved by
      * picking a take at random.
      */
-    designatedVoiceSample: z
+    designatedVoiceSample: z.union([CharacterVoiceSampleSchema, z
       .object({
         file: z.string().min(1),
         source: z.enum(["cloning-recording", "voice-take"]),
         sourceTakeId: TakeIdSchema.optional(),
         designatedAt: IsoDateTimeSchema,
       })
-      .strict()
-      .optional(),
+      .strict()]).optional(),
     /**
      * A location's accepted angles (#243). Optional so every character kit written before this
      * existed round-trips unchanged, and so opening an old world rewrites nothing.

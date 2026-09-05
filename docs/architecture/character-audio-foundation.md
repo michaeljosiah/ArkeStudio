@@ -90,3 +90,21 @@ Focused tests cover contracts, PCM fixtures, real WorldStore preparation/accepta
 pass coordinates, path containment, rights withdrawal/corruption, local transcript caching,
 clearance and provider capture. A smoke check with the bundled binaries exercises real trim/gain/
 conversion and analysis. The 255/111 workflow and provider payload tests remain with their owners.
+
+## Character sample consumer (#255)
+
+The character Voice screen now contains a separate reference-sample panel above TTS. Speaking-video
+requests use the durable queue and verified Seedance 2.0 reference routes, with an explicit quote,
+accepted imagery and independent script. Reference finalization files every video as an immutable
+artifact; it never selects a voice or picture. Existing artifacts, take ranges and explicit legacy
+revalidation converge on `audio/character-sample.ts`. The client submits identities, never paths.
+
+A prepared review can resume from its server-owned staging record after restart. Acceptance freezes
+the full-hash provenance in kit.json and records an operation id for lost-response retries. It checks
+the preparation-time kit hash, so concurrent kit changes refuse rather than overwrite. Clear retains
+durable audio; withdrawing scope appends a current rights event. Reopening does not migrate legacy
+samples. Ranged source audition and prepared audition share the existing single audio player.
+
+This increment establishes the assignment precursor. Automatic scene transport belongs to #111;
+legacy missing-media messages, in-flight extraction cancellation, reference-aware staging collection
+and complete narrow-screen interaction verification remain part of the epic integration work.

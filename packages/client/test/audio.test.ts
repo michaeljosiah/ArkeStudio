@@ -34,6 +34,21 @@ function fakeAudio() {
 const clip = (id: string, url: string) => ({ id, url, title: id });
 
 describe("audio playback controller", () => {
+  it("auditions only the reviewed physical range and bounds keyboard seeking", async () => {
+    const { element } = fakeAudio();
+    setAudioFactoryForTest(() => element as never);
+    const excerpt = { ...clip("excerpt", "source.mp4"), range: { inSec: 3, outSec: 5 } };
+    await playClip(excerpt);
+    element.duration = 10;
+    emitForTest("loadedmetadata");
+    assert.equal(element.currentTime, 3);
+    seekTo(99); assert.equal(element.currentTime, 5);
+    seekTo(0); assert.equal(element.currentTime, 3);
+    element.currentTime = 5.1; emitForTest("timeupdate");
+    assert.equal(playbackSnapshot().status, "ended");
+    await playClip(excerpt); assert.equal(element.currentTime, 3);
+    setAudioFactoryForTest(null);
+  });
   it("keeps one active clip and stops the prior source", async () => {
     const { element, calls } = fakeAudio();
     setAudioFactoryForTest(() => element as never);

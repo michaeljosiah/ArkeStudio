@@ -20,6 +20,8 @@ export interface Clip {
   url: string;
   title: string;
   sub?: string;
+  /** Physical source coordinates for an explicitly reviewed excerpt. */
+  range?: { inSec: number; outSec: number };
 }
 
 export interface PlaybackState {
@@ -82,9 +84,17 @@ function handle(event: Event): void {
       publish({ ...state, status: "ended", currentTime: state.duration });
       return;
     case "timeupdate":
+      if (state.clip.range && audio.currentTime >= state.clip.range.outSec) {
+        audio.pause();
+        publish({ ...state, status: "ended", currentTime: state.clip.range.outSec });
+        return;
+      }
       publish({ ...state, currentTime: audio.currentTime });
       return;
     case "loadedmetadata":
+      if (state.clip.range) audio.currentTime = state.clip.range.inSec;
+      publish({ ...state, currentTime: audio.currentTime, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
+      return;
     case "durationchange":
       publish({ ...state, duration: Number.isFinite(audio.duration) ? audio.duration : 0 });
       return;
@@ -104,13 +114,13 @@ function ensureAudio(): AudioLike {
 export async function playClip(clip: Clip): Promise<void> {
   const generation = ++playGeneration;
   const element = ensureAudio();
-  if (state.clip?.url !== clip.url) {
+  if (state.clip?.url !== clip.url || JSON.stringify(state.clip?.range) !== JSON.stringify(clip.range)) {
     element.pause();
     element.currentTime = 0;
     element.src = clip.url;
     publish({ clip, status: "loading", currentTime: 0, duration: 0, error: null });
   } else {
-    if (state.status === "ended") element.currentTime = 0;
+    if (state.status === "ended") element.currentTime = clip.range?.inSec ?? 0;
     publish({ ...state, clip, error: null });
   }
   try {
@@ -178,7 +188,8 @@ export function togglePlayback(): void {
 
 export function seekTo(seconds: number): void {
   if (!audio || !state.clip) return;
-  const bounded = Math.max(0, state.duration > 0 ? Math.min(seconds, state.duration) : seconds);
+  const end = state.clip.range?.outSec ?? state.duration;
+  const bounded = Math.max(state.clip.range?.inSec ?? 0, end > 0 ? Math.min(seconds, end) : seconds);
   audio.currentTime = bounded;
   publish({ ...state, currentTime: bounded, status: state.status === "ended" ? "paused" : state.status });
 }

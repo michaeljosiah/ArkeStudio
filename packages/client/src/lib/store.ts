@@ -344,6 +344,16 @@ export type QueueEnqueueResult = Extract<DomainEvent, { type: "queue.enqueue-res
 const pendingQueueRequests = new Map<string, { command: QueueCommand; characterName?: string }>();
 const queueResultListeners = new Set<(result: QueueEnqueueResult) => void>();
 export type VoiceAssignmentResult = Extract<DomainEvent, { type: "voice.assignment-result" }>;
+export type VoiceSampleResult = Extract<DomainEvent, { type: "voice.sample-result" }>;
+const voiceSampleListeners = new Set<(result: VoiceSampleResult) => void>();
+export function subscribeVoiceSampleResults(listener: (result: VoiceSampleResult) => void): () => void {
+  voiceSampleListeners.add(listener); return () => { voiceSampleListeners.delete(listener); };
+}
+export function generateCharacterVoiceSample(input: Omit<Extract<ClientMessage, { kind: "generate-character-voice-sample" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-character-voice-sample");
+  if (!send({ kind: "generate-character-voice-sample", ...input, requestId })) { pendingQueueRequests.delete(requestId); return null; }
+  return requestId;
+}
 const voiceAssignmentListeners = new Set<(result: VoiceAssignmentResult) => void>();
 export type VoiceUploadConfirmationRequired = Extract<
   DomainEvent,
@@ -913,6 +923,7 @@ function handleFrame(json: string): void {
         for (const listener of voiceUploadConfirmationListeners) listener(event);
       }
     }
+    if (event.type === "voice.sample-result") for (const listener of voiceSampleListeners) listener(event);
     if (event.type === "voice.assignment-result") {
       for (const listener of voiceAssignmentListeners) listener(event);
     }

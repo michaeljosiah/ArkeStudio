@@ -249,6 +249,8 @@ export class FalClient implements ProviderClient {
       "provenance",
       "lookKind",
       "lookPrompt",
+      "referenceScript",
+      "characterName",
       "shotPlan",
       // Ours, not fal's: the mode already chose the endpoint and the image field names.
       "taskMode",

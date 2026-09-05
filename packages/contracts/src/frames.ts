@@ -1,3 +1,4 @@
+import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
@@ -1308,6 +1309,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       identityReferences: z.array(z.string().min(1)).max(4),
     })
     .strict(),
+  z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
+  z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, source: VoiceSampleSourceSchema }).strict(),
+  z.object({ kind: z.literal("accept-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, operationId: z.string().uuid(), warningCodes: z.array(z.string()).max(20),
+    singleSpeaker: z.boolean(), noMusic: z.boolean(),
+    rightsBasis: z.enum(["self", "authorized", "licensed"]).nullable() }).strict(),
+  z.object({ kind: z.literal("clear-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("withdraw-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, expectedHash: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("generate-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, modelId: z.string().min(1), script: z.string().trim().min(1).max(2000),
+    durationSec: z.number().int().min(5).max(10), confirmedMicroUsd: z.number().int().min(0) }).strict(),
   /** SPEC-017: one composite generation, conditioned on the accepted main photo. */
   z
     .object({

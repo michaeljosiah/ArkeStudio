@@ -73,3 +73,5 @@ export * from "./world-chat-actions.js";
 export * from "./harness-env.js";
 
 export * from "./audio.js";
+
+export * from "./voice-sample.js";

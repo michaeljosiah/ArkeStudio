@@ -35,6 +35,9 @@ export const AudioRangeSchema = z
   });
 
 export const AudioSourceRefSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("legacy-character-sample"), sheetId: SlugSchema,
+    sourceFile: z.string().min(1), legacySource: z.enum(["cloning-recording", "voice-take"]),
+    legacyDesignatedAt: IsoDateTimeSchema, sourceMediaHash: FullSha256Schema, range: AudioRangeSchema.optional() }).strict(),
   z
     .object({
       kind: z.literal("artifact"),

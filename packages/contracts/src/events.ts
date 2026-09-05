@@ -1,3 +1,4 @@
+import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -83,6 +84,7 @@ export const QueueCommandSchema = z.enum([
   "establish-look",
   "generate-main-photo",
   "generate-character-sheet",
+  "generate-character-voice-sample",
   "generate-location-view",
   "generate-character-looks",
   "generate-missing-tiles",
@@ -521,6 +523,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict()),
     })
     .strict(),
+  z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
+    sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
+    review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),
   /** A direct voice assignment committed or refused. Every request receives exactly one result. */
   z
     .object({

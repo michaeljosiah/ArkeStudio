@@ -55,6 +55,7 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "main-photo-candidate",
   "establish-candidate",
   "character-sheet",
+  "character-voice-sample",
   "character-look",
   "location-view-candidate",
 ]);
