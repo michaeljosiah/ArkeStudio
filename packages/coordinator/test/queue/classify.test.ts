@@ -169,3 +169,15 @@ describe("classifyError: a class the client declared on the error", () => {
     assert.equal(classifyError(Object.assign(new Error("inscrutable"), { failureClass: "" })), "terminal");
   });
 });
+
+describe("classifyError: a witnessed 4xx is the provider's verdict, not the transport's", () => {
+  it("does not read `result fetch failed (HTTP 422)` as the network being down (#630)", () => {
+    assert.equal(classifyError(new Error("fal: result fetch failed (HTTP 422)")), "terminal");
+    assert.equal(classifyError(new Error("fal: result fetch failed (HTTP 400)")), "terminal");
+  });
+
+  it("keeps 429 transient and the credential statuses on the fault side", () => {
+    assert.equal(classifyError(new Error("fal: result fetch failed (HTTP 429)")), "transient");
+    assert.equal(classifyError(new Error("fal: result fetch failed (HTTP 401)")), "provider-fault");
+  });
+});

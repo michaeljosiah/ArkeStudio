@@ -92,6 +92,13 @@ export function classifyError(err: unknown): FailureClass {
   // transport, and a rejected credential retried on backoff is a lane that never says why it is
   // stuck. Nothing reporting one of these carries a transport code to lose.
   if (PROVIDER_FAULT.test(message)) return "provider-fault";
+  // A witnessed 4xx is the provider's verdict on the request, not a reading of the transport, and
+  // nothing about waiting changes it. Read after the message alone, `fal: result fetch failed
+  // (HTTP 422)` met OFFLINE's literal `fetch failed` and a request that could never become valid
+  // was re-fetched every poll interval for as long as the app ran (#630). 429 keeps its place on
+  // the transient side; every other 4xx is D5's terminal, named by its status.
+  const witnessed = /HTTP (4\d\d)/i.exec(message);
+  if (witnessed !== null) return witnessed[1] === "429" ? "transient" : "terminal";
   // Then the chain, ahead of the message: `fetch failed` is what the message says for every one
   // of them, so reading it first is reading the one part that cannot tell them apart.
   const transport = transportClass(err);
