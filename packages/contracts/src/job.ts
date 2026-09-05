@@ -193,16 +193,30 @@ export function voiceJobFormat(job: Pick<Job, "provider" | "params">): "wav" | "
 
 /** Rebuild the document identity frozen into a durable voice-preview job. */
 export function voiceJobReadIdentity(job: Pick<Job, "params">): {
-  purpose: "candidate-preview" | "sheet-section" | "bible-section";
+  purpose: "candidate-preview" | "sheet-section" | "sheet-page" | "bible-section";
   sheetId?: string;
 } {
   const rawPurpose = job.params["purpose"];
-  const purpose = rawPurpose === "sheet-section" || rawPurpose === "bible-section"
-    ? rawPurpose
-    : "candidate-preview";
+  const purpose =
+    rawPurpose === "sheet-section" || rawPurpose === "sheet-page" || rawPurpose === "bible-section"
+      ? rawPurpose
+      : "candidate-preview";
   if (purpose === "bible-section") return { purpose };
   const sheetId = job.params["sheetId"];
   return typeof sheetId === "string" && sheetId.length > 0 ? { purpose, sheetId } : { purpose };
+}
+
+/**
+ * Where a page read's block sits in the page it belongs to (issue 859), frozen into the job.
+ *
+ * A page is enqueued as one job per block, and they land in whatever order the provider
+ * finishes them. Without this the player would have to guess an order from arrival times,
+ * which is exactly the order a page read must not be read in.
+ */
+export function voiceJobPart(job: Pick<Job, "params">): { part: number; parts: number } | Record<string, never> {
+  const part = job.params["part"];
+  const parts = job.params["parts"];
+  return typeof part === "number" && typeof parts === "number" ? { part, parts } : {};
 }
 
 /** Only character auditions feed `voice.preview`; document reads feed `voice.audio` alone. */

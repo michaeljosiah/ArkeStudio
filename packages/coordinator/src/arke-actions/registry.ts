@@ -181,6 +181,7 @@ const CLIENT_COMMAND_METADATA = {
   "open-world": readOnly("Opens an existing world for reading; it does not alter that world."),
   "create-world": globalOnly("World creation happens before there is an open-world scope for Arke."),
   "read-sheet-section": readOnly(QUERY),
+  "read-sheet-page": readOnly(QUERY),
   "read-bible-section": readOnly(QUERY),
   "generate-world-image": action("world", "generation", "job-queue", "spend-and-compute", ["world-metadata", "art-direction"], { preparation: GENERATION_QUOTE }),
   "upload-world-image": action("world", "host-action", "host", "host-file-access", ["world-metadata"]),

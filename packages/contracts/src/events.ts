@@ -79,6 +79,7 @@ export const QueueCommandSchema = z.enum([
   "voice-preview",
   "voice-line",
   "read-sheet-section",
+  "read-sheet-page",
   "read-bible-section",
   "generate-world-image",
   "upload-world-image",
@@ -583,7 +584,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        */
       sheetId: SlugSchema.optional(),
       sheetVersion: z.number().int().min(1),
-      purpose: z.enum(["candidate-preview", "sheet-section", "bible-section"]),
+      purpose: z.enum(["candidate-preview", "sheet-section", "sheet-page", "bible-section"]),
       sectionHeading: z.string().min(1).optional(),
       /**
        * Which piece of a long read this is, and how many there are (2026-08-24).

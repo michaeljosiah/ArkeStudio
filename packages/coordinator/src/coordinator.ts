@@ -88,6 +88,7 @@ import {
   type FrameRunState,
   voiceJobFormat,
   voiceJobReadIdentity,
+  voiceJobPart,
   voiceJobIsCandidatePreview,
   CLONED_VOICE_MODEL,
   type LedgerEntry,
@@ -1071,10 +1072,15 @@ export class Coordinator {
     requestId: string;
     /** Approval for this paid read only; never a remote voice-upload destination approval. */
     confirmationToken?: string;
-    /** Already resolved and normalised by the caller — this method never reads a document. */
-    text: string;
-    purpose: "sheet-section" | "bible-section";
-    sectionHeading: string;
+    /**
+     * The passage, already resolved and normalised by the caller — this method never reads a
+     * document. More than one block is a page read (issue 859): they are narrated in the order
+     * the screen declared and each block is one part, so the position the client already keeps
+     * is a position in the page rather than in a synthesis it cannot see. One block is the
+     * per-block read, unchanged in every respect.
+     */
+    blocks: readonly { heading: string; text: string }[];
+    purpose: "sheet-section" | "sheet-page" | "bible-section";
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
     /** Present only when the subject is a sheet; the bible belongs to no one in the world. */
@@ -1082,14 +1088,16 @@ export class Coordinator {
     fail: (error: string, characters?: number) => void;
   }): Promise<void> {
     if (!this.voiceService) return;
-    const { store, worldId, requestId, text, purpose, sectionHeading, subject, fail } = input;
-    const identity = {
+    const { store, worldId, requestId, blocks, purpose, subject, fail } = input;
+    const page = blocks.length > 1;
+    const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
+    const identity = (heading: string | null) => ({
       worldId,
       ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
       sheetVersion: subject.version,
       purpose,
-      sectionHeading,
-    };
+      ...(heading === null ? {} : { sectionHeading: heading }),
+    });
     // Who narrates is the app's preference, not the character's. Reading prose ABOUT
     // somebody in their own voice was the old behaviour, and it refused entirely for the
     // many characters who have no voice assigned.
@@ -1101,7 +1109,45 @@ export class Coordinator {
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
     if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
+      const ready = (
+        block: { heading: string; text: string },
+        file: string,
+        cached: boolean,
+        piece?: { part: number; parts: number },
+      ) =>
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.audio",
+          requestId,
+          ...identity(block.heading),
+          provider: "kokoro",
+          model: speaking.model,
+          voiceId: speaking.voiceId,
+          format: "wav",
+          status: "ready",
+          file,
+          cached,
+          characterCount: block.text.length,
+          estimatedMicroUsd: 0,
+          ...piece,
+        } as DomainEvent);
       try {
+        if (page) {
+          /*
+           * A page is narrated a block at a time, in the declared order, each block a part.
+           *
+           * The parts of a single-block read are synthesis chunks — an implementation detail
+           * nobody could navigate by. The parts of a page are the blocks themselves, which is
+           * what makes "third of five" and skipping to the next block mean anything. Sequential
+           * because the local engine is one small model on this machine, and several syntheses
+           * at once is the other way to fell it.
+           */
+          for (const [index, block] of blocks.entries()) {
+            const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text);
+            ready(block, result.file, result.cached, { part: index, parts: blocks.length });
+          }
+          return;
+        }
         /*
          * Emit each piece as it lands rather than one clip at the end (2026-08-24).
          *
@@ -1109,50 +1155,19 @@ export class Coordinator {
          * ten-minute wait if the first word has to arrive with the last. The client queues these
          * and starts on the first, which is the same total render with none of the silence.
          */
+        const block = blocks[0]!;
         let streamed = 0;
-        const result = await this.voiceService.localSpeech(store, speaking.voiceId, text, (piece) => {
+        const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text, (piece) => {
           // A single-piece read stays exactly what it was: one event, no part numbers.
           if (piece.total < 2) return;
           streamed += 1;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId,
-            ...identity,
-            provider: "kokoro",
-            model: speaking.model,
-            voiceId: speaking.voiceId,
-            format: "wav",
-            status: "ready",
-            file: piece.file,
-            cached: false,
-            characterCount: text.length,
-            estimatedMicroUsd: 0,
-            part: piece.index,
-            parts: piece.total,
-          } as DomainEvent);
+          ready(block, piece.file, false, { part: piece.index, parts: piece.total });
         });
         // The joined clip, for a cache hit next time and for anything that wants one file. A
         // streamed read has already been heard, so this closes it rather than announcing it.
-        if (streamed === 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId,
-            ...identity,
-            provider: "kokoro",
-            model: speaking.model,
-            voiceId: speaking.voiceId,
-            format: "wav",
-            status: "ready",
-            file: result.file,
-            cached: result.cached,
-            characterCount: text.length,
-            estimatedMicroUsd: 0,
-          } as DomainEvent);
-        }
+        if (streamed === 0) ready(block, result.file, result.cached);
       } catch (error) {
-        fail(error instanceof Error ? error.message : "Local voice failed.", text.length);
+        fail(error instanceof Error ? error.message : "Local voice failed.", characters);
       }
       return;
     }
@@ -1163,71 +1178,96 @@ export class Coordinator {
         candidate.capability === "voice-tts",
     );
     if (!model) {
-      fail(`${speaking.provider} voice is unavailable.`, text.length);
+      fail(`${speaking.provider} voice is unavailable.`, characters);
       return;
     }
     const format = voiceFormatForModel(model);
-    const file = speechCacheFile({
-      provider: model.provider,
-      model: model.id,
-      voiceId: speaking.voiceId,
-      text,
-      format,
-    });
-    try {
-      const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file)))));
-      if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
+    const files = blocks.map((block) =>
+      speechCacheFile({
+        provider: model.provider,
+        model: model.id,
+        voiceId: speaking.voiceId,
+        text: block.text,
+        format,
+      }),
+    );
+    const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
         type: "voice.audio",
         requestId,
-        ...identity,
+        ...identity(block.heading),
         provider: model.provider,
         model: model.id,
         voiceId: speaking.voiceId,
         format,
         status: "ready",
-        file,
+        file: files[index]!,
         cached: true,
-        characterCount: text.length,
+        characterCount: block.text.length,
         estimatedMicroUsd: 0,
+        ...(page ? { part: index, parts: blocks.length } : {}),
       } as DomainEvent);
-      return;
-    } catch {
-      /* confirmation required */
+    /*
+     * Which blocks would actually be paid for. A page is usually a mix — the Essence heard
+     * yesterday is in the cache, the Appearance rewritten this morning is not — and quoting the
+     * whole page when only half of it would be synthesised would overstate the spend.
+     */
+    const misses: number[] = [];
+    for (const index of blocks.keys()) {
+      try {
+        const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(files[index]!)))));
+        if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
+      } catch {
+        misses.push(index);
+      }
     }
-    const estimate = estimateMicroUsd(model, { characters: text.length });
-    const token = createHash("sha256").update(`${subject.id}\n${subject.version}\n${file}`).digest("hex");
-    const enqueued: EnqueueInput = {
+    if (misses.length === 0) {
+      blocks.forEach(cachedReady);
+      return;
+    }
+    const estimate = misses.reduce(
+      (sum, index) => sum + estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      0,
+    );
+    const token = createHash("sha256")
+      .update([subject.id, String(subject.version), ...misses.map((index) => files[index]!)].join("\n"))
+      .digest("hex");
+    const enqueued: EnqueueInput[] = misses.map((index) => ({
       worldId,
       target: {
         kind: "voice-preview",
-        id: `${subject.id}/${model.provider}/${model.id}/${speaking.voiceId}`,
+        // The heading keeps a page's blocks apart. They differ only in their words, and one
+        // target for all of them would be one job for all of them.
+        id: `${subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
       },
       capability: "voice-tts",
       provider: model.provider,
       model: model.id,
       params: {
         voiceId: speaking.voiceId,
-        text,
+        text: blocks[index]!.text,
         audioFormat: format,
         requestId,
         purpose,
         ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
         sheetVersion: subject.version,
-        sectionHeading,
-        characterCount: text.length,
+        sectionHeading: blocks[index]!.heading,
+        characterCount: blocks[index]!.text.length,
+        ...(page ? { part: index, parts: blocks.length } : {}),
       },
-      estimatedMicroUsd: estimate,
-      landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! },
-    };
+      estimatedMicroUsd: estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      landing: { dir: ".cache/voice-previews", name: files[index]!.split("/").pop()! },
+    }));
     if (input.confirmationToken !== token) {
-      this.pendingVoiceReads.set(requestId, { token, input: enqueued });
+      this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
         at: new Date().toISOString(),
         type: "voice.audio",
         requestId,
-        ...identity,
+        // A page's price is the page's, not any one block's, so this names no section: it is
+        // the one thing the reader is being asked about before anything starts.
+        ...identity(page ? null : blocks[0]!.heading),
         provider: model.provider,
         model: model.id,
         voiceId: speaking.voiceId,
@@ -1235,7 +1275,7 @@ export class Coordinator {
         status: "confirmation-required",
         file: null,
         cached: false,
-        characterCount: text.length,
+        characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
       } as DomainEvent);
@@ -1243,12 +1283,14 @@ export class Coordinator {
     }
     const pending = this.pendingVoiceReads.get(requestId);
     if (!pending || pending.token !== token) {
-      fail("The read request changed; review it again.", text.length);
+      fail("The read request changed; review it again.", characters);
       return;
     }
     this.pendingVoiceReads.delete(requestId);
-    const queued = await this.enqueueBatch(requestId, input.frameKind, [pending.input]);
-    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", text.length);
+    // A block already in the cache never went to the queue, and is ready the moment the page is.
+    for (const [index, block] of blocks.entries()) if (!misses.includes(index)) cachedReady(block, index);
+    const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
+    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
   }
 
   /** Session config builder with the user's agent settings folded in. */
@@ -2007,7 +2049,7 @@ export class Coordinator {
   }
 
   private readonly askService: AskService | null;
-  private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
+  private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
@@ -2915,6 +2957,7 @@ export class Coordinator {
           ...readIdentity,
           sheetVersion: Number(job.params["sheetVersion"]),
           ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+          ...voiceJobPart(job),
           provider: job.provider as ProviderId,
           model: job.model,
           voiceId: String(job.params["voiceId"]),
@@ -3303,6 +3346,7 @@ export class Coordinator {
             ...readIdentity,
             sheetVersion: Number(job.params["sheetVersion"]),
             ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            ...voiceJobPart(job),
             provider: job.provider as ProviderId,
             model: job.model,
             voiceId,
@@ -10511,9 +10555,8 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: bibleText,
+          blocks: [{ heading: msg.sectionHeading, text: bibleText }],
           purpose: "bible-section",
-          sectionHeading: msg.sectionHeading,
           subject: { id: "bible", version: bible.version },
           fail: failBible,
         });
@@ -10567,9 +10610,73 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: resolved.text,
+          blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
           purpose: "sheet-section",
-          sectionHeading: msg.sectionHeading,
+          subject: { id: sheet.id, version: sheet.version },
+          sheetId: sheet.id,
+          fail,
+        });
+        return;
+      }
+      case "read-sheet-page": {
+        /*
+         * The sheet read in order (issue 859). The screen declares which blocks and in what
+         * order; this resolves each one from the authoritative sheet and hands the ordered
+         * list over as a page. Nothing about the order is inferred here — deriving it would
+         * put the narration back at the mercy of whatever the layout happens to contain.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        const fail = (error: string, characters = 0) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            sheetVersion: sheet?.version ?? 1,
+            purpose: "sheet-page",
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        if (!sheet) {
+          fail("The character is no longer available.");
+          return;
+        }
+        /*
+         * A block with nothing in it drops out of the page rather than refusing it. A sheet
+         * whose Appearance has not been written yet still has an Essence worth hearing, and a
+         * page read that refuses because one of its blocks is empty reads as broken.
+         */
+        const blocks: { heading: string; text: string }[] = [];
+        for (const heading of msg.sections) {
+          try {
+            blocks.push({ heading, text: authoritativeSheetSpeech(sheet, heading).text });
+          } catch {
+            /* not part of the page */
+          }
+        }
+        if (blocks.length === 0) {
+          fail("Nothing to read yet.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          blocks,
+          purpose: "sheet-page",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,
           fail,

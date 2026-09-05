@@ -47,6 +47,7 @@ import {
 import { Composer } from "../components/composer.js";
 import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
+import { PageReadControl, usePageRead, type PageReadBlock } from "../components/page-read.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
@@ -101,6 +102,7 @@ import {
   requestVoiceCandidates,
   requestVoicePreview,
   readSheetSection,
+  readSheetPage,
   resolveExtraction,
   useArtifactNotices,
   useImportReport,
@@ -1642,6 +1644,38 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     sheet?.name,
     narratorLabel,
   ]);
+  /*
+   * What the sheet reads as a page, and in what order (issue 859).
+   *
+   * Declared, never derived. Between the two paragraphs a reader wants sit a portrait, a voice
+   * card and a row of buttons; narration taken from the page as laid out would try to read
+   * them. Only blocks with words in them are declared, so the page never announces a heading
+   * and then says nothing.
+   */
+  const pageBlocks = useMemo<PageReadBlock[]>(() => {
+    if (sheet?.type !== "character") return [];
+    const blocks: PageReadBlock[] = [];
+    for (const heading of ["Essence", "Appearance"] as const) {
+      const body = sheet.sections.find((section) => section.heading === heading)?.body ?? "";
+      if (body.trim() !== "" && body.trim() !== "—") blocks.push({ heading, body });
+    }
+    return blocks;
+  }, [sheet?.type, sheet?.sections]);
+  const pageRead = usePageRead({
+    pageId: sheet?.id,
+    title: sheet?.name ?? "",
+    narratorLabel,
+    worldSlug: world?.meta.slug,
+    blocks: pageBlocks,
+    start: (requestId, confirmationToken) =>
+      readSheetPage(
+        worldId ?? "",
+        sheet?.id ?? "",
+        pageBlocks.map((block) => block.heading as "Essence" | "Appearance"),
+        requestId,
+        confirmationToken,
+      ),
+  });
   const sheetRefsMap = useSheetRefs();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
@@ -1689,6 +1723,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         : null;
     const onRead = () => {
       if (!worldId) return;
+      // A second read replaces the first: two voices over one another is never what was meant.
+      pageRead.stop();
       setRead({ requestId: readSheetSection(worldId, sheet.id, heading), section: heading });
     };
     const note =
@@ -1834,6 +1870,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         >
           {sheetTalkStarting ? "Starting…" : "Talk about them"}
         </Button>
+        {/* Page scale (issue 859). The speaker on each paragraph reads that paragraph; this
+              reads the sheet through, in the order declared above. Offered only when there is
+              more than one block — a page read of one block is the block read with more words
+              on the button. */}
+        {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the sheet" />}
         <Button
           onClick={() => {
             if (!worldId) return;
