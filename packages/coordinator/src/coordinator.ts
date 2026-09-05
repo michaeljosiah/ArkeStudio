@@ -353,7 +353,7 @@ import {
   mainPhotoLogRecord,
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
-import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
+import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
 import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -588,11 +588,12 @@ export interface CoordinatorOptions {
   sampleWorldPath?: string | null;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
-  /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
+  /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
+   * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt") => string;
     /**
-     * The shipped roster, injected like everything else from the adapter package. The
+     * The shipped roster, supplied by the host from contracts. The
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
      * original — it never needs to know how a prompt is assembled.
      */

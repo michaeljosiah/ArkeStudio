@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
 import { createProviderClients, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { KOKORO_PRESETS, localCandidates } from "@arke-studio/voice";
-import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 import { AppSettingsFile } from "./app-settings.js";
 import { ChildLedger } from "./child-ledger.js";
 import { Coordinator } from "./coordinator.js";
@@ -17,7 +16,7 @@ import { registerExitBackstop } from "./supervisor.js";
 import { nodeSetupDeps } from "./setup/node-deps.js";
 import { FsWorldProvider } from "./world/provider.js";
 import { harnessTrace } from "./harness/trace.js";
-import { assembleHarness } from "./harness/v2-launch.js";
+import { assembleHarness, describeClaudeAvailability } from "./harness/v2-launch.js";
 
 /**
  * Dev entry: run the coordinator standalone over a real on-disk app root (SPEC-002) so the
