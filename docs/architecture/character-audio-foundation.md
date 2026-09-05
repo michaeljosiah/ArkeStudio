@@ -316,3 +316,9 @@ The separate take-feedback.jsonl journal records diagnostics through an owned, s
 ### Shared proposal prompt review (#116)
 
 Scene proposal projection exposes changed filed shot prompt overrides, and the existing proposal card consumes the same exact-text PromptReview contract as key-art review. It calculates full before/after diffs, character/byte deltas and unverified added spans without inventing source citations or an assembled baseline for new overrides. Complete scene JSON and proposal acceptance remain the existing authority; this does not introduce the broader #252 prompt lifecycle. Superseded asynchronous diffs are ignored. Design turn 126 records these states.
+
+### Final integration validation (5 September 2026)
+
+Implementation continues in the isolated `ArkeStudio-epic-110` worktree, tracking remote `codex/issue-117-audio-foundation`. Full lint, all workspace typechecks and the desktop build passed. The complete test run exercised 5,558 tests: three failures were corrected (the sample Activity origin, the credential guard recognizing a UUID-only recovery marker, and the superseded provider-padding expectation). The affected suites then passed: Activity 20, client token/security checks 10, and production planning 77. The affected typechecks and lint passed after these fixes. One pre-existing test was skipped. The unchanged full suite was not run repeatedly.
+
+Provider transport, exact bytes, rights, restart, queue ambiguity and frozen provenance were verified using the focused/integration suites and deterministic provider doubles; this work did not purchase a live provider generation. Initial dialogue quality guidance remains empty pending reviewed evidence. Related #252/#253/#245 retain their wider scope; this epic does not introduce their speculative workflows or replace the timeline authority.
