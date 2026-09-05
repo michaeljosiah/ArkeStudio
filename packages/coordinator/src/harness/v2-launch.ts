@@ -22,6 +22,10 @@ import {
 } from "@arke-studio/adapter-claude";
 import { ChildSupervisor, type SupervisorDeps } from "../supervisor.js";
 
+// This package owns shared desktop/dev composition, so both adapters are runtime dependencies.
+// Keep concrete adapter imports here; Coordinator itself consumes the HarnessAdapter contract.
+export { describeClaudeAvailability } from "@arke-studio/adapter-claude";
+
 /**
  * Confinement verdicts survive across assemblies, keyed on binary and version, so a user who
  * opens and closes the app pays for one probe rather than one per launch. An auto-update

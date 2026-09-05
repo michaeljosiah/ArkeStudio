@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
  *
  * `packages/adapter-claude/node_modules/@anthropic-ai/claude-agent-sdk` once existed as a
  * directory holding zero entries — no `package.json`, no code. The coordinator's dev entry
- * reaches that package through `@arke-studio/adapter-claude`, so node threw
+ * reaches that package through the shared launcher's Claude adapter, so node threw
  * ERR_MODULE_NOT_FOUND at module load and the process was gone before a line of dev.ts ran.
  * None of that is what the developer saw: the launcher reported "Server started successfully",
  * the Vite client kept serving, and the app came up with an empty manifest, every capability

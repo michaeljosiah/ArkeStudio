@@ -73,6 +73,14 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
+## Harness dependencies (issue #828)
+
+Harness dependencies (issue #828): concrete adapter imports under coordinator/src belong only in
+`harness/v2-launch.ts`, the shared desktop/dev composition module. The package intentionally
+depends on both adapters; Coordinator itself consumes contracts. Credential-environment policy
+lives in contracts (`harness-env.ts`). The dev entry stays here, so providers and voice are runtime
+dependencies. See SPEC-005 §1.1; do not remove these dependencies based on the historical AR-2 audit.
+
 ## World ownership checks (issue #827)
 
 World ownership (issue #827): preserve the disk identity checks in WorldStore/Committer and the

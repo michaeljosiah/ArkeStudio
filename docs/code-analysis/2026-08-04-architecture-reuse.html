@@ -84,6 +84,7 @@
   </section>
 
   <section class="finding" id="f2">
+    <p><strong>Resolution, 2026-09-05 (#828):</strong> The coordinator package intentionally owns the shared desktop/dev launcher in <code>harness/v2-launch.ts</code>, so both concrete adapters remain runtime dependencies. Concrete adapter imports are confined to that launcher; <code>coordinator.ts</code> consumes contracts. Harness credential-environment policy moved to contracts, and the dev entry's providers/voice imports are declared runtime dependencies. The recommendation below is historical; a separately packaged minimal core is deferred.</p>
     <h3><span class="badge minor">MINOR</span><span class="badge">LIKELY</span> Coordinator package has an avoidable OpenCode dependency <span class="location"><code>coordinator/package.json:14-20</code></span></h3>
     <p><strong>Dimension:</strong> Business-logic placement &amp; layering</p>
     <p><strong>Evidence:</strong></p>
@@ -124,7 +125,7 @@
   <h2 id="quick-wins">Quick Wins</h2>
   <ol>
     <li>Document the supported reuse levels: existing WebSocket protocol for alternate clients; Node service imports for in-workspace hosts; no stable external package API yet.</li>
-    <li>Remove the coordinator's unnecessary runtime dependency on <code>@arke-studio/adapter-opencode</code> once dev-only imports are relocated.</li>
+    <li>AR-2 resolved by explicit shared-launcher ownership (#828): retain the required adapter dependencies and keep the Coordinator class independent of concrete adapters.</li>
     <li>When a second interface is approved, extract the command facade before adding interface-specific behavior. Keep transport translation outside the use-case methods.</li>
   </ol>
 

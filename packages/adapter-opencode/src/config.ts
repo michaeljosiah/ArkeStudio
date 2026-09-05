@@ -1,5 +1,7 @@
 import {
   agentPromptFor,
+  LLM_ENV_NAMES,
+  LLM_ENV_PROVIDERS,
   confinementFor,
   permits,
   ROSTER,
@@ -134,17 +136,8 @@ export function buildSessionConfig(input: SessionConfigInput): Record<string, un
   };
 }
 
-/** The providers whose credentials travel to the harness as environment (R-6). One list —
- * the rotation guards and the delivery loop both derive from it, so adding a provider here
- * is the whole change; a guard that forgot would strand the new key outside the spawn env,
- * which under v2's redirected profile is the only credential path there is (issue 327 §2).
- */
-export const LLM_ENV_PROVIDERS = ["anthropic", "openai"] as const;
-
-const LLM_ENV_NAMES: Record<(typeof LLM_ENV_PROVIDERS)[number], string> = {
-  anthropic: "ANTHROPIC_API_KEY",
-  openai: "OPENAI_API_KEY",
-};
+/** Compatibility export; contracts owns the policy shared with credential rotation guards. */
+export { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
 
 /**
  * Provider credentials as environment variables for the spawned harness (R-6). Keys never
