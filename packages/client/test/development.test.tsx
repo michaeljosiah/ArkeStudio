@@ -526,6 +526,11 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
     assert.match(html, /aria-label="Switch production\. Current production: Bell Watch — Season 1"/);
+    // It wore ChevronsUpDown — the glyph that means a menu opens here — and navigated to the
+    // Productions screen instead, so the one control that looked like a picker was the one that
+    // left the workspace. It is a menu button now, and the promise is the contract.
+    assert.match(html, /aria-haspopup="menu"/, "the switcher opens a menu");
+    assert.match(html, /aria-expanded="false"/, "closed until it is pressed");
   });
 
   it("keeps loose scenes reachable under Unassigned after episodes exist", () => {

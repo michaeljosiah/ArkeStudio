@@ -7585,3 +7585,34 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   font: 500 11px var(--font-sans); line-height: 1;
 }
 .fy-seasontile__move > button:hover { opacity: 1; }
+
+/* The production switcher's menu (fixed, like the editor's clip menu): the rail is
+   `overflow-y: auto`, so a menu positioned inside it is clipped by its own container and
+   scrolls away from the button that opened it. */
+.fy-switchmenu {
+  position: fixed; z-index: 40; min-width: 268px; max-height: 60vh; overflow-y: auto;
+  background: var(--popover); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; gap: 1px;
+}
+.fy-switchmenu__item {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  border: 0; background: none; border-radius: 7px; padding: 7px 8px; cursor: pointer;
+  color: var(--foreground); font: 400 12px var(--font-sans);
+  transition: var(--transition-control);
+}
+.fy-switchmenu__item:hover { background: var(--accent); }
+.fy-switchmenu__item--on { background: var(--secondary); }
+.fy-switchmenu__mark {
+  width: 26px; height: 26px; flex: none; display: inline-grid; place-items: center;
+  border: 1px solid var(--border); border-radius: 7px;
+  font: 600 12px var(--font-sans);
+}
+.fy-switchmenu__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.fy-switchmenu__name {
+  font: 500 12.5px var(--font-sans);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fy-switchmenu__sub { font: 400 9.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-switchmenu__here { flex: none; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-switchmenu__rule { display: block; height: 1px; margin: 4px 6px; background: var(--border); }
+.fy-switchmenu__item--all { color: var(--muted-foreground); }
