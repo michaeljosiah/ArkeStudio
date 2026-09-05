@@ -1,3 +1,4 @@
+import { CadenceCapabilitiesSchema } from "./cadence.js";
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
@@ -270,6 +271,7 @@ export const ManifestModelSchema = z
     id: z.string().min(1),
     /** The provider or harness spelling when it differs from the stable manifest id. */
     providerModelId: z.string().min(1).optional(),
+    cadence: CadenceCapabilitiesSchema.optional(),
     provider: ProviderIdSchema,
     capability: CapabilitySchema,
     displayName: z.string().min(1),

@@ -526,7 +526,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ ...base, type: z.literal("performance.result"), requestId: UlidSchema, worldId: UlidSchema,
-    productionId: SlugSchema, status: z.enum(["kept", "purged", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
+    productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
     review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),

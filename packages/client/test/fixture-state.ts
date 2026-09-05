@@ -347,7 +347,7 @@ const state: ClientState = {
     clonedVoices: [],
     productions: [
       {
-        performances: [],
+        performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
         meta: {
           id: "saltlight",
           format: "video",

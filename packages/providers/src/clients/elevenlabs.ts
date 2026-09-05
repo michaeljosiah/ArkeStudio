@@ -86,7 +86,7 @@ export class ElevenLabsClient implements ProviderClient {
       method: "POST",
       headers: this.headers(key),
       body: JSON.stringify({
-        model_id: request.model,
+        model_id: request.model === "eleven-v3" ? "eleven_v3" : request.model,
         text: String(request.params["text"] ?? ""),
         ...(request.params["voiceSettings"] !== undefined ? { voice_settings: request.params["voiceSettings"] } : {}),
       }),

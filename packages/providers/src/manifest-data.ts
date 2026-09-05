@@ -187,6 +187,19 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       limits: { maxDurationSec: 300, audioFormat: "mp3" }, pricing: { kind: "perSecond", microUsdPerSecond: 2000 },
     },
     {
+      // Reviewed 2026-09-05: official best-practices documents tags, capitalization and native speed.
+      // https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
+      // https://elevenlabs.io/pricing/api — v3 $0.10/1,000 characters, 5,000-character maximum.
+      id: "eleven-v3", providerModelId: "eleven_v3", provider: "elevenlabs", capability: "voice-tts", displayName: "Eleven v3",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: { audioFormat: "mp3" },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 100 },
+      cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
+        pause: "best-effort-audio-tag", emphasis: "best-effort-capitalization", breath: "best-effort-audio-tag", outputTimestamps: "none",
+        deliveryMappings: { measured: { settings: { stability: 0.5 } }, whispered: { settings: { stability: 0.5 }, tag: "whispers" },
+          breaking: { settings: { stability: 0 }, tag: "crying" }, cold: { settings: { stability: 1 }, tag: "coldly" },
+          warm: { settings: { stability: 0.5 }, tag: "warmly" }, urgent: { settings: { stability: 0 }, tag: "urgent" } } },
+    },
+    {
       id: "eleven_multilingual_v2",
       provider: "elevenlabs",
       capability: "voice-tts",
@@ -196,6 +209,8 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       pricing: { kind: "perCharacter", microUsdPerCharacter: 300 },
     },
     {
+      cadence: { deliveries: ["measured", "urgent"], speed: null, pause: "unsupported", emphasis: "unsupported", breath: "unsupported", outputTimestamps: "none",
+        deliveryMappings: { measured: { settings: { speed: 0.92 } }, urgent: { settings: { speed: 1.15 } } } },
       id: "kokoro-82m",
       provider: "kokoro",
       capability: "voice-tts",

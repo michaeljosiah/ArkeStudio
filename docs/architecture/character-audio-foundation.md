@@ -165,3 +165,26 @@ Validation so far includes real world Keep/reopen/retry, interrupted purge resto
 purge and resurrection refusal, desktop permission/spool tests, multipart upload/refusal and account
 probe tests. The remaining epic integration pass must cover conversion queue/finalization replay,
 recorder interaction and narrow-window QA, and downstream review/selection/bible references.
+
+
+## Performance review and cadence (#112, first implementation slice)
+
+Review decisions live in `performance-reviews.jsonl`; current choices live in
+`performance-selections.json`. `performanceLineKey` includes scene, shot and covered block (or an
+explicit legacy marker), so two authored lines covered by one shot cannot overwrite each other.
+Accept compares both file hashes, current target and voice assignment, and exact media bytes before
+committing review and selection together. Reject appends review alone. Request IDs make lost-response
+retries idempotent. The bundle exposes both authorities and hashes; purge now sees these references.
+
+The shared cadence mapper validates UTF-16 positions, surrogate boundaries, exact spans, ordering,
+overlaps and duplicate cues. Model rows declare mappings and unsupported controls. Eleven v3's app
+ID is `eleven-v3`, wire ID `eleven_v3`; the reviewed official rate is $0.10 per 1,000 characters.
+Qualitative audio tags and capitalization are best-effort. Kokoro exposes existing delivery presets;
+arbitrary speed and audio tags remain unsupported pending a packaged runtime check. Speech whitespace
+normalization moved into contracts; existing voice-service imports continue to work.
+
+Design turn 116 and the performance panel add transient A/B pins and explicit Accept/Reject controls.
+World-store tests cover atomic selection, idempotent review, stale file refusal, reject preserving
+selection, restart reads and purge blockers. Cadence tests cover exact Unicode addressing and honest
+unsupported mappings. TTS generation/finalization and its full client cadence editor are the next
+slice; the new mapper alone does not claim that workflow is complete.

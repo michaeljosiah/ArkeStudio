@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile, readFile, rename, lstat } from "node:fs/promises";
 import { join } from "node:path";
-import { orderedShots, resolvePerformanceLine, ulid } from "@arke-studio/contracts";
+import { orderedShots, resolvePerformanceLine, performanceLineKey, ulid } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
+import { reviewPerformance } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
 import { keepPerformanceRecording } from "../../src/audio/performances.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -54,4 +55,23 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.equal(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.performances.length, 0);
   await assert.rejects(keepPerformanceRecording(store, tools, spool, request), /purged/);
   assert.equal(claims, 1, "a tombstone prevents stale Keep from claiming again");
+  const next = await keepPerformanceRecording(store, tools, spool, { ...request, requestId: ulid() });
+  const review = { kind: "review-performance" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    performanceId: next.id, decision: "accept" as const, expectedReviewHash: null, expectedSelectionHash: null };
+  await reviewPerformance(store, review);
+  await reviewPerformance(store, review);
+  const reviewed = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(reviewed.performanceReview.reviews.length, 1, "retry does not duplicate review");
+  assert.equal(reviewed.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id);
+  assert.deepEqual(reviewed.selections, originalSelections, "performance acceptance never changes picture selection");
+  await assert.rejects(reviewPerformance(store, { ...review, requestId: ulid() }), /review changed/);
+  await reviewPerformance(store, { ...review, requestId: ulid(), decision: "reject", expectedReviewHash: reviewed.performanceReview.reviewHash,
+    expectedSelectionHash: reviewed.performanceReview.selectionHash });
+  const rejected = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(rejected.performanceReview.reviews.length, 2);
+  assert.equal(rejected.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id, "rejection leaves current selection unchanged");
+  await assert.rejects(purgePerformance(store, production.meta.id, next.id, []), /referenced/);
+  await store.close(); store = await WorldStore.open(dir);
+  assert.deepEqual(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.performanceReview, rejected.performanceReview);
+
 });

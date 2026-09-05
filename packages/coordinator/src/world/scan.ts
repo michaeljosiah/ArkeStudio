@@ -1,3 +1,4 @@
+import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
@@ -686,7 +687,16 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       const record = await tryParse(`productions/${id}/performances/${entry.name}/performance.json`, raw => PerformanceRecordSchema.parse(JSON.parse(raw)));
       if (record && record.id === entry.name && record.target.productionId === id) performances.push(record);
     }
+    const performanceReviewPath = `productions/${id}/performance-reviews.jsonl`;
+    const performanceSelectionPath = `productions/${id}/performance-selections.json`;
+    const performanceReviews = (await exists(join(pdir, "performance-reviews.jsonl"))) ? await tryParse(performanceReviewPath, raw => {
+      if (raw && !raw.endsWith("\n")) throw new Error("Incomplete performance review history.");
+      return raw.split("\n").filter(Boolean).map(line => PerformanceReviewDecisionSchema.parse(JSON.parse(line)));
+    }) : [];
+    const performanceSelections = (await exists(join(pdir, "performance-selections.json"))) ? await tryParse(performanceSelectionPath, raw => PerformanceSelectionsSchema.parse(JSON.parse(raw))) : {};
     productions.push({
+      performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
+        reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },
       performances,
       meta: metaDoc,
       story,

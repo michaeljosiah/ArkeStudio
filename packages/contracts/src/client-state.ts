@@ -1,4 +1,4 @@
-import { PerformanceRecordSchema } from "./performance.js";
+import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
 import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
@@ -133,6 +133,7 @@ export type WorldSummary = z.infer<typeof WorldSummarySchema>;
 export const ProductionBundleSchema = z
   .object({
     performances: z.array(PerformanceRecordSchema).default([]),
+    performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */

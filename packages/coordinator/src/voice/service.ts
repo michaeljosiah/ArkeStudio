@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   clonedVoiceCandidates,
+  normalizeSpeechText,
   KOKORO_VOICE_MODEL,
   estimateMicroUsd,
   extractVoiceAttributes,
@@ -69,9 +70,7 @@ export interface VoiceServiceDeps {
 const PREVIEW_CACHE_DIR = ".cache/voice-previews";
 const SPEECH_SETTINGS_VERSION = 1;
 
-export function normalizeSpeechText(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
-}
+export { normalizeSpeechText } from "@arke-studio/contracts";
 
 /**
  * How much text the local engine is asked to speak at once (2026-08-24).

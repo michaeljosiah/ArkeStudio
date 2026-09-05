@@ -1,3 +1,4 @@
+import { reviewPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs } from "./audio/reference-inputs.js";
@@ -11684,6 +11685,20 @@ export class Coordinator {
           ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
         }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "review-performance": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the performance world first.");
+          await reviewPerformance(store, msg);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "reviewed", reason: msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged." });
+        } catch {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: "Review refused. Refresh the line, voice assignment and selection; verify the performance audio." });
+        }
         return;
       }
       case "purge-performance": {

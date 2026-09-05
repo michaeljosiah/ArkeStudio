@@ -79,3 +79,5 @@ export * from "./voice-sample.js";
 export * from "./audio-reference.js";
 
 export * from "./performance.js";
+
+export * from "./cadence.js";

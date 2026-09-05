@@ -69,7 +69,7 @@ function scene(id: string, order: number, shots: Array<{ id: string; durationSec
 
 function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
   return {
-    performances: [],
+    performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
     meta: {
       id: "bell-watch",
       format: "video",

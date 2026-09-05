@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { resolvePerformanceLine, orderedShots, estimateMicroUsd, formatMicroUsd, ulid, type PerformanceRecord, type VoiceAssignment, type WorldBundle, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
+import { resolvePerformanceLine, performanceLineKey, orderedShots, estimateMicroUsd, formatMicroUsd, ulid, type PerformanceRecord, type VoiceAssignment, type WorldBundle, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { playClip, dismissPlayback, playbackSnapshot } from "../lib/audio.js";
 import { mediaUrl } from "../lib/media.js";
 import { send, subscribePerformanceResults, subscribeQueueResults, convertPerformance, useStore } from "../lib/store.js";
@@ -21,6 +21,7 @@ export function PerformancePanel({ world, production, scene, shotId }: {
   const sheet = line.ok ? world.sheets.find(s => s.id === line.speakerSheetId) : undefined;
   const [phase, setPhase] = useState<"idle" | "permission" | "recording" | "stopping" | "captured" | "staging" | "kept" | "error">("idle");
   const [notice, setNotice] = useState("");
+  const [pins, setPins] = useState<Array<string | null>>([null, null]);
   const [blob, setBlob] = useState<Blob | null>(null);
   const [basis, setBasis] = useState<"" | "self" | "authorized" | "licensed">("");
   const stream = useRef<MediaStream | null>(null), recorder = useRef<MediaRecorder | null>(null);
@@ -102,10 +103,21 @@ export function PerformancePanel({ world, production, scene, shotId }: {
         } catch { if (generation === captureGeneration.current) { setPhase("captured"); setNotice("The desktop could not stage this recording. Your preview remains available for retry."); } }
       }}>Keep recording locally</Button></>}
     {!bridge?.stagePerformanceAudio && <p>Keeping a performance requires the desktop app. Browser capture supports local preview only.</p>}
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>{pins.map((id, index) => {
+      const pinned = records.find(r => r.id === id);
+      return <Button key={index} disabled={!pinned} onClick={() => { if (pinned) void playClip({ id: pinned.id, url: mediaUrl(world.meta.slug, `productions/${production.meta.id}/performances/${pinned.id}/${pinned.file}`), title: `Performance ${index === 0 ? "A" : "B"}` }); }}>Hear {index === 0 ? "A" : "B"}</Button>;
+    })}</div>
     {records.map(record => <div key={record.id} style={{ marginTop: 12 }}><Button onClick={() => { void playClip({ id: record.id,
       url: mediaUrl(world.meta.slug, `productions/${production.meta.id}/performances/${record.id}/${record.file}`), title: `${sheet?.name ?? "Performance"} · ${record.kind}` }); }}>Hear {record.kind}</Button>
       <p>{record.provenance.outputTechnical.durationSec?.toFixed(2)} seconds · {record.transcript?.status === "compared" ? `Transcript ${record.transcript.result}` : "Transcription unavailable"}</p>
       {record.transcript?.status === "compared" && record.transcript.differences.map((d, i) => <p key={i}>{d.kind}: “{d.authored}” → “{d.observed}”</p>)}
+      <p>{production.performanceReview.reviews.filter(r => r.performanceId === record.id).at(-1)?.decision ?? "Unreviewed"}{production.performanceReview.selections[performanceLineKey(record.target)]?.performanceId === record.id ? " · Selected for this line" : ""}{record.target.sceneVersion !== scene.version ? " · Earlier scene version" : ""}</p>
+      {[0, 1].map(index => <Button key={index} variant="ghost" onClick={() => setPins(current => current.map((value, i) => i === index ? record.id : value))}>Pin {index === 0 ? "A" : "B"}</Button>)}
+      {(["accept", "reject"] as const).map(decision => <Button key={decision} onClick={() => {
+        pending.current = ulid();
+        if (!send({ kind: "review-performance", requestId: pending.current, worldId: world.meta.worldId, productionId: production.meta.id,
+          performanceId: record.id, decision, expectedReviewHash: production.performanceReview.reviewHash, expectedSelectionHash: production.performanceReview.selectionHash })) setNotice("The studio is disconnected.");
+      }}>{decision === "accept" ? "Accept for this line" : "Reject"}</Button>)}
       <Button variant="ghost" onClick={() => { pending.current = ulid(); if (!send({ kind: "purge-performance", requestId: pending.current, worldId: world.meta.worldId, productionId: production.meta.id, performanceId: record.id })) setNotice("The studio is disconnected."); }}>Purge local recording</Button>
       {record.kind === "scratch" && <PerformanceConversionControls record={record} voice={sheet?.voice} worldId={world.meta.worldId} />}
     </div>)}

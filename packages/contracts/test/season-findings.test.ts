@@ -31,7 +31,7 @@ function episode(id: string, order: number, over: Partial<Episode> = {}): Episod
 
 function production(over: Partial<ProductionBundle>): ProductionBundle {
   return {
-    performances: [],
+    performances: [], performanceReview: { reviews: [], selections: {}, reviewHash: null, selectionHash: null },
     meta: {
       id: "bell-watch-season-1",
       format: "video",

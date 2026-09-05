@@ -59,3 +59,25 @@ export const PerformancePurgeSchema = z.object({
   performanceId: PerformanceIdSchema, purgedAt: IsoDateTimeSchema,
   reason: z.enum(["user-request", "capture-discarded"]),
 }).strict();
+
+export function performanceLineKey(target: Pick<PerformanceTarget, "sceneId" | "shotId" | "blockId">): string {
+  return `${target.sceneId}/${target.shotId}/${target.blockId ?? "legacy"}`;
+}
+export const PerformanceReviewDecisionSchema = z.object({
+  requestId: z.string().regex(/^[0-9A-HJKMNP-TV-Z]{26}$/), ts: IsoDateTimeSchema,
+  performanceId: PerformanceIdSchema, target: PerformanceTargetSchema,
+  decision: z.enum(["accept", "reject"]), by: z.literal("user"), note: z.string().max(1000).optional(),
+}).strict();
+export const PerformanceSelectionSchema = z.object({
+  performanceId: PerformanceIdSchema.nullable(), target: PerformanceTargetSchema,
+  selectedAt: IsoDateTimeSchema, selectedBy: z.literal("user"),
+}).strict();
+export const PerformanceSelectionsSchema = z.record(z.string().min(1).max(300), PerformanceSelectionSchema);
+export const PerformanceReviewStateSchema = z.object({
+  reviews: z.array(PerformanceReviewDecisionSchema), selections: PerformanceSelectionsSchema,
+  reviewHash: z.string().nullable(), selectionHash: z.string().nullable(),
+}).strict();
+export function emptyPerformanceReviewState(): z.infer<typeof PerformanceReviewStateSchema> {
+  return { reviews: [], selections: {}, reviewHash: null, selectionHash: null };
+}
+export type PerformanceReviewState = z.infer<typeof PerformanceReviewStateSchema>;
