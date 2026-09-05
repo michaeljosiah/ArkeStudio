@@ -816,6 +816,15 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   const masterLookCandidates = await imagesIn(dir, join("incoming", "master-look"), "incoming/master-look");
   const stagedReferences = await readStagedReferences(dir);
   const keyArt = await findKeyArt(dir);
+  /*
+   * When the key art last changed, so the renderer can tell a new picture from the old one.
+   *
+   * The path alone cannot say: an uploaded PNG replacing a PNG keeps the name, and an <img> the
+   * browser already holds at that URL is never re-requested — the frame you are standing on goes
+   * on showing the picture you just replaced. The mtime moves whenever the bytes do.
+   */
+  const keyArtVersion =
+    keyArt === null ? null : ((await stat(toExtendedLength(join(dir, keyArt))).catch(() => null))?.mtimeMs ?? null);
 
   const resolved = resolveArtDirection(meta, artDirectionRecord);
   const overrides: ArtDirectionOverride[] = [];
@@ -924,6 +933,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     },
     keyArtCandidates,
     keyArt,
+    keyArtVersion,
     masterLookCandidates,
     stagedReferences,
     sheets,

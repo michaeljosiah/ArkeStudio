@@ -474,6 +474,18 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.match(html, /Nothing sends it to a model/i, "the distinction that governs everything else");
   });
 
+  /*
+   * The other half of "nothing happens" (issue 291's sequel): an upload lands the new picture
+   * under the same name, the URL never changes, and the <img> the browser already holds is never
+   * asked for again — so the frame under the Upload button goes on showing what was replaced.
+   */
+  it("asks for the picture again when the bytes behind the same name change", () => {
+    const html = renderArtDirection({ keyArt: "world-art.png", keyArtVersion: 1_700_000_000_000 });
+    const frame = /class="fy-artdirection__keyart[^"]*"[\s\S]*?<\/section>/.exec(html);
+    assert.ok(frame, "the frame renders");
+    assert.match(frame[0], /world-art\.png\?v=1700000000000/, "the version is in the URL the frame requests");
+  });
+
   it("states the empty case rather than hiding the block", () => {
     const html = renderArtDirection({ keyArt: null });
     assert.match(html, /NO KEY ART/);

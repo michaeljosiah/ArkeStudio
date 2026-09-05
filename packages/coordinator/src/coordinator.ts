@@ -10494,8 +10494,27 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be copied into the world.");
           return;
         }
-        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        /*
+         * An upload is a decision, not an offer — reported as "nothing happens".
+         *
+         * It used to land as a candidate and wait for a yes, the same as a generation, and the
+         * only sign was one grey line in the other column: the person pressed Upload, chose a
+         * file in the host's picker, and the picture they were standing on did not change. A
+         * generation is offered because a model may return something nobody wanted. A file the
+         * author picked by name has already been chosen, and the picker showed it to them while
+         * they chose. So it lands as the world's key art here, the same adoption `use-world-image`
+         * performs, and the frame answers immediately.
+         */
+        const adopted = await adoptKeyArtCandidate(store).catch(() => false);
         await this.refreshWorldSnapshot(msg.worldId);
+        if (!adopted) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That image could not be set as the world's key art.");
+          return;
+        }
+        this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+        // The picker reads the registry rather than the open world, so the card that sent you
+        // here shows the old image until the list is asked for again (issue 291).
+        await this.refreshWorldList();
         return;
       }
       case "use-world-image": {

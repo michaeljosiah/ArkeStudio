@@ -15,6 +15,7 @@ export function Portrait({
   loading = "eager",
   download = false,
   downloadName,
+  version,
   onAvailabilityChange,
 }: {
   worldSlug: string | undefined;
@@ -33,6 +34,14 @@ export function Portrait({
   download?: boolean;
   /** A human name for the saved file. The extension always comes from the file itself. */
   downloadName?: string;
+  /**
+   * When the file behind `path` last changed, for the pictures a person replaces in place.
+   *
+   * A replacement that keeps its name keeps its URL, and an <img> already holding that URL never
+   * asks for it again — so the frame goes on showing the picture that was replaced. Passing this
+   * makes new bytes a new URL. Only the surfaces that overwrite a picture need it.
+   */
+  version?: number | null;
   onAvailabilityChange?: (available: boolean) => void;
 }) {
   const [failed, setFailed] = useState(false);
@@ -41,12 +50,12 @@ export function Portrait({
    * ImageDialog's trigger uses, and for the same reason. A save control enabled by the *previous*
    * subject's load would write the wrong bytes, or none.
    */
-  const subject = `${worldSlug ?? ""}|${path}`;
+  const subject = `${worldSlug ?? ""}|${path}|${version ?? ""}`;
   const [loadedSubject, setLoadedSubject] = useState<string | null>(null);
   const loaded = loadedSubject === subject;
   useEffect(() => {
     setFailed(false);
-  }, [worldSlug, path]);
+  }, [worldSlug, path, version]);
 
   // Held in a ref so `settle` below keeps one identity: callers pass an inline arrow, and a ref
   // callback that changes every render is detached and reattached every render with it.
@@ -92,7 +101,7 @@ export function Portrait({
       </>
     );
   }
-  const src = mediaUrl(worldSlug, path);
+  const src = version == null ? mediaUrl(worldSlug, path) : mediaUrl(worldSlug, path, { v: String(version) });
   const picture = (
     <img
       // Remounted per source, so `settle` runs again for the next picture rather than only for
