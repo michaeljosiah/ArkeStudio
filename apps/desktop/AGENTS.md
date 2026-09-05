@@ -6,7 +6,7 @@ Read the root guidance and [code map](../../docs/development/code-map.md). Paths
 
 For bridge changes inspect client `src/arke-bridge.d.ts` and transport usage. Preserve private capability handling, endpoint-scoped media headers and redirect removal; the precise rules are in [CLAUDE.md](../../CLAUDE.md). A mock or data-URL smoke test does not establish sandboxed Electron file-page behavior.
 
-For lifecycle changes follow `shutdownConfirmed()` and the `before-quit` path through `Coordinator.stop()`, including startup-failure cleanup. Inspect `src/take-qc.ts` and `src/media-probe.ts` for native media process handling; preserve timeouts and cleanup when extending it.
+For lifecycle changes follow `shutdownConfirmed()` and the `before-quit` path through `Coordinator.stop()`, including startup-failure cleanup. Reuse the bounded runner in `src/media-tools.ts` for native media work rather than introducing unmanaged subprocesses.
 
 Build/runtime ownership lives in `scripts/` and package.json. Read [maintenance.md](../../docs/development/maintenance.md) before changing bundled runtimes or generated assets. Host Node and Electron use different native SQLite binaries; preserve the rebuild and alias arrangement. External copyleft media executables remain separate processes; see CONTRIBUTING.md.
 

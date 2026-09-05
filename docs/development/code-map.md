@@ -30,6 +30,7 @@ Client, coordinator and integrations ──> shared contracts
 | Production scene/plan | client `src/screens/production.tsx`, `screens/scene-workspace/`; coordinator `src/productions/scene-commands.ts`, `plans.ts`, `frame-run.ts`; contracts `src/scene.ts`, `planning.ts`, `pass-compiler.ts` | coordinator `test/productions/pass-compiler.test.ts`; client `test/scene-workspace.test.tsx`, `frame-run.test.tsx` |
 | Timeline/playback | coordinator `src/productions/timeline.ts`; contracts `src/timeline.ts`, `render-plan.ts`; client `src/lib/plan-playback.ts`, `playback-engine.ts` | coordinator `test/productions/timeline.test.ts`; client `test/timeline-editing.test.tsx`, `plan-playback.test.ts` |
 | Voice | coordinator `src/voice/service.ts`, `library.ts`; `packages/voice/src/index.ts`; desktop `src/voxa-runtime.ts` | voice `test/`; desktop `test/voxa-runtime.test.ts`; [SPEC-011](../specifications/011.voice.md) |
+| Audio/performance | coordinator `src/audio/`; contracts audio/performance modules; client performance components; desktop media tools | coordinator `test/audio/`; desktop `test/media-tools.test.ts`; [audio integration notes](../architecture/character-audio-foundation.md) |
 | Desktop/platform | desktop `src/main.ts`, `startup.ts`, `preload.ts`, `transport-auth.ts`; client `src/arke-bridge.d.ts` | desktop `test/startup.test.ts`, `transport-auth.test.ts`, `preload-auth.test.ts` |
 | Derived search | coordinator `src/index-db/world-index.ts`, `app-index.ts`, `queries.ts`, `sqlite.ts` | coordinator `test/index-db/cache-contract.test.ts` |
 
