@@ -2179,7 +2179,7 @@ export function detachAudioCommands(production: ProductionBundle, timeline: Prod
   } else throw new TimelineOperationRefused("This source is already independent performance audio");
   if (!measured) throw new TimelineOperationRefused("Measure the video before detaching its audio");
   if (!measured.hasAudio) throw new TimelineOperationRefused("This video has no audio stream");
-  const destination = timeline.tracks.find(candidate => AUDIO_TRACK_KINDS.has(candidate.kind) &&
+  const destination = timeline.tracks.find(candidate => AUDIO_TRACK_KINDS.has(candidate.kind) && !candidate.muted && candidate.solo !== true &&
     !candidate.clips.some(other => other.startFrame < clip.startFrame + clip.durationFrames && other.startFrame + other.durationFrames > clip.startFrame));
   const added = destination ? null : newAudioTrack(timeline);
   const sound: TimelineClip = {

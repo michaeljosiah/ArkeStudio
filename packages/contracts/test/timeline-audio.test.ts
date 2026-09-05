@@ -204,6 +204,22 @@ describe("independent sound and roles (SPEC-042)", () => {
     assert.throws(() => detachAudioCommands(p, before, [], id, "cl_unknown"), /Measure/);
   });
 
+  it("keeps detached sound out of muted or soloed destination tracks", () => {
+    const p = production();
+    for (const state of [{ muted: true }, { solo: true }]) {
+      const timeline = applyTimelineCommands(seedStoryPictureTimeline(p), [
+        { kind: "add-track", trackId: "tr_reserved", trackKind: "audio", name: "Reserved" },
+        { kind: "set-track", trackId: "tr_reserved", ...state },
+      ]);
+      const detached = applyTimelineCommands(timeline, [{ kind: "detach-audio", clipId: timeline.tracks[0]!.clips[0]!.id, newClipId: "cl_detached" }],
+        { sources: { production: p, artifacts: [] } });
+      assert.equal(detached.tracks.find(track => track.id === "tr_reserved")!.clips.length, 0);
+      const result = buildRenderPlan({ production: p, timeline: { status: "ready", timeline: detached }, artifacts, scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(result.ok);
+      assert.equal(result.plan.audio.some(item => item.clipId === "cl_detached"), !state.solo, "detachment retains the existing audible set");
+    }
+  });
+
   it("persists future-only defaults and clip overrides through history and reload", () => {
     let timeline = applyTimelineCommands(seedStoryPictureTimeline(production()), [
       { kind: "add-track", trackId: "tr_new", trackKind: "audio", name: "Audio 1" },
