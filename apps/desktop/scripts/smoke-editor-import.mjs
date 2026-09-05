@@ -10,6 +10,8 @@ import { spawn } from "node:child_process";
 // webUtils still receives their native identity, or that file:// WebSockets actually connect.
 const require = createRequire(import.meta.url);
 const dir = await mkdtemp(join(tmpdir(), "arke-editor-import-"));
+const withinTemp = relative(tmpdir(), dir);
+if (withinTemp.startsWith("..") || isAbsolute(withinTemp)) throw new Error("Temporary smoke directory escaped its parent");
 const preload = fileURLToPath(new URL("../dist/preload.cjs", import.meta.url));
 try {
   await writeFile(join(dir, "index.html"), '<!doctype html><input id="files" type="file" multiple>');
@@ -69,7 +71,5 @@ app.whenReady().then(async () => {
   assert.equal(code, 0, "sandboxed editor import smoke failed");
 } finally {
   // Only the newly created temporary directory; never a checkout or shared application profile.
-  const withinTemp = relative(tmpdir(), dir);
-  if (withinTemp.startsWith("..") || isAbsolute(withinTemp)) throw new Error("Temporary smoke directory escaped its parent");
   await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
