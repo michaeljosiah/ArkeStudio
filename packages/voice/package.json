@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "license": "AGPL-3.0-only",
   "private": true,
-  "description": "Typed skeleton for the Voxa voice sidecar — local TTS/STT, supervised as a child process. The protocol client and catalogue arrive with SPEC-011; the workspace graph is settled here (SPEC-001 D9).",
+  "description": "Typed Voxa sidecar client and voice catalogue for local TTS/STT, with protocol validation and runtime readiness handling (SPEC-011).",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
