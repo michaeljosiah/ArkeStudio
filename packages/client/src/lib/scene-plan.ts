@@ -33,6 +33,7 @@ export function planForScene(input: ScenePlanInput, mode: "per-shot"): Pick<Scen
 export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-scene"): Partial<ScenePlans> {
   const { world, production, scene, model, resolution, tier } = input;
   const planInput = {
+    timingProduction: production,
     audioReferencesDisabled: input.audioReferencesDisabled,
     world: world.meta,
     artDirection: world.artDirection,

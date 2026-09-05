@@ -25,6 +25,11 @@ export function PerformanceTimingPanel({ world, production, performance }: { wor
       if(!send({kind:"place-selected-performance",requestId,worldId:world.meta.worldId,productionId:production.meta.id,performanceId:performance.id,
         expectedTimelineRevision:timeline.timeline.revision,expectedTimelineHash:timeline.hash,expectedSelectionHash:production.performanceReview.selectionHash,leadInSec:lead,timing:intent.data})) {pending.current=null;setNotice("Reconnect before placing this performance.");}
     }}>{placed?"Update cut to selected performance":"Use selected performance in cut"}</Button>
+    {(!slots[0] || slots[0].source === "shot-duration") && <Button disabled={!timing?.ok || pending.current!==null} onClick={()=>{
+      if(!intent.success)return;const requestId=ulid();pending.current=requestId;setNotice("Preparing a scene-duration proposal…");
+      if(!send({kind:"propose-performance-duration",requestId,worldId:world.meta.worldId,productionId:production.meta.id,performanceId:performance.id,
+        expectedSceneVersion:performance.target.sceneVersion,leadInSec:lead,timing:intent.data})){pending.current=null;setNotice("Reconnect before proposing timing.");}
+    }}>Propose authored duration to fit</Button>}
     <p className="text-xs" role="status">{notice}</p>
   </fieldset>;
 }

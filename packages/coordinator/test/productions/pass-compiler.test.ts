@@ -216,6 +216,21 @@ describe("the pass compiler (issue 398)", () => {
     assert.equal(pass!.params["providerPaddingSec"], 2);
   });
 
+  it("anchor budgets override authored durations and timeline gaps close passes", async () => {
+    const { bundle } = await open(); const production = bundle.productions[0]!;
+    const scene: Scene = { ...production.scenes[0]!, shots: [shot(1, 9, "a pier"), shot(2, 9, "a bell"), shot(3, 9, "the tide")] };
+    const timed = { ...production, scenes: [scene], spine: { schemaVersion: 1 as const, revision: 1, trackArtifactId: "af_clock", markers: [],
+      anchors: { [scene.shots[0]!.id]: { startSec: 0, endSec: 2.5, clipAudio: { mode: "mute" as const } },
+        [scene.shots[1]!.id]: { startSec: 2.5, endSec: 5, clipAudio: { mode: "mute" as const } },
+        [scene.shots[2]!.id]: { startSec: 7, endSec: 10, clipAudio: { mode: "mute" as const } } }, updatedAt: CLOCK() } };
+    const plan = planScene({ world: bundle.meta, sheets: bundle.sheets, kits: bundle.referenceKits, scene, selections: {}, model: WAN_LIKE, timingProduction: timed }, "whole-scene");
+    assert.ok(plan.pack.ok); assert.deepEqual(plan.pack.passes.map(p=>p.durationSec),[5,3]);
+    assert.deepEqual(plan.shots.map(s=>s.shot.durationSec),[2.5,2.5,3]); assert.equal(scene.shots[0]!.durationSec,9,"planning never rewrites authored fallback");
+    const passes=compilePasses({productionId:production.meta.id,scene,plan,model:WAN_LIKE,world:bundle});
+    assert.equal(passes[1]!.params.providerPaddingSec,2);assert.equal((passes[1]!.params.dispatchTiming as {slotSource:string}).slotSource,"spine-anchor");
+    assert.deepEqual((passes[1]!.params.shotPlan as Array<{endSec:number}>).map(p=>p.endSec),[3]);
+  });
+
   it("keeps authored timing inside each shot prompt and out of the machine shot plan", async () => {
     const { bundle } = await open();
     const production = bundle.productions[0]!;

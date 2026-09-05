@@ -1,4 +1,4 @@
-import { placeSelectedPerformance, validatePlacedPerformanceBytes } from "./audio/performance-placement.js";
+import { placeSelectedPerformance, validatePlacedPerformanceBytes, proposePerformanceDuration } from "./audio/performance-placement.js";
 import { planTableRead, prepareLocalTableRead, finalizeTableReadCache } from "./audio/table-read.js";
 import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
@@ -7052,6 +7052,7 @@ export class Coordinator {
         // durable BEFORE any pass may reach a provider (SPEC-024 R-12).
         const scenePlan = planScene(
           {
+            timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
             world: bundle.meta,
             artDirection: bundle.artDirection,
@@ -7580,6 +7581,7 @@ export class Coordinator {
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
+            timingProduction: production,
             audioReferencesDisabled: msg.audioReferencesDisabled,
             world: bundle.meta,
             artDirection: bundle.artDirection,
@@ -11793,6 +11795,19 @@ export class Coordinator {
           }
         } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
         finally { this.performanceGenerations.delete(operationKey); }
+        return;
+      }
+      case "propose-performance-duration": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open this performance world first.");
+          const proposal = await proposePerformanceDuration(store, msg);
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emit({type:"proposal.staged",at:this.nowIso(),worldId:msg.worldId,proposalId:proposal.id});
+          this.emit({type:"performance.result",at:this.nowIso(),worldId:msg.worldId,requestId:msg.requestId,productionId:msg.productionId,status:"reviewed",reason:`Review timing proposal ${proposal.id} before it changes the scene.`});
+        } catch(error) {
+          this.emit({type:"performance.result",at:this.nowIso(),worldId:msg.worldId,requestId:msg.requestId,productionId:msg.productionId,status:"refused",reason:error instanceof Error?error.message:"Timing proposal refused."});
+        }
         return;
       }
       case "place-selected-performance": {

@@ -1,3 +1,5 @@
+import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
+import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
 import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan } from "./audio-reference.js";
 import {
@@ -1405,6 +1407,7 @@ export function skillFamilyMismatch(
 }
 
 export interface ScenePlanInput {
+  timingProduction?: ProductionBundle;
   /** Explicit bypass applies only to this dispatch. */
   audioReferencesDisabled?: boolean;
   world: WorldMeta;
@@ -1482,6 +1485,8 @@ export interface BoundaryFramePlan {
 }
 
 export interface ShotDispatchPlan {
+  slot?: DialogueSlot;
+  authoredDurationSec?: number;
   audioReferences?: CharacterAudioPlan;
   shot: Shot;
   prompt: { text: string; overridden: boolean };
@@ -1512,6 +1517,8 @@ export interface ShotDispatchPlan {
 }
 
 export interface ScenePlan {
+  timingProblems?: string[];
+  timingWarnings?: string[];
   mode: "per-shot" | "whole-scene";
   /** The effective production/world visual language frozen into every assembled prompt. */
   effectiveStyle: string;
@@ -1861,7 +1868,31 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
-  const ordered = orderedShots(scene);
+  const authored = orderedShots(scene);
+  const timingProduction = input.timingProduction;
+  const hasClock = timingProduction !== undefined && (timingProduction.spine !== null || timingProduction.timeline?.status === "ready" || timingProduction.timeline?.status === "invalid");
+  const slots = hasClock ? dialogueSlots(timingProduction!) : [];
+  const byShot = new Map<string, DialogueSlot>();
+  const timingProblems: string[] = [], timingWarnings: string[] = [];
+  for (const slot of slots) {
+    if (byShot.has(slot.shotId)) timingProblems.push(`${slot.shotId}: multiple picture placements make generation timing ambiguous.`);
+    byShot.set(slot.shotId,slot);
+  }
+  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("Repair the invalid production timeline before generation.");
+  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timingWarnings.push(`${shot.id}: unanchored; per-shot generation uses authored fallback and whole-scene packing excludes it.`);
+  const ordered = authored.filter(shot => mode !== "whole-scene" || !hasClock || byShot.has(shot.id)).map(shot => {
+    const slot = byShot.get(shot.id);
+    return slot ? { ...shot, durationSec: slot.endSec-slot.startSec } : shot;
+  });
+  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("Place at least one scene shot on the timeline before whole-scene generation.");
+  if (mode === "whole-scene" && hasClock) ordered.sort((a,b)=>byShot.get(a.id)!.startSec-byShot.get(b.id)!.startSec);
+  const timingBreaks = new Set<string>();
+  if (hasClock) for (let i=1;i<ordered.length;i++) {
+    const previous=byShot.get(ordered[i-1]!.id), next=byShot.get(ordered[i]!.id);
+    if (!previous || !next || previous.endSec!==next.startSec) timingBreaks.add(ordered[i]!.id);
+    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${ordered[i]!.id}: picture slots overlap; repair the timing before dispatch.`);
+  }
+
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
   const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
@@ -1953,6 +1984,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     };
     return {
       shot,
+      ...(byShot.has(shot.id) ? { slot: byShot.get(shot.id)!, authoredDurationSec: resolvedAuthoredDuration(authored.find(s=>s.id===shot.id)!) } : {}),
       prompt,
       references,
       bound,
@@ -2026,7 +2058,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
-    forceBreakBefore: boardBoundaries,
+    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks]),
   });
 
   const passReferences: ScenePlan["passReferences"] = pack.ok
@@ -2287,6 +2319,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   return {
     mode,
+    ...(hasClock ? { timingProblems, timingWarnings } : {}),
     effectiveStyle,
     ...(productionStyleOverride !== undefined ? { productionStyleOverride } : {}),
     shots,

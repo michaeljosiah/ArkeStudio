@@ -309,6 +309,7 @@ async function compileFrameRun(input: CompileFrameRunInput): Promise<FrameRun> {
   const routeOutput = sceneImageOutput(input.model, undefined, aspect);
   const plan = planScene(
     {
+      timingProduction: input.production,
       world: input.world.meta,
       artDirection: input.world.artDirection,
       productionId: input.productionId,

@@ -239,6 +239,7 @@ export interface CompilePassesInput {
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   const { productionId, scene, plan, model, world } = input;
+  if (plan.timingProblems?.length) throw new Error(plan.timingProblems.join(" "));
   const audioPlans = plan.mode === "per-shot" ? plan.shots.map(s => s.audioReferences) : plan.passReferences.map(p => p.audioReferences);
   const audioProblems = audioPlans.flatMap(a => a?.problems ?? []);
   if (audioProblems.length) throw new Error(audioProblems.join(" "));
@@ -394,7 +395,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
                 }
               : {}),
           ...(askedSec !== undefined ? { durationSec: askedSec, dispatchTiming: {
-            slotSource: "shot-duration", slotDurationSec: resolvedAuthoredDuration(entry.shot), requestedDurationSec: askedSec,
+            slotSource: entry.slot?.source ?? "shot-duration", slotDurationSec: resolvedAuthoredDuration(entry.shot), requestedDurationSec: askedSec,
             providerDurationMode: "requested", providerPaddingSec: Math.max(0, askedSec-resolvedAuthoredDuration(entry.shot)),
           } } : {}),
           ...size,
@@ -514,7 +515,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         // remain exact, so a paid tail never becomes another shot's time by accident.
         shotPlan: pass.plan,
         providerPaddingSec: Math.max(0, passSeconds - pass.durationSec),
-        dispatchTiming: { slotSource: "shot-duration", slotDurationSec: pass.durationSec,
+        dispatchTiming: { slotSource: plan.shots.find(s=>s.shot.id===pass.plan[0]?.shotId)?.slot?.source ?? "shot-duration", slotDurationSec: pass.durationSec,
           requestedDurationSec: passSeconds, providerDurationMode: "requested", providerPaddingSec: Math.max(0,passSeconds-pass.durationSec) },
         provenance,
       },

@@ -1,4 +1,5 @@
-import { placeSelectedPerformance, validatePlacedPerformanceBytes } from "../../src/audio/performance-placement.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
+import { placeSelectedPerformance, validatePlacedPerformanceBytes, proposePerformanceDuration } from "../../src/audio/performance-placement.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { storyTimelineFingerprint, buildRenderPlan } from "@arke-studio/contracts";
 import { writePerformanceBible } from "../../src/audio/performance-bible.js";
@@ -72,6 +73,13 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
   assert.equal(reviewed.performanceReview.selections[performanceLineKey(next.target)]?.performanceId, next.id);
   assert.deepEqual(reviewed.selections, originalSelections, "performance acceptance never changes picture selection");
   await assert.rejects(reviewPerformance(store, { ...review, requestId: ulid() }), /review changed/);
+  const durationRequest = { kind:"propose-performance-duration" as const,requestId:ulid(),worldId:store.worldId,productionId:production.meta.id,
+    performanceId:next.id,expectedSceneVersion:scene.version,leadInSec:0.25,timing:{postHandle:{kind:"reaction" as const,durationSec:0.5},overflow:{mode:"forbid" as const}} };
+  const durationProposal=await proposePerformanceDuration(store,durationRequest);
+  assert.equal(store.getBundle().productions.find(p=>p.meta.id===production.meta.id)!.scenes.find(s=>s.id===scene.id)!.version,scene.version,"timing stays proposed until accepted");
+  assert.equal(durationProposal.kind,"scene-edit");
+  await assert.rejects(proposePerformanceDuration(store,{...durationRequest,expectedSceneVersion:scene.version+1}),/line changed/);
+  await new ProposalManager(store).discard(durationProposal.id);
   await applyTimelineCommand(store, production.meta.id, { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(reviewed),
     commands: [{ kind: "place", trackId: "tr_picture", clip: { id: "cl_dialogue_picture", startFrame: 0, durationFrames: 300, sourceInFrames: 0,
       source: { kind: "shot", shotId: shot.id, sceneNumber: scene.number, shotNumber: shot.number, label: shot.title } } }] });
