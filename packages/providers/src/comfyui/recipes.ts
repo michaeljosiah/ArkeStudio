@@ -71,6 +71,12 @@ export interface ComfyUiRecipe {
   capability: "image" | "video" | "voice-tts";
   displayName: string;
   recipeVersion: number;
+  /**
+   * The engine range this recipe is known to run on (SPEC-021 R-18; issue 592): the oldest ComfyUI
+   * it requires, and the newest it was exercised against. Readiness disables below the floor,
+   * naming this recipe; above the ceiling it stays dispatchable and says the pairing is untested.
+   */
+  engine: { minVersion: string; exercisedThroughVersion: string };
   params: Record<string, RecipeParamSpec>;
   graph: RecipeGraph;
   /** The one node whose outputs are fetched (§2.6) — never every image the history names. */
@@ -124,6 +130,7 @@ const DRAFT_IMAGE: ComfyUiRecipe = {
   capability: "image",
   displayName: "Local · Draft Image",
   recipeVersion: 1,
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["6", "text"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["3", "seed"]] },
@@ -191,6 +198,7 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
   capability: "video",
   displayName: "Local · Draft Video",
   recipeVersion: 1,
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["5", "text"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["8", "seed"]] },
@@ -325,6 +333,7 @@ const H3_VIDEO: ComfyUiRecipe = {
   capability: "video",
   displayName: "Local · H3 Video",
   recipeVersion: 1,
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
@@ -469,6 +478,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   capability: "voice-tts",
   displayName: "Local · Cloned Voice",
   recipeVersion: 1,
+  engine: { minVersion: "0.3.45", exercisedThroughVersion: "0.33.1" },
   params: {
     // The words, verbatim — a line to speak, never a prompt describing a performance
     // (SPEC-011 turn 70). The cap is ours: the node chunks longer text, and a scene line that

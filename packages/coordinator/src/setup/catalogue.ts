@@ -65,7 +65,8 @@ export type ComponentKind =
    * Presence is `rootMarker` under the installed dir, and the marker may sit one level deep,
    * because upstream archives wrap their content in a single top-level folder.
    */
-  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile };
+  /** `version` is what the release pins; `versionFile` is where the tree records its own, relative to the same root as `rootMarker` (issue 592). */
+  | { kind: "tree"; dir: string; rootMarker: string; file: DownloadFile; version?: string; versionFile?: string };
 
 export interface CatalogueEntry {
   id: string;
@@ -132,7 +133,7 @@ const GZIP_MAGIC = [0x1f, 0x8b] as const;
 /** 7-Zip's signature — the System32 bsdtar this service already resolves reads the format. */
 const SEVENZ_MAGIC = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c] as const;
 
-const COMFYUI_VERSION = "0.33.1";
+export const COMFYUI_VERSION = "0.33.1";
 
 /** Canonical setup identities for the two model directories Voxa reads at launch. */
 export const VOXA_SETUP_COMPONENT_IDS = {
@@ -269,6 +270,8 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
       kind: "tree",
       dir: "comfyui-runtime",
       rootMarker: "ComfyUI/main.py",
+      version: COMFYUI_VERSION,
+      versionFile: "ComfyUI/comfyui_version.py",
       file: {
         url: `https://github.com/Comfy-Org/ComfyUI/releases/download/v${COMFYUI_VERSION}/ComfyUI_windows_portable_nvidia.7z`,
         file: "ComfyUI_windows_portable_nvidia.7z",

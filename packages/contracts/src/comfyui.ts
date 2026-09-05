@@ -87,6 +87,12 @@ export const RecipeIdentitySchema = z
     templateDigest: Sha256HexSchema,
     /** Digest over the pinned dependency set (checkpoint digests + node pins), order-independent. */
     dependencyDigest: Sha256HexSchema,
+    /**
+     * The engine version the job was priced against, frozen at enqueue (SPEC-021 R-19; issue
+     * 592). The client refuses before `/prompt` when the engine no longer reports it, so a take
+     * either ran on this version or never ran. Absent for jobs enqueued before it existed.
+     */
+    engineVersion: z.string().min(1).optional(),
   })
   .strict();
 export type RecipeIdentity = z.infer<typeof RecipeIdentitySchema>;
@@ -192,6 +198,11 @@ export const RecipeReadinessSchema = z
     reasonKind: RecipeReasonKindSchema.optional(),
     /** The cloud alternative worth naming, when one exists. */
     cloudAlternative: z.string().min(1).optional(),
+    /**
+     * Set on a ready recipe whose engine is newer than the version it was exercised against
+     * (SPEC-021 R-19; issue 592): stated, never a refusal, so an honest engine error stays diagnosable.
+     */
+    untested: z.string().min(1).optional(),
   })
   .strict();
 export type RecipeReadiness = z.infer<typeof RecipeReadinessSchema>;
@@ -263,4 +274,36 @@ export function comfyUiRecoveryDecision(input: {
     };
   }
   return status === "running" ? { action: "resume" } : { action: "hold" };
+}
+
+// ---------------------------------------------------------------------------
+// Engine versions (SPEC-021 D14, D17; issue 592) — one floor, one comparison, shared
+// ---------------------------------------------------------------------------
+
+/**
+ * The oldest engine whose API shape the client drives — `/prompt`, `/history`, `/system_stats`,
+ * `/object_info`, `/upload`. A recipe's own requirement lives on the recipe (R-18); this is the
+ * provider's, and it was declared twice before it was declared here.
+ */
+export const COMFYUI_VERSION_FLOOR = "0.3.45";
+
+function parseComfyUiVersion(version: string): number[] | null {
+  const m = /^v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(version.trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)] : null;
+}
+
+/** Numeric, field by field: "0.33.1" is newer than "0.3.45", which a string compare denies. Null when either side is not a version. */
+export function compareComfyUiVersions(a: string, b: string): -1 | 0 | 1 | null {
+  const left = parseComfyUiVersion(a);
+  const right = parseComfyUiVersion(b);
+  if (left === null || right === null) return null;
+  for (let i = 0; i < 3; i++) {
+    if (left[i]! !== right[i]!) return left[i]! > right[i]! ? 1 : -1;
+  }
+  return 0;
+}
+
+export function meetsComfyUiVersion(version: string, floor: string): boolean | null {
+  const order = compareComfyUiVersions(version, floor);
+  return order === null ? null : order >= 0;
 }

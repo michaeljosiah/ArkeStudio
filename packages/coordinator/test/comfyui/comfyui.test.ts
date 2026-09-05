@@ -2269,3 +2269,26 @@ describe("a local take carries local-zero and its recipe version (§2.9)", () =>
     await store.close();
   });
 });
+
+describe("engine version compatibility is per recipe (SPEC-021 R-18, R-19; issue 592)", () => {
+  const devices = [{ type: "cuda", vram_total: 10240 * 1024 * 1024, torch_vram_total: 0 }];
+  const above: ComfyUiRecipeFacts = { ...FACTS[0]!, id: "needs-newer", displayName: "Needs newer", checkpoints: [], minEngineVersion: "0.40.0" };
+  const within: ComfyUiRecipeFacts = { ...FACTS[0]!, id: "runs-here", displayName: "Runs here", checkpoints: [], exercisedThroughVersion: "0.30.0" };
+
+  it("disables exactly the recipe above the engine, naming its own requirement, and states an untested pairing without refusing", async () => {
+    const world = fakeWorld();
+    world.urls.set("http://127.0.0.1:8188", { version: "0.33.1", devices });
+    const service = new ComfyUiEngineService({ ...engineDeps(world, "C:/app", [above, within]), freeVramMb: async () => 8000 });
+    await service.applySettings({ enginePath: null, engineUrl: "http://127.0.0.1:8188", modelsDir: null });
+    const { recipes } = await service.status(PROBES);
+    const newer = recipes.find((r) => r.recipeId === "needs-newer")!;
+    const here = recipes.find((r) => r.recipeId === "runs-here")!;
+    assert.equal(newer.state, "disabled");
+    assert.match(newer.reason ?? "", /Needs newer needs ComfyUI 0\.40\.0 or later — this engine reports 0\.33\.1/);
+    assert.doesNotMatch(newer.reason ?? "", /floor/, "the recipe's requirement is named, not the module floor");
+    assert.equal(here.state, "ready", "the recipe the engine satisfies stays ready");
+    assert.match(here.untested ?? "", /0\.33\.1 is newer than the 0\.30\.0/);
+    assert.match((await service.preflight("needs-newer")).ok ? "" : (await service.preflight("needs-newer") as { reason: string }).reason, /0\.40\.0/, "pre-flight re-checks the floor");
+    assert.equal(service.identityFor("runs-here")?.recipe.engineVersion, "0.33.1", "the reported version is frozen into the identity");
+  });
+});

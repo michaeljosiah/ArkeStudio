@@ -11,6 +11,7 @@ import type {
   RecipeReasonKind,
   RuntimeProbes,
 } from "@arke-studio/contracts";
+import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import type { ChildSupervisor, SupervisedSpec } from "../supervisor.js";
 
 /**
@@ -41,6 +42,12 @@ export interface ComfyUiRecipeFacts {
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
+  /**
+   * The recipe's own engine range (SPEC-021 R-18; issue 592). Absent falls back to the provider
+   * floor, so a recipe that declares nothing behaves exactly as every recipe did before.
+   */
+  minEngineVersion?: string;
+  exercisedThroughVersion?: string;
   /** A known-incomplete immutable dependency closure. It is never treated as an empty one. */
   unavailableReason?: string;
   nodeClasses: readonly string[];
@@ -87,7 +94,6 @@ export interface EngineServiceDeps {
 const STATUS_RECOMPUTE_LIMIT = 4;
 const DEFAULT_PORT_URL = "http://127.0.0.1:8188";
 const MANAGED_DIR = "comfyui-runtime";
-const VERSION_FLOOR = "0.3.45";
 const MIB = 1024 * 1024;
 
 interface ResolvedEngine {
@@ -98,18 +104,6 @@ interface ResolvedEngine {
   url: string | null;
   /** Why this resolution cannot serve, when it cannot (a path with no interpreter). */
   problem: string | null;
-}
-
-function meetsFloor(version: string): boolean | null {
-  const parse = (v: string): number[] | null => {
-    const m = /^v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(v.trim());
-    return m ? [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)] : null;
-  };
-  const a = parse(version);
-  const b = parse(VERSION_FLOOR);
-  if (a === null || b === null) return null;
-  for (let i = 0; i < 3; i++) if (a[i]! !== b[i]!) return a[i]! > b[i]!;
-  return true;
 }
 
 /** Keep the useful part of Undici's nested failure without exposing socket objects or stacks. */
@@ -550,13 +544,13 @@ export class ComfyUiEngineService {
         if (reading.version === null) {
           return {
             ok: false,
-            reason: `the engine did not report a ComfyUI version — Arke supports ${VERSION_FLOOR} and later`,
+            reason: `the engine did not report a ComfyUI version — Arke supports ${COMFYUI_VERSION_FLOOR} and later`,
           };
         }
-        if (meetsFloor(reading.version) !== true) {
+        if (meetsComfyUiVersion(reading.version, COMFYUI_VERSION_FLOOR) !== true) {
           return {
             ok: false,
-            reason: `ComfyUI ${reading.version} is older than the ${VERSION_FLOOR} floor Arke supports`,
+            reason: `ComfyUI ${reading.version} is older than the ${COMFYUI_VERSION_FLOOR} floor Arke supports`,
           };
         }
         const wasReachable = this.probed.reachable;
@@ -647,6 +641,36 @@ export class ComfyUiEngineService {
     );
     this.settingsWork = next.catch(() => {});
     return next;
+  }
+
+  /**
+   * Stop the supervised child only where it is the managed engine (R-20; issue 592) — the tree
+   * replace needs its files closed, and a user-directed path is supervised identically but is
+   * somebody else's engine with work on it. True when a child was stopped; the caller restarts
+   * through applySettings once the tree is swapped. Serialised with Settings for the same reason
+   * applySettings is: two lifecycle changes interleaving leak a child nothing can reach.
+   */
+  stopManagedSupervision(): Promise<boolean> {
+    if (this.disposed) return Promise.resolve(false);
+    const work = this.settingsWork.then(
+      () => this.stopManagedOnce(),
+      () => this.stopManagedOnce(),
+    );
+    this.settingsWork = work.then(
+      () => undefined,
+      () => undefined,
+    );
+    return work;
+  }
+
+  private async stopManagedOnce(): Promise<boolean> {
+    if (this.disposed || this.resolved.source !== "managed" || this.supervisor === null) return false;
+    this.cancelHashing();
+    this.invalidateVerification();
+    await this.stopSupervision();
+    this.recordProbe({ version: null, reachable: false, reclaimableVramMb: null, detail: null });
+    await this.publish();
+    return true;
   }
 
   private settingsWork: Promise<void> = Promise.resolve();
@@ -908,13 +932,13 @@ export class ComfyUiEngineService {
   }
 
   private floorOk(): boolean {
-    return this.probed.version !== null && meetsFloor(this.probed.version) === true;
+    return this.probed.version !== null && meetsComfyUiVersion(this.probed.version, COMFYUI_VERSION_FLOOR) === true;
   }
 
   private floorDetail(): string {
     return this.probed.version === null
-      ? `the engine did not report a ComfyUI version — Arke supports ${VERSION_FLOOR} and later`
-      : `ComfyUI ${this.probed.version} is older than the ${VERSION_FLOOR} floor Arke supports`;
+      ? `the engine did not report a ComfyUI version — Arke supports ${COMFYUI_VERSION_FLOOR} and later`
+      : `ComfyUI ${this.probed.version} is older than the ${COMFYUI_VERSION_FLOOR} floor Arke supports`;
   }
 
   // ---- pre-flight (§2.5, R-9) ---------------------------------------------
@@ -953,6 +977,20 @@ export class ComfyUiEngineService {
     if (this.baseUrl() === null) {
       const verdict = { ok: false as const, reason: "the ComfyUI engine is not ready", reasonKind: "engine" as const };
       return record(verdict, false);
+    }
+    // Re-checked here, immediately before submission (R-18): a URL engine can be replaced in
+    // place beneath a job already admitted, and the pinned-file backstop below says nothing
+    // about which engine now answers.
+    // Only a reported version is judged: an engine that has not said one yet is the health
+    // probe's to refuse, and a verdict left pending here would hold `status()` open for good.
+    const floor = recipe.minEngineVersion ?? COMFYUI_VERSION_FLOOR;
+    if (this.probed.version !== null && meetsComfyUiVersion(this.probed.version, floor) !== true) {
+      const verdict = {
+        ok: false as const,
+        reason: `${recipe.displayName} needs ComfyUI ${floor} or later — this engine reports ${this.probed.version}`,
+        reasonKind: "engine" as const,
+      };
+      return record(verdict);
     }
     const dir = this.modelsDir();
     const engineRoot = this.resolved.root;
@@ -1174,6 +1212,32 @@ export class ComfyUiEngineService {
     measuredReclaimableVramMb: number | null,
     freeVramMb: () => Promise<number | null>,
   ): Promise<RecipeReadiness> {
+    const readiness = await this.recipeReadinessInner(recipe, engine, probes, measuredReclaimableVramMb, freeVramMb);
+    // Above the exercised ceiling, warn and never refuse (R-19, D15): a false "disabled" is the
+    // failure this spec exists to prevent, and the engine's own error is an honest one — made
+    // diagnosable by saying which pairing was never tried.
+    const ceiling = recipe.exercisedThroughVersion;
+    if (
+      readiness.state === "ready" &&
+      ceiling !== undefined &&
+      engine.version !== null &&
+      compareComfyUiVersions(engine.version, ceiling) === 1
+    ) {
+      return {
+        ...readiness,
+        untested: `ComfyUI ${engine.version} is newer than the ${ceiling} this recipe was exercised on — it may still run`,
+      };
+    }
+    return readiness;
+  }
+
+  private async recipeReadinessInner(
+    recipe: ComfyUiRecipeFacts,
+    engine: ComfyUiEngineStatus,
+    probes: RuntimeProbes | null,
+    measuredReclaimableVramMb: number | null,
+    freeVramMb: () => Promise<number | null>,
+  ): Promise<RecipeReadiness> {
     const base = {
       recipeId: recipe.id,
       recipeVersion: recipe.version,
@@ -1205,6 +1269,16 @@ export class ComfyUiEngineService {
     if (engine.state === "failed") return disabled("engine", engine.detail ?? "the engine did not start");
     if (engine.state === "starting") return disabled("engine", "the engine is starting");
 
+    // The recipe's own floor, beside the node probe (R-18): a newer recipe disables itself alone,
+    // naming what it needs and what answered, and every recipe the engine still satisfies stays.
+    const floor = recipe.minEngineVersion ?? COMFYUI_VERSION_FLOOR;
+    if (engine.version !== null && meetsComfyUiVersion(engine.version, floor) !== true) {
+      return disabled(
+        "engine",
+        `${recipe.displayName} needs ComfyUI ${floor} or later — this engine reports ${engine.version}`,
+      );
+    }
+
     // 2 · A URL engine's files are unverifiable without the explicit mapping (D13) — but only
     // where there are files to verify. Step 4 is the only one that reads the folder and it
     // already skips when there is none, so a checkpoint-less recipe was being refused here for
@@ -1221,7 +1295,7 @@ export class ComfyUiEngineService {
     if (missing.length > 0) {
       return disabled(
         "node",
-        `this engine has no ${missing[0]} node — ComfyUI ${VERSION_FLOOR} or later is required`,
+        `this engine has no ${missing[0]} node — ComfyUI ${COMFYUI_VERSION_FLOOR} or later is required`,
       );
     }
 
@@ -1353,7 +1427,13 @@ export class ComfyUiEngineService {
   identityFor(modelId: string): { recipe: RecipeIdentity; engine: JobEngineIdentity | null } | null {
     const recipe = this.deps.recipes.find((r) => r.id === modelId);
     if (!recipe) return null;
-    return { recipe: recipe.identity, engine: this.engineIdentity() };
+    // The engine's reported version rides in the frozen identity (R-19): a job either ran on the
+    // version recorded against it or never reached /prompt, which the client enforces.
+    const engineVersion = this.probed.version;
+    return {
+      recipe: { ...recipe.identity, ...(engineVersion !== null ? { engineVersion } : {}) },
+      engine: this.engineIdentity(),
+    };
   }
 
   private async publish(): Promise<void> {

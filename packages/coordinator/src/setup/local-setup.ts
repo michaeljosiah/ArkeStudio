@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, parse, resolve } from "node:path";
+import { basename, dirname, join, parse, resolve } from "node:path";
 import {
   componentIsSettled,
   setupClosure,
@@ -13,6 +13,10 @@ import {
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
 import { SETUP_CATALOGUE, type CatalogueEntry, type DownloadFile } from "./catalogue.js";
+import { compareComfyUiVersions } from "@arke-studio/contracts";
+
+type TreeSpec = Extract<CatalogueEntry["spec"], { kind: "tree" }>;
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * Fetching the local runtimes at setup (Ollama and its default model, the voice models).
@@ -149,6 +153,8 @@ export function systemTar(): string {
 
 export class LocalSetupService {
   private readonly components = new Map<string, Live>();
+  /** Tree components queued for a replace rather than a first install (SPEC-021 R-20, D18; issue 592). */
+  private readonly replacing = new Set<string>();
   private abort = new AbortController();
   private diskFreeMb: number | null = null;
   /** When that figure was read — carried so a start-up reading never poses as current (SPEC-032 R-16). */
@@ -551,6 +557,9 @@ export class LocalSetupService {
         });
       }
       const present = await this.isPresent(c.entry).catch(() => false);
+      // A tree queued for its replace is present by definition; leaving it queued is what lets
+      // the round below install over it (issue 592).
+      if (present && this.replacing.has(id) && c.state === "queued") continue;
       if (present) {
         await this.discardOwned(c.entry);
         this.set(id, {
@@ -559,6 +568,7 @@ export class LocalSetupService {
           bytesPerSecond: null,
           pauseSupported: false,
           repairRequired: undefined,
+          ...(await this.treeCurrency(c.entry)),
         });
       } else if (c.state !== "downloading" && c.state !== "installing" && !this.resuming.has(id)) {
         const paused = await this.pausedProgress(c.entry);
@@ -884,8 +894,12 @@ export class LocalSetupService {
           this.publish();
           return;
         }
-        await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
-        await rename(toExtendedLength(staged), toExtendedLength(dir));
+        if (this.replacing.has(entry.id)) {
+          if (!(await this.replaceTree(entry.id, spec, dir, staged))) return;
+        } else {
+          await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
+          await rename(toExtendedLength(staged), toExtendedLength(dir));
+        }
         this.set(entry.id, {
           state: "ready",
           bytesDone: received,
@@ -1347,6 +1361,107 @@ export class LocalSetupService {
    * Start one component: an offered model someone asked for, or a skipped/failed one going
    * round again. Either way it joins the queue and the run picks it up.
    */
+  /**
+   * Replace an installed `tree` with the version the catalogue pins (SPEC-021 R-20, D18; issue
+   * 592). Not Repair, which takes `files` components only, and not `retry`, which returns early on
+   * anything present — and never on its own: the caller has stopped the managed child first, and
+   * restarts it after. Resolves once the run has ended, with whether the tree is now ready.
+   */
+  async updateTree(componentId: string): Promise<boolean> {
+    const c = this.components.get(componentId);
+    if (!c || c.entry.spec.kind !== "tree" || c.state !== "present" || this.replacing.has(componentId)) return false;
+    this.replacing.add(componentId);
+    try {
+      this.set(componentId, { state: "queued", bytesDone: 0, bytesPerSecond: null, detail: undefined, leftovers: undefined });
+      this.publish();
+      await this.run();
+    } finally {
+      this.replacing.delete(componentId);
+    }
+    return this.components.get(componentId)?.state === "ready";
+  }
+
+  /**
+   * How current an installed tree is (R-20): read from the version the tree itself records, never
+   * assumed from the pin — a genuinely old tree reported as current would withhold the update for
+   * good — and never inferred from a reading that failed, which would offer every existing user a
+   * six-gigabyte replacement for the version they already hold.
+   */
+  private async treeCurrency(
+    entry: CatalogueEntry,
+  ): Promise<Pick<SetupComponent, "installedVersion" | "pinnedVersion" | "currency">> {
+    const spec = entry.spec;
+    if (spec.kind !== "tree" || spec.version === undefined) return {};
+    const file =
+      spec.versionFile === undefined
+        ? null
+        : await this.treeMarkerPath(join(this.opts.appRoot, spec.dir), spec.versionFile);
+    const text = file === null ? null : await readFile(toExtendedLength(file), "utf8").catch(() => null);
+    const installed = text === null ? null : (/__version__\s*=\s*["']([^"']+)["']/.exec(text)?.[1] ?? null);
+    if (installed === null) return { pinnedVersion: spec.version, currency: "unknown" };
+    const order = compareComfyUiVersions(installed, spec.version);
+    return {
+      installedVersion: installed,
+      pinnedVersion: spec.version,
+      currency: order === null ? "unknown" : order < 0 ? "behind" : "current",
+    };
+  }
+
+  /**
+   * The swap a replacement needs and a first install never did (D18). The old tree steps aside by
+   * rename rather than removal, so a failed second rename puts it straight back; then `models` and
+   * `custom_nodes` are merged into the new tree entry by entry — what the user's install added
+   * carries across, what the new archive ships at the same path wins. A carry that fails leaves
+   * the previous tree in place under its own name and says so: a working engine or a stated
+   * failure, never a displaced tree with its models stranded.
+   */
+  private async replaceTree(componentId: string, spec: TreeSpec, dir: string, staged: string): Promise<boolean> {
+    const previous = `${dir}.previous`;
+    await rm(toExtendedLength(previous), { recursive: true, force: true }).catch(() => {});
+    try {
+      await rename(toExtendedLength(dir), toExtendedLength(previous));
+    } catch (err) {
+      await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+      this.set(componentId, { state: "failed", detail: `the installed runtime could not step aside: ${errorText(err)}` });
+      this.publish();
+      return false;
+    }
+    try {
+      await rename(toExtendedLength(staged), toExtendedLength(dir));
+    } catch (err) {
+      await rename(toExtendedLength(previous), toExtendedLength(dir)).catch(() => {});
+      await rm(toExtendedLength(staged), { recursive: true, force: true }).catch(() => {});
+      this.set(componentId, {
+        state: "failed",
+        detail: `the new runtime could not be moved into place; the previous one was put back: ${errorText(err)}`,
+      });
+      this.publish();
+      return false;
+    }
+    const oldMarker = await this.treeMarkerPath(previous, spec.rootMarker);
+    const newMarker = await this.treeMarkerPath(dir, spec.rootMarker);
+    for (const folder of ["models", "custom_nodes"]) {
+      const carried =
+        oldMarker !== null &&
+        newMarker !== null &&
+        (await this.mergeInto(join(dirname(oldMarker), folder), join(dirname(newMarker), folder)));
+      if (!carried) {
+        this.set(componentId, {
+          state: "failed",
+          detail: `the runtime was replaced, but ${folder} could not all be carried across — it is still under ${basename(previous)}`,
+        });
+        this.publish();
+        return false;
+      }
+    }
+    await rm(toExtendedLength(previous), { recursive: true, force: true }).catch(() => {});
+    return true;
+  }
+
+  private mergeInto(from: string, to: string): Promise<boolean> {
+    return mergePreserving(from, to);
+  }
+
   retry(componentId: string): void {
     const c = this.components.get(componentId);
     if (!c || c.state === "ready" || c.state === "present" || c.state === "paused") return;
@@ -1677,4 +1792,31 @@ async function directorySize(path: string): Promise<number> {
     total += await directorySize(join(path, entry.name));
   }
   return total;
+}
+
+/**
+ * Carry one directory into another, entry by entry (SPEC-021 R-20; issue 592): what the user's
+ * install added crosses, and a file the new runtime ships at the same path keeps its place,
+ * because the runtime's own contents belong to the version being installed. Moving the folder
+ * wholesale would delete whatever the new archive shipped there. False when a carry failed
+ * part-way — the caller names where the rest still is rather than deleting it.
+ */
+export async function mergePreserving(from: string, to: string): Promise<boolean> {
+  const entries = await readdir(toExtendedLength(from), { withFileTypes: true }).catch(() => null);
+  if (entries === null) return true;
+  try {
+    await mkdir(toExtendedLength(to), { recursive: true });
+    for (const item of entries) {
+      const source = join(from, item.name);
+      const target = join(to, item.name);
+      if ((await stat(toExtendedLength(target)).catch(() => null)) === null) {
+        await rename(toExtendedLength(source), toExtendedLength(target));
+      } else if (item.isDirectory() && !(await mergePreserving(source, target))) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }

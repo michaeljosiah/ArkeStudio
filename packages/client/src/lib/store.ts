@@ -4292,3 +4292,8 @@ export function acceptPropState(
 export function openEngineLog(engine: "comfyui" | "voxa"): void {
   send({ kind: "open-engine-log", engine });
 }
+
+/** Replace the Arke-managed ComfyUI tree with the pinned version — an explicit choice, never automatic (SPEC-021 R-20). */
+export function updateComfyUiRuntime(): void {
+  send({ kind: "comfyui-update-runtime" });
+}
