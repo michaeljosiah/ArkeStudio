@@ -200,6 +200,13 @@ describe("the season page (design turn 91)", () => {
   const seasonPage = (episodes: Episode[]) =>
     render(withMicrodrama(episodes), SEASON("bell-watch-season-1"), <StoryScreen />, "/w/:worldId/p/:prodId/season");
 
+  it("lets the assistant be put away, and says so with the pin (turn 122)", () => {
+    // `dock.onPutAway` is optional and this page omitted it, so Arke could not be dismissed at
+    // all — a third of the frame the person had no way to reclaim. The panel head draws its pin
+    // only when there is somewhere to go, so the pin's presence is the contract.
+    assert.match(seasonPage([ONE]), /fy-arke__pin/, "the season's Arke panel can be put away");
+  });
+
   it("has no tabs at all: a season is its episodes (turn 99)", () => {
     const html = seasonPage([ONE]);
     // Arcs was a peer tab, which taught a second vocabulary to somebody who did not yet have a
@@ -519,6 +526,11 @@ describe("an episodic production's front page is its season (design turn 93)", (
     assert.match(html, /New episode/);
     assert.match(html, /fy-prodrail--folded/);
     assert.match(html, /aria-label="Switch production\. Current production: Bell Watch — Season 1"/);
+    // It wore ChevronsUpDown — the glyph that means a menu opens here — and navigated to the
+    // Productions screen instead, so the one control that looked like a picker was the one that
+    // left the workspace. It is a menu button now, and the promise is the contract.
+    assert.match(html, /aria-haspopup="menu"/, "the switcher opens a menu");
+    assert.match(html, /aria-expanded="false"/, "closed until it is pressed");
   });
 
   it("keeps loose scenes reachable under Unassigned after episodes exist", () => {

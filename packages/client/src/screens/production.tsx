@@ -381,13 +381,170 @@ function storyShotCount(production: ProductionBundle | null | undefined): number
   return production?.scenes.reduce((count, scene) => count + orderedShots(scene).length, 0) ?? 0;
 }
 
+const SWITCH_MENU_WIDTH_PX = 268;
+
+/**
+ * The production switcher, as a menu that actually switches.
+ *
+ * It wore `ChevronsUpDown` on an episodic production — the glyph that means *a menu opens here* —
+ * and navigated to the Productions screen instead, so the one control in the workspace that looks
+ * like a picker was the one that left it. Same button, same behaviour, two different promises
+ * depending on the format.
+ *
+ * Fixed rather than absolute: the rail is `overflow-y: auto`, so a menu positioned inside it is
+ * clipped by its own container and scrolls away from the button that opened it.
+ */
+function ProductionSwitcher({
+  world,
+  production,
+  sub,
+  folded,
+  chevron,
+}: {
+  world: { productions: readonly ProductionBundle[] } | null;
+  production: ProductionBundle | null;
+  sub: string;
+  folded: boolean;
+  chevron: ReactNode;
+}) {
+  const navigate = useNavigate();
+  const { worldId } = useParams();
+  const button = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const others = world?.productions ?? [];
+
+  useEffect(() => {
+    if (at === null) return;
+    const close = () => setAt(null);
+    // Capture-phase, matching the editor's clip menu: a press elsewhere closes even when that
+    // element stops propagation, but a press inside the menu is the menu being used.
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".fy-switchmenu")) return;
+      close();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        close();
+        event.stopImmediatePropagation();
+        button.current?.focus();
+      }
+    };
+    window.addEventListener("pointerdown", closeOutside, { capture: true });
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("pointerdown", closeOutside, { capture: true });
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", close);
+    };
+  }, [at]);
+
+  const open = () => {
+    const rect = button.current?.getBoundingClientRect();
+    if (rect === undefined) return;
+    setAt({ x: rect.left, y: rect.bottom + 6 });
+  };
+  const go = (id: string) => {
+    setAt(null);
+    if (id !== production?.meta.id) navigate(`/w/${worldId}/p/${id}`);
+  };
+
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        className="fy-prodrail__switch"
+        aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
+        aria-haspopup="menu"
+        aria-expanded={at !== null}
+        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
+        onClick={() => (at === null ? open() : setAt(null))}
+      >
+        <span className="fy-prodrail__switchmark" aria-hidden>
+          {(production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+        </span>
+        <div className="fy-prodrail__switchcopy">
+          <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
+          <div className="fy-prodrail__switchsub">{sub}</div>
+        </div>
+        <span className="fy-prodrail__switchchevron">{chevron}</span>
+      </button>
+      {at !== null && (
+        <div
+          className="fy-switchmenu"
+          role="menu"
+          aria-label="Productions in this world"
+          ref={(node) => node?.querySelector<HTMLElement>("[role='menuitem']")?.focus()}
+          style={{
+            left: Math.min(at.x, Math.max(0, window.innerWidth - SWITCH_MENU_WIDTH_PX - 8)),
+            top: at.y,
+          }}
+          // `role="menu"` promises the arrows work, so they do. Without this the role is a
+          // claim the widget does not honour, which is worse than plain buttons would have been.
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+            event.preventDefault();
+            const items = [
+              ...event.currentTarget.querySelectorAll<HTMLElement>("[role='menuitem']"),
+            ];
+            const from = items.indexOf(document.activeElement as HTMLElement);
+            const step = event.key === "ArrowDown" ? 1 : -1;
+            const next = (from + step + items.length) % items.length;
+            items[next]?.focus();
+          }}
+        >
+          {others.map((candidate) => {
+            const shape = productionShape(candidate.meta);
+            const current = candidate.meta.id === production?.meta.id;
+            return (
+              <button
+                key={candidate.meta.id}
+                type="button"
+                role="menuitem"
+                className={cx("fy-switchmenu__item", current && "fy-switchmenu__item--on")}
+                aria-current={current ? "true" : undefined}
+                onClick={() => go(candidate.meta.id)}
+              >
+                <span className="fy-switchmenu__mark" aria-hidden>
+                  {candidate.meta.title.trim().charAt(0).toUpperCase() || "P"}
+                </span>
+                <span className="fy-switchmenu__copy">
+                  <span className="fy-switchmenu__name">{candidate.meta.title}</span>
+                  <span className="fy-switchmenu__sub">{shape.displayLabel.toLowerCase()}</span>
+                </span>
+                {/* Where you are is said the way the rail says it — the selected background and
+                    weight — rather than with a tick this icon set does not have. */}
+                {current && <span className="fy-switchmenu__here">here</span>}
+              </button>
+            );
+          })}
+          <span className="fy-switchmenu__rule" aria-hidden />
+          {/* The old destination keeps a way in: the Productions screen carries the key art and
+              the counts, which a menu row cannot. */}
+          <button
+            type="button"
+            role="menuitem"
+            className="fy-switchmenu__item fy-switchmenu__item--all"
+            onClick={() => {
+              setAt(null);
+              navigate(`/w/${worldId}/productions`);
+            }}
+          >
+            All productions
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
   const { worldId, prodId, episodeId, sceneId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
-  const navigate = useNavigate();
   const location = useLocation();
   const exportsState = useExports();
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
@@ -609,24 +766,13 @@ export function ProductionLayout() {
           >
             <PanelLeft size={14} />
           </button>
-          <button
-            type="button"
-            className="fy-prodrail__switch"
-            aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
-            title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
-            onClick={() => navigate(`/w/${worldId}/productions`)}
-          >
-            <span className="fy-prodrail__switchmark" aria-hidden>
-              {(production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
-            </span>
-            <div className="fy-prodrail__switchcopy">
-              <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
-              <div className="fy-prodrail__switchsub">{switchSub}</div>
-            </div>
-            <span className="fy-prodrail__switchchevron">
-              {shape?.isEpisodic ? <ChevronsUpDown size={13} /> : <ChevronRight size={14} />}
-            </span>
-          </button>
+          <ProductionSwitcher
+            world={world}
+            production={production}
+            sub={switchSub}
+            folded={folded}
+            chevron={shape?.isEpisodic ? <ChevronsUpDown size={13} /> : <ChevronRight size={14} />}
+          />
           <span className="fy-prodrail__fold-divider" aria-hidden />
           {shape?.isEpisodic ? (
             <>
