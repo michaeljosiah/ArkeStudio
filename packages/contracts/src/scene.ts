@@ -238,8 +238,14 @@ export const ShotSchema = z
     propStates: z.array(z.object({ propId: PropIdSchema, stateId: PropStateIdSchema }).strict()).optional(),
     /**
      * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
-     * an authored intent — the dispatch already chains when a boundary still exists; this records
-     * that the shot *wants* it. `keepOut` is the negative half of the same promise.
+     * an authored decision, and since issue 851 it is the decision: accepting a take still cuts
+     * the still and files it onto the next shot, but the dispatch opens on it only where the
+     * shot asked. Default off (SPEC-019 R-50's reasoning — most cuts are cuts), because a frame
+     * displaces the cast sheets on every reference-capable route, and an unopposed run of
+     * accepts otherwise walks a recurring face off its own reference a shot at a time. A frame
+     * the shot was given rather than chained onto it is unaffected (SPEC-036 R-20).
+     *
+     * `keepOut` is the negative half of the same promise.
      */
     continuity: z
       .object({

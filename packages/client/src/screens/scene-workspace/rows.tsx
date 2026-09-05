@@ -29,7 +29,7 @@ import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
 import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./selection.js";
-import { acceptTake, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
+import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
 import { finalizationRetryJobId, frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
 import { Grid2x2, Grip, ImageMark, Lines, More, Plus } from "../../components/icons.js";
@@ -830,6 +830,8 @@ function Row({
   const waitingTakeCount = waitingSessions.reduce((total, summary) => total + summary.waitingCount, 0);
   const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
   const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
+  const hasFramePointer =
+    artifactId !== null || (production.selections[shot.id]?.startFrameTakeId ?? null) !== null;
   const legacyStill = acceptedTake?.kind === "frame" || acceptedTake?.kind === "still" ? acceptedTake : undefined;
   const framePath = artifact !== undefined && hasFrame
     ? `artifacts/${artifact.file}`
@@ -1167,6 +1169,20 @@ function Row({
             onClick={() => importShotFrame(worldId, production.meta.id, shot.id)}
           >
             Upload
+          </button>
+          {/*
+            The reverse of the chain (issue 851). An accept files a still onto the next shot, and
+            nothing else takes one off — so without this a shot handed a boundary frame could only
+            be moved off it by drawing over it.
+          */}
+          <button
+            type="button"
+            disabled={disabled || !hasFramePointer}
+            title="Clear the start frame; dispatch from this shot's own references"
+            aria-label={`Clear the start frame for shot ${shot.number}`}
+            onClick={() => clearShotFrame(worldId, production.meta.id, shot.id)}
+          >
+            Clear
           </button>
         </div>
         <dialog

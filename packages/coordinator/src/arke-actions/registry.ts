@@ -397,6 +397,7 @@ const CLIENT_COMMAND_METADATA = {
   "record-review": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),
   "accept-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "scenes"]),
   "import-shot-frame": action("production", "host-action", "host", "host-file-access", ["shots", "takes"]),
+  "clear-shot-frame": action("production", "command", "take-review", "authored-change", ["shots", "takes"]),
   "stage-playblast": action("production", "host-action", "scene-store", "host-file-access", ["scenes", "shots", "stage"], { preparation: ARTIFACT_SOURCE }),
   "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff."),
   "reject-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),

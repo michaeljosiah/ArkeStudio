@@ -7,6 +7,7 @@ import {
   BOUNDARY_METHOD,
   boundaryFrameArgs,
   chainBoundaryFrame,
+  clearShotFrame,
   createBoundaryFrameMaker,
   type BoundaryFrameMaker,
 } from "../../src/takes/boundary.js";
@@ -358,5 +359,40 @@ describe("boundary-frame extraction (issue 154)", () => {
     assert.ok(filedId !== undefined);
     const files = await import("node:fs/promises").then((fs) => fs.readdir(join(dir, "artifacts")));
     assert.equal(files.some((file) => file.startsWith("boundary-sh_05-")), false);
+  });
+
+  /*
+   * Issue 851. Nothing in the frame family ever took a frame off a shot, so a still an accept
+   * chained on could only be displaced by drawing over it. Both pointers go — a take pointer
+   * left standing beside a cleared picture is a second answer to what the shot opens on — and
+   * the artifact stays on the shelf, because it is still the record of where the last shot ended.
+   */
+  it("clearing a shot's frame drops both pointers and keeps the artifact", async () => {
+    const { dir, store, production } = await open();
+    const accepted = take("tk_01J8E0000000000000000000C1");
+    await landClip(dir, production.meta.id, accepted.id);
+    await expectBoundaryFrom(store, dir, production.meta.id, "sh_1", "sh_2", accepted.id);
+    const chained = await chainBoundaryFrame(
+      store,
+      { ...production, takes: [accepted] },
+      { take: accepted, sourceShotId: "sh_1", followingShotId: "sh_2", maker: fakeMaker([]), clock: CLOCK },
+    );
+    assert.ok(chained.ok && "artifactId" in chained);
+    const artifactId = chained.artifactId;
+
+    const cleared = await clearShotFrame(store, production.meta.id, "sh_2");
+    assert.ok(cleared.ok && cleared.cleared);
+    const selections = SelectionsSchema.parse(
+      JSON.parse(await readFile(join(dir, "productions", production.meta.id, "selections.json"), "utf8")),
+    );
+    assert.equal(selections["sh_2"]?.startFrameArtifactId ?? null, null);
+    assert.equal(selections["sh_2"]?.startFrameTakeId ?? null, null);
+    assert.ok(
+      store.getBundle().artifacts.some((artifact) => artifact.id === artifactId),
+      "the still stays filed; only the pointer went",
+    );
+
+    const again = await clearShotFrame(store, production.meta.id, "sh_2");
+    assert.ok(again.ok && !again.cleared, "a shot with no frame is already where the caller wanted it");
   });
 });

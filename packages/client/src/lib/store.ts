@@ -3348,6 +3348,17 @@ export function importShotFrame(worldId: string, productionId: string, shotId: s
   });
 }
 
+/** Drop the still a shot opens on, so its own references travel again (issue 851). */
+export function clearShotFrame(worldId: string, productionId: string, shotId: string): void {
+  send({
+    kind: "clear-shot-frame",
+    worldId,
+    productionId,
+    shotId,
+    requestId: queueRequest("clear-shot-frame"),
+  });
+}
+
 /**
  * Where a shot starts inside its selected media (R-8, issue 253) — the only authored edit the cut
  * offers, and trim-from-the-in-point only. The coordinator refuses a shot with no accepted take
