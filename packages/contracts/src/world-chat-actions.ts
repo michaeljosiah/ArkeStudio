@@ -8,6 +8,8 @@ import {
   CandidateIdSchema,
   CanonIdSchema,
   CheckReceiptIdSchema,
+  EpisodeIdSchema,
+  SceneIdSchema,
   SlugSchema,
   ShotIdSchema,
   TakeIdSchema,
@@ -15,8 +17,15 @@ import {
 } from "./ids.js";
 import { STAGED_REFERENCE_KEY } from "./planning.js";
 import { CompilationFormatSchema, ReferenceAngleSchema } from "./reference.js";
+import { CapabilitySchema } from "./provider.js";
+import { ScriptBlockSchema, ShotFramingSchema } from "./scene.js";
 import {
   CHARACTER_ROLE_MAX,
+  FrameRateSchema,
+  ProductionMediumSchema,
+  ProductionSchema,
+  SeasonSchema,
+  SeriesSchema,
   SheetKindSchema,
   SheetStatusSchema,
   WorldAuthoredFieldChangesSchema,
@@ -419,6 +428,333 @@ const SheetRestoreModelActionSchema = z.object({ kind: z.literal("sheet-restore"
 const ArtDirectionModelActionSchema = z.object({ kind: z.literal("art-direction"), changes: ArtDirectionChangesSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
 const ArtDirectionRestoreModelActionSchema = z.object({ kind: z.literal("art-direction-restore"), version: z.number().int().min(1), checkReceiptIds: CompleteReadIdsSchema }).strict();
 
+const SeasonDefaultsSchema = z
+  .object({
+    episodeCount: z.number().int().min(1).optional(),
+    episodeSecondsMin: z.number().positive().optional(),
+    episodeSecondsMax: z.number().positive().optional(),
+    hookWindowSec: z.number().positive().optional(),
+    episodeEnding: z.string().min(1).optional(),
+    exportPreset: z.string().min(1).optional(),
+  })
+  .strict();
+
+const SeasonArcSchema = z
+  .object({
+    id: SlugSchema,
+    title: z.string().trim().min(1).max(200),
+    note: z.string().max(1_000).optional(),
+    setup: EpisodeIdSchema.optional(),
+    turn: EpisodeIdSchema.optional(),
+    payoff: EpisodeIdSchema.optional(),
+  })
+  .strict();
+
+const EpisodePromiseSchema = z
+  .object({
+    opens: z.string().max(1_000).optional(),
+    turn: z.string().max(1_000).optional(),
+    closes: z.string().max(1_000).optional(),
+  })
+  .strict();
+
+const EpisodeLinkedSchema = z
+  .object({ closesInto: EpisodeIdSchema.optional(), opensFrom: EpisodeIdSchema.optional() })
+  .strict();
+
+const EpisodeReleaseSchema = z
+  .object({
+    title: z.string().optional(),
+    description: z.string().optional(),
+    thumbnailTakeId: TakeIdSchema.optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    recap: z.string().optional(),
+    teaser: z.string().optional(),
+    crops: z.array(z.object({ label: z.string().min(1), aspect: z.string().min(1) }).strict()).optional(),
+    metadata: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+const SceneInheritsSchema = z
+  .object({
+    location: SlugSchema.optional(),
+    timeOfDay: z.string().optional(),
+    tone: z.string().optional(),
+  })
+  .strict();
+
+const ScriptBlocksSchema = z.array(ScriptBlockSchema).max(200).superRefine((blocks, context) => {
+  const seen = new Set<string>();
+  for (const [index, block] of blocks.entries()) {
+    if (seen.has(block.id)) {
+      context.addIssue({ code: "custom", path: [index, "id"], message: "script block ids must be unique" });
+    }
+    seen.add(block.id);
+  }
+});
+
+const ProductionCreateModelActionSchema = z
+  .object({
+    kind: z.literal("production-create"),
+    production: z
+      .object({
+        title: z.string().trim().min(1).max(200),
+        medium: ProductionMediumSchema,
+        productionKind: z.string().trim().min(1).max(120).optional(),
+        seriesTitle: z.string().trim().min(1).max(200).optional(),
+        aspect: z.string().trim().min(1).max(20).optional(),
+        frameRate: FrameRateSchema.optional(),
+        defaults: SeasonDefaultsSchema.optional(),
+        logline: z.string().trim().min(1).max(1_000).optional(),
+      })
+      .strict(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionMetadataChangesSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    medium: ProductionMediumSchema.optional(),
+    productionKind: z.string().trim().min(1).max(120).nullable().optional(),
+    seriesId: SlugSchema.nullable().optional(),
+    status: z.string().trim().min(1).max(120).optional(),
+    aspect: z.string().trim().min(1).max(20).optional(),
+    frameRate: FrameRateSchema.optional(),
+  })
+  .strict()
+  .refine((changes) => Object.keys(changes).length > 0, "a production metadata action must change at least one field");
+
+const ProductionMetadataModelActionSchema = z
+  .object({
+    kind: z.literal("production-metadata"),
+    productionId: SlugSchema,
+    changes: ProductionMetadataChangesSchema,
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionModelModelActionSchema = z
+  .object({
+    kind: z.literal("production-model"),
+    productionId: SlugSchema,
+    capability: CapabilitySchema,
+    modelId: z.string().min(1).nullable(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionSeriesModelActionSchema = z
+  .object({
+    kind: z.literal("production-series"),
+    productionId: SlugSchema,
+    change: z.discriminatedUnion("operation", [
+      z
+        .object({
+          operation: z.literal("create"),
+          title: z.string().trim().min(1).max(200),
+          engine: z.string().trim().min(1).max(4_000).optional(),
+          continuity: z.string().trim().min(1).max(4_000).optional(),
+          seasons: z.array(SlugSchema).default([]),
+        })
+        .strict(),
+      z
+        .object({
+          operation: z.literal("edit"),
+          seriesId: SlugSchema,
+          changes: z
+            .object({
+              title: z.string().trim().min(1).max(200).optional(),
+              engine: z.string().trim().min(1).max(4_000).nullable().optional(),
+              continuity: z.string().trim().min(1).max(4_000).nullable().optional(),
+              seasons: z.array(SlugSchema).optional(),
+            })
+            .strict()
+            .refine((changes) => Object.keys(changes).length > 0, "a Series edit must change at least one field"),
+        })
+        .strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionOverviewModelActionSchema = z
+  .object({
+    kind: z.literal("production-overview"),
+    productionId: SlugSchema,
+    changes: z
+      .object({
+        logline: z.string().min(1).max(1_000).nullable().optional(),
+        spine: z.string().min(1).max(4_000).nullable().optional(),
+        acts: z.array(z.object({ title: z.string().min(1).max(200), summary: z.string().max(2_000).optional() }).strict()).max(20).nullable().optional(),
+        targetLength: z.string().min(1).max(120).nullable().optional(),
+      })
+      .strict()
+      .refine((changes) => Object.keys(changes).length > 0, "an overview action must change at least one field"),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionSeasonModelActionSchema = z
+  .object({
+    kind: z.literal("production-season"),
+    productionId: SlugSchema,
+    changes: z
+      .object({
+        question: z.string().min(1).max(1_000).nullable().optional(),
+        ending: z.string().min(1).max(2_000).nullable().optional(),
+        direction: z.string().min(1).max(4_000).nullable().optional(),
+        arcs: z.array(SeasonArcSchema).max(40).nullable().optional(),
+        defaults: SeasonDefaultsSchema.nullable().optional(),
+      })
+      .strict()
+      .refine((changes) => Object.keys(changes).length > 0, "a season action must change at least one field"),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionEpisodeModelActionSchema = z
+  .object({
+    kind: z.literal("production-episode"),
+    productionId: SlugSchema,
+    change: z.discriminatedUnion("operation", [
+      z
+        .object({
+          operation: z.literal("create"),
+          title: z.string().trim().min(1).max(200),
+          order: z.number().int().min(1).optional(),
+          promise: EpisodePromiseSchema.optional(),
+          scenes: z.array(SceneIdSchema).default([]),
+          linked: EpisodeLinkedSchema.optional(),
+          release: EpisodeReleaseSchema.optional(),
+        })
+        .strict(),
+      z
+        .object({
+          operation: z.literal("edit"),
+          episodeId: EpisodeIdSchema,
+          changes: z
+            .object({
+              title: z.string().trim().min(1).max(200).optional(),
+              order: z.number().int().min(1).optional(),
+              promise: EpisodePromiseSchema.nullable().optional(),
+              scenes: z.array(SceneIdSchema).optional(),
+              linked: EpisodeLinkedSchema.nullable().optional(),
+              release: EpisodeReleaseSchema.nullable().optional(),
+            })
+            .strict()
+            .refine((changes) => Object.keys(changes).length > 0, "an episode edit must change at least one field"),
+        })
+        .strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ChapterDrawsSchema = z
+  .object({ sheets: z.array(SlugSchema), canon: z.array(CanonIdSchema) })
+  .strict();
+
+const ProductionChapterModelActionSchema = z
+  .object({
+    kind: z.literal("production-chapter"),
+    productionId: SlugSchema,
+    change: z.discriminatedUnion("operation", [
+      z
+        .object({
+          operation: z.literal("create"),
+          title: z.string().trim().min(1).max(200),
+          order: z.number().int().min(1),
+          body: z.string(),
+          status: z.string().trim().min(1).max(120).default("planned"),
+          draws: ChapterDrawsSchema.optional(),
+        })
+        .strict(),
+      z
+        .object({
+          operation: z.literal("edit"),
+          chapterId: SlugSchema,
+          changes: z
+            .object({
+              title: z.string().trim().min(1).max(200).optional(),
+              status: z.string().trim().min(1).max(120).optional(),
+              body: z.string().optional(),
+              draws: ChapterDrawsSchema.nullable().optional(),
+            })
+            .strict()
+            .refine((changes) => Object.keys(changes).length > 0, "a chapter edit must change at least one field"),
+        })
+        .strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionSceneModelActionSchema = z
+  .object({
+    kind: z.literal("production-scene"),
+    productionId: SlugSchema,
+    change: z.discriminatedUnion("operation", [
+      z
+        .object({
+          operation: z.literal("create"),
+          title: z.string().trim().min(1).max(200),
+          episodeId: EpisodeIdSchema.optional(),
+          synopsis: z.string().max(2_000).optional(),
+          status: z.string().trim().min(1).max(120).default("draft"),
+          inherits: SceneInheritsSchema.optional(),
+          defaults: ShotFramingSchema.optional(),
+          scriptBlocks: ScriptBlocksSchema.optional(),
+        })
+        .strict(),
+      z
+        .object({
+          operation: z.literal("edit"),
+          sceneId: SceneIdSchema,
+          changes: z
+            .object({
+              title: z.string().trim().min(1).max(200).optional(),
+              synopsis: z.string().max(2_000).nullable().optional(),
+              status: z.string().trim().min(1).max(120).optional(),
+              inherits: SceneInheritsSchema.nullable().optional(),
+              defaults: ShotFramingSchema.nullable().optional(),
+            })
+            .strict()
+            .refine((changes) => Object.keys(changes).length > 0, "a scene edit must change at least one field"),
+        })
+        .strict(),
+      z
+        .object({ operation: z.literal("replace-script"), sceneId: SceneIdSchema, blocks: ScriptBlocksSchema })
+        .strict(),
+    ]),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+const ProductionEpisodeOrderModelActionSchema = z
+  .object({ kind: z.literal("production-episode-order"), productionId: SlugSchema, orderedIds: z.array(EpisodeIdSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+const ProductionChapterOrderModelActionSchema = z
+  .object({ kind: z.literal("production-chapter-order"), productionId: SlugSchema, orderedIds: z.array(SlugSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+const ProductionSceneOrderModelActionSchema = z
+  .object({ kind: z.literal("production-scene-order"), productionId: SlugSchema, orderedIds: z.array(SceneIdSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+const ProductionSceneDeleteModelActionSchema = z
+  .object({ kind: z.literal("production-scene-delete"), productionId: SlugSchema, sceneId: SceneIdSchema, checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+const ProductionSceneRestoreModelActionSchema = z
+  .object({ kind: z.literal("production-scene-restore"), productionId: SlugSchema, sceneId: SceneIdSchema, version: z.number().int().min(1), checkReceiptIds: CompleteReadIdsSchema })
+  .strict();
+const ProductionStyleModelActionSchema = z
+  .object({
+    kind: z.literal("production-style"),
+    productionId: SlugSchema,
+    style: z.string().trim().min(1).max(4_000).nullable(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
 export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   WorldMetadataModelActionSchema,
   CanonModelActionSchema,
@@ -496,14 +832,21 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   VoiceClipReviewActionSchema,
   z.object({ kind: z.literal("world-archive"), checkReceiptIds: CompleteReadIdsSchema }).strict(),
   z.object({ kind: z.literal("world-export"), checkReceiptIds: CompleteReadIdsSchema }).strict(),
-  z
-    .object({
-      kind: z.literal("production-style"),
-      productionId: SlugSchema,
-      style: z.string().trim().min(1).max(4_000).nullable(),
-      checkReceiptIds: CompleteReadIdsSchema,
-    })
-    .strict(),
+  ProductionCreateModelActionSchema,
+  ProductionMetadataModelActionSchema,
+  ProductionModelModelActionSchema,
+  ProductionSeriesModelActionSchema,
+  ProductionOverviewModelActionSchema,
+  ProductionSeasonModelActionSchema,
+  ProductionEpisodeModelActionSchema,
+  ProductionChapterModelActionSchema,
+  ProductionSceneModelActionSchema,
+  ProductionEpisodeOrderModelActionSchema,
+  ProductionChapterOrderModelActionSchema,
+  ProductionSceneOrderModelActionSchema,
+  ProductionSceneDeleteModelActionSchema,
+  ProductionSceneRestoreModelActionSchema,
+  ProductionStyleModelActionSchema,
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
 
@@ -547,7 +890,41 @@ export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-
 export const WorldChatVoiceClipReviewActionSchema = preparedAction("world-chat-voice-clip-review", VoiceClipReviewActionSchema);
 export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", ModelWorldChatActionSchema.options[31]);
 export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", ModelWorldChatActionSchema.options[32]);
-export const WorldChatProductionStyleActionSchema = preparedAction("world-chat-production-style", ModelWorldChatActionSchema.options[33]);
+export const ProductionCreationPlanSchema = z
+  .object({
+    production: ProductionSchema,
+    initialSeason: SeasonSchema.nullable(),
+    series: z.discriminatedUnion("operation", [
+      z.object({ operation: z.literal("none") }).strict(),
+      z.object({ operation: z.literal("create"), record: SeriesSchema }).strict(),
+      z.object({ operation: z.literal("join"), record: SeriesSchema }).strict(),
+    ]),
+  })
+  .strict();
+export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
+
+export const WorldChatProductionCreateActionSchema = z
+  .object({
+    kind: z.literal("world-chat-production-create"),
+    worldId: UlidSchema,
+    action: ProductionCreateModelActionSchema,
+    plan: ProductionCreationPlanSchema,
+  })
+  .strict();
+export const WorldChatProductionMetadataActionSchema = preparedAction("world-chat-production-metadata", ProductionMetadataModelActionSchema);
+export const WorldChatProductionModelActionSchema = preparedAction("world-chat-production-model", ProductionModelModelActionSchema);
+export const WorldChatProductionSeriesActionSchema = preparedAction("world-chat-production-series", ProductionSeriesModelActionSchema);
+export const WorldChatProductionOverviewActionSchema = preparedAction("world-chat-production-overview", ProductionOverviewModelActionSchema);
+export const WorldChatProductionSeasonActionSchema = preparedAction("world-chat-production-season", ProductionSeasonModelActionSchema);
+export const WorldChatProductionEpisodeActionSchema = preparedAction("world-chat-production-episode", ProductionEpisodeModelActionSchema);
+export const WorldChatProductionChapterActionSchema = preparedAction("world-chat-production-chapter", ProductionChapterModelActionSchema);
+export const WorldChatProductionSceneActionSchema = preparedAction("world-chat-production-scene", ProductionSceneModelActionSchema);
+export const WorldChatProductionEpisodeOrderActionSchema = preparedAction("world-chat-production-episode-order", ProductionEpisodeOrderModelActionSchema);
+export const WorldChatProductionChapterOrderActionSchema = preparedAction("world-chat-production-chapter-order", ProductionChapterOrderModelActionSchema);
+export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-chat-production-scene-order", ProductionSceneOrderModelActionSchema);
+export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
+export const WorldChatProductionSceneRestoreActionSchema = preparedAction("world-chat-production-scene-restore", ProductionSceneRestoreModelActionSchema);
+export const WorldChatProductionStyleActionSchema = preparedAction("world-chat-production-style", ProductionStyleModelActionSchema);
 
 export type WorldChatWorldMetadataAction = z.infer<typeof WorldChatWorldMetadataActionSchema>;
 export type WorldChatCanonAction = z.infer<typeof WorldChatCanonActionSchema>;
@@ -582,6 +959,20 @@ export type WorldChatVoiceCloneAction = z.infer<typeof WorldChatVoiceCloneAction
 export type WorldChatVoiceClipReviewAction = z.infer<typeof WorldChatVoiceClipReviewActionSchema>;
 export type WorldChatWorldArchiveAction = z.infer<typeof WorldChatWorldArchiveActionSchema>;
 export type WorldChatWorldExportAction = z.infer<typeof WorldChatWorldExportActionSchema>;
+export type WorldChatProductionCreateAction = z.infer<typeof WorldChatProductionCreateActionSchema>;
+export type WorldChatProductionMetadataAction = z.infer<typeof WorldChatProductionMetadataActionSchema>;
+export type WorldChatProductionModelAction = z.infer<typeof WorldChatProductionModelActionSchema>;
+export type WorldChatProductionSeriesAction = z.infer<typeof WorldChatProductionSeriesActionSchema>;
+export type WorldChatProductionOverviewAction = z.infer<typeof WorldChatProductionOverviewActionSchema>;
+export type WorldChatProductionSeasonAction = z.infer<typeof WorldChatProductionSeasonActionSchema>;
+export type WorldChatProductionEpisodeAction = z.infer<typeof WorldChatProductionEpisodeActionSchema>;
+export type WorldChatProductionChapterAction = z.infer<typeof WorldChatProductionChapterActionSchema>;
+export type WorldChatProductionSceneAction = z.infer<typeof WorldChatProductionSceneActionSchema>;
+export type WorldChatProductionEpisodeOrderAction = z.infer<typeof WorldChatProductionEpisodeOrderActionSchema>;
+export type WorldChatProductionChapterOrderAction = z.infer<typeof WorldChatProductionChapterOrderActionSchema>;
+export type WorldChatProductionSceneOrderAction = z.infer<typeof WorldChatProductionSceneOrderActionSchema>;
+export type WorldChatProductionSceneDeleteAction = z.infer<typeof WorldChatProductionSceneDeleteActionSchema>;
+export type WorldChatProductionSceneRestoreAction = z.infer<typeof WorldChatProductionSceneRestoreActionSchema>;
 export type WorldChatProductionStyleAction = z.infer<typeof WorldChatProductionStyleActionSchema>;
 
 /** Existing World Chat outputs after coordinator validation, before an authority prepares them. */
@@ -665,6 +1056,20 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatVoiceClipReviewActionSchema,
   WorldChatWorldArchiveActionSchema,
   WorldChatWorldExportActionSchema,
+  WorldChatProductionCreateActionSchema,
+  WorldChatProductionMetadataActionSchema,
+  WorldChatProductionModelActionSchema,
+  WorldChatProductionSeriesActionSchema,
+  WorldChatProductionOverviewActionSchema,
+  WorldChatProductionSeasonActionSchema,
+  WorldChatProductionEpisodeActionSchema,
+  WorldChatProductionChapterActionSchema,
+  WorldChatProductionSceneActionSchema,
+  WorldChatProductionEpisodeOrderActionSchema,
+  WorldChatProductionChapterOrderActionSchema,
+  WorldChatProductionSceneOrderActionSchema,
+  WorldChatProductionSceneDeleteActionSchema,
+  WorldChatProductionSceneRestoreActionSchema,
   WorldChatProductionStyleActionSchema,
 ]);
 export type WorldChatPreparedAction = z.infer<typeof WorldChatPreparedActionSchema>;

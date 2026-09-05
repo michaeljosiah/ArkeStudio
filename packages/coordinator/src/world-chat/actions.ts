@@ -5,7 +5,12 @@ import {
   ArtDirectionRecordSchema,
   CanonEntrySchema,
   deriveArtDirectionDescription,
+  productionFrameRate,
+  productionShape,
+  SceneRecordSchema,
+  sceneDeleteBlockers,
   SheetSchema,
+  sortScenes,
   WorldMetaSchema,
   ModelWorldChatActionSchema,
   applyBibleEdits,
@@ -25,6 +30,20 @@ import {
   WorldChatCanonRetireActionSchema,
   WorldChatEditorRequestActionSchema,
   WorldChatProposalActionSchema,
+  WorldChatProductionChapterActionSchema,
+  WorldChatProductionChapterOrderActionSchema,
+  WorldChatProductionCreateActionSchema,
+  WorldChatProductionEpisodeActionSchema,
+  WorldChatProductionEpisodeOrderActionSchema,
+  WorldChatProductionMetadataActionSchema,
+  WorldChatProductionModelActionSchema,
+  WorldChatProductionOverviewActionSchema,
+  WorldChatProductionSceneActionSchema,
+  WorldChatProductionSceneDeleteActionSchema,
+  WorldChatProductionSceneOrderActionSchema,
+  WorldChatProductionSceneRestoreActionSchema,
+  WorldChatProductionSeasonActionSchema,
+  WorldChatProductionSeriesActionSchema,
   WorldChatProductionStyleActionSchema,
   WorldChatReferenceChangeActionSchema,
   WorldChatReferenceCompileActionSchema,
@@ -61,12 +80,9 @@ import {
   type ArkeReadObservation,
   type ArkeReadRequirement,
   type ModelWorldChatAction,
-  type WorldChatArtDirectionAction,
   type WorldChatArtDirectionRestoreAction,
-  type WorldChatCanonAction,
   type WorldChatCanonRestoreAction,
   type WorldChatCanonRetireAction,
-  type WorldChatSheetAction,
   type WorldChatSheetRestoreAction,
   type WorldChatSheetRetireAction,
   type WorldChatWorldMetadataAction,
@@ -114,7 +130,19 @@ import {
   validateEditorRequest,
 } from "../productions/editor-requests.js";
 import { applySceneEdits, sceneOfContext } from "../productions/scene-edits.js";
-import { setProductionStyle } from "../productions/ops.js";
+import {
+  createProductionFromPlan,
+  deleteScene,
+  planProductionCreation,
+  reorderChapters,
+  reorderEpisodes,
+  reorderScenes,
+  restoreScene,
+  setProductionModel,
+  setProductionStyle,
+  updateProductionMetadata,
+  validateProductionMetadataChanges,
+} from "../productions/ops.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -143,7 +171,7 @@ import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readBible, applyTurnBibleEdits } from "../world/bible.js";
 import { readChanges } from "../world/change-writer.js";
-import type { CommitResult } from "../world/commit.js";
+import { CommitStaleError, type CommitResult } from "../world/commit.js";
 import {
   WorldStateStaleError,
   type WorldStatePrecondition,
@@ -160,15 +188,24 @@ import {
   artifactsFence,
   bibleFence,
   canonFence,
+  chaptersFence,
+  episodesFence,
   productionMetadataFence,
   productionsFence,
   referencesFence,
+  sceneFence,
+  sceneScriptFence,
+  scenesFence,
+  seasonFence,
+  seriesFence,
   sheetsFence,
+  storyFence,
   timelineFence,
   takesFence,
   voicesFence,
   worldMetadataFence,
 } from "./target-reads.js";
+import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -298,6 +335,20 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "voice-clip-review": ["takes", "sheets"],
   "world-archive": ["world-metadata"],
   "world-export": ["world-metadata", "artifacts"],
+  "production-create": ["production-metadata", "series"],
+  "production-metadata": ["production-metadata", "series", "timeline"],
+  "production-model": ["production-metadata"],
+  "production-series": ["production-metadata", "series"],
+  "production-overview": ["story"],
+  "production-season": ["seasons"],
+  "production-episode": ["episodes"],
+  "production-chapter": ["chapters"],
+  "production-scene": ["scenes"],
+  "production-episode-order": ["episodes"],
+  "production-chapter-order": ["chapters"],
+  "production-scene-order": ["scenes"],
+  "production-scene-delete": ["scenes"],
+  "production-scene-restore": ["scenes"],
   "production-style": ["production-metadata", "art-direction"],
 };
 
@@ -321,12 +372,113 @@ function currentWorldObservation(
         ? { target: store.worldId, fence: productionsFence(bundle) }
         : { target: productionId, fence: productionMetadataFence(bundle, productionId) };
     }
+    case "series": return { target: store.worldId, fence: seriesFence(bundle) };
+    case "story": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
+    case "seasons": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: seasonFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
+    case "episodes": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: episodesFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
+    case "chapters": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
+    case "scenes": {
+      const targetId = target ?? store.worldId;
+      const [productionId, sceneId, suffix] = targetId.split(":");
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      if (sceneId && suffix === "script") return { target: targetId, fence: sceneScriptFence(production, sceneId) };
+      if (sceneId && suffix === undefined) return { target: targetId, fence: sceneFence(production, sceneId) };
+      return { target: targetId, fence: scenesFence(production) };
+    }
+    case "timeline": {
+      const productionId = target ?? store.worldId;
+      return { target: productionId, fence: timelineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+    }
     case "takes": {
       const productionId = target ?? store.worldId;
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       return { target: productionId, fence: takesFence(production) };
     }
     default: return null;
+  }
+}
+
+function productionActionTargets(
+  store: WorldStore,
+  action: ModelWorldChatAction,
+): Array<{ requirement: ArkeReadRequirement; target: string }> {
+  const worldId = store.worldId;
+  switch (action.kind) {
+    case "production-create": return [
+      { requirement: "production-metadata", target: worldId },
+      { requirement: "series", target: worldId },
+    ];
+    case "production-metadata": return [
+      { requirement: "production-metadata", target: action.productionId },
+      { requirement: "series", target: worldId },
+      { requirement: "timeline", target: action.productionId },
+    ];
+    case "production-model": return [{ requirement: "production-metadata", target: action.productionId }];
+    case "production-series": return [
+      { requirement: "production-metadata", target: action.productionId },
+      { requirement: "series", target: worldId },
+    ];
+    case "production-overview": return [{ requirement: "story", target: action.productionId }];
+    case "production-season": return [
+      { requirement: "seasons", target: action.productionId },
+      ...(action.changes.arcs !== undefined && action.changes.arcs !== null
+        ? [{ requirement: "episodes" as const, target: action.productionId }]
+        : []),
+    ];
+    case "production-episode": return [
+      { requirement: "episodes", target: action.productionId },
+      ...((action.change.operation === "create" && action.change.scenes.length > 0) ||
+          (action.change.operation === "edit" && action.change.changes.scenes !== undefined)
+        ? [{ requirement: "scenes" as const, target: action.productionId }]
+        : []),
+    ];
+    case "production-chapter": {
+      const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      return [
+        { requirement: "chapters", target: action.productionId },
+        ...(draws
+          ? [
+              { requirement: "sheets" as const, target: worldId },
+              { requirement: "canon" as const, target: worldId },
+            ]
+          : []),
+      ];
+    }
+    case "production-scene": return [
+      {
+        requirement: "scenes",
+        target: action.change.operation === "create"
+          ? action.productionId
+          : action.change.operation === "replace-script"
+            ? `${action.productionId}:${action.change.sceneId}:script`
+            : `${action.productionId}:${action.change.sceneId}`,
+      },
+      ...(action.change.operation === "create" && action.change.episodeId !== undefined
+        ? [{ requirement: "episodes" as const, target: action.productionId }]
+        : []),
+    ];
+    case "production-episode-order": return [{ requirement: "episodes", target: action.productionId }];
+    case "production-chapter-order": return [{ requirement: "chapters", target: action.productionId }];
+    case "production-scene-order": return [{ requirement: "scenes", target: action.productionId }];
+    case "production-scene-delete":
+    case "production-scene-restore": return [{ requirement: "scenes", target: `${action.productionId}:${action.sceneId}` }];
+    case "production-style": return [
+      { requirement: "production-metadata", target: action.productionId },
+      { requirement: "art-direction", target: "art-direction" },
+    ];
+    default: return [];
   }
 }
 
@@ -363,14 +515,22 @@ function worldActionObservations(
   const observed = new Set(observations.map((observation) => observation.requirement));
   const missing = WORLD_ACTION_REQUIREMENTS[action.kind].find((requirement) => !observed.has(requirement));
   if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
+  const wrongTarget = productionActionTargets(store, action).find((required) =>
+    !observations.some((observation) =>
+      observation.requirement === required.requirement && observation.target === required.target));
+  if (wrongTarget) {
+    throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
+  }
   return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
 }
 
 function preparedWorldPayload(
-  worldId: string,
+  store: WorldStore,
   action: ModelWorldChatAction,
   productionId?: string,
+  at = store.now(),
 ): WorldChatPreparedAction {
+  const worldId = store.worldId;
   const common = { worldId, ...(productionId !== undefined ? { productionId } : {}), action };
   switch (action.kind) {
     case "world-metadata": return WorldChatWorldMetadataActionSchema.parse({ kind: "world-chat-world-metadata", ...common });
@@ -406,6 +566,25 @@ function preparedWorldPayload(
     case "voice-clip-review": return WorldChatVoiceClipReviewActionSchema.parse({ kind: "world-chat-voice-clip-review", ...common });
     case "world-archive": return WorldChatWorldArchiveActionSchema.parse({ kind: "world-chat-world-archive", ...common });
     case "world-export": return WorldChatWorldExportActionSchema.parse({ kind: "world-chat-world-export", ...common });
+    case "production-create": return WorldChatProductionCreateActionSchema.parse({
+      kind: "world-chat-production-create",
+      worldId,
+      action,
+      plan: planProductionCreation(store.getBundle(), action.production, at),
+    });
+    case "production-metadata": return WorldChatProductionMetadataActionSchema.parse({ kind: "world-chat-production-metadata", ...common });
+    case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
+    case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
+    case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
+    case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
+    case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
+    case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
+    case "production-scene": return WorldChatProductionSceneActionSchema.parse({ kind: "world-chat-production-scene", ...common });
+    case "production-episode-order": return WorldChatProductionEpisodeOrderActionSchema.parse({ kind: "world-chat-production-episode-order", ...common });
+    case "production-chapter-order": return WorldChatProductionChapterOrderActionSchema.parse({ kind: "world-chat-production-chapter-order", ...common });
+    case "production-scene-order": return WorldChatProductionSceneOrderActionSchema.parse({ kind: "world-chat-production-scene-order", ...common });
+    case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
+    case "production-scene-restore": return WorldChatProductionSceneRestoreActionSchema.parse({ kind: "world-chat-production-scene-restore", ...common });
     case "production-style": return WorldChatProductionStyleActionSchema.parse({ kind: "world-chat-production-style", ...common });
   }
 }
@@ -415,6 +594,12 @@ function scopedWorldAction(
   action: ModelWorldChatAction,
   productionId: string | undefined,
 ): ModelWorldChatAction {
+  const declaredProductionId = actionProduction(action, undefined);
+  if (productionId && declaredProductionId && declaredProductionId !== productionId) {
+    throw new Error(action.kind === "production-style"
+      ? "A Production Chat action cannot change another production's style."
+      : "A Production Chat action cannot change another production.");
+  }
   let sheetIds: Array<string | undefined> = [];
   if (action.kind === "sheet") {
     if (action.change.operation === "relationship") {
@@ -515,9 +700,9 @@ function scopedWorldAction(
 }
 
 function actionProduction(action: ModelWorldChatAction, contextProductionId: string | undefined): string | undefined {
+  if (action.kind === "production-create") return undefined;
   if (contextProductionId) return contextProductionId;
-  if (action.kind === "production-style") return action.productionId;
-  if (action.kind === "voice-clip-review") return action.productionId;
+  if ("productionId" in action && typeof action.productionId === "string") return action.productionId;
   if (action.kind === "artifact-import" && typeof action.productionId === "string") return action.productionId;
   if (action.kind === "artifact-metadata" && action.change.operation === "set-owner") {
     return action.change.productionId ?? undefined;
@@ -529,7 +714,11 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
   return undefined;
 }
 
-function worldActionTargets(action: ModelWorldChatAction, fallbackId: string): ConversationActionTarget[] {
+function worldActionTargets(
+  store: WorldStore,
+  action: ModelWorldChatAction,
+  fallbackId: string,
+): ConversationActionTarget[] {
   switch (action.kind) {
     case "world-metadata": return [{ kind: "world", id: "metadata", label: "World metadata" }];
     case "canon-retire":
@@ -605,6 +794,54 @@ function worldActionTargets(action: ModelWorldChatAction, fallbackId: string): C
     ];
     case "world-archive":
     case "world-export": return [{ kind: "world", id: fallbackId, label: action.kind === "world-archive" ? "World archive" : "World export" }];
+    case "production-create": return [{ kind: "production", id: fallbackId, label: action.production.title }];
+    case "production-metadata": {
+      const seriesIds = action.changes.seriesId === undefined
+        ? []
+        : [
+            ...store.getBundle().series
+              .filter((series) => series.seasons.includes(action.productionId))
+              .map((series) => series.id),
+            ...(action.changes.seriesId ? [action.changes.seriesId] : []),
+          ];
+      return [
+        { kind: "production", id: action.productionId, label: action.productionId },
+        ...[...new Set(seriesIds)].map((id) => ({ kind: "series", id, label: id })),
+      ];
+    }
+    case "production-model": return [{ kind: "production", id: action.productionId, label: `${action.capability} model` }];
+    case "production-series": return [{
+      kind: "series",
+      id: action.change.operation === "edit" ? action.change.seriesId : fallbackId,
+      label: action.change.operation === "edit" ? action.change.seriesId : action.change.title,
+    }];
+    case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
+    case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
+    case "production-episode": return [{
+      kind: "episode",
+      id: action.change.operation === "edit" ? action.change.episodeId : fallbackId,
+      label: action.change.operation === "edit" ? action.change.episodeId : action.change.title,
+    }];
+    case "production-chapter": return [{
+      kind: "chapter",
+      id: action.change.operation === "edit" ? action.change.chapterId : fallbackId,
+      label: action.change.operation === "edit" ? action.change.chapterId : action.change.title,
+    }];
+    case "production-scene": return [
+      {
+        kind: "scene",
+        id: action.change.operation === "create" ? fallbackId : action.change.sceneId,
+        label: action.change.operation === "create" ? action.change.title : action.change.sceneId,
+      },
+      ...(action.change.operation === "create" && action.change.episodeId
+        ? [{ kind: "episode", id: action.change.episodeId, label: action.change.episodeId }]
+        : []),
+    ];
+    case "production-episode-order": return action.orderedIds.map((id) => ({ kind: "episode", id, label: id }));
+    case "production-chapter-order": return action.orderedIds.map((id) => ({ kind: "chapter", id, label: id }));
+    case "production-scene-order": return action.orderedIds.map((id) => ({ kind: "scene", id, label: id }));
+    case "production-scene-delete":
+    case "production-scene-restore": return [{ kind: "scene", id: action.sceneId, label: action.sceneId }];
     case "production-style": return [{ kind: "production", id: action.productionId, label: action.productionId }];
   }
 }
@@ -669,10 +906,24 @@ export function prepareWorldChatActions(
   }
 
   const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
+  const plannedProductionIds = new Set<string>();
+  const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
     const productionId = actionProduction(action, contextProductionId);
-    const payload = preparedWorldPayload(store.worldId, action, productionId);
+    const payload = preparedWorldPayload(store, action, productionId, turn.at);
+    if (payload.kind === "world-chat-production-create") {
+      if (plannedProductionIds.has(payload.plan.production.id)) {
+        throw new Error("Two production creations in one turn cannot claim the same fixed identity.");
+      }
+      plannedProductionIds.add(payload.plan.production.id);
+      if (payload.plan.series.operation === "create") {
+        if (plannedSeriesIds.has(payload.plan.series.record.id)) {
+          throw new Error("Two production creations in one turn cannot create the same fixed Series identity.");
+        }
+        plannedSeriesIds.add(payload.plan.series.record.id);
+      }
+    }
     prepared.push({
       payload,
       intent: lifecycle.createIntent({
@@ -681,7 +932,16 @@ export function prepareWorldChatActions(
         worldId: store.worldId,
         ...(productionId !== undefined ? { productionId } : {}),
         actionKind: payload.kind,
-        targets: worldActionTargets(action, `${turn.turnId}:${index + 1}`),
+        targets: [
+          ...worldActionTargets(
+            store,
+            action,
+            payload.kind === "world-chat-production-create" ? payload.plan.production.id : `${turn.turnId}:${index + 1}`,
+          ),
+          ...(payload.kind === "world-chat-production-create" && payload.plan.series.operation !== "none"
+            ? [{ kind: "series", id: payload.plan.series.record.id, label: payload.plan.series.record.title }]
+            : []),
+        ],
         payload,
         baseObservations: worldActionObservations(store, turn.receipts ?? [], action),
         createdAt: turn.at,
@@ -966,6 +1226,19 @@ function diffFields(
   return [...new Set([...Object.keys(before), ...Object.keys(after)])]
     .filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]))
     .map((key) => ({ label: labels[key] ?? key, before: clipped(shownValue(before[key])), after: clipped(shownValue(after[key])) }));
+}
+
+function requireExactOrder(current: readonly string[], proposed: readonly string[], label: string): void {
+  if (
+    proposed.length !== current.length ||
+    new Set(proposed).size !== proposed.length ||
+    proposed.some((id) => !current.includes(id))
+  ) {
+    throw new Error(`${label} order must contain every current id exactly once.`);
+  }
+  if (proposed.every((id, index) => id === current[index])) {
+    throw new Error(`The ${label.toLowerCase()} are already in that order.`);
+  }
 }
 
 function canonView(raw: string): { label: string; fields: Record<string, unknown> } {
@@ -1782,10 +2055,200 @@ async function sharedResourceProjection(
         },
       };
       break;
+    case "world-chat-production-create": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const plan = payload.plan;
+      shown = {
+        title: `Create ${plan.production.title}`,
+        consequence: "Creates the fixed production identity and every shown initial record atomically, without replanning after approval.",
+        affectedTargets: [...intent.targets],
+        ripples: [
+          plan.series.operation === "none"
+            ? "No Series record changes."
+            : plan.series.operation === "create"
+              ? `Creates Series ${plan.series.record.title} with this production as its first season.`
+              : `Adds this production to Series ${plan.series.record.title}.`,
+        ],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: [
+            { label: `Create production ${plan.production.id}`, detail: JSON.stringify(plan.production) },
+            {
+              label: "Initial season",
+              detail: plan.initialSeason === null ? "None" : JSON.stringify(plan.initialSeason),
+            },
+            {
+              label: "Series consequence",
+              detail: plan.series.operation === "none"
+                ? "None"
+                : `${plan.series.operation}: ${JSON.stringify(plan.series.record)}`,
+            },
+          ],
+          expectedResult: `Production ${plan.production.id} exists with exactly the shown metadata${plan.initialSeason ? ", initial season" : ""}${plan.series.operation === "none" ? "" : ", and Series consequence"}.`,
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-metadata": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      validateProductionMetadataChanges(production, payload.action.changes);
+      const currentSeries = bundle.series.find((series) => series.seasons.includes(production.meta.id))?.id ?? null;
+      const currentShape = productionShape(production.meta);
+      const before = {
+        title: production.meta.title,
+        medium: currentShape.medium,
+        productionKind: currentShape.kind,
+        seriesId: currentSeries,
+        status: production.meta.status,
+        aspect: production.meta.aspect ?? null,
+        frameRate: productionFrameRate(production.meta),
+      };
+      const after = { ...before, ...payload.action.changes };
+      if (
+        payload.action.changes.seriesId !== undefined &&
+        payload.action.changes.seriesId !== null &&
+        !bundle.series.some((series) => series.id === payload.action.changes.seriesId)
+      ) throw new Error("That Series is no longer in this world.");
+      const fields = diffFields(before, after, {
+        title: "Title",
+        medium: "Medium",
+        productionKind: "Kind",
+        seriesId: "Series",
+        status: "Status",
+        aspect: "Aspect",
+        frameRate: "Frame rate",
+      });
+      if (fields.length === 0) throw new Error("The production metadata already has those values.");
+      shown = {
+        title: `Change ${production.meta.title} metadata`,
+        consequence: "Updates the world-owned production record and, when requested, its Series membership in one commit.",
+        affectedTargets: [...intent.targets],
+        ripples: [
+          ...(payload.action.changes.frameRate !== undefined ? ["Future frame-based work uses the new production frame rate."] : []),
+          ...(payload.action.changes.seriesId !== undefined ? ["Series season membership changes atomically with production metadata."] : []),
+        ],
+        permissionReason: "authored-change",
+        body: { family: "authored-diff", fields, conflicts: [], openChoices: [] },
+      };
+      break;
+    }
+    case "world-chat-production-model": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const current = production.meta.models?.[payload.action.capability] ?? null;
+      if (current === payload.action.modelId) throw new Error("That model assignment is already set.");
+      shown = {
+        title: `${payload.action.modelId === null ? "Clear" : "Set"} the ${payload.action.capability} model`,
+        consequence: "Changes where this production routes future work for one capability.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Accepted work remains pinned to the model and provenance it already recorded."],
+        permissionReason: "authored-change",
+        body: {
+          family: "setting",
+          setting: `${payload.action.capability} model`,
+          current,
+          proposed: payload.action.modelId,
+          consequences: ["World-wide routing defaults are unchanged."],
+        },
+      };
+      break;
+    }
+    case "world-chat-production-episode-order":
+    case "world-chat-production-chapter-order":
+    case "world-chat-production-scene-order": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const label = payload.kind === "world-chat-production-episode-order"
+        ? "Episodes"
+        : payload.kind === "world-chat-production-chapter-order"
+          ? "Chapters"
+          : "Scenes";
+      const current = payload.kind === "world-chat-production-episode-order"
+        ? [...production.episodes].sort((a, b) => a.order - b.order).map((episode) => episode.id)
+        : payload.kind === "world-chat-production-chapter-order"
+          ? [...production.chapters].sort((a, b) => a.order - b.order).map((chapter) => chapter.id)
+          : sortScenes(production.scenes).map((scene) => scene.id);
+      requireExactOrder(current, payload.action.orderedIds, label);
+      shown = {
+        title: `Reorder ${label.toLowerCase()}`,
+        consequence: `Writes the shown complete ${label.toLowerCase()} order through the existing production authority.`,
+        affectedTargets: [...intent.targets],
+        ripples: [],
+        permissionReason: "authored-change",
+        body: {
+          family: "command",
+          commands: payload.action.orderedIds.map((id, index) => ({ label: `${index + 1}. ${id}` })),
+          expectedResult: `${label} appear in exactly this order.`,
+          undoAvailable: true,
+        },
+      };
+      break;
+    }
+    case "world-chat-production-scene-delete": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      if (!production || !scene) throw new Error("That scene is no longer in this production.");
+      const blockers = sceneDeleteBlockers(production, scene);
+      approvalBlockedReason = blockers[0];
+      shown = {
+        title: `Delete ${scene.title}`,
+        consequence: "Deletes the scene through the existing blocker-aware operation and retains its version history.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Episode membership and shot selections owned by this scene are repaired in the same commit."],
+        permissionReason: "destructive-change",
+        body: {
+          family: "destructive",
+          removed: [`Scene ${scene.id} from the production`],
+          retained: ["Scene version history", "Takes, reviews, and immutable spend history"],
+          dependentChanges: ["Episode membership and scene-owned shot selections are removed atomically."],
+          blockers,
+          undoAvailable: true,
+        },
+      };
+      authorityRevision = scene.version;
+      break;
+    }
+    case "world-chat-production-scene-restore": {
+      authority = { kind: "production-store", id: intent.actionId };
+      const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
+      const stem = production?.sceneFiles[payload.action.sceneId];
+      if (!production || !scene || !stem) throw new Error("That scene is no longer in this production.");
+      const snapshot = SceneRecordSchema.parse(JSON.parse(await historyContent(
+        store,
+        `.history/productions/${production.meta.id}/scenes/${stem}/v${payload.action.version}.json`,
+      )));
+      const fields = diffFields(scene, snapshot);
+      shown = {
+        title: `Restore ${scene.title} from v${payload.action.version}`,
+        consequence: "Restores the complete historical scene as a new version without deleting later history.",
+        affectedTargets: [...intent.targets],
+        ripples: ["Script, shot, inherited-context, and Stage data in that snapshot return together."],
+        permissionReason: "authored-change",
+        body: {
+          family: "authored-diff",
+          fields: fields.length > 0 ? fields : [{ label: "Scene", before: "Current", after: "Same in selected version" }],
+          conflicts: [],
+          openChoices: [],
+        },
+      };
+      authorityRevision = scene.version;
+      break;
+    }
     case "world-chat-production-style": {
       authority = { kind: "production-store", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
+      if ((production.meta.styleOverride ?? null) === payload.action.style) {
+        throw new Error("The production style already has that value.");
+      }
       shown = {
         title: payload.action.style === null ? "Clear the production style" : "Set the production style",
         consequence: "Updates the production's scoped style through its world-owned production metadata authority.",
@@ -2248,6 +2711,74 @@ async function executeSharedResource(
       await store.commit({ kind: "world-chat-world-export", source: options.source, files: [], requestId: action.actionId });
       return { status: "completed", receipt: { kind: "world-export", id: exported.id, summary: "The portable world export completed." } };
     }
+    case "world-chat-production-create": {
+      const result = await createProductionFromPlan(store, payload.plan, options);
+      return {
+        status: "completed",
+        receipt: { kind: "production", id: payload.plan.production.id, summary: `Created ${payload.plan.production.title} in commit ${result.commitId}.` },
+      };
+    }
+    case "world-chat-production-metadata": {
+      const result = await updateProductionMetadata(
+        store,
+        payload.action.productionId,
+        payload.action.changes,
+        options,
+      );
+      return {
+        status: "completed",
+        receipt: { kind: "production", id: payload.action.productionId, summary: `The production metadata was updated in commit ${result.commitId}.` },
+      };
+    }
+    case "world-chat-production-model":
+      await setProductionModel(
+        store,
+        payload.action.productionId,
+        payload.action.capability,
+        payload.action.modelId,
+        options,
+      );
+      return { status: "completed", receipt: { kind: "production", id: payload.action.productionId, summary: "The production model assignment was updated." } };
+    case "world-chat-production-episode-order":
+      await reorderEpisodes(store, payload.action.productionId, payload.action.orderedIds, options);
+      return { status: "completed", receipt: { kind: "production-order", id: payload.action.productionId, summary: "The episodes were reordered." } };
+    case "world-chat-production-chapter-order": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      if (!production) throw new Error("That production is no longer in this world.");
+      const files = payload.action.orderedIds.map((id) => {
+        const chapter = production.chapters.find((candidate) => candidate.id === id);
+        if (!chapter) throw new Error(`Chapter ${id} is no longer in this production.`);
+        return chapter.file;
+      });
+      await reorderChapters(store, payload.action.productionId, files, options);
+      return { status: "completed", receipt: { kind: "production-order", id: payload.action.productionId, summary: "The chapters were reordered." } };
+    }
+    case "world-chat-production-scene-order":
+      await reorderScenes(store, payload.action.productionId, payload.action.orderedIds, options);
+      return { status: "completed", receipt: { kind: "production-order", id: payload.action.productionId, summary: "The scenes were reordered." } };
+    case "world-chat-production-scene-delete": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const sceneFile = production?.sceneFiles[payload.action.sceneId];
+      if (!sceneFile) throw new Error("That scene is no longer in this production.");
+      await deleteScene(store, {
+        productionId: payload.action.productionId,
+        sceneFile,
+        ...options,
+      });
+      return { status: "completed", receipt: { kind: "scene", id: payload.action.sceneId, summary: "The scene was deleted with its history retained." } };
+    }
+    case "world-chat-production-scene-restore": {
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
+      const sceneFile = production?.sceneFiles[payload.action.sceneId];
+      if (!sceneFile) throw new Error("That scene is no longer in this production.");
+      await restoreScene(store, {
+        productionId: payload.action.productionId,
+        sceneFile,
+        version: payload.action.version,
+        ...options,
+      });
+      return { status: "completed", receipt: { kind: "scene-version", id: payload.action.sceneId, summary: "The selected scene snapshot was restored as a new version." } };
+    }
     case "world-chat-production-style":
       await setProductionStyle(
         store,
@@ -2592,7 +3123,7 @@ export function worldChatActionAdapters(
     },
   };
 
-  const proposalBacked = <T extends WorldChatCanonAction | WorldChatSheetAction | WorldChatArtDirectionAction>(
+  const proposalBacked = <T extends WorldChatPreparedAction>(
     actionKind: string,
     parse: (value: unknown) => T,
     stage: (
@@ -2728,9 +3259,9 @@ export function worldChatActionAdapters(
         await removePreparation(store, "world", action.actionId);
         return { status: "completed", receipt: receipt(result) };
       } catch (error) {
-        if (error instanceof WorldStateStaleError) {
+        if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
           await removePreparation(store, "world", action.actionId);
-          return { status: "stale", detail: error.detail };
+          return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
         }
         throw error;
       }
@@ -2803,9 +3334,9 @@ export function worldChatActionAdapters(
           await removePreparation(store, "world", action.actionId);
           return outcome;
         } catch (error) {
-          if (error instanceof WorldStateStaleError) {
+          if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
             await removePreparation(store, "world", action.actionId);
-            return { status: "stale", detail: error.detail };
+            return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
           }
           throw error;
         }
@@ -2848,6 +3379,14 @@ export function worldChatActionAdapters(
     "world-chat-voice-clip-review",
     "world-chat-world-archive",
     "world-chat-world-export",
+    "world-chat-production-create",
+    "world-chat-production-metadata",
+    "world-chat-production-model",
+    "world-chat-production-episode-order",
+    "world-chat-production-chapter-order",
+    "world-chat-production-scene-order",
+    "world-chat-production-scene-delete",
+    "world-chat-production-scene-restore",
     "world-chat-production-style",
   ] satisfies readonly WorldChatPreparedAction["kind"][];
 
@@ -2873,6 +3412,54 @@ export function worldChatActionAdapters(
     (intent, payload, precondition) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       return stageWorldChatArtDirectionAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionSeries = proposalBacked(
+    "world-chat-production-series",
+    (value) => WorldChatProductionSeriesActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionOverview = proposalBacked(
+    "world-chat-production-overview",
+    (value) => WorldChatProductionOverviewActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionSeason = proposalBacked(
+    "world-chat-production-season",
+    (value) => WorldChatProductionSeasonActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionEpisode = proposalBacked(
+    "world-chat-production-episode",
+    (value) => WorldChatProductionEpisodeActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionChapter = proposalBacked(
+    "world-chat-production-chapter",
+    (value) => WorldChatProductionChapterActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionScene = proposalBacked(
+    "world-chat-production-scene",
+    (value) => WorldChatProductionSceneActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
     },
   );
   const worldMetadata = direct(
@@ -2934,6 +3521,12 @@ export function worldChatActionAdapters(
     sheetRestore,
     artDirectionAction,
     artDirectionRestore,
+    productionSeries,
+    productionOverview,
+    productionSeason,
+    productionEpisode,
+    productionChapter,
+    productionScene,
     ...sharedResources.map(sharedResource),
   ];
 }

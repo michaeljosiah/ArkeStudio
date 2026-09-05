@@ -188,4 +188,48 @@ describe("World Chat authored action contracts", () => {
       checkReceiptIds: [CHECK],
     }));
   });
+
+  it("admits the complete Production Development operation shapes", () => {
+    const actions = [
+      {
+        kind: "production-series",
+        productionId: "bell-watch-season-one",
+        change: { operation: "create", title: "Bell Watch", seasons: ["bell-watch-season-one"] },
+      },
+      {
+        kind: "production-episode",
+        productionId: "bell-watch-season-one",
+        change: { operation: "create", title: "The Missing Night", scenes: [], release: { tags: ["harbour"] } },
+      },
+      {
+        kind: "production-chapter",
+        productionId: "saltlight",
+        change: { operation: "create", title: "The Vigil", order: 1, body: "The ledger opens." },
+      },
+      {
+        kind: "production-scene",
+        productionId: "saltlight",
+        change: { operation: "create", title: "The Ledger", scriptBlocks: [{ id: "blk_opening", kind: "action", text: "The ledger opens." }] },
+      },
+    ];
+    for (const action of actions) {
+      assert.doesNotThrow(() => ModelWorldChatActionSchema.parse({ ...action, checkReceiptIds: [CHECK] }));
+    }
+  });
+
+  it("requires unique stable ids in a complete scene-script replacement", () => {
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-scene",
+      productionId: "saltlight",
+      change: {
+        operation: "replace-script",
+        sceneId: "sc_01",
+        blocks: [
+          { id: "blk_same", kind: "action", text: "The ledger opens." },
+          { id: "blk_same", kind: "dialogue", speaker: "maren-kest", text: "One night is missing." },
+        ],
+      },
+      checkReceiptIds: [CHECK],
+    }), /script block ids must be unique/i);
+  });
 });

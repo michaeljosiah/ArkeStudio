@@ -20,8 +20,9 @@ import {
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
+import { createEpisode, createProduction } from "../../src/productions/ops.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
-import { sceneVersionFor } from "../../src/productions/scene-edits.js";
+import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
 import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -41,10 +42,18 @@ import {
   artifactsFence,
   bibleFence,
   canonFence,
+  chaptersFence,
+  episodesFence,
   productionMetadataFence,
   productionsFence,
   referencesFence,
+  sceneFence,
+  sceneScriptFence,
+  scenesFence,
+  seasonFence,
+  seriesFence,
   sheetsFence,
+  storyFence,
   takesFence,
   timelineFence,
   voicesFence,
@@ -169,10 +178,7 @@ function turn(
 
 function currentReceipt(
   store: WorldStore,
-  requirement: Extract<
-    ArkeReadRequirement,
-    "world-metadata" | "canon" | "sheets" | "art-direction" | "references" | "artifacts" | "voices" | "takes" | "production-metadata"
-  >,
+  requirement: ArkeReadRequirement,
   target?: string,
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
@@ -190,8 +196,30 @@ function currentReceipt(
               ? artifactsFence(bundle)
               : requirement === "voices"
                 ? voicesFence(bundle)
-                : requirement === "takes"
-                  ? takesFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+              : requirement === "takes"
+                ? takesFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                : requirement === "series"
+                  ? seriesFence(bundle)
+                  : requirement === "story"
+                    ? storyFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                    : requirement === "seasons"
+                      ? seasonFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                      : requirement === "episodes"
+                        ? episodesFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                        : requirement === "chapters"
+                          ? chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === target))
+                          : requirement === "scenes"
+                            ? (() => {
+                                const [productionId, sceneId, suffix] = (target ?? "").split(":");
+                                const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+                                return sceneId
+                                  ? suffix === "script"
+                                    ? sceneScriptFence(production, sceneId)
+                                    : sceneFence(production, sceneId)
+                                  : scenesFence(production);
+                              })()
+                            : requirement === "timeline"
+                              ? timelineFence(bundle.productions.find((candidate) => candidate.meta.id === target))
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
@@ -1057,6 +1085,239 @@ describe("World Chat authority adapters", () => {
     assert.equal(result.disposition, "refused");
     assert.equal(result.reason, "adapter-unavailable");
     assert.equal((await loaded(w.log)).actions[0]!.status, "pending");
+  });
+
+  it("creates exactly the precomputed production plan only after approval", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [productions, series],
+      actions: [{
+        kind: "production-create",
+        production: {
+          title: "Bell Watch Season One",
+          medium: "video",
+          productionKind: "microdrama",
+          seriesTitle: "Bell Watch",
+          frameRate: 25,
+          defaults: { episodeCount: 8 },
+        },
+        checkReceiptIds: [productions.id, series.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    assert.equal(prepared[0]!.payload.kind, "world-chat-production-create");
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    assert.equal(payload.plan.production.id, "bell-watch-season-one");
+    assert.equal(payload.plan.initialSeason?.defaults?.episodeCount, 8);
+    assert.equal(payload.plan.series.operation, "create");
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.equal(w.store.getBundle().productions.some((production) => production.meta.id === payload.plan.production.id), false);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.body.family, "command");
+    assert.match(JSON.stringify(card.shown), /bell-watch-season-one/);
+
+    const result = await decide(w.lifecycle, w.log, card);
+    assert.equal(result.status, "completed");
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === payload.plan.production.id)!;
+    assert.equal(production.meta.frameRate, 25);
+    assert.equal(production.season?.defaults?.episodeCount, 8);
+    assert.deepEqual(w.store.getBundle().series.find((candidate) => candidate.id === "bell-watch")?.seasons, [production.meta.id]);
+  });
+
+  it("refuses a prepared production creation after its world fences move instead of replanning", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [productions, series],
+      actions: [{
+        kind: "production-create",
+        production: { title: "Fixed Identity", medium: "video" },
+        checkReceiptIds: [productions.id, series.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+
+    await createProduction(w.store, { title: "Concurrent Production", medium: "video" });
+    const result = await decide(w.lifecycle, w.log, card);
+    assert.equal(result.reason, "stale");
+    assert.equal(w.store.getBundle().productions.some((production) => production.meta.id === payload.plan.production.id), false);
+  });
+
+  it("stages production overview authorship through ProposalManager", async () => {
+    const w = await setup();
+    const episode = await createEpisode(w.store, { productionId: PRODUCTION, title: "Bell Watch" });
+    const context = { kind: "episode" as const, productionId: PRODUCTION, episodeId: episode.episodeId };
+    const story = currentReceipt(w.store, "story", PRODUCTION);
+    const before = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.story?.logline;
+    const openBefore = (await w.gate.listOpen()).length;
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [story],
+      actions: [{
+        kind: "production-overview",
+        productionId: PRODUCTION,
+        changes: { logline: "The drowned bell rings one night early." },
+        checkReceiptIds: [story.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    assert.equal(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.story?.logline, before);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.authority.kind, "proposal-manager");
+    assert.equal((await w.gate.listOpen()).length, openBefore + 1);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(
+      w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.story?.logline,
+      "The drowned bell rings one night early.",
+    );
+  });
+
+  it("requires the exact complete scene script and refuses reminted unchanged block ids", async () => {
+    const w = await setup();
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes[0]!;
+    const sceneFile = production.sceneFiles[scene.id]!;
+    const path = join(w.store.dir, "productions", PRODUCTION, "scenes", `${sceneFile}.json`);
+    const record = JSON.parse(await readFile(path, "utf8"));
+    record.script = { blocks: [{ id: "blk_opening", kind: "action", text: "Maren opens the ledger." }] };
+    await w.store.ownedWrite(() => writeFile(path, `${JSON.stringify(record, null, 2)}\n`));
+    const current = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+      .scenes.find((candidate) => candidate.id === scene.id)!;
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: current.id };
+    const wrong = currentReceipt(w.store, "scenes", PRODUCTION);
+    const reminted = current.script!.blocks.map((block, index) =>
+      index === 0 ? { ...block, id: "blk_reminted" } : block);
+    const action = {
+      kind: "production-scene" as const,
+      productionId: PRODUCTION,
+      change: { operation: "replace-script" as const, sceneId: current.id, blocks: reminted },
+      checkReceiptIds: [wrong.id],
+    };
+    assert.throws(
+      () => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, {
+        receipts: [wrong],
+        actions: [action],
+      })),
+      /complete current scenes read.*script/i,
+    );
+
+    const script = currentReceipt(w.store, "scenes", `${PRODUCTION}:${current.id}:script`);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [script],
+      actions: [{ ...action, checkReceiptIds: [script.id] }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare/i);
+    assert.deepEqual(
+      w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+        .scenes.find((candidate) => candidate.id === current.id)!.script!.blocks,
+      current.script!.blocks,
+    );
+  });
+
+  it("refuses a production frame-rate card after a timeline exists", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    await assembleStory(w.store, PRODUCTION);
+    const metadata = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const series = currentReceipt(w.store, "series");
+    const timeline = currentReceipt(w.store, "timeline", PRODUCTION);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [metadata, series, timeline],
+      actions: [{
+        kind: "production-metadata",
+        productionId: PRODUCTION,
+        changes: { frameRate: 25 },
+        checkReceiptIds: [metadata.id, series.id, timeline.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare/i);
+    assert.equal(
+      w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.meta.frameRate,
+      undefined,
+    );
+  });
+
+  it("updates production metadata atomically after approval", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const metadata = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const series = currentReceipt(w.store, "series");
+    const timeline = currentReceipt(w.store, "timeline", PRODUCTION);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [metadata, series, timeline],
+      actions: [{
+        kind: "production-metadata",
+        productionId: PRODUCTION,
+        changes: { title: "Saltlight: Bell Watch", aspect: "2:1", frameRate: 25 },
+        checkReceiptIds: [metadata.id, series.id, timeline.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    assert.notEqual(
+      w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.meta.title,
+      "Saltlight: Bell Watch",
+    );
+
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.body.family, "authored-diff");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    assert.equal(production.meta.title, "Saltlight: Bell Watch");
+    assert.equal(production.meta.aspect, "2:1");
+    assert.equal(production.meta.frameRate, 25);
+  });
+
+  it("restores a scene snapshot through the existing version authority", async () => {
+    const w = await setup();
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes[0]!;
+    const originalTitle = scene.title;
+    await applySceneEdits(w.store, {
+      entryContext: { kind: "scene", productionId: PRODUCTION, sceneId: scene.id },
+      edits: [{ kind: "rename", title: "Changed before restore" }],
+      baseVersion: scene.version,
+    });
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: scene.id };
+    const current = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [current],
+      actions: [{
+        kind: "production-scene-restore",
+        productionId: PRODUCTION,
+        sceneId: scene.id,
+        version: scene.version,
+        checkReceiptIds: [current.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.match(card.shown.title, /restore/i);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const restored = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+      .scenes.find((candidate) => candidate.id === scene.id)!;
+    assert.equal(restored.title, originalTitle);
+    assert.equal(restored.version, scene.version + 2);
   });
 
   it("scopes production style to Production Chat and writes it only after approval", async () => {

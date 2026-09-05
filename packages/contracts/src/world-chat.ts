@@ -2364,6 +2364,118 @@ const exampleWorldActions = {
     kind: "world-export",
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-create": {
+    kind: "production-create",
+    production: {
+      title: "Bell Watch: Season One",
+      medium: "video",
+      productionKind: "series",
+      seriesTitle: "Bell Watch",
+      aspect: "16:9",
+      frameRate: 24,
+      defaults: { episodeCount: 8, episodeSecondsMax: 180 },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-metadata": {
+    kind: "production-metadata",
+    productionId: "saltlight",
+    changes: { title: "Saltlight: The Bell Watch", status: "writing", aspect: "2:1", frameRate: 25 },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-model": {
+    kind: "production-model",
+    productionId: "saltlight",
+    capability: "video",
+    modelId: "seedance-2.5",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-series": {
+    kind: "production-series",
+    productionId: "bell-watch-season-1",
+    change: {
+      operation: "edit",
+      seriesId: "bell-watch",
+      changes: { engine: "Every night, the watch answers one bell that should not ring." },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-overview": {
+    kind: "production-overview",
+    productionId: "saltlight",
+    changes: { logline: "The drowned bell rings one night early." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-season": {
+    kind: "production-season",
+    productionId: "bell-watch-season-1",
+    changes: {
+      question: "Who is ringing the drowned bell?",
+      defaults: { episodeCount: 8 },
+      arcs: [{ id: "maren-answers", title: "Maren answers", setup: "ep_the-ledger", payoff: "ep_below" }],
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-episode": {
+    kind: "production-episode",
+    productionId: "bell-watch-season-1",
+    change: {
+      operation: "edit",
+      episodeId: "ep_the-ledger",
+      changes: {
+        promise: { opens: "The fourteenth page is gone." },
+        release: { title: "The Missing Night", tags: ["mystery", "harbour"] },
+      },
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-chapter": {
+    kind: "production-chapter",
+    productionId: "saltlight",
+    change: { operation: "edit", chapterId: "the-vigil", changes: { body: "Maren opens the ledger to the missing night." } },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene": {
+    kind: "production-scene",
+    productionId: "saltlight",
+    change: {
+      operation: "replace-script",
+      sceneId: "sc_04",
+      blocks: [{ id: "blk_the-empty-page", kind: "action", text: "Maren opens the ledger to the 14th." }],
+    },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-episode-order": {
+    kind: "production-episode-order",
+    productionId: "bell-watch-season-1",
+    orderedIds: ["ep_the-ledger", "ep_below"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-chapter-order": {
+    kind: "production-chapter-order",
+    productionId: "saltlight",
+    orderedIds: ["the-vigil", "below-the-bells"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-order": {
+    kind: "production-scene-order",
+    productionId: "saltlight",
+    orderedIds: ["sc_04", "sc_05"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-delete": {
+    kind: "production-scene-delete",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-scene-restore": {
+    kind: "production-scene-restore",
+    productionId: "saltlight",
+    sceneId: "sc_04",
+    version: 2,
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-style": {
     kind: "production-style",
     productionId: "saltlight",
@@ -2693,14 +2805,15 @@ Where the bible and Canon disagree, Canon is what the world has decided. Say so 
 
 ### World actions
 
-Actions wait for Approve. checkReceiptIds cite final reads: metadata + art direction; both Canon/sheet lists; or art direction.
+Actions wait for Approve and cite final complete reads.
 
-- world-metadata changes: {name: string?, logline: string|null?, tone: string|null?, genre: string|null?}
+- world-metadata changes name, logline, tone or genre.
 - canon: create(entryType,title,statement,links); amend(entryId,changes); open-thread(title,question,consideredEntryIds); settle-thread(entryId,resolvedType,statement); set-status(entryId,change); set-considered-entries(entryId,consideredEntryIds). Types: rule|lore|location|faction|timeline|tone.
 - canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
 - sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
 - sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
 - art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
+- production-* never replans creation; prose uses proposals; order and script ids stay stable.
 
 ### Editor requests
 

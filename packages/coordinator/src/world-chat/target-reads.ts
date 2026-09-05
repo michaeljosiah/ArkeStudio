@@ -141,6 +141,23 @@ export function productionsFence(bundle: WorldBundle): string {
   );
 }
 
+export function seriesFence(bundle: WorldBundle): string {
+  return fence(bundle.series);
+}
+
+export function chaptersFence(production: ProductionBundle | undefined): string {
+  return fence(production?.chapters ?? []);
+}
+
+export function scenesFence(production: ProductionBundle | undefined): string {
+  return fence(sortScenes(production?.scenes ?? []));
+}
+
+export function sceneFence(production: ProductionBundle | undefined, sceneId: string): string {
+  const scene = sceneOf(production, sceneId);
+  return fence(scene ?? null, scene?.version ?? "absent");
+}
+
 function takeRows(production: ProductionBundle | undefined): Row[] {
   return [
     ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null } })),
@@ -372,7 +389,7 @@ export class WorldChatTargetReads {
         assertArgs(args, []);
         readTarget = target("series", bundle.meta.worldId);
         rows = [...bundle.series].sort((a, b) => a.id.localeCompare(b.id)).map((series) => ({ key: series.id, value: series }));
-        revisionOrDigest = fence(bundle.series);
+        revisionOrDigest = seriesFence(bundle);
         break;
       case "get_production_metadata": {
         assertArgs(args, ["productionId"]);
@@ -424,7 +441,7 @@ export class WorldChatTargetReads {
         const chapters = productionOf(bundle, productionId)?.chapters ?? [];
         readTarget = target("chapters", productionId);
         rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: chapter }));
-        revisionOrDigest = fence(chapters);
+        revisionOrDigest = chaptersFence(productionOf(bundle, productionId));
         break;
       }
       case "get_chapter": {
@@ -459,7 +476,7 @@ export class WorldChatTargetReads {
             structure: "flow" in scene ? "graph" : "linear",
           },
         }));
-        revisionOrDigest = fence(scenes);
+        revisionOrDigest = scenesFence(productionOf(bundle, productionId));
         break;
       }
       case "get_scene": {
@@ -478,7 +495,7 @@ export class WorldChatTargetReads {
               ...orderedShots(scene).map((shot, index) => ({ key: `shot:${padded(index)}:${shot.id}`, value: { kind: "shot", shot } })),
             ]
           : [];
-        revisionOrDigest = fence(scene ?? null, scene?.version ?? "absent");
+        revisionOrDigest = sceneFence(productionOf(bundle, productionId), sceneId);
         break;
       }
       case "get_scene_script": {
