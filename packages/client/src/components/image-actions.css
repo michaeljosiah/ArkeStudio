@@ -85,3 +85,39 @@
   top: 22px;
   right: 22px;
 }
+
+/* ---- the right-click menu on a picture -------------------------------------
+   One panel at the root of the app, placed against the viewport at the pointer.
+   Fixed rather than absolute because the picture it belongs to can be anywhere,
+   including inside a pane that scrolls — the menu closes on any scroll rather
+   than trying to follow. */
+
+.fy-imgmenu {
+  position: fixed;
+  z-index: 90;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--popover);
+  box-shadow: var(--shadow-md);
+}
+
+.fy-imgmenu > button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--popover-foreground);
+  font: var(--type-ui);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fy-imgmenu > button:hover,
+.fy-imgmenu > button:focus-visible {
+  background: var(--accent);
+  outline: none;
+}
