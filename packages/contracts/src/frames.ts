@@ -1935,6 +1935,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
+      audioReferencesDisabled: z.boolean().optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -2054,6 +2055,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("dispatch-scene"),
+      audioReferencesDisabled: z.boolean().optional(),
       requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,

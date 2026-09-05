@@ -1,3 +1,4 @@
+import { planForScene } from "../../lib/scene-plan.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -86,6 +87,7 @@ export function SceneWorkspace({
   const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
+  const [audioReferencesDisabled, setAudioReferencesDisabled] = useState(false);
   const [planError, setPlanError] = useState<string | null>(null);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
@@ -378,15 +380,19 @@ export function SceneWorkspace({
     setSubject({ kind: "shot", shotId: playblastRequest.shotId as never });
     setView("stage");
   }, [playblastRequest?.actionId, playblastRequest?.shotId]);
+  const videoAudioPlans = videoModel ? planForScene({ world, production, scene: legacySceneView(scene), model: videoModel,
+    audioReferencesDisabled }, "whole-scene").wholeScene.passReferences.map(p => p.audioReferences).filter(p => p !== undefined) : [];
+  const videoAudioProblems = videoAudioPlans.flatMap(p => p.problems);
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
+    if (videoAudioProblems.length) { setPlanError(videoAudioProblems.join(" ")); return; }
     pendingPlan.current = dispatchScenePlanned(
       world.meta.worldId,
       production.meta.id,
       sceneFile,
       "whole-scene",
       videoModel.id,
-      "review-gated",
+      "review-gated", undefined, undefined, audioReferencesDisabled,
     );
     setPlanError(null);
   };
@@ -435,6 +441,11 @@ export function SceneWorkspace({
                 </Button>
               </div>
             </div>
+            {world.referenceKits.some(k => k.designatedVoiceSample) && <div aria-label="Scene character audio references">
+              <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use assigned character voice references for this dispatch</label>
+              {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.sheetId}`}>Pass {i + 1}: {r.characterName} · {r.label} · voice guidance with new scene dialogue</p>))}
+              {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
+            </div>}
             <SceneSynopsis
               scene={legacySceneView(scene)}
               onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}

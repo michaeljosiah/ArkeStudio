@@ -3139,6 +3139,7 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
 ): string {
   const requestId = ulid();
   send({
@@ -3152,6 +3153,7 @@ export function dispatchScenePlanned(
     policy,
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
@@ -3236,6 +3238,7 @@ export function dispatchScene(
   modelId: string,
   resolution?: string,
   tier?: SizeTier,
+  audioReferencesDisabled?: boolean,
 ): void {
   send({
     kind: "dispatch-scene",
@@ -3247,6 +3250,7 @@ export function dispatchScene(
     requestId: queueRequest("dispatch-scene"),
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
+    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
 }
 

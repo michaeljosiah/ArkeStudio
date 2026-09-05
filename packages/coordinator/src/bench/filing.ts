@@ -104,7 +104,7 @@ function baseTake(
     },
     prompt: take.request.brief,
     references,
-    params: take.request.params,
+    params: { ...take.request.params, ...(take.request.audioReferences ? { audioReferences: take.request.audioReferences } : {}) },
     cost: costOf(take),
     dispatchedAt: take.createdAt,
     ...(take.completedAt !== undefined ? { completedAt: take.completedAt } : {}),

@@ -1,3 +1,4 @@
+import { CharacterAudioPlanSchema } from "./audio-reference.js";
 import { z } from "zod";
 import {
   ArtifactIdSchema,
@@ -86,6 +87,7 @@ export const BenchVideoParamsSchema = z
     durationSec: z.number().positive().optional(),
     /** Present only where the model declares the control; absent is "the control does not exist". */
     sound: z.boolean().optional(),
+    audioReferencesDisabled: z.boolean().optional(),
   })
   .strict();
 export type BenchVideoParams = z.infer<typeof BenchVideoParamsSchema>;
@@ -386,6 +388,7 @@ export function unresolvedBenchMentions(text: string, attached: Iterable<string>
 export const BenchRequestSnapshotSchema = z
   .object({
     mode: BenchModeSchema,
+    audioReferences: CharacterAudioPlanSchema.optional(),
     brief: z.string(),
     references: z.array(BenchReferenceTokenSchema),
     provider: z.string().min(1),

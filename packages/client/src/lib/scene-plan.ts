@@ -10,6 +10,7 @@ import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
  * — so it is assembled once, here, and both callers read it.
  */
 export interface ScenePlanInput {
+  audioReferencesDisabled?: boolean;
   world: WorldBundle;
   production: ProductionBundle;
   scene: Scene;
@@ -32,6 +33,7 @@ export function planForScene(input: ScenePlanInput, mode: "per-shot"): Pick<Scen
 export function planForScene(input: ScenePlanInput, mode?: "per-shot" | "whole-scene"): Partial<ScenePlans> {
   const { world, production, scene, model, resolution, tier } = input;
   const planInput = {
+    audioReferencesDisabled: input.audioReferencesDisabled,
     world: world.meta,
     artDirection: world.artDirection,
     productionId: production.meta.id,

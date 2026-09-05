@@ -1,5 +1,6 @@
 import type { PropStateProvenance } from "./prop.js";
 import type { ShotPropResolution } from "./planning.js";
+import { characterAudioInstructions } from "./audio-reference.js";
 import {
   assemblePassBlocks,
   bindingPreamble,
@@ -249,6 +250,12 @@ export interface CompilePassesInput {
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
   const { productionId, scene, plan, model, world } = input;
+  const audioPlans = plan.mode === "per-shot" ? plan.shots.map(s => s.audioReferences) : plan.passReferences.map(p => p.audioReferences);
+  const audioProblems = audioPlans.flatMap(a => a?.problems ?? []);
+  if (audioProblems.length) throw new Error(audioProblems.join(" "));
+  if (input.chainWholeSceneFrames && plan.mode === "whole-scene" && audioPlans.slice(1).some(a => a?.references.length)) {
+    throw new Error("Chained frame routes cannot carry character audio references. Use independent referenced passes or explicitly disable audio references.");
+  }
   const styleSource = (overridden: boolean) =>
     overridden
       ? { version: world.artDirection.version, source: "generation", transport: "text" }
@@ -367,6 +374,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // below comes from the same bound records the preamble numbers, so the stated order
           // and the sent order are one structure rather than two that can drift (R-2, D2).
           prompt: composePrompt(entry.parts),
+          ...(entry.audioReferences && (entry.audioReferences.disabled || entry.audioReferences.references.length) ? { audioReferences: entry.audioReferences } : {}),
           artDirection: styleSource(entry.prompt.overridden),
           // A continued shot sends no images at all: the extend route declares one video field
           // and nothing else, so an empty list here is the accurate description of the request.
@@ -492,12 +500,13 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           }),
           // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
           // numbers its assets. Never both — the route carries one or the other.
-          preamble: chained ? START_FRAME_PREAMBLE : bindingPreamble(passReferencePlan.bound),
+          preamble: chained ? START_FRAME_PREAMBLE : [bindingPreamble(passReferencePlan.bound), passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"),
           body: passBody,
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
           // be the same request (R-9).
           negatives: passReferencePlan.negatives,
         }),
+        ...(passReferencePlan.audioReferences && (passReferencePlan.audioReferences.disabled || passReferencePlan.audioReferences.references.length) ? { audioReferences: passReferencePlan.audioReferences } : {}),
         artDirection: styleSource(false),
         references,
         durationSec: passSeconds,

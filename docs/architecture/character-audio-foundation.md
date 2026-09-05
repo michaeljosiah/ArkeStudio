@@ -108,3 +108,24 @@ samples. Ranged source audition and prepared audition share the existing single 
 This increment establishes the assignment precursor. Automatic scene transport belongs to #111;
 legacy missing-media messages, in-flight extraction cancellation, reference-aware staging collection
 and complete narrow-screen interaction verification remain part of the epic integration work.
+
+## Automatic scene reference transport (#111)
+
+`contracts/audio-reference.ts` owns route declarations, the source/intent matrix, authored speaker
+resolution and ordered frozen bindings. `planScene` and subject-bound Bench dispatch share it.
+The renderer offers a dispatch-scoped bypass, recomputes on model changes, and exposes refusal
+reasons. Bench reruns use the take's frozen audio plan. Empty/off metadata never reaches a provider.
+
+At plan/enqueue and again before physical submit, `audio/reference-inputs.ts` reads the frozen
+content-addressed files and current rights events. Reassignment cannot substitute audio in a queued
+job. FAL checks route, ordered count and full hashes again before building `audio_urls`; no bytes
+are journalled. It explicitly enables generated audio, while prompts preserve scene words and label
+voice guidance honestly. Whole-scene plans carrying voice audio retain independent reference routes;
+they do not chain through first-frame routes that cannot accept audio. Explicit shot frame and
+continuation modes surface incompatibility instead of dropping audio.
+
+The first shipped transport is the verified Seedance 2.0/2.0 Fast reference-to-video route, with
+three MP3/WAV inputs, 15 seconds combined, 15 MB per audio input and 12 combined references.
+Performance and master-slice intents are strictly distinguished by schema; their actual source
+resolution will be integrated with their owning issues (#113/#112/#256), never inferred from a
+character designation. Full epic interaction verification and those downstream consumers remain.

@@ -1,3 +1,4 @@
+import { readCharacterAudioInputs } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -1565,6 +1566,12 @@ export class Coordinator {
               } catch {
                 return false;
               }
+            },
+            readAudioReferences: async job => {
+              if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, store => readCharacterAudioInputs(store, job));
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== job.worldId) throw new Error("The owning world is unavailable.");
+              return readCharacterAudioInputs(store, job);
             },
             readImageReferences: async (worldId, paths) => {
               if (this.opts.provider.withWorldStore) {
@@ -3473,9 +3480,14 @@ export class Coordinator {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
       return { accepted: true };
     }
-    const outcome = await enqueueInputs(inputs, (input) =>
-      this.jobQueue!.enqueue(this.freezeLocalIdentity(input)),
-    );
+    const outcome = await enqueueInputs(inputs, async input => {
+      if (input.params.audioReferences !== undefined) {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== input.worldId) throw new Error("The owning world is unavailable.");
+        await readCharacterAudioInputs(store, input);
+      }
+      return this.jobQueue!.enqueue(this.freezeLocalIdentity(input));
+    });
     this.emitEnqueueResult(
       requestId,
       command,
@@ -7005,6 +7017,7 @@ export class Coordinator {
         // durable BEFORE any pass may reach a provider (SPEC-024 R-12).
         const scenePlan = planScene(
           {
+            audioReferencesDisabled: msg.audioReferencesDisabled,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -7532,6 +7545,7 @@ export class Coordinator {
         // Recompute the plan server-side — the request the dialog showed is the one executed.
         const plan = planScene(
           {
+            audioReferencesDisabled: msg.audioReferencesDisabled,
             world: bundle.meta,
             artDirection: bundle.artDirection,
             productionId: production.meta.id,
@@ -9125,8 +9139,9 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           return;
         }
-        const outcome = await enqueueInputs(plan.inputs, (input) => {
+        const outcome = await enqueueInputs(plan.inputs, async (input) => {
           if (!this.jobQueue) throw new Error("the job queue is unavailable");
+          if (input.params.audioReferences !== undefined) await readCharacterAudioInputs(store, input);
           return this.jobQueue.enqueue(this.freezeLocalIdentity(input));
         });
         // Jobs join their reserved takes in order: a failure keeps its number and says why.

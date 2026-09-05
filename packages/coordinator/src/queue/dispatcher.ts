@@ -72,6 +72,7 @@ export interface DispatchClient {
       signal?: AbortSignal;
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
+      audioReferences?: DispatchVoiceReference[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
       idempotencyKey?: string;
@@ -150,6 +151,7 @@ export interface JobQueueOptions {
    */
   landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
+  readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
   readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
@@ -252,7 +254,7 @@ const FOLLOW_ON_TARGETS = new Set([
 const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request"]);
 
 function providerParams(params: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key)));
+  return Object.fromEntries(Object.entries(params).filter(([key]) => !COORDINATOR_ONLY_PARAMS.has(key) && (key !== "audioReferences" || (Array.isArray((params.audioReferences as { references?: unknown })?.references) && ((params.audioReferences as { references: unknown[] }).references.length > 0)))));
 }
 
 /**
@@ -730,6 +732,7 @@ export class JobQueue {
     }
     if (!this.stillQueued(job)) return;
 
+    let audioReferences: DispatchVoiceReference[] | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
     let videoSource: DispatchVideoSource | undefined;
@@ -809,6 +812,17 @@ export class JobQueue {
     }
     if (!this.stillQueued(job)) return;
 
+    if (job.params.audioReferences !== undefined) {
+      try {
+        if (!this.opts.readAudioReferences) throw new Error("Audio reference transport is not configured.");
+        audioReferences = await this.opts.readAudioReferences(job);
+      } catch (error) {
+        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Audio references are not cleared for upload.");
+        return;
+      }
+      if (!this.stillQueued(job)) return;
+    }
+
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
@@ -838,6 +852,7 @@ export class JobQueue {
           signal: submitAbort.signal,
           params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
+          ...(audioReferences ? { audioReferences } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),

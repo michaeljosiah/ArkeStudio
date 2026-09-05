@@ -22,6 +22,8 @@ export interface SubmitRequest {
   params: Record<string, unknown>;
   /** Ephemeral verified bytes, resolved immediately before submission and never journalled. */
   imageReferences?: PreparedImageReference[];
+  /** Verified scene audio inputs, ordered by frozen @AudioN bindings. Never journal bytes. */
+  audioReferences?: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array }>;
   /**
    * The footage a continuation extends (SPEC-019 R-50), resolved immediately before submission
    * and never journalled.

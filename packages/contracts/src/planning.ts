@@ -1,3 +1,4 @@
+import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -1404,6 +1405,8 @@ export function skillFamilyMismatch(
 }
 
 export interface ScenePlanInput {
+  /** Explicit bypass applies only to this dispatch. */
+  audioReferencesDisabled?: boolean;
   world: WorldMeta;
   sheets: Sheet[];
   kits: ReferenceKit[];
@@ -1479,6 +1482,7 @@ export interface BoundaryFramePlan {
 }
 
 export interface ShotDispatchPlan {
+  audioReferences?: CharacterAudioPlan;
   shot: Shot;
   prompt: { text: string; overridden: boolean };
   references: AttachmentDecision[];
@@ -1515,6 +1519,7 @@ export interface ScenePlan {
   productionStyleOverride?: string;
   shots: ShotDispatchPlan[];
   passReferences: Array<{
+    audioReferences?: CharacterAudioPlan;
     passIndex: number;
     references: AttachmentDecision[];
     budget: BudgetResult;
@@ -2024,7 +2029,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     forceBreakBefore: boardBoundaries,
   });
 
-  const passReferences = pack.ok
+  const passReferences: ScenePlan["passReferences"] = pack.ok
     ? pack.passes.map((pass) => {
         const seen = new Map<string, ResolvedCast["cast"][number]>();
         for (const entry of pass.plan) {
@@ -2265,6 +2270,20 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         : { aspect: input.aspect, model: model.displayName, supported: verdict.supported };
     })(),
   };
+
+  for (const entry of shots) {
+    entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
+      imageCount: entry.bound.length, taskMode: entry.continuation ? "continue" : entry.frame ? "first-frame" : "generate",
+      disabled: input.audioReferencesDisabled });
+    const audioText = characterAudioInstructions(entry.audioReferences);
+    if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
+  }
+  for (const reference of passReferences) {
+    const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
+    const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
+    reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled });
+  }
 
   return {
     mode,

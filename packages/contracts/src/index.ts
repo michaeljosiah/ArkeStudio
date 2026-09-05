@@ -75,3 +75,5 @@ export * from "./harness-env.js";
 export * from "./audio.js";
 
 export * from "./voice-sample.js";
+
+export * from "./audio-reference.js";
