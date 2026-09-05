@@ -1,3 +1,4 @@
+import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -87,6 +88,7 @@ export const QueueCommandSchema = z.enum([
   "generate-character-sheet",
   "generate-character-voice-sample",
   "convert-performance",
+  "generate-performance",
   "generate-location-view",
   "generate-character-looks",
   "generate-missing-tiles",
@@ -525,8 +527,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       voices: z.array(VoiceCandidateSchema.extend({ usedBy: z.array(z.string()).default([]) }).strict()),
     })
     .strict(),
-  z.object({ ...base, type: z.literal("performance.result"), requestId: UlidSchema, worldId: UlidSchema,
-    productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
+  z.object({ ...base, type: z.literal("performance.result"), quote: PerformanceGenerationQuoteSchema.optional(), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, status: z.enum(["kept", "purged", "reviewed", "prepared", "queued", "refused"]), performance: PerformanceRecordSchema.optional(), reason: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("voice.sample-result"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, status: z.enum(["prepared", "assigned", "cleared", "withdrawn", "refused"]),
     review: VoiceSampleReviewSchema.optional(), reason: z.string().optional() }).strict(),

@@ -51,3 +51,12 @@ it("probes conversion independently and reports zero retention only for verified
     assert.equal(probes.find(p => p.capability === "voice-conversion")?.zeroRetention, tier === "enterprise");
   }
 });
+
+it("maps the explicit Eleven v3 app alias to its wire id for TTS", async () => {
+  const client = new ElevenLabsClient(async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.model_id, "eleven_v3"); assert.equal(body.text, "[whispers] Hello");
+    return new Response(new Uint8Array([73, 68, 51]));
+  });
+  await client.submit("key", { capability: "voice-tts", model: "eleven-v3", params: { voiceId: "voice_1", text: "[whispers] Hello" } });
+});

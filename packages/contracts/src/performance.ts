@@ -1,3 +1,4 @@
+import { CadencePlanSchema, CadenceMappingSchema } from "./cadence.js";
 import { z } from "zod";
 import { prefixedIdSchema, SlugSchema, SceneIdSchema, ShotIdSchema, IsoDateTimeSchema, JobIdSchema } from "./ids.js";
 import { AudioAssetProvenanceSchema, AudioTranscriptComparisonSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
@@ -12,20 +13,26 @@ export const PerformanceTargetSchema = z.object({
 }).strict();
 export const PerformanceRecordBaseSchema = z.object({
   id: PerformanceIdSchema, target: PerformanceTargetSchema,
-  file: z.string().regex(/^sha256-[a-f0-9]{64}\.wav$/), provenance: AudioAssetProvenanceSchema,
+  file: z.string().regex(/^sha256-[a-f0-9]{64}\.(wav|mp3)$/), provenance: AudioAssetProvenanceSchema,
   createdAt: IsoDateTimeSchema,
-  captureAcknowledgement: z.object({ basis: z.enum(["self", "authorized", "licensed"]), statementVersion: z.literal(1), at: IsoDateTimeSchema }).strict(),
+  captureAcknowledgement: z.object({ basis: z.enum(["self", "authorized", "licensed"]), statementVersion: z.literal(1), at: IsoDateTimeSchema }).strict().optional(),
   transcript: AudioTranscriptComparisonSchema.optional(), wordingConfirmedAt: IsoDateTimeSchema.optional(),
 }).strict();
-export const ScratchPerformanceSchema = PerformanceRecordBaseSchema.extend({ kind: z.literal("scratch"), recordedAt: IsoDateTimeSchema }).strict();
+export const ScratchPerformanceSchema = PerformanceRecordBaseSchema.extend({ captureAcknowledgement: PerformanceRecordBaseSchema.shape.captureAcknowledgement.unwrap(), kind: z.literal("scratch"), recordedAt: IsoDateTimeSchema }).strict();
 export const SpeechToSpeechPerformanceSchema = PerformanceRecordBaseSchema.extend({
+  captureAcknowledgement: PerformanceRecordBaseSchema.shape.captureAcknowledgement.unwrap(),
   kind: z.literal("speech-to-speech"), sourcePerformanceId: PerformanceIdSchema, sourcePerformanceHash: FullSha256Schema,
   jobId: JobIdSchema, voiceAssignment: VoiceAssignmentSchema,
   conversion: z.object({ provider: z.literal("elevenlabs"), model: z.string().min(1),
     retention: z.enum(["provider-history", "zero-retention"]), preservesTiming: z.boolean(), preservesProsody: z.boolean() }).strict(),
   cost: TakeCostSchema,
 }).strict();
-export const PerformanceRecordSchema = z.discriminatedUnion("kind", [ScratchPerformanceSchema, SpeechToSpeechPerformanceSchema]);
+export const GeneratedTtsPerformanceSchema = PerformanceRecordBaseSchema.omit({ captureAcknowledgement: true }).extend({
+  kind: z.literal("generated-tts"), operationId: z.string().uuid(), authoredText: z.string().min(1), voiceAssignment: VoiceAssignmentSchema,
+  cadencePlan: CadencePlanSchema, cadencePlanHash: FullSha256Schema, mapping: CadenceMappingSchema,
+  cost: TakeCostSchema, jobId: JobIdSchema.optional(),
+}).strict();
+export const PerformanceRecordSchema = z.discriminatedUnion("kind", [ScratchPerformanceSchema, SpeechToSpeechPerformanceSchema, GeneratedTtsPerformanceSchema]);
 export type PerformanceRecord = z.infer<typeof PerformanceRecordSchema>;
 export type PerformanceTarget = z.infer<typeof PerformanceTargetSchema>;
 
@@ -81,3 +88,11 @@ export function emptyPerformanceReviewState(): z.infer<typeof PerformanceReviewS
   return { reviews: [], selections: {}, reviewHash: null, selectionHash: null };
 }
 export type PerformanceReviewState = z.infer<typeof PerformanceReviewStateSchema>;
+
+export const PerformanceGenerationQuoteSchema = z.object({
+  operationId: z.string().uuid(), target: PerformanceTargetSchema, authoredText: z.string().min(1),
+  voiceAssignment: VoiceAssignmentSchema, cadencePlan: CadencePlanSchema, cadencePlanHash: FullSha256Schema,
+  mapping: CadenceMappingSchema, modelHash: FullSha256Schema, estimatedMicroUsd: z.number().int().nonnegative(),
+  local: z.boolean(), createdAt: IsoDateTimeSchema,
+}).strict();
+export type PerformanceGenerationQuote = z.infer<typeof PerformanceGenerationQuoteSchema>;

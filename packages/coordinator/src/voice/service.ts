@@ -48,7 +48,7 @@ export interface SidecarLike {
    */
   health(): Promise<{ engineStatus: { kokoro: { ready: boolean; reason?: string } } } | null>;
   listVoices(): Promise<Array<{ id: string; label: string; attributes: string[] }>>;
-  synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }): Promise<Uint8Array>;
+  synthesize(input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }): Promise<Uint8Array>;
   transcribe(audio: Uint8Array, contentType: string): Promise<string>;
 }
 
@@ -457,6 +457,20 @@ export class VoiceService {
       await atomicWriteFile(abs, audio);
     });
     return { file: rel, cached: false };
+  }
+
+  /** A deliberate performance is always a fresh synthesis; preview caches are not take authority. */
+  async synthesizePerformance(voiceId: string, text: string, params: Record<string, number>, signal: AbortSignal): Promise<Uint8Array> {
+    if (!this.deps.sidecar) throw new Error("Local synthesis is unavailable.");
+    const rendered: Uint8Array[] = [];
+    for (const chunk of splitForSpeech(normalizeSpeechText(text))) {
+      if (signal.aborted) throw new Error("Performance generation cancelled.");
+      const bytes = await this.deps.sidecar.synthesize({ voiceId, text: chunk, params }, { signal });
+      if (!cachedVoiceAudioLooksRight(bytes, "wav")) throw new Error("Local synthesis returned invalid audio.");
+      rendered.push(bytes);
+    }
+    if (!rendered.length) throw new Error("This line has no spoken text.");
+    return concatWav(rendered);
   }
 
   async localPreview(store: WorldStore, _sheet: Sheet, voiceId: string, line: PreviewLine): Promise<string> {

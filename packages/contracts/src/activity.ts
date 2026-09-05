@@ -415,6 +415,11 @@ export function jobOrigin(job: Job): JobOrigin | null {
       where: "the scene workspace",
     };
   }
+  if (job.productionId && ["performance-conversion", "performance-generation"].includes(job.target.kind)) {
+    const input = (job.params.performanceConversion ?? job.params.performanceGeneration) as { target?: { sceneId?: string } } | undefined;
+    if (input?.target?.sceneId) return { path: `/w/${job.worldId}/p/${job.productionId}/scenes/${input.target.sceneId}`,
+      label: "Performance", where: "the scene's performance panel" };
+  }
   // Shots, scene passes, storyboards and lines are the production's. A line is the exception
   // among them: it has its own dialog, and the shot dispatch dialog carries no dialogue or
   // delivery controls, so sending a failed line there would be the same dead end again.

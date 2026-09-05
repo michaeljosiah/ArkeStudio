@@ -1,3 +1,4 @@
+import { PerformanceGenerationPanel } from "./performance-generation-panel.js";
 import { useEffect, useRef, useState } from "react";
 import { resolvePerformanceLine, performanceLineKey, orderedShots, estimateMicroUsd, formatMicroUsd, ulid, type PerformanceRecord, type VoiceAssignment, type WorldBundle, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { playClip, dismissPlayback, playbackSnapshot } from "../lib/audio.js";
@@ -77,6 +78,8 @@ export function PerformancePanel({ world, production, scene, shotId }: {
     {blocks.length > 1 && <label>Authored line <select disabled={busy} value={blockId ?? ""} onChange={e => { discard(); setBlockId(e.target.value || undefined); }}>
       <option value="">Choose one dialogue block…</option>{blocks.map(b => <option key={b.id} value={b.id}>{b.speaker ?? "Unnamed speaker"}: {b.text}</option>)}</select></label>}
     {line.ok ? <><p>{sheet?.name ?? line.speakerSheetId} · {sheet?.voice ? `TTS assignment: ${sheet.voice.label ?? sheet.voice.voiceId}` : "No TTS assignment"}</p><blockquote>{line.text}</blockquote></> : <p>{line.reason}</p>}
+    {line.ok && sheet && <PerformanceGenerationPanel key={`${scene.id}/${shotId}/${line.blockId ?? "legacy"}`} worldId={world.meta.worldId}
+      production={production} scene={scene} shotId={shotId} blockId={line.blockId} text={line.text} sheet={sheet} />}
     <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
       <Button disabled={busy || !line.ok} onClick={() => { void start(); }}>Start recording</Button>
       <Button disabled={phase !== "recording"} onClick={() => { setPhase("stopping"); recorder.current?.stop(); }}>Stop recording</Button>
@@ -110,6 +113,8 @@ export function PerformancePanel({ world, production, scene, shotId }: {
     {records.map(record => <div key={record.id} style={{ marginTop: 12 }}><Button onClick={() => { void playClip({ id: record.id,
       url: mediaUrl(world.meta.slug, `productions/${production.meta.id}/performances/${record.id}/${record.file}`), title: `${sheet?.name ?? "Performance"} · ${record.kind}` }); }}>Hear {record.kind}</Button>
       <p>{record.provenance.outputTechnical.durationSec?.toFixed(2)} seconds · {record.transcript?.status === "compared" ? `Transcript ${record.transcript.result}` : "Transcription unavailable"}</p>
+      {record.kind === "generated-tts" && <details><summary>Frozen TTS performance</summary><blockquote>{record.authoredText}</blockquote><p>{record.voiceAssignment.label ?? record.voiceAssignment.voiceId} · {record.mapping.model} · {record.cadencePlan.delivery} · {formatMicroUsd(record.cost.estimatedMicroUsd)}</p></details>}
+      {record.kind !== "scratch" && (record.voiceAssignment.voiceId !== sheet?.voice?.voiceId || record.voiceAssignment.provider !== sheet?.voice?.provider || record.voiceAssignment.assignedAtVersion !== sheet?.voice?.assignedAtVersion) && <p>Made with an earlier voice assignment. It remains playable; current selection is refused.</p>}
       {record.transcript?.status === "compared" && record.transcript.differences.map((d, i) => <p key={i}>{d.kind}: “{d.authored}” → “{d.observed}”</p>)}
       <p>{production.performanceReview.reviews.filter(r => r.performanceId === record.id).at(-1)?.decision ?? "Unreviewed"}{production.performanceReview.selections[performanceLineKey(record.target)]?.performanceId === record.id ? " · Selected for this line" : ""}{record.target.sceneVersion !== scene.version ? " · Earlier scene version" : ""}</p>
       {[0, 1].map(index => <Button key={index} variant="ghost" onClick={() => setPins(current => current.map((value, i) => i === index ? record.id : value))}>Pin {index === 0 ? "A" : "B"}</Button>)}

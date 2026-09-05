@@ -1,3 +1,5 @@
+import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
+  finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
 import { reviewPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
@@ -1438,6 +1440,7 @@ export class Coordinator {
   private readonly jobQueue: JobQueue | null;
   /** SPEC-011: catalogue, matching, previews and dictation. Null without voice wiring. */
   private readonly voiceService: VoiceService | null;
+  private readonly performanceGenerations = new Map<string, AbortController>();
   /** SPEC-013: exports in flight, cancellable by id (R-21). */
   private readonly exports = new Map<string, ExportHandle>();
   /** Safe read projections for the target-read surface; output paths remain world-relative. */
@@ -2921,6 +2924,12 @@ export class Coordinator {
       return;
     }
     const finalize = async (store: WorldStore) => {
+      if (job.target.kind === "performance-generation") {
+        const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
+        await finalizePerformanceGenerationJob(store, this.opts.audioMediaTools, job, { estimatedMicroUsd: job.estimatedMicroUsd,
+          actualMicroUsd: entry?.actualMicroUsd ?? null, ...(entry?.actualSource ? { actualSource: entry.actualSource } : {}) });
+        return;
+      }
       if (job.target.kind === "performance-conversion") {
         if (!this.opts.audioMediaTools) throw new Error("Audio preparation is required to finalize this performance.");
         const entry = this.ledger ? (await this.ledger.readAll()).find(e => e.jobId === job.id) : undefined;
@@ -11687,6 +11696,58 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "prepare-performance-generation": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
+          if (!store || store.worldId !== msg.worldId || !model) throw new Error("Open this world and choose a TTS model.");
+          const quote = await preparePerformanceGeneration(store, model, msg);
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "prepared", quote });
+        } catch {
+          this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+            productionId: msg.productionId, status: "refused", reason: "Cannot prepare this performance. Check the current line, voice, model and every cadence control." });
+        }
+        return;
+      }
+      case "cancel-performance-generation": {
+        this.performanceGenerations.get(`${msg.worldId}/${msg.operationId}`)?.abort();
+        for (const job of this.jobQueue?.listJobs() ?? []) {
+          if (job.worldId === msg.worldId && (job.params.performanceGeneration as { operationId?: string } | undefined)?.operationId === msg.operationId) await this.jobQueue?.cancel(job.id);
+        }
+        return;
+      }
+      case "generate-performance": {
+        const store = this.opts.provider.openStore?.();
+        const operationKey = `${msg.worldId}/${msg.operationId}`;
+        if (this.performanceGenerations.has(operationKey)) return;
+        const controller = new AbortController(); this.performanceGenerations.set(operationKey, controller);
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open this performance world first.");
+          const quote = await readPerformanceGenerationQuote(store, msg.operationId);
+          const model = this.opts.manifest?.models.find(m => m.id === quote.mapping.model);
+          if (!model) throw new Error("The quoted model is unavailable.");
+          validatePerformanceGeneration(store, model, quote, msg.confirmedMicroUsd);
+          if (quote.local) {
+            if (!this.voiceService) throw new Error("Local synthesis is unavailable.");
+            const signal = AbortSignal.any([controller.signal, store.closingSignal]);
+            const performanceId = `pf_${msg.requestId}`;
+            const existing = store.getBundle().productions.find(p => p.meta.id === quote.target.productionId)?.performances.find(p => p.id === performanceId);
+            if (existing && (existing.kind !== "generated-tts" || existing.operationId !== quote.operationId)) throw new Error("Performance request identity changed.");
+            const performance = existing ?? await finalizeGeneratedPerformance(store, this.opts.audioMediaTools, quote, performanceId,
+              await this.voiceService.synthesizePerformance(quote.voiceAssignment.voiceId, quote.mapping.providerText, quote.mapping.voiceSettings, signal),
+              "wav", { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "local-zero" }, undefined, signal);
+            await this.refreshWorldSnapshot(msg.worldId);
+            this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
+              productionId: quote.target.productionId, status: "kept", performance, reason: "New local TTS performance ready for review." });
+          } else {
+            if (controller.signal.aborted) throw new Error("Performance generation cancelled.");
+            await this.enqueueBatch(msg.requestId, msg.kind, [performanceGenerationJob(store, quote, msg.requestId)]);
+          }
+        } catch { this.rejectEnqueue(msg.requestId, msg.kind, "Performance generation did not complete. Check the quote, current line and voice, engine readiness and cancellation. Existing and paid outputs are retained."); }
+        finally { this.performanceGenerations.delete(operationKey); }
+        return;
+      }
       case "review-performance": {
         const store = this.opts.provider.openStore?.();
         try {
@@ -14026,6 +14087,7 @@ export class Coordinator {
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    for (const controller of this.performanceGenerations.values()) controller.abort();
     // Close both doors synchronously. Handlers already past the transport remain tracked below,
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();

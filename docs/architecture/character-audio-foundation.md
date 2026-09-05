@@ -188,3 +188,27 @@ World-store tests cover atomic selection, idempotent review, stale file refusal,
 selection, restart reads and purge blockers. Cadence tests cover exact Unicode addressing and honest
 unsupported mappings. TTS generation/finalization and its full client cadence editor are the next
 slice; the new mapper alone does not claim that workflow is complete.
+
+
+### TTS generation integration
+
+The cadence panel prepares a server-owned quote under `.staging/performances/<operationId>/quote.json`.
+It freezes authoritative text/target, current voice assignment, normalized cadence hash, provider
+mapping and exact character price. Confirm revalidates the target, assignment, model and price.
+Local synthesis is uncached and cancellable through Voxa; deliberate retakes never collapse into a
+preview cache. Cloud generation uses the durable queue with `performance-generation` finalization
+and the job-derived performance ID. Both paths create an immutable `generated-tts` record, initially
+unreviewed. Generated records carry no fabricated capture-rights acknowledgement.
+
+The shared QC module now has an explicit unavailable report for verified encoded output. Optional
+decoder failure preserves the paid WAV/MP3, marks duration and measurements unknown, and refuses
+future reference clearance until usable preparation exists. Canonical decoded output still follows
+#117's preparation/acceptance path. Source and derivative hashes, frozen cadence/provider text,
+voice assignment and cost stay with the performance. Performance job errors link to the scene.
+
+Generation tests cover quote character cost, stale confirmation, exact output retention with unknown
+duration, finalization replay/reopen, no automatic review/picture changes, fresh local retakes,
+forwarded pace and cancellation. The alias regression test verifies `eleven-v3` sends `eleven_v3`.
+The full epic validation pass still needs recorder/cadence interactions, narrow-window inspection,
+real packaged local pace verification, conversion queue recovery, and reference transport of the
+accepted performance variants.

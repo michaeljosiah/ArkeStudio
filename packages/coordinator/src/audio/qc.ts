@@ -87,3 +87,14 @@ export function analyzePcmWav(bytes: Uint8Array, analyzedAt = new Date().toISOSt
       multipleSpeakers: unavailable, transcriptMatch: check("not-applicable", "separate-text-comparison") },
   });
 }
+
+/** Preserve verified encoded output when optional decoding is unavailable; no measurement is invented. */
+export function unavailableAudioReport(bytes: Uint8Array, technical: AudioTechnical, analyzedAt = new Date().toISOString()): AudioQcReport {
+  const unavailable = { outcome: "unavailable", code: "decoder-unavailable" };
+  return AudioQcReportSchema.parse({ schemaVersion: 1, sourceHash: audioHash(bytes),
+    analyzer: { id: "arke-pcm-qc", version: AUDIO_ANALYZER_VERSION, policyVersion: AUDIO_POLICY_VERSION }, analyzedAt, technical,
+    measurements: { samplePeakDbfs: null, rmsDbfs: null, fullScaleSampleCount: null, leadingSilenceSec: null,
+      trailingSilenceSec: null, longestInternalSilenceSec: null, dcOffset: null },
+    checks: Object.fromEntries(["decode", "duration", "technicalFormat", "clipping", "silence", "dcOffset", "truePeak", "lufs",
+      "noiseFloor", "snr", "speechPresence", "musicLikelihood", "multipleSpeakers", "transcriptMatch"].map(key => [key, unavailable])) });
+}

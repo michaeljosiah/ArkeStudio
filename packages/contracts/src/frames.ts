@@ -1,3 +1,4 @@
+import { CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
@@ -1315,6 +1316,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
     confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
     warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  z.object({ kind: z.literal("prepare-performance-generation"), requestId: UlidSchema, worldId: UlidSchema,
+    productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
+    expectedSceneVersion: z.number().int().positive(), expectedVoiceId: z.string().min(1), modelId: z.string().min(1), cadencePlan: CadencePlanSchema }).strict(),
+  z.object({ kind: z.literal("generate-performance"), requestId: UlidSchema, worldId: UlidSchema,
+    operationId: z.string().uuid(), confirmedMicroUsd: z.number().int().nonnegative() }).strict(),
+  z.object({ kind: z.literal("cancel-performance-generation"), worldId: UlidSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
     expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),

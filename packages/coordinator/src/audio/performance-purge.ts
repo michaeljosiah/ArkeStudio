@@ -42,6 +42,7 @@ export async function purgePerformance(store: WorldStore, productionId: string, 
     if (events.some(p => p.performanceId === id)) return;
     const production = store.getBundle().productions.find(p => p.meta.id === productionId);
     if (!production) throw new Error("This production is unavailable.");
+    if (store.getBundle().problems.some(problem => problem.path.startsWith(`productions/${productionId}/performance`))) throw new Error("Repair performance metadata before purging.");
     const { performances, ...authorities } = production;
     const references = [authorities, ...performances.filter(p => p.id !== id), ...jobs.filter(j => j.worldId === store.worldId)];
     if (references.some(value => JSON.stringify(value).includes(id))) throw new Error("This performance is referenced by a performance, selection, review, designation or job. Remove its dependencies first.");
@@ -90,7 +91,8 @@ export async function recoverPerformanceStorage(dir: string) {
       if (await lstat(await audioWorldPath(dir, `${prefix}/performance.json`, true)).catch(() => null)) continue;
       // Conversion input/landing must survive until the durable queue replays finalization.
       const source = await readFile(await audioWorldPath(dir, `${prefix}/source.json`, true), "utf8").catch(() => null);
-      if (!source || !(JSON.parse(source) as { target?: unknown }).target) continue;
+      const metadata = source ? JSON.parse(source) as { target?: unknown; operationId?: string; jobId?: string } : null;
+      if (!metadata || metadata.jobId || (!metadata.target && !metadata.operationId)) continue;
       await rm(path, { recursive: true, force: true });
     }
   }

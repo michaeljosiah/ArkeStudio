@@ -536,7 +536,7 @@ export class JobQueue {
     this.requireAccepting();
     const now = this.clock();
     const job: Job = {
-      id: `jb_${input.target.kind === "performance-conversion" ? UlidSchema.parse(input.idempotencyKey) : ulid()}`,
+      id: `jb_${["performance-conversion", "performance-generation"].includes(input.target.kind) ? UlidSchema.parse(input.idempotencyKey) : ulid()}`,
       idempotencyKey: input.idempotencyKey ?? ulid(), // persisted before submission (R-2)
       worldId: input.worldId,
       ...(input.productionId !== undefined ? { productionId: input.productionId } : {}),

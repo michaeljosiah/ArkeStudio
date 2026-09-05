@@ -71,6 +71,7 @@ export const REFERENCE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
  */
 export const REPLAYABLE_FINALIZATION_TARGETS: ReadonlySet<string> = new Set([
   "performance-conversion",
+  "performance-generation",
   ...REFERENCE_FINALIZATION_TARGETS,
   "voice-line",
   "voice-preview",

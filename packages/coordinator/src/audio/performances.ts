@@ -136,6 +136,7 @@ export async function readPerformanceConversionInputs(store: WorldStore, job: Pi
   if (job.capability !== "voice-conversion" || job.provider !== "elevenlabs" || job.model !== "eleven_multilingual_sts_v2" ||
     job.productionId !== input.target.productionId || job.params.voiceId !== input.voiceAssignment.voiceId || job.params.retention !== input.retention) throw new Error("Conversion route or target changed.");
   const source = await readPerformance(store, input.target.productionId, input.sourcePerformanceId);
+  if (source.kind !== "scratch" || source.provenance.outputHash !== input.sourceHash) throw new Error("Conversion source identity changed.");
   if (source.provenance.outputHash !== input.sourceHash || JSON.stringify(source.target) !== JSON.stringify(input.target) || !currentPerformanceTarget(store, input.target)) throw new Error("The performance target is stale.");
   const bytes = await readAudioBytes(await audioWorldPath(store.dir,
     `productions/${input.target.productionId}/performances/${source.id}/${source.file}`), store.closingSignal);
@@ -159,6 +160,7 @@ export async function finalizePerformanceConversion(store: WorldStore, tools: Au
     return;
   }
   const source = await readPerformance(store, input.target.productionId, input.sourcePerformanceId);
+  if (source.kind !== "scratch" || source.provenance.outputHash !== input.sourceHash) throw new Error("Conversion source identity changed.");
   const landed = job.landedFiles?.[0]; if (!landed) throw new Error("Conversion audio has not landed.");
   const bytes = await readAudioBytes(await audioWorldPath(store.dir, landed), store.closingSignal);
   await store.ownedWrite(async () => {
