@@ -1,3 +1,4 @@
+import { ProposalManager } from "../../src/gate/proposals.js";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -45,5 +46,7 @@ it("freezes pass assessments, gates independent feedback on immutable evidence, 
   const proposal = await proposeShotVisualFacts(store, { kind: "propose-shot-visual-facts", worldId: store.worldId, requestId: ulid(), productionId: production.meta.id,
     sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, visualFacts: { onScreenCharacters: [], composition: "wide", confirmedAt: store.now() } });
   assert.ok(proposal.id);
+  const projected = await new ProposalManager(store).project(proposal.id);
+  assert.ok(projected.review.targets.some(target => target.fields.some(field => field.field.includes("Authored visual facts"))), "proposal review exposes the exact authored facts");
   assert.deepEqual(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.scenes, before.scenes, "fact proposal leaves authored state unchanged until accepted");
 });

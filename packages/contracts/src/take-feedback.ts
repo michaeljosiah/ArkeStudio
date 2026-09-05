@@ -42,7 +42,7 @@ export function allowedDialogueFeedback(take: Take, shotId: string): TakeDialogu
   if (assessment.facts.speakerId) tags.push("wrong-speaker-mouth");
   if ((assessment.facts.authoredNonSpeakerPresentedFaceCount ?? 0) > 0) tags.push("listener-face-distorted");
   if (assessment.facts.audioIntent !== "none" && take.params.audioReferences) tags.push("audio-ignored");
-  if (assessment.facts.frameMode === "exact-start-frame" && take.params.startFrame && take.params.frameArtifact) tags.push("start-frame-not-respected");
+  if (assessment.facts.frameMode === "exact-start-frame" && take.startFrame && take.params.frameArtifact) tags.push("start-frame-not-respected");
   if (assessment.recommendations.some(r => r.guidance.claims?.includes("cadence"))) tags.push("cadence-changed");
   return tags;
 }

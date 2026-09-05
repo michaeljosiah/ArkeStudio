@@ -86,7 +86,7 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       const fields = new Map<string, string>([["Scene JSON", JSON.stringify(scene, null, 2)]]);
       for (const shot of orderedShots(scene)) {
         if (shot.visualFacts) fields.set(`Shot ${shot.id} · Authored visual facts`, JSON.stringify(shot.visualFacts, null, 2));
-        if (shot.promptOverride !== undefined) fields.set(`Shot ${shot.id} · Prompt override`, shot.promptOverride);
+        if (shot.promptOverride !== undefined) fields.set(`Shot ${shot.id} · Prompt override`, shot.promptOverride.text);
       }
       return { label: scene.title, kind: `scene · v${scene.version}`, fields };
     } catch { return null; }
