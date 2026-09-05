@@ -12,6 +12,7 @@ export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";
 export * from "./reference.js";
+export * from "./prop.js";
 export * from "./proposal.js";
 export * from "./job.js";
 export * from "./frame-run.js";

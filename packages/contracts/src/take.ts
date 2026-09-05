@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PropStateProvenanceSchema } from "./prop.js";
 import {
   IsoDateTimeSchema,
   JobIdSchema,
@@ -69,6 +70,12 @@ export const ProvenanceSchema = z
      * enqueue, never looked up at arrival.
      */
     recipeVersion: z.number().int().min(1).optional(),
+    /**
+     * The prop states this take dispatched with (design turn 105; issue 534) — one entry per prop
+     * the shot cited, each explicit about what resolved and what did not. Absent for every take
+     * made before props existed and for any shot that cites none.
+     */
+    propStates: z.array(PropStateProvenanceSchema).optional(),
   })
   .strict();
 export type Provenance = z.infer<typeof ProvenanceSchema>;
