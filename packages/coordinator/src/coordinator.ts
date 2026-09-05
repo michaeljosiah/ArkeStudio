@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
@@ -569,6 +570,8 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
+  transportAuth?: import("./transport.js").TransportAuth;
   provider: WorldProvider;
   observeEvent?: (event: DomainEvent) => void;
   adapter: HarnessAdapter | null;
@@ -840,6 +843,7 @@ export class Coordinator {
   private readonly readModel: ReadModel;
   private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
   private readonly transport: Transport;
+  private readonly transportAuth: import("./transport.js").TransportAuth;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
@@ -1640,7 +1644,10 @@ export class Coordinator {
           emit: (event) => this.emit(event),
         })
       : null;
+    this.transportAuth = opts.transportAuth ?? { token: randomBytes(32).toString("hex"), allowedOrigins: [] };
+    this.secrets.register(this.transportAuth.token);
     this.transport = new Transport({
+      auth: this.transportAuth,
       getSnapshot: () => this.getState(),
       getInitialEvents: () => {
         const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
@@ -2121,7 +2128,7 @@ export class Coordinator {
     });
   }
 
-  async start(port = 0): Promise<{ port: number }> {
+  async start(port = 0): Promise<{ port: number; token: string }> {
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
@@ -2342,7 +2349,7 @@ export class Coordinator {
       })();
     }
 
-    return { port: boundPort };
+    return { port: boundPort, token: this.transportAuth.token };
   }
 
   async openWorld(worldId: string): Promise<void> {

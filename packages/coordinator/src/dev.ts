@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { cp, mkdir, readdir, rm } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentForPurpose, skillFor, ROSTER } from "@arke-studio/contracts";
@@ -121,7 +122,12 @@ const providerCalls = new ProviderCallStore(join(devRoot, "provider-calls", "cal
 // depend on what happens to be installed. Every Higgsfield call then fails with the remedy.
 const providerClients = createProviderClients({ fetch: (url, init) => fetch(url, init), capture: providerCalls });
 
+const transportToken = randomBytes(32).toString("hex");
+const devOrigins = process.env["ARKE_DEV_ORIGIN"]
+  ? [new URL(process.env["ARKE_DEV_ORIGIN"]).origin]
+  : ["http://localhost:5173", "http://127.0.0.1:5173"];
 const coordinator = new Coordinator({
+  transportAuth: { token: transportToken, allowedOrigins: devOrigins },
   provider,
   adapter,
   cipher: devCipher(),
@@ -177,6 +183,11 @@ const coordinator = new Coordinator({
 coordinator.superviseAs("harness", opencodeSupervisor);
 
 const { port } = await coordinator.start(DEV_PORT);
+// Browser development has no isolated preload. Vite reads this gitignored launch record
+// to print a private sign-in link in the terminal; the packaged renderer never uses this handoff or sees a token.
+const sessionDir = join(repoRoot, ".dev");
+await mkdir(sessionDir, { recursive: true });
+await writeFile(join(sessionDir, "transport-" + port + ".json"), JSON.stringify({ port, token: transportToken }), { mode: 0o600 });
 console.log(`[arke-studio] dev coordinator on ws://127.0.0.1:${port} (root: ${devRoot})`);
 // Said out loud, because the packaged app behaves differently here and a key that vanished
 // without explanation is the failure this whole seam exists to prevent.

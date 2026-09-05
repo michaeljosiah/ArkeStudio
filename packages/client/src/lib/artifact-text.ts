@@ -62,7 +62,7 @@ export function useArtifactText(
     setState({ status: "loading" });
     void (async () => {
       try {
-        const response = await fetch(`${mediaUrl(worldSlug, path)}?attempt=${attempt}`, {
+        const response = await fetch(mediaUrl(worldSlug, path, { attempt: String(attempt) }), {
           signal: abort.signal,
         });
         if (!response.ok) {

@@ -1,3 +1,4 @@
+import { devSessionPlugin } from "./dev-session-plugin.js";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -11,7 +12,7 @@ const port = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 5173;
 export default defineConfig({
   // Relative base so the same bundle loads from Vite, file:// and the packaged app.
   base: "./",
-  plugins: [react()],
+  plugins: [react(), devSessionPlugin()],
   server: {
     port,
     strictPort: true,

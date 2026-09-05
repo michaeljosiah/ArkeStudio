@@ -73,6 +73,44 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
+## The coordinator session is authenticated (issue #825)
+
+Loopback is an address, not authorization. `Transport` requires a fresh 32-byte capability for
+WebSocket hello and every media GET. Missing or wrong credentials close the socket before any
+snapshot or command, or return HTTP 401. Refusals are logged without credentials. There is no
+unauthenticated fallback, including when constructing a Coordinator without explicit transport
+options: `start()` returns its generated token alongside the port for trusted host/test callers.
+
+- **Desktop:** main mints the capability and sends it over private startup IPC. Preload adds it
+  to hello and exposes only sanitized startup state. Main attaches media authorization headers
+  only for the current window and coordinator endpoint. Never expose the token through the
+  public bridge, renderer URLs, process arguments, snapshots or logs. Keep header removal on
+  redirects to other endpoints.
+- **Origins:** Electron's file page sends `file://` on WebSocket handshakes and `null` on media
+  fetches. Both are explicitly allowed and both still require the token. Development windows
+  use their configured HTTP origin. Do not restore wildcard CORS or mistake an Origin check
+  for authentication.
+- **Browser development:** start `dev:coordinator`, then `dev`, and open Vite's **Arke session**
+  terminal link. The URL fragment supplies the capability; the browser removes it from the
+  address bar and stores it for that tab/endpoint. Media uses a query credential in this mode
+  because there is no isolated preload. Restart Vite for a fresh link after a coordinator
+  restart. Custom ports/origins are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+- **The dev handoff is private:** `.dev/transport-<port>.json` must remain gitignored and denied
+  by Vite's filesystem-serving rules, including `/@fs` and raw/import requests. Never put the
+  token in public HTML, a bootstrap endpoint or a build-time `VITE_*` variable. A public token
+  handoff would recreate the unauthenticated service this fix removes.
+
+For transport changes, preserve snapshot/reconnect sequencing and authenticated media ranges.
+The relevant regressions are coordinator `test/transport.test.ts`, desktop
+`test/transport-auth.test.ts` and `test/preload-auth.test.ts`, and client
+`test/dev-session.test.ts` and `test/dev-session-server.test.ts`. Run client tests from
+`packages/client`. Check an actual sandboxed Electron **file page**, not only a data URL or a
+mock: the differing origins were caught by that smoke check. Typecheck after test edits.
+
+Implementation entry points: coordinator `src/transport.ts`; desktop `src/transport-auth.ts`,
+`src/main.ts` and `src/preload.ts`; client `dev-session-plugin.ts` and `src/lib/dev-session.ts`.
+The product-level explanation is in [the architecture guide](docs/architecture/the-program.html).
+
 ## Pull requests
 
 Branch, push, raise the PR, then comment `@codex review` on it. Fix every P1 and re-request until a

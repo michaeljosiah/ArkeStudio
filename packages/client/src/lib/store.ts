@@ -1,3 +1,4 @@
+import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
@@ -1474,7 +1475,10 @@ function devBridge(url: string): ArkeBridge {
       });
     },
     send(json) {
-      if (socket?.readyState === WebSocket.OPEN) socket.send(json);
+      if (socket?.readyState === WebSocket.OPEN) {
+        const message = JSON.parse(json) as { kind?: string };
+        socket.send(message.kind === "hello" ? JSON.stringify({ ...message, token: devSession()?.token }) : json);
+      }
     },
     subscribe(frameCb, statusCb) {
       onFrame = frameCb;

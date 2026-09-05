@@ -61,7 +61,7 @@ export type Frame = z.infer<typeof FrameSchema>;
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional() }).strict(),
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z

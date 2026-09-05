@@ -112,7 +112,7 @@ function ArtifactPanel({
    * by it so the element that failed is replaced rather than re-pointed.
    */
   const [attempt, setAttempt] = useState(0);
-  const src = worldSlug ? `${mediaUrl(worldSlug, path)}?attempt=${attempt}` : "";
+  const src = worldSlug ? mediaUrl(worldSlug, path, { attempt: String(attempt) }) : "";
   const retry = () => setAttempt((n) => n + 1);
 
   const extension = name.includes(".") ? name.split(".").pop() : null;
