@@ -161,13 +161,13 @@ describe("a proposal being written into, seen from a client that reloaded (issue
       appVersion: "test",
       manifest: SHIPPED_MANIFEST,
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const drafter = new TestClient(port);
     let reloaded: TestClient | null = null;
     let proposalId: string | null = null;
     await drafter.open();
     try {
-      drafter.send({ kind: "hello", lastSeq: 0 });
+      drafter.send({ kind: "hello", token, lastSeq: 0 });
       await drafter.until((f) => f.kind === "snapshot", "the opening snapshot");
       drafter.send({
         kind: "draft-with-studio",
@@ -190,7 +190,7 @@ describe("a proposal being written into, seen from a client that reloaded (issue
       // authoring event at all. Everything it knows arrives in the snapshot.
       reloaded = new TestClient(port);
       await reloaded.open();
-      reloaded.send({ kind: "hello", lastSeq: 0 });
+      reloaded.send({ kind: "hello", token, lastSeq: 0 });
       await reloaded.until((f) => f.kind === "snapshot", "the reloaded client's snapshot");
       assert.deepEqual(
         reloaded.lastSnapshot().state.authoringRuns,
@@ -259,7 +259,7 @@ describe("a proposal being written into, seen from a client that reloaded (issue
 
       // Nothing settled: the proposal is still staged, and still being written into.
       const beforeHello = reloaded.frames.length;
-      reloaded.send({ kind: "hello", lastSeq: 0 });
+      reloaded.send({ kind: "hello", token, lastSeq: 0 });
       const after = await reloaded.until(
         (f) => f.kind === "snapshot",
         "a snapshot after the refusals",
@@ -280,7 +280,7 @@ describe("a proposal being written into, seen from a client that reloaded (issue
         "the cancellation",
       );
       const beforeLast = reloaded.frames.length;
-      reloaded.send({ kind: "hello", lastSeq: 0 });
+      reloaded.send({ kind: "hello", token, lastSeq: 0 });
       await reloaded.until(
         (f) => f.kind === "snapshot" && f.state.authoringRuns.length === 0,
         "a snapshot with no live run",

@@ -21,6 +21,7 @@ import {
   type Shot,
   type StagingFigure,
   type StagingKey,
+  type StagingSet,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
@@ -659,6 +660,33 @@ export function SceneStage({
         return { ...holding, pose: "sit" };
       }),
     }));
+  const patchSet = (which: number, change: Partial<StagingSet>) =>
+    patchBlocking((current) => ({
+      ...current,
+      sets: current.sets.map((set, position) => position === which ? { ...set, ...change } : set),
+    }));
+  const patchSetNumber = (which: number, field: "x" | "z" | "w" | "h" | "d", raw: string) => {
+    const parsed = Number.parseFloat(raw);
+    if (!Number.isFinite(parsed)) return;
+    const value = field === "x" || field === "z" ? parsed : Math.max(0.1, parsed);
+    patchSet(which, { [field]: round(value) });
+  };
+  const addSet = () => patchBlocking((current) => {
+    const figure = current.cast[0];
+    return {
+      ...current,
+      sets: [...current.sets, {
+        name: `set ${current.sets.length + 1}`,
+        x: figure?.x ?? 0,
+        z: round((figure?.z ?? 0) + 1),
+        w: 1,
+        h: 0.75,
+        d: 1,
+      }],
+    };
+  });
+  const removeSet = (which: number) =>
+    patchBlocking((current) => ({ ...current, sets: current.sets.filter((_, position) => position !== which) }));
   const cycleRig = () => patchCamera((current) => {
     const index = STAGE_RIGS.indexOf(current.rig ?? "sticks");
     return { ...current, rig: STAGE_RIGS[(index + 1) % STAGE_RIGS.length]! };
@@ -741,7 +769,7 @@ export function SceneStage({
               <div className="fy-swstage__corner">
                 {moved ? (
                   <span className="fy-swstage__moved" data-testid="stage-moved">
-                    <span>{keyName(active, keys.length)} moved</span>
+                    <span>{overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
                     <button type="button" aria-label="Discard" title="Discard" onClick={discard}><X size={11} /></button>
                     <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>
@@ -861,6 +889,55 @@ export function SceneStage({
                   ))}
                 </div>
               )}
+
+              <div className="fy-swstage__block">
+                <div className="fy-swstage__eyebrow"><span>Set massing</span></div>
+                <div className="fy-swstage__sets">
+                  {working.sets.map((set, position) => (
+                    <div className="fy-swstage__set" key={position}>
+                      <div className="fy-swstage__set-head">
+                        <input
+                          key={set.name}
+                          type="text"
+                          aria-label={`Set ${position + 1} name`}
+                          defaultValue={set.name}
+                          disabled={frozen}
+                          onBlur={(event) => {
+                            const name = event.currentTarget.value.trim();
+                            if (name.length > 0) patchSet(position, { name });
+                            else event.currentTarget.value = set.name;
+                          }}
+                        />
+                        <button type="button" aria-label={`Remove set ${position + 1}`} disabled={frozen} onClick={() => removeSet(position)}><X size={10} /></button>
+                      </div>
+                      <div className="fy-swstage__set-fields">
+                        {([
+                          ["x", "x", set.x],
+                          ["z", "z", set.z],
+                          ["w", "width", set.w],
+                          ["h", "height", set.h],
+                          ["d", "depth", set.d],
+                        ] as const).map(([field, label, value]) => (
+                          <label key={field}>
+                            <span>{field}</span>
+                            <input
+                              key={`${field}:${value}`}
+                              type="number"
+                              step="0.1"
+                              min={field === "x" || field === "z" ? undefined : 0.1}
+                              aria-label={`Set ${position + 1} ${label}`}
+                              defaultValue={value}
+                              disabled={frozen}
+                              onBlur={(event) => patchSetNumber(position, field, event.currentTarget.value)}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <Button className="fy-swstage__set-add" variant="outline" size="sm" disabled={frozen} onClick={addSet}>Add set</Button>
+              </div>
 
               <div className="fy-swstage__block">
                 <div className="fy-swstage__eyebrow"><span title="Resolved from the shot · reads out on the prompt">Framing</span></div>

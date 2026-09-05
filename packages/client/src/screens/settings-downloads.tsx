@@ -6,6 +6,7 @@ import {
   type TransferProgress,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
+import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup } from "../lib/store.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
@@ -28,7 +29,7 @@ import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-p
 
 /** In flight, or waiting its turn, or stopped mid-way — everything with an outstanding transfer. */
 function isMoving(component: SetupComponent): boolean {
-  return component.state === "downloading" || component.state === "installing" || component.state === "queued";
+  return component.state === "downloading" || component.state === "paused" || component.state === "installing" || component.state === "queued";
 }
 
 /** Needs a hand: it failed, or the disk refused it. */
@@ -45,17 +46,20 @@ function ProgressRow({ component, progress }: { component: SetupComponent; progr
           <div className="fy-set__caps">
             {component.purpose} · {sizeMb(component.sizeMb)}
           </div>
+          <div className="fy-set__caps">Location · {component.installLocation ?? "Unavailable"}</div>
         </div>
         <RuntimeStatus tone={needsAttention(component) ? "warn" : componentIsSettled(component.state) ? "ok" : "idle"}>
-          {progress.active
-            ? `${progress.percent}%${progress.mbPerSecond === null ? "" : ` · ${progress.mbPerSecond} MB/s`}`
+          {component.state === "paused"
+            ? `paused · ${progress.percent}%`
+            : progress.active
+              ? `${progress.percent}%${progress.mbPerSecond === null ? "" : ` · ${progress.mbPerSecond} MB/s`}`
             : (component.leftovers?.length ?? 0) > 0 && !componentIsSettled(component.state)
               ? `${component.leftovers!.length} file${component.leftovers!.length === 1 ? "" : "s"}`
               : component.state}
         </RuntimeStatus>
-        {/* Only what is still waiting can be taken out of the queue. A transfer already
-            streaming cannot be stopped one component at a time — the run holds one abort — so a
-            per-row Stop would be a word the code does not honour. Stop all is the one that acts. */}
+        <SetupTransferControl component={component} />
+        {/* Only what is still waiting can be skipped. Pause preserves one range-capable transfer;
+            Stop all remains the destructive action for the whole setup run. */}
         {component.state === "queued" && (
           <button type="button" className="fy-set__link" onClick={() => setupSkip(component.id)}>
             Skip
@@ -85,7 +89,7 @@ function ProgressRow({ component, progress }: { component: SetupComponent; progr
           </button>
         )}
       </div>
-      {progress.active && (
+      {(progress.active || component.state === "paused") && (
         <div className="fy-set__bar">
           <div className="fy-set__barfill" style={{ width: `${progress.percent}%` }} />
         </div>

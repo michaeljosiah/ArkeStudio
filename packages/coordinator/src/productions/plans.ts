@@ -163,13 +163,32 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
     })),
     createdAt: input.clock(),
   });
-  await mkdir(toExtendedLength(plansDir(store, input.productionId)), { recursive: true });
-  await atomicWriteFile(join(plansDir(store, input.productionId), `${aggregate.planId}.json`), // atomic: temp + rename
-    JSON.stringify(aggregate, null, 2) + "\n");
-  await appendPlanEvents(store, input.productionId, aggregate.planId, [
-    { kind: "authorized", ts: input.clock(), planId: aggregate.planId },
-  ]);
-  return aggregate;
+  /*
+   * The write joins the store's queue rather than landing beside it (issue 654). Everything
+   * above read the scene outside that queue, and a shot deletion takes its R-39 blockers
+   * inside it: a delete that saw no plan, then a plan file appearing for the shot it removed,
+   * was the one interleaving nothing caught. Serialised, the deletion has either landed — and
+   * the scene's version says so — or it queues behind this write and finds the plan.
+   */
+  return store.ownedWrite(async () => {
+    const current = store
+      .getBundle()
+      .productions.find((production) => production.meta.id === input.productionId)
+      ?.scenes.find((scene) => scene.id === input.scene.id);
+    if (current === undefined) throw new Error(`scene ${input.scene.id} is gone — nothing to dispatch`);
+    if (current.version !== input.scene.version) {
+      throw new Error(
+        `the scene moved v${input.scene.version} → v${current.version} since the plan was priced — price it again`,
+      );
+    }
+    await mkdir(toExtendedLength(plansDir(store, input.productionId)), { recursive: true });
+    await atomicWriteFile(join(plansDir(store, input.productionId), `${aggregate.planId}.json`), // atomic: temp + rename
+      JSON.stringify(aggregate, null, 2) + "\n");
+    await appendPlanEvents(store, input.productionId, aggregate.planId, [
+      { kind: "authorized", ts: input.clock(), planId: aggregate.planId },
+    ]);
+    return aggregate;
+  });
 }
 
 export interface PlanDriverDeps {

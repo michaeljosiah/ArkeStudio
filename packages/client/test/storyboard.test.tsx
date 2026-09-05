@@ -160,3 +160,28 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     assert.ok(later.includes("Continue the footage of shot 12"));
   });
 });
+
+describe("the shot's prop state control (design turn 105; issue 537)", () => {
+  it("shows a cited prop unresolved and offers its states for this shot only, never behind a toggle", () => {
+    const polaroid = {
+      id: "prop_01J8F0000000000000000000P1",
+      name: "Polaroid",
+      states: [
+        { id: "pst_01J8F0000000000000000000S1", name: "on-fridge", reference: { id: "psr-1", file: "takes/tk_x/a.png", acceptedAt: "2026-09-05T00:00:00.000Z" } },
+        { id: "pst_01J8F0000000000000000000S2", name: "in-hand" },
+      ],
+    };
+    const cited = withScene((s) => ({
+      shots: (s as { shots: Array<{ id: string; description: string }> }).shots.map((shot) =>
+        shot.id === "sh_12" ? { ...shot, description: `${shot.description} The @polaroid is on the fridge.` } : shot,
+      ),
+    }));
+    const state = { ...cited, world: { ...cited.world!, props: [polaroid] } };
+    const html = render(state, `${SCENE_PATH}/shots/sh_12`, <ShotSheetScreen />, "/w/:worldId/p/:prodId/scenes/:sceneId/shots/:shotId");
+    assert.match(html, /this shot only/);
+    assert.match(html, /<option value="" selected="">unresolved<\/option>/);
+    assert.match(html, /on-fridge · has a reference/);
+    assert.match(html, /in-hand · no ref yet/);
+    assert.doesNotMatch(html, /Override/);
+  });
+});

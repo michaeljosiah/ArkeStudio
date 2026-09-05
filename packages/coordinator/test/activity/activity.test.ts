@@ -53,6 +53,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       },
       jobs: [],
       builds: [],
+      worldGenesis: {},
       ledger: [],
       ledgerUnavailable: false,
       providers: [],

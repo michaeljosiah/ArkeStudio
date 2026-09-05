@@ -2,6 +2,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
+import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
@@ -237,6 +238,7 @@ export function StartupScreen() {
   const env = useEnvCheck();
   const setup = useSetup();
   const downloading = setup?.running === true;
+  const paused = setup?.components.some((component) => component.state === "paused") === true;
   const [startup, setStartup] = useState<StartupState | null>(() =>
     typeof window === "undefined" ? null : window.arke?.startupState?.() ?? null,
   );
@@ -247,7 +249,7 @@ export function StartupScreen() {
   const ready = connection === "open" && state !== null;
   // Nothing left to fetch and somewhere to go: the only state where this screen is finished
   // rather than working.
-  const settled = ready && !downloading;
+  const settled = ready && !downloading && !paused;
   const steps = setupSteps(connection, state, env !== null);
   const components = setup?.components ?? [];
 
@@ -260,7 +262,7 @@ export function StartupScreen() {
     components.reduce(
       (sum, c) =>
         sum +
-        (c.state === "downloading" || c.state === "installing"
+        (c.state === "downloading" || c.state === "paused" || c.state === "installing"
           ? c.bytesTotal > 0
             ? Math.min(1, c.bytesDone / c.bytesTotal)
             : 0
@@ -272,17 +274,19 @@ export function StartupScreen() {
   const percent = parts === 0 ? 0 : Math.round((doneParts / parts) * 100);
 
   // What is happening right now, in the product's words — one line, never a list.
-  const active = components.find((c) => c.state === "downloading" || c.state === "installing");
+  const active =
+    components.find((c) => c.state === "downloading" || c.state === "installing") ??
+    components.find((c) => c.state === "paused");
   const outstanding = steps.find((s) => !s.settled);
   const activity = active
-    ? `${active.state === "installing" ? "installing" : "downloading"} ${active.displayName.toLowerCase()}`
+    ? `${active.state === "installing" ? "installing" : active.state === "paused" ? "paused" : "downloading"} ${active.displayName.toLowerCase()}`
     : outstanding
       ? `checking ${outstanding.label.toLowerCase()}`
       : "everything ready";
 
   // Bytes and time remaining, only while there is something to measure.
   const totalBytes = components.reduce((sum, c) => sum + c.bytesTotal, 0);
-  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
+  const doneBytes = components.reduce((sum, c) => sum + (c.state === "queued" ? 0 : c.state === "downloading" || c.state === "paused" || c.state === "installing" ? c.bytesDone : c.bytesTotal), 0);
   const speed = active?.bytesPerSecond ?? null;
   const remaining = speed !== null && speed > 0 ? Math.round((totalBytes - doneBytes) / speed) : null;
 
@@ -292,7 +296,7 @@ export function StartupScreen() {
   // about what is happening and about how often it happens, so that panel is kept for the
   // launch that is actually doing the work: something queued, downloading or installing.
   const fetching = components.some(
-    (c) => c.state === "queued" || c.state === "downloading" || c.state === "installing",
+    (c) => c.state === "queued" || c.state === "downloading" || c.state === "paused" || c.state === "installing",
   );
   const setupRun = downloading || fetching;
 
@@ -351,6 +355,7 @@ export function StartupScreen() {
             <span className="fy-mono">{activity}</span>
             <span style={{ flex: 1 }} />
             {speed !== null && speed > 0 && <span className="fy-mono">{mb(speed)}/s</span>}
+            {active !== undefined && <SetupTransferControl component={active} />}
           </div>
           <div className="fy-setupbar">
             <div className="fy-setupbar__fill" style={{ width: `${percent}%` }} />
@@ -1755,7 +1760,7 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
   const [copied, setCopied] = useState(false);
   const componentId = toolComponentFor(setup?.components ?? [], id);
   const component = setup?.components.find((c) => c.id === componentId);
-  const fetching = component?.state === "downloading" || component?.state === "installing" || component?.state === "queued";
+  const fetching = component?.state === "downloading" || component?.state === "paused" || component?.state === "installing" || component?.state === "queued";
   const arrived = component?.state === "ready" || component?.state === "present";
   // The download finishing is not the row changing: discovery is what decides where the tool
   // is, so ask again rather than leaving "not installed" beside a tool that just landed.
@@ -1796,7 +1801,10 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
         <div className="fy-prov__eyebrow">SIGN-IN</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>{label}</span>
-          {tool.state === "absent" && (
+          {tool.state === "absent" && component !== undefined &&
+            (component.state === "downloading" || component.state === "paused") ? (
+            <SetupTransferControl component={component} />
+          ) : tool.state === "absent" ? (
             <button
               type="button"
               className="fy-set__link"
@@ -1805,7 +1813,7 @@ function ProviderToolLine({ id }: { id: ProviderId }) {
             >
               {fetching ? "installing…" : `Install${component ? ` · ${component.sizeMb} MB` : ""}`}
             </button>
-          )}
+          ) : null}
           {tool.state === "signing-in" ? (
             <button type="button" className="fy-set__link" onClick={() => cancelProviderToolSignIn(id)}>
               Stop waiting
@@ -3344,9 +3352,16 @@ export function ActivityScreen() {
   // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
   // The build holds the join, so read it: dropping those entries would underreport every world
   // that was founded from a paid preview.
-  const genesisForActiveWorld = new Set(
-    (state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
-  );
+  // The build is pruned from the snapshot once every item has landed, which is exactly when
+  // the founding went well — so the coordinator also keeps the pair it harvested before pruning
+  // (issue 531). Both are read: the build for a founding in this session, the map after any
+  // restart. Neither ever names another world's genesis as this one's.
+  const genesisForActiveWorld = new Set([
+    ...(state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
+    ...Object.entries(state?.app.worldGenesis ?? {})
+      .filter(([worldId]) => worldId === activeWorldId)
+      .map(([, genesisId]) => genesisId),
+  ]);
   const inScope = (entry: LedgerEntry): boolean =>
     scope === "all" ||
     activeWorldId === null ||

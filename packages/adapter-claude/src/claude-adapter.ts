@@ -79,6 +79,8 @@ interface ClaudeSession {
   systemPrompt: string;
   /** The world-query MCP for THIS session, as prepareSession supplied it. */
   worldQueryUrl: string | undefined;
+  /** Claude's model id, without the provider prefix used at Studio's harness boundary. */
+  model: string | undefined;
   inbox: AsyncQueue<unknown>;
   abort: AbortController;
   normalize: NormalizeState;
@@ -218,6 +220,10 @@ export class ClaudeAdapter implements HarnessAdapter {
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
     const override = this.opts.agents?.[agentName];
+    const requestedModel = prepared.model ?? override?.model;
+    if (requestedModel !== undefined && !requestedModel.startsWith("anthropic/")) {
+      throw new Error(`${requestedModel} is not available through Claude Code`);
+    }
     if (!input.cwd) throw new Error("a Claude session needs an explicit cwd — it is the confinement boundary");
     /*
      * From the session that was just prepared, not from how the adapter was built (codex,
@@ -262,6 +268,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
       confinement: confinementFor(member, { web: prepared.researchWeb === true }),
       worldQueryUrl: this.opts.worldQueryUrl ?? prepared.worldQueryUrl,
+      model: requestedModel?.slice("anthropic/".length),
       systemPrompt: agentPromptFor({
         ...member,
         researchWeb: prepared.researchWeb === true,
@@ -353,6 +360,7 @@ export class ClaudeAdapter implements HarnessAdapter {
           systemPrompt: session.systemPrompt,
           cwd: session.cwd,
           abortController: session.abort,
+          ...(session.model !== undefined ? { model: session.model } : {}),
           // No `allowedTools`: a bare entry there auto-approves the tool before canUseTool is
           // consulted, which would disarm the gate below rather than configure it.
           canUseTool: this.gateFor(session),

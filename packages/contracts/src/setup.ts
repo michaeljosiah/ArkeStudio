@@ -20,6 +20,8 @@ export const SetupComponentStateSchema = z.enum([
   /** Waiting its turn. */
   "queued",
   "downloading",
+  /** A byte-range HTTP transfer owned by Arke is durable on disk and can continue from here. */
+  "paused",
   /** Bytes are here; the runtime's own installer or model-pull is running. */
   "installing",
   /** Arrived and usable. */
@@ -40,6 +42,8 @@ export const SetupComponentSchema = z
     purpose: z.string().min(1),
     /** The download size as published, for honest arithmetic before anything starts. */
     sizeMb: z.number().int().min(0),
+    /** The concrete folder this component occupies; null when it has no local filesystem path. */
+    installLocation: z.string().min(1).nullable(),
     /**
      * Peak disk this component needs where that differs from what it downloads — an archive that
      * is extracted holds both copies at once. On the wire so the closure's total is the same
@@ -51,6 +55,8 @@ export const SetupComponentSchema = z
     bytesTotal: z.number().int().min(0).default(0),
     /** Measured, not guessed; null while nothing is moving. */
     bytesPerSecond: z.number().int().min(0).nullable().default(null),
+    /** Whether the active transfer can pause or the retained transfer can safely resume. */
+    pauseSupported: z.boolean().default(false),
     /** The reason, whenever the state is one that owes you one. */
     detail: z.string().optional(),
     /**
@@ -79,6 +85,16 @@ export const SetupComponentSchema = z
     blockedAt: IsoDateTimeSchema.optional(),
     /** The failed action must be tried again; an ordinary retry would trust the surviving file. */
     repairRequired: z.boolean().optional(),
+    /**
+     * Managed-runtime currency for a `tree` component (SPEC-021 R-20; issue 592): the version the
+     * installed tree itself records, the version this release pins, and how they compare. `unknown`
+     * is a tree whose version could not be read — never treated as behind, since a missing reading
+     * proves only that nothing could be read, and offering a six-gigabyte replacement on that is
+     * the failure R-20 names. Reported and offered, never applied.
+     */
+    installedVersion: z.string().min(1).optional(),
+    pinnedVersion: z.string().min(1).optional(),
+    currency: z.enum(["current", "behind", "unknown"]).optional(),
     /**
      * The manifest models this component makes available (SPEC-033 R-39). Declared, so that a
      * capability row can say whether a model is installed without inferring a chain from an

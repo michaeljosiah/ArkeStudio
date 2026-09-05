@@ -31,10 +31,12 @@ function weights(patch: Partial<SetupComponent>): SetupComponent {
     displayName: "Local · Draft Image · weights",
     purpose: "Model files for Local · Draft Image",
     sizeMb: 6617,
+    installLocation: "D:\\ComfyUI\\models",
     state: "available",
     bytesDone: 0,
     bytesTotal: 6617 * 1024 * 1024,
     bytesPerSecond: null,
+    pauseSupported: false,
     ...patch,
   };
 }
@@ -107,6 +109,36 @@ describe("a recipe's weights hang off the recipe", () => {
     assert.match(html, /<span class="fy-set__status"><span class="fy-set__state">42%/);
     // Nothing to press while it is already moving.
     assert.doesNotMatch(html, DOWNLOAD_AT_SIZE);
+  });
+
+  it("offers Pause only after the weights source advertises range support", () => {
+    const supported = render(
+      "/settings/providers?provider=comfyui",
+      stateWith(weights({ state: "downloading", pauseSupported: true })),
+    );
+    assert.match(supported, />Pause<\/button>/);
+    assert.doesNotMatch(supported, /Cannot be paused/);
+
+    const unsupported = render(
+      "/settings/providers?provider=comfyui",
+      stateWith(weights({ state: "downloading", pauseSupported: false })),
+    );
+    assert.match(unsupported, /Cannot be paused/);
+    assert.doesNotMatch(unsupported, />Pause<\/button>/);
+  });
+
+  it("keeps paused weights and their retained progress on the recipe row", () => {
+    const html = render(
+      "/settings/providers?provider=comfyui",
+      stateWith(weights({
+        state: "paused",
+        bytesDone: Math.round(6617 * 1024 * 1024 * 0.42),
+        pauseSupported: true,
+      })),
+    );
+    assert.match(html, /paused · (?:<!-- -->)?42%/);
+    assert.match(html, />Resume<\/button>/);
+    assert.match(html, /width:42%/);
   });
 
   it("states the fetch's own cause rather than the recipe's, and offers a way on", () => {

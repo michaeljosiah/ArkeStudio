@@ -33,6 +33,7 @@ export interface WorldProvider {
    * Nothing is wrong, nobody has to reconcile, and the only correct response is to redraw.
    */
   onWorldAdopted?(cb: (worldId: string) => void): void;
+  onWorldLockError?(cb: (worldId: string, message: string, consecutive: number) => void): void;
   /** The accept gate over the open world (SPEC-004). Null until a world is open. */
   gate?(): ProposalManager | null;
   /** The open store itself (SPEC-005: the world-query tool reads through it). */

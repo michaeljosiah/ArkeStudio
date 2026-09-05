@@ -8,13 +8,42 @@ import type { SetupDeps } from "./local-setup.js";
  */
 export function nodeSetupDeps(): SetupDeps {
   return {
-    async fetchStream(url, signal) {
-      const res = await fetch(url, { signal, redirect: "follow" });
+    async fetchStream(url, signal, rangeStart, validator) {
+      const res = await fetch(url, {
+        signal,
+        redirect: "follow",
+        headers: {
+          "Accept-Encoding": "identity",
+          ...(rangeStart === null ? {} : { Range: `bytes=${rangeStart}-` }),
+          ...(rangeStart === null || validator === null || validator === undefined ? {} : { "If-Range": validator }),
+        },
+      });
       const len = res.headers.get("content-length");
+      const contentRange = res.headers.get("content-range")?.match(/^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/i);
+      const etag = res.headers.get("etag");
+      const lastModified = res.headers.get("last-modified");
+      const responseDate = res.headers.get("date");
+      const modifiedAt = lastModified === null ? Number.NaN : Date.parse(lastModified);
+      const datedAt = responseDate === null ? Number.NaN : Date.parse(responseDate);
+      // RFC 7232 only permits Last-Modified as a strong validator when the origin's Date proves
+      // the resource had not changed for at least sixty seconds before the response was sent.
+      const strongLastModified = Number.isFinite(modifiedAt) && Number.isFinite(datedAt) && datedAt - modifiedAt >= 60_000
+        ? lastModified
+        : null;
+      const responseValidator = etag !== null && !etag.startsWith("W/") ? etag : strongLastModified;
+      const contentLength = safeInteger(len);
+      const contentRangeStart = safeInteger(contentRange?.[1] ?? null);
+      const contentRangeEnd = safeInteger(contentRange?.[2] ?? null);
+      const contentRangeTotal = contentRange?.[3] === "*" ? null : safeInteger(contentRange?.[3] ?? null);
       return {
         ok: res.ok,
         status: res.status,
-        contentLength: len === null ? null : Number(len),
+        contentLength,
+        acceptRanges: res.headers.get("accept-ranges")?.trim().toLowerCase() === "bytes",
+        contentRangeStart,
+        contentRangeEnd,
+        contentRangeTotal,
+        validator: responseValidator,
         body: res.body === null ? empty() : streamOf(res.body as ReadableStream<Uint8Array>),
       };
     },
@@ -67,6 +96,12 @@ export function nodeSetupDeps(): SetupDeps {
       }
     },
   };
+}
+
+function safeInteger(raw: string | null): number | null {
+  if (raw === null || !/^\d+$/.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) ? value : null;
 }
 
 async function* streamOf(body: ReadableStream<Uint8Array>): AsyncIterable<Uint8Array> {

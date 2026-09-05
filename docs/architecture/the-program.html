@@ -162,8 +162,11 @@
 
         <p>
           The engine is <em>not</em> a server you install. It is a library loaded into the same
-          process that puts the window on screen. Two things follow: nothing about Arke is
-          reachable from a network, because there is no network part to reach; and quitting really
+          process that puts the window on screen. The client talks to a loopback HTTP/WebSocket
+          service, authenticated by a fresh capability for each launch. Local binding limits where
+          the service is reachable; the capability decides who may read state, request media or
+          issue commands. It is held by main and the isolated preload, never exposed through the
+          renderer bridge. Quitting really
           does stop everything, because nothing is left over to stop.
         </p>
         <p>

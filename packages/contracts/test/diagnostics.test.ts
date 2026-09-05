@@ -121,10 +121,12 @@ function component(id: string, over: Partial<SetupComponent> = {}): SetupCompone
     displayName: id,
     purpose: "test component",
     sizeMb: 1000,
+    installLocation: "C:\\ArkeStudio\\models",
     state: "available",
     bytesDone: 0,
     bytesTotal: 0,
     bytesPerSecond: null,
+    pauseSupported: false,
     ...over,
   };
 }
@@ -523,6 +525,24 @@ describe("an engine that is down (R-20.7)", () => {
       },
     });
     assert.ok(settled.findings.some((f) => f.kind === "comfyui-engine-unavailable"));
+  });
+
+  it("a paused component that holds work routes its remedy to Resume", () => {
+    const snapshot = derive({
+      comfyui: comfyui({
+        state: "absent",
+        instanceId: null,
+        recipes: [recipe("a", "disabled", "engine", "no ComfyUI engine is configured or installed")],
+      }),
+      setup: {
+        components: [component("comfyui-runtime", { state: "paused", pauseSupported: true })],
+        running: false,
+        diskFreeMb: 500_000,
+        diskCheckedAt: RECENT,
+      },
+    });
+    const waiting = snapshot.findings.find((finding) => finding.kind === "waiting-on-component");
+    assert.deepEqual(waiting?.remedy, { control: "component-resume", target: "comfyui-runtime" });
   });
 
   it("skipped weights offer the row's own Retry, never a Download the row does not draw", () => {

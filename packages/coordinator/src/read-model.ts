@@ -28,6 +28,7 @@ export class ReadModel {
         },
         jobs: [],
         builds: [],
+        worldGenesis: {},
         ledger: [],
         ledgerUnavailable: false,
         providers: [],
@@ -206,6 +207,11 @@ export class ReadModel {
   /** Founding builds known at startup (SPEC-031 R-33); later changes fold from build.state. */
   setBuilds(builds: ClientState["app"]["builds"]): void {
     this.state = { ...this.state, app: { ...this.state.app, builds } };
+  }
+
+  /** Which genesis founded each world (issue 531) — kept apart from `builds`, which is activity and is pruned. */
+  setWorldGenesis(worldGenesis: ClientState["app"]["worldGenesis"]): void {
+    this.state = { ...this.state, app: { ...this.state.app, worldGenesis } };
   }
 
   /**

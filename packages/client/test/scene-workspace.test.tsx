@@ -110,6 +110,18 @@ const editTextarea = async (textarea: HTMLTextAreaElement, value: string): Promi
     textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
   });
 };
+const editInput = async (input: HTMLInputElement, value: string): Promise<void> => {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
+    if (setter) setter.call(input, value);
+    else input.value = value;
+    const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"));
+    const props = key === undefined
+      ? undefined
+      : (input as unknown as Record<string, { onBlur?: (event: { currentTarget: HTMLInputElement }) => void }>)[key];
+    props?.onBlur?.({ currentTarget: input });
+  });
+};
 const mouse = (type: string, x: number, y: number): Event => {
   const event = new dom.window.Event(type, { bubbles: true });
   Object.defineProperties(event, {
@@ -681,6 +693,33 @@ describe("scene detail owns the workspace", () => {
     assert.equal(command.kind, "edit-stage");
     if (command.kind !== "edit-stage") return;
     assert.equal(command.staging?.cast?.[0]?.pose, "lie");
+  });
+
+  it("adds, names, moves and sizes set massing", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+    scene.blocking = { version: 1, cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [] };
+    shot.staging = { version: 1, keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+
+    await click(all(mounted, "button").find((button) => button.textContent === "Add set")!);
+    await editInput(q(mounted, '[aria-label="Set 1 name"]') as HTMLInputElement, "counter");
+    await editInput(q(mounted, '[aria-label="Set 1 x"]') as HTMLInputElement, "1.5");
+    await editInput(q(mounted, '[aria-label="Set 1 width"]') as HTMLInputElement, "2");
+    await editInput(q(mounted, '[aria-label="Set 1 height"]') as HTMLInputElement, "0.9");
+    assert.match(q(mounted, '[data-testid="stage-moved"]')?.textContent ?? "", /blocking moved/);
+    await click(all(mounted, '[data-testid="stage-moved"] button').find((button) => button.textContent === "Keep")!);
+
+    const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
+    assert.equal(command.kind, "edit-stage");
+    if (command.kind !== "edit-stage") return;
+    assert.deepEqual(command.blocking?.sets, [{ name: "counter", x: 1.5, z: 1, w: 2, h: 0.9, d: 1 }]);
+    assert.equal(command.staging, undefined, "set controls use the existing scene-blocking payload");
   });
 
   it("edits deterministic camera rig character with the staged camera", async () => {

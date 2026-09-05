@@ -466,6 +466,15 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
 });
 
 describe("v2 session config (issue 327 §7)", () => {
+  it("gives a dispatch model precedence over an agent default", () => {
+    const config = buildSessionConfigV2({
+      model: "openai/gpt-5.2",
+      agents: { "world-builder": { model: "ollama/gemma4" } },
+    });
+    const agents = config["agents"] as Record<string, { model?: string }>;
+    assert.equal(agents["world-builder"]!.model, "openai/gpt-5.2");
+  });
+
   it("orders the confinement block deny-first, managed re-allows after", () => {
     const config = buildSessionConfigV2({ defaultAgent: "scene-writer" });
     const agents = config["agents"] as Record<string, { permissions: Array<{ action: string; resource: string; effect: string }> }>;

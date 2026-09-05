@@ -35,12 +35,14 @@ const shot = (extra: Partial<Shot>): Shot => ({
 
 describe("the Stage's arithmetic", () => {
   it("stages a shot deterministically from its cast, sets and framing words", () => {
-    const first = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil"], durationSec: 4 });
-    const again = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil"], durationSec: 4 });
+    const first = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
+    const again = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
     assert.deepEqual(first, again, "the same shot stages the same way twice");
     assert.equal(first.version, 1);
     assert.deepEqual(first.cast, [{ sheetId: "maren-kest", x: -1.5, z: 0 }]);
     assert.equal(first.sets[0]?.name, "The Vigil");
+    assert.equal(first.sets.length, 3, "named set massing is not capped at two boxes");
+    assert.equal(new Set(first.sets.map((set) => set.x)).size, 3, "later boxes do not stack on one mark");
     assert.equal(first.keys.length, 2);
     assert.equal(first.keys[0]?.anchor, "maren-kest");
     assert.equal(first.keys[0]?.track, "maren-kest");
@@ -85,12 +87,29 @@ describe("the Stage's arithmetic", () => {
     assert.equal(staged.cast[1]?.pose, undefined);
     assert.ok(staged.cast[1]?.to);
     assert.ok((stageWalkSpeed(staged.cast[1]!, 4) ?? Infinity) <= MAX_STAGE_WALK_SPEED_MPS);
+    assert.deepEqual(staged.sets[1], { name: "counter", x: -2.25, z: 0.6, w: 2, h: 0.9, d: 0.7 });
+    assert.equal(staged.sets.length, 2, "the next figure does not inherit the previous figure's prop");
     assert.ok(ShotStagingSchema.safeParse(staged).success);
     assert.equal(ShotStagingSchema.safeParse({
       ...staged,
       cast: [{ sheetId: "maren-kest", x: 0, z: 0, pose: "sit", to: [1, 0] }],
     }).success, false, "a static posture cannot also claim a walk");
-    assert.match(stagingPromptClause(staged, (id) => id === "maren-kest" ? "Maren" : "Ivo", 4), /Ivo walks through the shot\. Maren is seated\./);
+    const prompt = stagingPromptClause(staged, (id) => id === "maren-kest" ? "Maren" : "Ivo", 4);
+    assert.match(prompt, /Ivo walks through the shot\. Maren is seated\./);
+    assert.match(prompt, /counter: 2\.00m wide, 0\.90m high, 0\.70m deep at x -2\.25m, z 0\.60m/);
+  });
+
+  it("keeps locations inside a figure's sentence and reads setting text before its first mention", () => {
+    const located = stageShot(shot({
+      description: "@wren-halloway sits in @railway-hotel-lobby with her hands flat on the desk.",
+    }), { cast: ["wren-halloway"], sets: [], durationSec: 4 });
+    assert.equal(located.cast[0]?.pose, "sit");
+    assert.equal(located.sets[0]?.name, "desk", "a location mention does not end the action");
+
+    const settingFirst = stageShot(shot({
+      description: "Behind the front counter, @wren-halloway does not stand up.",
+    }), { cast: ["wren-halloway"], sets: [], durationSec: 4 });
+    assert.equal(settingFirst.sets[0]?.name, "counter", "the first figure owns its sentence's leading setting");
   });
 
   it("reads the move off the framing: static holds, orbit sweeps, crane rises, and a castless shot stays in the world", () => {

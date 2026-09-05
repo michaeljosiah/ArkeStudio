@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
+import { existsSync, mkdirSync } from "node:fs";
 import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
@@ -47,6 +49,7 @@ import {
   comfyUiRecoveryDecision,
   estimateMicroUsd,
   modelEligible,
+  providerModelId,
   modelForCapability,
   gateLocalRuntimes,
   type EngineLocalities,
@@ -64,6 +67,7 @@ import {
   type WorldChatProductionCutExportAction,
   type WorldChatBenchGenerationAction,
   type ConversationActionCard,
+  type WorldChatContext,
   type Job,
   type FrameRunQuote,
   type FrameRunState,
@@ -359,15 +363,17 @@ import {
   recordUploadedMainPhotoTake,
   recordUploadedReferenceTake,
   referenceReviewDecision,
+  recordUploadedPropImage,
 } from "./references/takes.js";
 import { fileGeneratedReferenceArtifact, frozenTileProvenance } from "./references/artifacts.js";
+import { acceptPropStateReference, addPropState, createProp } from "./references/props.js";
 import {
   acceptMainPhoto,
   mainPhotoFailureReason,
   mainPhotoLogRecord,
   type MainPhotoAcceptanceStage,
 } from "./references/main-photo.js";
-import { LLM_ENV_PROVIDERS } from "@arke-studio/adapter-opencode";
+import { LLM_ENV_PROVIDERS } from "@arke-studio/contracts";
 import { diagnosticsBoundary, SecretRegistry } from "./redact.js";
 import { detectDrift, evaluateSpend, type LedgerRead } from "./spend/analytics.js";
 import { LedgerFile } from "./spend/ledger.js";
@@ -619,6 +625,8 @@ async function landUploadedImage(
 }
 
 export interface CoordinatorOptions {
+  /** Host-minted session capability. Omission creates a fresh capability, never an open socket. */
+  transportAuth?: import("./transport.js").TransportAuth;
   provider: WorldProvider;
   observeEvent?: (event: DomainEvent) => void;
   adapter: HarnessAdapter | null;
@@ -637,11 +645,12 @@ export interface CoordinatorOptions {
   sampleWorldPath?: string | null;
   /** App root for remembered grants (SPEC-005 R-16). Absent → grants are session-only. */
   appRoot?: string;
-  /** Session-config builders from the adapter package, injected to keep dependencies one-way. */
+  /** Host-supplied authoring policy. Coordinator consumes contracts; the shared launcher
+   * in harness/v2-launch.ts owns concrete adapter assembly for desktop and dev. */
   authoring?: {
     agentForPurpose: (purpose: "authoring" | "drafting" | "extraction" | "ask" | "art-prompt") => string;
     /**
-     * The shipped roster, injected like everything else from the adapter package. The
+     * The shipped roster, supplied by the host from contracts. The
      * coordinator needs it to show what each agent is for and to tell an edited brief from the
      * original — it never needs to know how a prompt is assembled.
      */
@@ -894,6 +903,7 @@ export class Coordinator {
   private readonly readModel: ReadModel;
   private readonly frameRunQuotes = new Map<string, FrameRunQuote>();
   private readonly transport: Transport;
+  private readonly transportAuth: import("./transport.js").TransportAuth;
   private readonly changeLog: ChangeLog;
   private readonly supervisors = new Map<HealthComponent, ChildSupervisor>();
   private readonly worldQuery: WorldQueryServer;
@@ -1304,6 +1314,61 @@ export class Coordinator {
     const model = modelForCapability(this.opts.manifest, settings?.routing, capability);
     return resolve(purpose, model?.family, model?.id);
   }
+
+  /** Resolve a production's language choice exactly; absence preserves the harness default. */
+  private async languageModelFor(
+    context: WorldChatContext | undefined,
+    requestedId?: string,
+  ): Promise<{ modelId?: string; sessionModel?: string; reason?: string }> {
+    const productionId = context && "productionId" in context ? context.productionId : undefined;
+    if (productionId === undefined) {
+      return requestedId === undefined
+        ? {}
+        : { modelId: requestedId, reason: "A language model can only be chosen inside a production." };
+    }
+    const production = this.opts.provider
+      .openStore?.()
+      ?.getBundle()
+      .productions.find((candidate) => candidate.meta.id === productionId);
+    const modelId = requestedId ?? production?.meta.models?.llm;
+    if (modelId === undefined) return {};
+    const model = this.opts.manifest?.models.find(
+      (candidate) => candidate.id === modelId && candidate.capability === "llm",
+    );
+    if (model === undefined) {
+      return { modelId, reason: `This production still names ${modelId}, which is no longer available.` };
+    }
+    const app = this.readModel.getState().app;
+    const local = PROVIDERS[model.provider].local === true;
+    if (
+      app.models.disabled.includes(model.id) ||
+      (local &&
+        !modelEligible(model, {
+          providers: app.providers,
+          disabled: app.models.disabled,
+          recipes: app.comfyui?.recipes ?? [],
+          comfyUiLocality: app.comfyui?.engine.locality,
+          gated: app.runtime?.models ?? [],
+        }))
+    ) {
+      return { modelId, reason: `${model.displayName} is unavailable and has not been replaced.` };
+    }
+    const adapter = this.opts.adapter;
+    if (adapter?.id === "claude" && model.provider !== "anthropic") {
+      return { modelId, reason: `${model.displayName} is not available through Claude Code.` };
+    }
+    if (adapter?.capabilities().has("models") && adapter.listModels) {
+      const available = await adapter.listModels().catch(() => []);
+      if (!available.some((candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model))) {
+        return { modelId, reason: `${model.displayName} is not available through the current harness.` };
+      }
+    }
+    return {
+      modelId,
+      sessionModel: `${model.provider}/${providerModelId(model)}`,
+      ...(model.limits.maxContextTokens !== undefined ? { inputTokenLimit: model.limits.maxContextTokens } : {}),
+    };
+  }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
 
@@ -1389,6 +1454,9 @@ export class Coordinator {
       : null;
     opts.providerCalls?.setTransportFailureSink((record) => {
       void this.appLog?.append(record);
+    });
+    opts.provider.onWorldLockError?.((worldId, message, consecutive) => {
+      void this.appLog?.append({ kind: "world.lock-heartbeat-failed", worldId, message, consecutive });
     });
     this.credentials =
       opts.appRoot && opts.cipher
@@ -1643,7 +1711,10 @@ export class Coordinator {
           emit: (event) => this.emit(event),
         })
       : null;
+    this.transportAuth = opts.transportAuth ?? { token: randomBytes(32).toString("hex"), allowedOrigins: [] };
+    this.secrets.register(this.transportAuth.token);
     this.transport = new Transport({
+      auth: this.transportAuth,
       getSnapshot: () => this.getState(),
       getInitialEvents: () => {
         const replayed: DomainEvent[] = [...this.pendingPermissions].map(([permissionId, permission]) => ({
@@ -1884,6 +1955,14 @@ export class Coordinator {
               // Weight entries land in the folder the engine actually reads: the same
               // resolver detection, launch and pre-flight use, so nothing can disagree.
               externalDirs: { "comfyui-models": () => this.opts.comfyui?.service.modelsDir() ?? null },
+              componentLocations: {
+                "comfyui-runtime": () => {
+                  const engine = this.opts.comfyui?.service.engineStatus();
+                  if (engine?.source === "user-path") return engine.location;
+                  if (engine?.source === "user-url") return null;
+                  return undefined;
+                },
+              },
               onComponentReady: (componentId) => this.onSetupComponentReady(componentId),
             },
           )
@@ -2157,7 +2236,7 @@ export class Coordinator {
     });
   }
 
-  async start(port = 0): Promise<{ port: number }> {
+  async start(port = 0): Promise<{ port: number; token: string }> {
     if (this.started) throw new Error("coordinator already started");
     this.started = true;
 
@@ -2193,14 +2272,21 @@ export class Coordinator {
     // known before any screen asks, and its notice is still standing (R-45). The run itself
     // resumes when its world opens; discovery here is what lets the client route back to it.
     if (this.foundingBuild && this.opts.provider.worldDir) {
+      // Which genesis founded each world, taken here — the one moment every record is in hand
+      // and before the settled ones are pruned (issue 531). A founding preview's ledger entry
+      // keeps the genesis it was spent under, and the build that joined the two is dropped
+      // precisely when the founding went well, so the pair is kept as a fact about the world.
+      const worldGenesis: Record<string, string> = {};
       for (const summary of this.readModel.getState().worlds) {
         try {
           const dir = await this.opts.provider.worldDir(summary.worldId);
-          await this.foundingBuild.load(dir, summary.worldId);
+          const active = await this.foundingBuild.load(dir, summary.worldId);
+          if (active !== null) worldGenesis[summary.worldId] = active.record.genesisId;
         } catch {
           /* not a world any more, or no build — nothing to know */
         }
       }
+      this.readModel.setWorldGenesis(worldGenesis);
       // Kept in memory only while there is something to know: a run in flight, or work that
       // did not land. A build whose every item landed years ago is just a record on disk.
       this.foundingBuild.forgetSettled();
@@ -2378,7 +2464,7 @@ export class Coordinator {
       })();
     }
 
-    return { port: boundPort };
+    return { port: boundPort, token: this.transportAuth.token };
   }
 
   async openWorld(worldId: string): Promise<void> {
@@ -4373,7 +4459,14 @@ export class Coordinator {
         const runner = this.worldChatRunner(store, msg.conversationId);
         // The screen shows the message and the spinner as soon as the turn starts, so the
         // snapshot is pushed before the model is waited on rather than after.
-        const inFlight = runner.send(log, msg.conversationId, msg.text, msg.attachmentIds, msg.subject);
+        const inFlight = runner.send(
+          log,
+          msg.conversationId,
+          msg.text,
+          msg.attachmentIds,
+          msg.subject,
+          msg.modelId,
+        );
         // Started after the turn it names, so the person's own turn has first claim on the
         // harness, and awaited last, so naming a row never delays the reply.
         const naming =
@@ -5014,6 +5107,14 @@ export class Coordinator {
       }
       case "setup-retry": {
         this.setup?.retry(msg.componentId);
+        return;
+      }
+      case "setup-pause": {
+        this.setup?.pause(msg.componentId);
+        return;
+      }
+      case "setup-resume": {
+        this.setup?.resume(msg.componentId);
         return;
       }
       case "setup-repair": {
@@ -6237,6 +6338,23 @@ export class Coordinator {
         await this.refreshComfyUi();
         return;
       }
+      case "comfyui-update-runtime": {
+        const service = this.opts.comfyui?.service;
+        if (!service || !this.setup || !this.appSettings) return;
+        // Stop only the managed child (SPEC-021 R-20): a user-directed engine is supervised
+        // identically and is somebody else's work, and the case this serves is a stale managed tree
+        // behind a selected user engine. The swap runs with the files closed; the engine comes back
+        // through the same path Settings uses, and only if it was the one stopped.
+        const stopped = await service.stopManagedSupervision().catch(() => false);
+        await this.setup.updateTree("comfyui-runtime").catch(() => false);
+        await this.setup.detect().catch(() => {});
+        if (stopped) {
+          const settings = await this.appSettings.load();
+          await service.applySettings(settings.comfyui).catch(() => {});
+        }
+        await this.refreshComfyUi();
+        return;
+      }
       case "repair-voice-models": {
         const repaired = await Promise.all([
           this.setup?.repair(VOXA_SETUP_COMPONENT_IDS.kokoro),
@@ -6250,6 +6368,25 @@ export class Coordinator {
       }
       case "open-model-folder": {
         if (this.opts.appRoot) this.opts.openPath?.(join(this.opts.appRoot, "models"));
+        return;
+      }
+      case "open-engine-log": {
+        // Host-owned end to end (SPEC-028 R-4, SPEC-033 R-70): the renderer names the engine and
+        // the path never leaves here. Before the engine has said anything there is no file, and
+        // opening the folder it will land in is honest about that; the app's own journal is not.
+        if (!this.opts.appRoot) return;
+        const folder = join(this.opts.appRoot, "logs", "engines");
+        const file = join(folder, `${msg.engine}.log`);
+        if (existsSync(file)) {
+          this.opts.openPath?.(file);
+        } else {
+          try {
+            mkdirSync(folder, { recursive: true });
+          } catch {
+            /* the open below reports the folder as missing, which is the truth */
+          }
+          this.opts.openPath?.(folder);
+        }
         return;
       }
       case "test-local-voice": {
@@ -6899,6 +7036,7 @@ export class Coordinator {
             },
             sheets: bundle.sheets,
             kits: bundle.referenceKits,
+            props: bundle.props,
             scene,
             selections: production.selections,
             model,
@@ -7427,6 +7565,7 @@ export class Coordinator {
             },
             sheets: bundle.sheets,
             kits: bundle.referenceKits,
+            props: bundle.props,
             scene,
             selections: production.selections,
             model,
@@ -9885,16 +10024,47 @@ export class Coordinator {
           );
           return;
         }
-        const resolvedModel =
-          voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, bundle.clonedVoices) ?? undefined;
+        const resolvedModel = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, bundle.clonedVoices);
+        if (resolvedModel === null) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `${sheet.name}'s assigned voice model is no longer available.`);
+          return;
+        }
+        const productionModelId = production?.meta.models?.["voice-tts"];
+        const selectedModelId = msg.modelId ?? productionModelId ?? resolvedModel;
+        if (selectedModelId !== resolvedModel) {
+          const selected = this.opts.manifest?.models.find(
+            (candidate) => candidate.id === selectedModelId && candidate.capability === "voice-tts",
+          );
+          if (selected === undefined) {
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              `This production still names ${selectedModelId}, which is no longer available.`,
+            );
+          } else {
+            const assigned = this.opts.manifest?.models.find(
+              (candidate) => candidate.id === resolvedModel && candidate.capability === "voice-tts",
+            );
+            this.rejectEnqueue(
+              msg.requestId,
+              msg.kind,
+              `This production uses ${selected.displayName}, but ${sheet.name}'s assigned voice uses ${assigned?.displayName ?? resolvedModel}. Choose the assigned model for this line.`,
+            );
+          }
+          return;
+        }
         const model = this.opts.manifest?.models.find(
           (m) =>
             m.provider === voice.provider &&
             m.capability === "voice-tts" &&
-            (resolvedModel === undefined || m.id === resolvedModel),
+            m.id === resolvedModel,
         );
         if (!model) {
           this.rejectEnqueue(msg.requestId, msg.kind, `No ${voice.provider} voice model is available.`);
+          return;
+        }
+        if (this.readModel.getState().app.models.disabled.includes(model.id)) {
+          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in Providers.`);
           return;
         }
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
@@ -11421,6 +11591,53 @@ export class Coordinator {
         // not: the usual answer to one is to run it again, and running it again with the
         // picture you had just chosen is the point of having staged it.
         await this.dropStagedReference(store, stagedReferenceKey("location-view", msg.sheetId));
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "create-prop": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await createProp(store, msg.name).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "add-prop-state": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await addPropState(store, msg.propId, msg.name).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "import-prop-state-candidate": {
+        const store = this.opts.provider.openStore?.();
+        const pick = this.opts.pickFiles;
+        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const [source] = chosen;
+        if (!source || chosen.length > 1) return;
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if (!this.stillOpen(store) || "error" in picked) return;
+        // Lands as a pending take under the prop, exactly where a location view lands: accepting
+        // is where a state that already has its reference asks first, and doing both in one
+        // motion would put that question behind a file dialog that has already closed.
+        const media = `prop-state-upload-${Date.now().toString(36)}${picked.extension}`;
+        await recordUploadedPropImage(store, msg.propId, msg.stateId, media, picked.data).catch(() => null);
+        this.refreshIfStillOpen(store);
+        return;
+      }
+      case "accept-prop-state": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        // A refusal is the location view's silence: nothing changed, and the candidate is still
+        // on the screen to accept once the reason is dealt with. The client confirms a
+        // replacement before sending `replace`, as it confirms a colliding view name.
+        await acceptPropStateReference(store, {
+          propId: msg.propId,
+          stateId: msg.stateId,
+          selection: msg.selection,
+          ...(msg.replace !== undefined ? { replace: msg.replace } : {}),
+        }).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -13254,13 +13471,17 @@ export class Coordinator {
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
       receiptsFor: (runId) => receipts.get(runId) ?? [],
-      createSession: ({ cwd, runId }) => {
+      resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
+      createSession: ({ cwd, runId, model }) => {
         const token = tokenByRun.get(runId);
         const url = token ? (this.worldQuery.leasedUrl(token) ?? undefined) : undefined;
         return createPreparedSession(
           this.opts.adapter!,
           cwd,
-          this.sessionInput(url ? { worldQueryUrl: url } : {}),
+          this.sessionInput({
+            ...(url ? { worldQueryUrl: url } : {}),
+            ...(model !== undefined ? { model } : {}),
+          }),
           { purpose: "world-chat", agent: "world-builder" },
         );
       },

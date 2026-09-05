@@ -1,3 +1,4 @@
+import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
 import {
   FrameSchema,
@@ -1489,7 +1490,10 @@ function devBridge(url: string): ArkeBridge {
       });
     },
     send(json) {
-      if (socket?.readyState === WebSocket.OPEN) socket.send(json);
+      if (socket?.readyState === WebSocket.OPEN) {
+        const message = JSON.parse(json) as { kind?: string };
+        socket.send(message.kind === "hello" ? JSON.stringify({ ...message, token: devSession()?.token }) : json);
+      }
     },
     subscribe(frameCb, statusCb) {
       onFrame = frameCb;
@@ -1888,6 +1892,14 @@ export function setupRetry(componentId: string): void {
 
 export function setupRepair(componentId: string): void {
   send({ kind: "setup-repair", componentId });
+}
+
+export function setupPause(componentId: string): void {
+  send({ kind: "setup-pause", componentId });
+}
+
+export function setupResume(componentId: string): void {
+  send({ kind: "setup-resume", componentId });
 }
 
 export function setupCancel(): void {
@@ -2692,6 +2704,7 @@ export function requestVoiceLine(input: {
   worldId: string;
   productionId: string;
   shotId: string;
+  modelId?: string;
   delivery?: Delivery;
   voiceUploadConfirmedFor?: string;
 }): string {
@@ -2702,6 +2715,7 @@ export function requestVoiceLine(input: {
     worldId: input.worldId,
     productionId: input.productionId,
     shotId: input.shotId,
+    ...(input.modelId !== undefined ? { modelId: input.modelId } : {}),
     ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined
       ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor }
@@ -3784,6 +3798,7 @@ export function sendWorldChat(
   text: string,
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
+  modelId?: string,
 ): void {
   send({
     kind: "world-chat-send",
@@ -3792,6 +3807,7 @@ export function sendWorldChat(
     conversationId,
     text,
     attachmentIds,
+    ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
   });
 }
@@ -4309,4 +4325,39 @@ export function sendAttachFilesCorrelated(worldId: string, links?: string[]): st
     ...(links !== undefined ? { links } : {}),
   } as ClientMessage);
   return requestId;
+}
+
+// ---- props (design turn 105; issues 535, 537) --------------------------------------------
+
+export function createProp(worldId: string, name: string): void {
+  send({ kind: "create-prop", worldId, name });
+}
+
+export function addPropState(worldId: string, propId: string, name: string): void {
+  send({ kind: "add-prop-state", worldId, propId, name });
+}
+
+/** The host picker lands one image as a pending take under the prop; accepting is a second, asked step. */
+export function importPropStateCandidate(worldId: string, propId: string, stateId: string): void {
+  send({ kind: "import-prop-state-candidate", worldId, propId, stateId });
+}
+
+export function acceptPropState(
+  worldId: string,
+  propId: string,
+  stateId: string,
+  selection: { source: "take"; takeId: string } | { source: "candidate"; file: string },
+  replace = false,
+): void {
+  send({ kind: "accept-prop-state", worldId, propId, stateId, selection, ...(replace ? { replace: true } : {}) });
+}
+
+/** The Logs control on a spawned engine's row (SPEC-033 R-70; issue 585): the host opens the file. */
+export function openEngineLog(engine: "comfyui" | "voxa"): void {
+  send({ kind: "open-engine-log", engine });
+}
+
+/** Replace the Arke-managed ComfyUI tree with the pinned version — an explicit choice, never automatic (SPEC-021 R-20). */
+export function updateComfyUiRuntime(): void {
+  send({ kind: "comfyui-update-runtime" });
 }

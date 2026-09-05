@@ -100,10 +100,10 @@ describe("Bench dispatch racing coordinator shutdown", () => {
       dispatchClients: { comfyui: new FakeProvider() },
       comfyui: { service },
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const socket = new WebSocket(`ws://127.0.0.1:${port}`);
     await once(socket, "open");
-    socket.send(JSON.stringify({ kind: "hello", lastSeq: 0 }));
+    socket.send(JSON.stringify({ kind: "hello", token, lastSeq: 0 }));
     await once(socket, "message");
 
     try {

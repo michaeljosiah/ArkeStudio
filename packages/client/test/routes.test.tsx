@@ -48,13 +48,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (57 screens)", () => {
+  it("covers the full screen inventory (58 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    assert.equal(SCREENS.length, 57);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 57, "screen ids are unique");
+    assert.equal(SCREENS.length, 58);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 58, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -122,10 +122,12 @@ describe("screen inventory", () => {
               displayName: "Kokoro voice",
               purpose: "Speaks on this machine",
               sizeMb: 88,
+              installLocation: "C:\\ArkeStudio\\models\\kokoro",
               state: "downloading",
               bytesDone: 44 * 1024 * 1024,
               bytesTotal: 88 * 1024 * 1024,
               bytesPerSecond: 2 * 1024 * 1024,
+              pauseSupported: false,
             },
           ],
         },
@@ -137,6 +139,43 @@ describe("screen inventory", () => {
       assert.ok(html.includes("fy-setupbar"), "and still shows how far along it is");
       assert.ok(html.includes("downloading kokoro voice"), "in the product's words, one line");
       assert.ok(html.includes("One-time setup"), "with the promise that this happens once");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("keeps retained paused setup progress visible and resumable", () => {
+    __setStateForTest({
+      ...FIXTURE_STATE,
+      app: {
+        ...FIXTURE_STATE.app,
+        setup: {
+          running: false,
+          diskFreeMb: 100_000,
+          diskCheckedAt: null,
+          components: [
+            {
+              id: "voxa-kokoro",
+              displayName: "Kokoro voice",
+              purpose: "Speaks on this machine",
+              sizeMb: 88,
+              installLocation: "C:\\ArkeStudio\\models\\kokoro",
+              state: "paused",
+              bytesDone: 44 * 1024 * 1024,
+              bytesTotal: 88 * 1024 * 1024,
+              bytesPerSecond: null,
+              pauseSupported: true,
+            },
+          ],
+        },
+      },
+    });
+    try {
+      const html = renderAt("/starting");
+      assert.match(html, /paused kokoro voice/);
+      assert.match(html, />Resume<\/button>/);
+      assert.match(html, /44 MB of (?:<!-- -->)?88 MB/);
+      assert.match(html, /fy-setupbar__fill/);
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

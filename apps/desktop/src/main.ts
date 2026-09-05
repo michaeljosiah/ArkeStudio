@@ -1,5 +1,6 @@
+import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
@@ -196,6 +197,7 @@ let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
+let transportSession: { port: number; token: string } | null = null;
 let stageExporter: StageExporter | null = null;
 
 async function closeProviderTransport(): Promise<void> {
@@ -278,7 +280,15 @@ const backgroundNotifications = new BackgroundNotificationController({
   },
 });
 
+function startupPayload(state: StartupState) {
+  // Only the isolated preload receives this payload; its public startupState omits the token.
+  return state.status === "ready" && transportSession?.port === state.port
+    ? { ...state, token: transportSession.token }
+    : state;
+}
+
 function publishStartup(state: StartupState): void {
+  if (state.status !== "ready") transportSession = null;
   startupState = state;
   traceDesktop(
     `startup.${state.status}`,
@@ -288,7 +298,7 @@ function publishStartup(state: StartupState): void {
         ? { detail: state.detail }
         : {},
   );
-  if (window && !window.isDestroyed()) window.webContents.send("arke:startup-state", state);
+  if (window && !window.isDestroyed()) window.webContents.send("arke:startup-state", startupPayload(state));
 }
 
 function registerHostIpc(): void {
@@ -371,7 +381,7 @@ function registerHostIpc(): void {
   });
   ipcMain.on("arke:startup-state-ready", (event) => {
     if (!window || event.sender !== window.webContents) return;
-    window.webContents.send("arke:startup-state", startupState);
+    window.webContents.send("arke:startup-state", startupPayload(startupState));
   });
   ipcMain.on("arke:set-host-theme", (event, preference: unknown) => {
     if (!window || event.sender !== window.webContents) return;
@@ -436,6 +446,10 @@ async function createWindow(): Promise<void> {
       ],
     },
   });
+  window.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ["<all_urls>"] },
+    (details, callback) => callback({ requestHeaders: authenticatedMediaHeaders(details, transportSession, window?.webContents.id) }),
+  );
   traceDesktop("window.created", { themePreference, resolvedTheme });
   windowShowFallback = setTimeout(() => {
     if (!window || window.isDestroyed()) return;
@@ -644,6 +658,8 @@ async function initialize(): Promise<{ port: number }> {
       displayName: recipe.displayName,
       capability: recipe.capability,
       version: recipe.recipeVersion,
+      minEngineVersion: recipe.engine.minVersion,
+      exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
@@ -677,7 +693,9 @@ async function initialize(): Promise<{ port: number }> {
     writeTextFile: (path, text) => writeFile(path, text, "utf8"),
     readNodeRef: (dir) => readCustomNodeRef(dir),
     createSupervisor: (spec) => {
-      return new ChildSupervisor(spec, { ledger: childLedger });
+      // What the engine says is kept beside the app's own journals (SPEC-033 R-70; issue 585),
+      // one file per engine so the reader never demultiplexes what the supervisor already did.
+      return new ChildSupervisor({ ...spec, logFile: join(appRoot, "logs", "engines", `${spec.id}.log`) }, { ledger: childLedger });
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
@@ -825,6 +843,7 @@ async function initialize(): Promise<{ port: number }> {
     {
       id: "voxa",
       ...voxaLaunch(voxaSelection, voxaSettings),
+      logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
       readyTimeoutMs: 30_000,
       validateHealth: async (response) => {
@@ -872,8 +891,11 @@ async function initialize(): Promise<{ port: number }> {
 
   const setupEngine = (id: string, healthReady: boolean) => {
     const component = coordinator?.getState().app.setup?.components.find((item) => item.id === id);
-    if (component?.state === "downloading" || component?.state === "installing") {
-      return { state: "downloading" as const, detail: "Model download is in progress." };
+    if (component?.state === "downloading" || component?.state === "installing" || component?.state === "paused") {
+      return {
+        state: "downloading" as const,
+        detail: component.state === "paused" ? "Model download is paused." : "Model download is in progress.",
+      };
     }
     if (component?.state === "failed") {
       const verification = /checksum|verification|not the file/i.test(component.detail ?? "");
@@ -1015,7 +1037,9 @@ async function initialize(): Promise<{ port: number }> {
     },
   });
 
+  const transportToken = randomBytes(32).toString("hex");
   coordinator = new Coordinator({
+    transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
     changeLogPath: join(appRoot, "logs", "coordinator.jsonl"),
@@ -1261,6 +1285,7 @@ async function initialize(): Promise<{ port: number }> {
   coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);
+  transportSession = { port, token: transportToken };
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);

@@ -1606,3 +1606,27 @@ describe("making room on the graphics card", () => {
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
   });
 });
+
+describe("a job runs on the engine version it was priced against, or not at all (SPEC-021 R-19; issue 592)", () => {
+  it("refuses before /prompt when the engine now reports another version, naming both, and proceeds when it matches", async () => {
+    const { comfyUiRecipeById, comfyUiRecipeIdentity } = await import("../src/comfyui/recipes.js");
+    const identity = comfyUiRecipeIdentity(comfyUiRecipeById("comfyui-draft-image")!);
+    const { fetch, calls } = engineFake([
+      { match: /\/system_stats$/, status: 200, body: { system: { comfyui_version: "0.34.0" } } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-9", number: 1, node_errors: {} } },
+    ]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    const request = {
+      model: "comfyui-draft-image",
+      capability: "image" as const,
+      params: { prompt: "the tide-clock at dusk", output: { width: 1216, height: 832, aspect: "3:2" }, provenance: { canonRevision: 1 } },
+    };
+    await assert.rejects(
+      () => client.submit("", { ...request, recipe: { ...identity, engineVersion: "0.33.1" } }),
+      /priced against ComfyUI 0\.33\.1, and the engine now reports 0\.34\.0/,
+    );
+    assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing reached /prompt");
+    const result = await client.submit("", { ...request, recipe: { ...identity, engineVersion: "0.34.0" } });
+    assert.equal(result.remoteId, "p-9");
+  });
+});

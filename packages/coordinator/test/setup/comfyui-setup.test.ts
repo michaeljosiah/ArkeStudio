@@ -76,6 +76,8 @@ function deps(opts: {
         ok: true,
         status: 200,
         contentLength: payload.byteLength,
+        acceptRanges: false,
+        contentRangeStart: null,
         body: (async function* () {
           yield payload;
         })(),
@@ -134,6 +136,7 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
     await svc.run();
     const status = last(events);
     assert.equal(status.components[0]!.state, "ready");
+    assert.equal(status.components[0]!.installLocation, join(appRoot, "comfyui-runtime"));
     // The whole tree arrived under the component dir, marker intact, archive cleaned away.
     const marker = join(appRoot, "comfyui-runtime", "ComfyUI_windows_portable", "ComfyUI", "main.py");
     assert.equal((await stat(marker)).isFile(), true);
@@ -190,15 +193,18 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
 
   it("an explicitly selected external engine is never fetched (D10)", async () => {
     const appRoot = await tempDir("arke-tree-");
+    const externalRoot = await tempDir("arke-external-tree-");
     const events: DomainEvent[] = [];
     const d = deps({ externallyPresent: true });
     const svc = new LocalSetupService(d, (e) => events.push(e), {
       appRoot,
       catalogue: [treeEntry()],
       throttleMs: 0,
+      componentLocations: { "comfyui-runtime": () => externalRoot },
     });
     await svc.detect();
     assert.equal(last(events).components[0]!.state, "present");
+    assert.equal(last(events).components[0]!.installLocation, externalRoot);
     await svc.run();
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0, "nothing was downloaded");
   });
@@ -243,6 +249,7 @@ describe("the tree kind installs a whole runtime atomically (§2.4, D10)", () =>
 
     await svc.run();
     assert.deepEqual(last(events).components.map((component) => component.state), ["ready", "ready"]);
+    assert.equal(last(events).components[1]!.installLocation, modelsDir);
     assert.equal(
       (await stat(join(modelsDir, "checkpoints", "sd_xl_base_1.0.safetensors"))).isFile(),
       true,
@@ -266,6 +273,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     });
     await svc.detect();
     assert.equal(last(events).components[0]!.state, "present", "the user's file IS presence (R-8)");
+    assert.equal(last(events).components[0]!.installLocation, modelsDir);
     assert.equal(d.calls.filter((c) => c.startsWith("fetch")).length, 0);
   });
 
@@ -433,9 +441,9 @@ describe("an external models folder is the user's (§2.4)", () => {
       },
     });
     const inner = d.fetchStream.bind(d);
-    d.fetchStream = async (url, signal) => {
+    d.fetchStream = async (url, signal, rangeStart) => {
       if (url.includes("portable")) await held; // the pass is in flight until this lets go
-      return inner(url, signal);
+      return inner(url, signal, rangeStart);
     };
     const svc = new LocalSetupService(d, (e) => events.push(e), {
       appRoot,
@@ -483,10 +491,9 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal((await stat(join(modelsDir, "loras"))).isDirectory(), true, "an empty folder survives");
   });
 
-  it("cancellation removes the exact external fragment even when the mapping changes", async () => {
+  it("cancellation removes the exact external fragment even when the mapping becomes unavailable", async () => {
     const appRoot = await tempDir("arke-cancel-map-");
     const oldModelsDir = await tempDir("arke-cancel-old-");
-    const newModelsDir = await tempDir("arke-cancel-new-");
     let modelsDir: string | null = oldModelsDir;
     const events: DomainEvent[] = [];
     const d = deps();
@@ -494,9 +501,14 @@ describe("an external models folder is the user's (§2.4)", () => {
       ok: true,
       status: 200,
       contentLength: 4096,
+      acceptRanges: false,
+      contentRangeStart: null,
       body: (async function* () {
         yield bytes(512, [1, 2, 3]);
-        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+        await new Promise<void>((resolve) => {
+          if (signal.aborted) resolve();
+          else signal.addEventListener("abort", () => resolve(), { once: true });
+        });
       })(),
     });
     const svc = new LocalSetupService(d, (event) => events.push(event), {
@@ -517,7 +529,7 @@ describe("an external models folder is the user's (§2.4)", () => {
     assert.equal(partials.length, 1, "the active fetch owns one unique fragment at its captured path");
 
     const cancelled = svc.cancel();
-    modelsDir = newModelsDir;
+    modelsDir = null;
     await Promise.all([running, cancelled]);
 
     assert.deepEqual(
@@ -525,7 +537,6 @@ describe("an external models folder is the user's (§2.4)", () => {
       [],
       "cleanup uses the old captured path, not the new mapping",
     );
-    assert.deepEqual(await readdir(newModelsDir), [], "the replacement mapping was never walked or written");
     assert.equal(last(events).components[0]!.state, "skipped");
     assert.equal(last(events).components[0]!.detail, "stopped");
     assert.equal(last(events).running, false, "cancel resolves only after the download has unwound");

@@ -120,7 +120,7 @@ export function buildSessionConfigV2(input: SessionConfigV2Input): Record<string
       }),
       permissions: renderV2(confinementFor(member, { web: input.researchWeb === true })),
       // Config files keep the string form; the API's ModelRef object is the adapter's business.
-      ...(override?.model ?? input.model ? { model: override?.model ?? input.model } : {}),
+      ...(input.model ?? override?.model ? { model: input.model ?? override?.model } : {}),
     };
   }
   return {

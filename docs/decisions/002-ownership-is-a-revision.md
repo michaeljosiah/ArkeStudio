@@ -1,8 +1,37 @@
 # ADR-002: Ownership moves from the format to the deployment — and what that actually costs
 
-**Status:** Proposed
+**Status:** Accepted for the bounded desktop checks below; hosted leases and atomic fencing remain Proposed
 **Date:** 2026-08-23
 **Related:** [SPEC-002](../specifications/002.the-world-on-disk.md) (the world on disk, R-3, R-15, R-24, R-27) · [SPEC-004](../specifications/004.the-accept-gate.md) (proposals carry a base) · [SPEC-025](../specifications/025.the-host-ports.md) §2.9 (what it deliberately left broken) · [ADR-001](001-one-gate-per-thing.md) (the engine takes no dependency on a host)
+
+## Desktop decision — issue #827 (2026-09-05)
+
+Supported writing is one machine on a local filesystem. Network shares and actively synchronized
+world folders (including OneDrive/Dropbox) are unsupported for concurrent ownership; copy or sync
+a closed world instead. No cross-machine ownership guarantee follows from a local pid.
+
+Keep exclusive creation and the 90-second cold-heartbeat reclaim policy, including a live but
+stalled process. Before each commit, recovery, ownedWrite and gateOp, re-read the complete lock
+identity (pid and acquisition startedAt). A missing, unreadable or different claim disables
+further writes with a close-and-reopen error. Recheck before the commit enters its committing
+phase; leave unfinished journals to the successor's recovery. Scan-state and history-seeding
+writes also check ownership. Three consecutive heartbeat errors are logged and disable store
+writes; successful heartbeats reset the counter, but cannot revive a disabled session. A heartbeat
+checks identity before touching the file so it does not knowingly refresh a successor's claim.
+
+**These checks narrow the race; they are not an atomic fence.** Takeover can occur after a check,
+including during an already-admitted callback. R-3a's stronger atomic-write requirement remains
+unimplemented. Direct world writers outside these store boundaries are not newly fenced by this
+change. The hosted design below remains proposed.
+
+OS-held locking was investigated and deferred as a separate native-platform change. Windows
+[CreateFile sharing modes](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
+can deny conflicting opens and deletion for a handle's lifetime. A POSIX implementation would
+need cooperative handle locking and a stable lock inode rather than unlink-and-recreate reclaim.
+[Node's filesystem API](https://nodejs.org/api/fs.html) exposes neither a portable flock operation
+nor a Windows sharing-mode argument; keeping an ordinary Node file handle open is not this fix.
+A native implementation would also change the chosen policy: a hung process retaining its handle
+would block reclamation. Do not claim an OS fence until that lifecycle and both platforms are tested.
 
 ## Context
 
@@ -235,8 +264,8 @@ SPEC-004 is the one that matters, because R-5 verifies base hashes *while holdin
 which is the coupling this ADR is about, stated in the dependent spec rather than in SPEC-002. It
 is also evidence the coupling is real and load-bearing rather than incidental.
 
-**The desktop gains nothing today.** Local behaviour is unchanged by design. This is groundwork,
-and should be judged as groundwork.
+The hosted revision design remains groundwork. The bounded desktop decision above independently
+adds ownership checks and heartbeat failure handling without introducing a revision protocol.
 
 ## On Aonik, and why this is not a dependency
 

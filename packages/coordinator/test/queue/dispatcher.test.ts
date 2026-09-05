@@ -18,7 +18,8 @@ import { until } from "../wait.js";
  * mid-step — after dispose, no further journal writes or events happen, exactly like a dead
  * process — then a fresh queue over the same journal and the same provider-side state runs
  * recovery. Each run asserts: no job lost, no second submission without reconciliation, no
- * duplicate ledger entry, and a resolvable state.
+ * duplicate ledger entry, and a resolvable state. These are process-termination simulations
+ * under SPEC-009 §2.2.1, not physical OS-crash or power-cut tests.
  */
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -2419,6 +2420,49 @@ describe("pre-allocated idempotency keys (SPEC-024 D2, R-19)", () => {
     const second = await h.queue.enqueue({ ...INPUT, idempotencyKey: key });
     assert.equal(second.id, first.id, "one key, one job");
     assert.equal(h.queue.listJobs().filter((job) => job.idempotencyKey === key).length, 1);
+    h.queue.dispose();
+  });
+});
+
+describe("a result fetch the provider refuses is not re-fetched (#630)", () => {
+  const LANDED: EnqueueInput = { ...INPUT, landing: { dir: "productions/saltlight/takes/sh_12" } };
+
+  it("fails the job on a 4xx result fetch instead of polling it forever", async () => {
+    // fal answers a request that failed validation with COMPLETED at /status and 422 at the
+    // result — and `result fetch failed` read as the network being down, so the same call
+    // repeated every poll interval until the app was killed.
+    const fake = new FakeProvider();
+    let fetches = 0;
+    fake.onFetch = () => {
+      fetches += 1;
+      throw new Error("fal: result fetch failed (HTTP 422)");
+    };
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(LANDED);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "the 422 to fail the job");
+    assert.match(foldedJob(h, job.id)?.error ?? "", /HTTP 422/);
+    assert.equal(fetches, 1, "a refusal is the provider's verdict; asking again changes nothing");
+    h.queue.dispose();
+  });
+
+  it("stops re-fetching a transient failure once the job is cancelled", async () => {
+    const fake = new FakeProvider();
+    let fetches = 0;
+    fake.onFetch = () => {
+      fetches += 1;
+      throw new Error("HTTP 503");
+    };
+    const h = await makeHarness({ fake });
+    await h.queue.start();
+    const job = await h.queue.enqueue(LANDED);
+    await until(() => fetches >= 2, "the transient failure to be re-fetched");
+    await h.queue.cancel(job.id);
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "the cancel to land");
+    const settled = fetches;
+    // Several backoff caps' worth of quiet: a poller still orphaned from its job would fetch again.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.equal(fetches, settled, "a cancelled job's poller stops");
     h.queue.dispose();
   });
 });

@@ -8,6 +8,9 @@ import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { tempDir } from "./tmp.js";
 
+const TOKEN = "a".repeat(64);
+const AUTH = { token: TOKEN, allowedOrigins: ["file://", "null", "http://localhost:5173"] };
+
 const STATE: ClientState = {
   app: {
     version: "0.0.0-test",
@@ -18,6 +21,7 @@ const STATE: ClientState = {
     },
     jobs: [],
     builds: [],
+    worldGenesis: {},
     ledger: [],
     ledgerUnavailable: false,
     providers: [],
@@ -112,13 +116,69 @@ class TestClient {
 }
 
 describe("Transport", () => {
+  it("refuses missing, wrong and malformed capabilities before snapshots or pipelined commands, and logs no secrets", async (t) => {
+    const logs: string[] = [], seen: unknown[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, onMessage: msg => seen.push(msg), log: line => logs.push(line) });
+    const port = await transport.start(0);
+    t.after(() => transport.stop());
+    for (const token of [undefined, "b".repeat(64), "wrong", 123, null]) {
+      const socket = new WebSocket("ws://127.0.0.1:" + port);
+      const frames: unknown[] = [];
+      socket.on("message", data => frames.push(data));
+      const closed = new Promise<{ code: number; reason: string }>(resolve => socket.once("close", (code, reason) => resolve({ code, reason: String(reason) })));
+      await new Promise<void>(resolve => socket.once("open", resolve));
+      socket.send(JSON.stringify({ kind: "hello", token }));
+      socket.send(JSON.stringify({ kind: "hello", token: TOKEN }));
+      socket.send(JSON.stringify({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" }));
+      assert.deepEqual(await closed, { code: 1008, reason: "session authentication required" });
+      assert.equal(frames.length, 0);
+    }
+    assert.equal(seen.length, 0);
+    assert.equal(logs.length, 5);
+    assert.ok(logs.every(line => line === "refused unauthenticated WebSocket session"));
+  });
+
+  it("rejects foreign browser origins even with the capability", async (t) => {
+    const logs: string[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, log: line => logs.push(line) });
+    const port = await transport.start(0);
+    t.after(() => transport.stop());
+    const socket = new WebSocket("ws://127.0.0.1:" + port, { origin: "https://foreign.example" });
+    const frames: unknown[] = [];
+    socket.on("message", data => frames.push(data));
+    const closed = new Promise<number>(resolve => socket.once("close", resolve));
+    socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", token: TOKEN })));
+    assert.equal(await closed, 1008);
+    assert.equal(frames.length, 0);
+    assert.equal(logs.length, 1);
+  });
+
+  it("permits the packaged and Vite origins and rejects the previous launch's token", async (t) => {
+    const token = "c".repeat(64);
+    const transport = new Transport({ auth: { ...AUTH, token }, getSnapshot: () => STATE });
+    const port = await transport.start(0);
+    t.after(() => transport.stop());
+    const stale = new TestClient(port);
+    await stale.open();
+    const closed = stale.closed();
+    stale.send({ kind: "hello", token: TOKEN });
+    assert.equal(await closed, 1008);
+    for (const origin of AUTH.allowedOrigins) {
+      const socket = new WebSocket("ws://127.0.0.1:" + port, { origin });
+      const frame = new Promise<string>(resolve => socket.once("message", data => resolve(String(data))));
+      socket.on("open", () => socket.send(JSON.stringify({ kind: "hello", token })));
+      assert.equal(FrameSchema.parse(JSON.parse(await frame)).kind, "snapshot");
+      socket.close();
+    }
+  });
+
   it("sends one snapshot then monotonically sequenced events (R-3)", async () => {
-    const transport = new Transport({ getSnapshot: () => STATE });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
     const port = await transport.start(0);
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello" });
+      client.send({ kind: "hello", token: TOKEN });
       await client.nextFrame(1);
 
       transport.broadcast(EVENT);
@@ -138,12 +198,12 @@ describe("Transport", () => {
   });
 
   it("answers a reconnect carrying lastSeq with a fresh snapshot, never a partial replay (D4)", async () => {
-    const transport = new Transport({ getSnapshot: () => STATE });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
     const port = await transport.start(0);
     try {
       const first = new TestClient(port);
       await first.open();
-      first.send({ kind: "hello" });
+      first.send({ kind: "hello", token: TOKEN });
       await first.nextFrame(1);
       transport.broadcast(EVENT);
       await first.nextFrame(2);
@@ -151,7 +211,7 @@ describe("Transport", () => {
 
       const second = new TestClient(port);
       await second.open();
-      second.send({ kind: "hello", lastSeq: 2 });
+      second.send({ kind: "hello", token: TOKEN, lastSeq: 2 });
       await second.nextFrame(1);
       assert.equal(second.frames[0]!.kind, "snapshot");
       assert.equal(second.frames[0]!.seq, 1, "sequence is per connection");
@@ -164,6 +224,7 @@ describe("Transport", () => {
   it("reconciles durable state before taking a reconnect snapshot", async () => {
     let reconciled = false;
     const transport = new Transport({
+      auth: AUTH,
       getSnapshot: () => ({ ...STATE, worldOpenFailure: reconciled ? { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", reason: "reconciled" } : null }),
       beforeInitialSnapshot: async () => {
         await Promise.resolve();
@@ -174,7 +235,7 @@ describe("Transport", () => {
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello", lastSeq: 4 });
+      client.send({ kind: "hello", token: TOKEN, lastSeq: 4 });
       await client.nextFrame(1);
 
       const first = client.frames[0]!;
@@ -194,12 +255,12 @@ describe("Transport", () => {
       description: "The agent wants to use a capability Studio does not recognise yet",
       rememberable: false,
     };
-    const transport = new Transport({ getSnapshot: () => STATE, getInitialEvents: () => [pending] });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, getInitialEvents: () => [pending] });
     const port = await transport.start(0);
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello" });
+      client.send({ kind: "hello", token: TOKEN });
       await client.nextFrame(2);
       assert.equal(client.frames[0]!.kind, "snapshot");
       assert.deepEqual(client.frames[1], { kind: "event", seq: 2, event: pending });
@@ -218,12 +279,12 @@ describe("Transport", () => {
       description: "The agent wants to use a capability Studio does not recognise yet",
       rememberable: false,
     };
-    const transport = new Transport({ getSnapshot: () => STATE, getInitialEvents: () => [pending] });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, getInitialEvents: () => [pending] });
     const port = await transport.start(0);
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello" });
+      client.send({ kind: "hello", token: TOKEN });
       await client.nextFrame(2);
       transport.broadcastSnapshot();
       await client.nextFrame(4);
@@ -237,12 +298,12 @@ describe("Transport", () => {
 
   it("routes non-hello messages to the coordinator only after hello", async () => {
     const seen: unknown[] = [];
-    const transport = new Transport({ getSnapshot: () => STATE, onMessage: (m) => seen.push(m) });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, onMessage: (m) => seen.push(m) });
     const port = await transport.start(0);
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello" });
+      client.send({ kind: "hello", token: TOKEN });
       await client.nextFrame(1);
       client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
       await new Promise((r) => setTimeout(r, 200));
@@ -251,7 +312,7 @@ describe("Transport", () => {
       const rude = new TestClient(port);
       await rude.open();
       rude.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
-      assert.equal(await rude.closed(), 1002);
+      assert.equal(await rude.closed(), 1008);
       client.close();
     } finally {
       await transport.stop();
@@ -259,7 +320,7 @@ describe("Transport", () => {
   });
 
   it("closes a connection that sends a malformed message rather than guessing", async () => {
-    const transport = new Transport({ getSnapshot: () => STATE });
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE });
     const port = await transport.start(0);
     try {
       const client = new TestClient(port);
@@ -277,7 +338,7 @@ describe("Transport", () => {
     // read as disconnected on one keystroke; the message is dropped, said so, and life goes on.
     const dropped: string[] = [];
     const seen: unknown[] = [];
-    const transport = new Transport({
+    const transport = new Transport({ auth: AUTH,
       getSnapshot: () => STATE,
       onMessage: (m) => seen.push(m),
       log: (line) => dropped.push(line),
@@ -286,7 +347,7 @@ describe("Transport", () => {
     try {
       const client = new TestClient(port);
       await client.open();
-      client.send({ kind: "hello" });
+      client.send({ kind: "hello", token: TOKEN });
       await client.nextFrame(1);
 
       client.send({ kind: "a-message-from-the-future", payload: { bold: true } });
@@ -327,7 +388,7 @@ describe("the media route", () => {
     await writeFile(join(root, "worlds", "the-undersong", "artifacts", "treatment.md"), NOTE, "utf8");
     await writeFile(join(root, "worlds", "the-undersong", "artifacts", "treatment.md.json"), "{}", "utf8");
     const provider = new FsWorldProvider(root, { clock: () => "2026-08-26T10:00:00.000Z" });
-    const transport = new Transport({
+    const transport = new Transport({ auth: AUTH,
       getSnapshot: () => STATE,
       // The same one line the coordinator wires up, so the route under test is the real one.
       serveFile: async (urlPath) => {
@@ -343,9 +404,30 @@ describe("the media route", () => {
     return `http://127.0.0.1:${port}/media/the-undersong`;
   }
 
+  it("requires a media capability and only returns CORS headers for allowed origins", async (t) => {
+    const base = await serving(t);
+    const url = base + "/artifacts/vigil.mp4";
+    for (const suffix of ["", "?token=wrong", "?token=" + "b".repeat(64)]) {
+      const res = await fetch(url + suffix);
+      assert.equal(res.status, 401);
+      assert.equal(res.headers.get("access-control-allow-origin"), null);
+      await res.text();
+    }
+    const blocked = await fetch(url, { headers: { Authorization: "Bearer " + TOKEN, Origin: "https://foreign.example" } });
+    assert.equal(blocked.status, 401);
+    await blocked.text();
+    for (const Origin of AUTH.allowedOrigins) {
+      const res = await fetch(url, { headers: { Authorization: "Bearer " + TOKEN, Origin, Range: "bytes=4-8" } });
+      assert.equal(res.status, 206);
+      assert.equal(res.headers.get("access-control-allow-origin"), Origin);
+      assert.equal(res.headers.get("vary"), "Origin");
+      assert.equal(await res.text(), "45678");
+    }
+  });
+
   it("sends the whole file when nothing was asked for, and says it takes ranges", async (t) => {
     const base = await serving(t);
-    const res = await fetch(`${base}/artifacts/vigil.mp4`);
+    const res = await fetch(`${base}/artifacts/vigil.mp4?token=${TOKEN}`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "video/mp4");
     assert.equal(res.headers.get("accept-ranges"), "bytes");
@@ -355,14 +437,14 @@ describe("the media route", () => {
 
   it("answers a range with 206 and the window it actually sent — what seeking runs on", async (t) => {
     const base = await serving(t);
-    const res = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=4-8" } });
+    const res = await fetch(`${base}/artifacts/vigil.mp4?token=${TOKEN}`, { headers: { Range: "bytes=4-8" } });
     assert.equal(res.status, 206);
     assert.equal(res.headers.get("content-range"), `bytes 4-8/${CLIP.length}`);
     assert.equal(res.headers.get("content-length"), "5");
     assert.equal(await res.text(), "45678");
 
     // The suffix form a player sends looking for the trailing atoms — the one that reads backwards.
-    const tail = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=-4" } });
+    const tail = await fetch(`${base}/artifacts/vigil.mp4?token=${TOKEN}`, { headers: { Range: "bytes=-4" } });
     assert.equal(tail.status, 206);
     assert.equal(tail.headers.get("content-range"), `bytes 16-19/${CLIP.length}`);
     assert.equal(await tail.text(), "ghij");
@@ -370,14 +452,14 @@ describe("the media route", () => {
 
   it("refuses a window past the end with 416 rather than a short body", async (t) => {
     const base = await serving(t);
-    const res = await fetch(`${base}/artifacts/vigil.mp4`, { headers: { Range: "bytes=900-999" } });
+    const res = await fetch(`${base}/artifacts/vigil.mp4?token=${TOKEN}`, { headers: { Range: "bytes=900-999" } });
     assert.equal(res.status, 416);
     assert.equal(res.headers.get("content-range"), `bytes */${CLIP.length}`);
   });
 
   it("serves an artifact's markdown as text, whitespace and line endings intact", async (t) => {
     const base = await serving(t);
-    const res = await fetch(`${base}/artifacts/treatment.md`);
+    const res = await fetch(`${base}/artifacts/treatment.md?token=${TOKEN}`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("content-type"), "text/markdown; charset=utf-8");
     assert.equal(await res.text(), NOTE);
@@ -386,7 +468,7 @@ describe("the media route", () => {
   it("404s what the resolver refuses — the sidecar beside the file included", async (t) => {
     const base = await serving(t);
     for (const path of ["artifacts/treatment.md.json", "artifacts/../world.json", "artifacts/missing.mp4"]) {
-      assert.equal((await fetch(`${base}/${path}`)).status, 404, `served ${path}`);
+      assert.equal((await fetch(`${base}/${path}?token=${TOKEN}`)).status, 404, `served ${path}`);
     }
   });
 });

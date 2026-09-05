@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp } from "node:fs/promises";
@@ -21,6 +21,36 @@ const RESET_DIAGNOSTIC: ProviderTransportDiagnostic = {
 };
 
 describe("provider call store", () => {
+  it("retains the newest 2,000 calls across compaction and restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "arke-provider-compact-"));
+    const path = join(dir, "calls.jsonl");
+    const secrets = new SecretRegistry();
+    const input = {
+      provider: "openai" as const,
+      operation: "submit" as const,
+      context: { jobId: `jb_${"0".repeat(26)}`, attempt: 1 },
+      method: "POST",
+      endpoint: "https://fixture.invalid/generate",
+      headers: {},
+      body: {},
+    };
+    await new ProviderCallStore(path, secrets).start(input);
+    const template = JSON.parse((await readFile(path, "utf8")).trim());
+    const records = Array.from({ length: 2_000 }, (_, index) => ({
+      ...template,
+      id: `pc_${String(index).padStart(26, "0")}`,
+      startedAt: new Date(Date.UTC(2020, 0, 1) + index * 1000).toISOString(),
+    }));
+    await writeFile(path, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    const newest = await new ProviderCallStore(path, secrets).start(input);
+    const rows = (await readFile(path, "utf8")).trim().split("\n");
+    assert.equal(rows.length, 2_000);
+    const recovered = await new ProviderCallStore(path, secrets).listForJob(input.context.jobId);
+    assert.equal(recovered.length, 2_000);
+    assert.ok(recovered.some((record) => record.id === newest));
+    assert.ok(!recovered.some((record) => record.id === records[0]?.id));
+  });
+
   it("persists, folds after restart, correlates jobs, and scrubs credentials", async () => {
     const dir = await mkdtemp(join(tmpdir(), "arke-provider-calls-"));
     const path = join(dir, "calls.jsonl");

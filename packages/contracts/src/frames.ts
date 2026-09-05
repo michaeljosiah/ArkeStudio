@@ -14,6 +14,7 @@ import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
 import { DomainEventSchema } from "./events.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
+import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ProviderIdSchema } from "./provider.js";
@@ -44,7 +45,7 @@ export type Frame = z.infer<typeof FrameSchema>;
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional() }).strict(),
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z
@@ -394,6 +395,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
       text: z.string().min(1).max(16_000),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
+      /** This turn's language-model override; absent uses the production's remembered choice. */
+      modelId: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
     })
@@ -625,9 +628,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("authoring-cancel"), worldId: UlidSchema, proposalId: z.string().min(1) })
     .strict(),
-  /** Local-runtime setup: leave one out, try one again, replace one, or stop the lot. */
+  /** Local-runtime setup: leave one out, try one again, pause/resume, replace one, or stop the lot. */
   z.object({ kind: z.literal("setup-skip"), componentId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("setup-retry"), componentId: z.string().min(1) }).strict(),
+  /** Replace the Arke-managed ComfyUI tree with the pinned version, an explicit choice (SPEC-021 R-20; issue 592). */
+  z.object({ kind: z.literal("comfyui-update-runtime") }).strict(),
+  z.object({ kind: z.literal("setup-pause"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-resume"), componentId: z.string().min(1) }).strict(),
   /**
    * Discard what is on disk for one component and fetch it again. Retry trusts what is already
    * there — presence is completion — so it is no answer to a file that arrived intact and is
@@ -1088,6 +1095,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("comfyui-verify-recipe"), recipeId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
+  /** Open what a spawned engine said, host-owned end to end (SPEC-033 R-70; issue 585). */
+  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa"]) }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({
@@ -1225,6 +1234,48 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(80),
       establishing: z.boolean().optional(),
       replaceExistingName: z.boolean().optional(),
+    })
+    .strict(),
+  /** A prop is born as a name with no states (design turn 105; issue 537); states are added by name. */
+  z.object({ kind: z.literal("create-prop"), worldId: UlidSchema, name: z.string().trim().min(1).max(80) }).strict(),
+  z
+    .object({
+      kind: z.literal("add-prop-state"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      name: z.string().trim().min(1).max(80),
+    })
+    .strict(),
+  /** Ask the host picker for one image for a prop state; it lands as a pending take, never straight as the reference. */
+  z
+    .object({
+      kind: z.literal("import-prop-state-candidate"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      stateId: PropStateIdSchema,
+    })
+    .strict(),
+  /**
+   * Accept a candidate or a pending take as one prop state's reference (design turn 105; issue
+   * 535). `replace` is the confirmation a state that already has its reference requires — the
+   * same asking-first that `replaceExistingName` is for a colliding location view.
+   */
+  z
+    .object({
+      kind: z.literal("accept-prop-state"),
+      worldId: UlidSchema,
+      propId: PropIdSchema,
+      stateId: PropStateIdSchema,
+      selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
+        z
+          .object({
+            source: z.literal("candidate"),
+            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
+          })
+          .strict(),
+      ]),
+      replace: z.boolean().optional(),
     })
     .strict(),
   /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
@@ -1413,6 +1464,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       shotId: z.string().min(1),
+      /** This line's model override; it must still host the speaker's assigned voice. */
+      modelId: z.string().min(1).optional(),
       /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
       /** One of DELIVERIES; absent leaves the read at the provider's own default. */

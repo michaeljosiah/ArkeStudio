@@ -25,7 +25,7 @@ import {
   type CommitResult,
   type PendingCommit,
 } from "./commit.js";
-import { WorldLock } from "./lock.js";
+import { WorldLock, type WorldLockOptions } from "./lock.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { scanWorld, type ScanResult } from "./scan.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -59,6 +59,8 @@ export interface WorldStoreEvents {
    * and is where that guarantee actually lives (R-28) — nothing is merged silently there either.
    */
   onAdopted?: () => void;
+  onOwnershipLost?: (error: Error) => void;
+  onHeartbeatError?: (error: unknown, consecutive: number) => void;
 }
 
 /** Checked after a fresh scan and inside the store's mutation queue. Null means still current. */
@@ -83,6 +85,13 @@ export class WorldStore {
     private readonly clockFn: () => string,
   ) {
     this.lockHeld = lock !== null;
+    if (lock) lock.onHeartbeatError = events.onHeartbeatError;
+    if (lock) lock.onLost = (error) => {
+      this.ownershipFailure = error;
+      this.lockHeld = false;
+      this.watcher?.stop();
+      this.events.onOwnershipLost?.(error);
+    };
   }
 
   private watcher: WorldWatcher | null = null;
@@ -93,6 +102,7 @@ export class WorldStore {
   private closed = false;
   private readonly admittedGate = new AsyncLocalStorage<{ active: boolean }>();
   private lockHeld: boolean;
+  private ownershipFailure: Error | null = null;
   private closePromise: Promise<void> | null = null;
   private readonly closingController = new AbortController();
 
@@ -103,9 +113,13 @@ export class WorldStore {
       events?: WorldStoreEvents;
       clock?: () => string;
       sqlite?: DatabaseCtor;
+      lockOptions?: WorldLockOptions;
     } = {},
   ): Promise<WorldStore> {
-    const committer = new Committer(dir, opts.clock);
+    const committer = new Committer(dir, opts.clock, async () => {
+      if (!lock) throw new Error("world is read-only");
+      await lock.assertOwned();
+    });
 
     /*
      * Ownership first, then recovery.
@@ -122,7 +136,7 @@ export class WorldStore {
      */
     let lock: WorldLock | null = null;
     if (!opts.readOnly) {
-      lock = new WorldLock(dir);
+      lock = new WorldLock(dir, opts.lockOptions);
       await lock.acquire();
     }
 
@@ -197,7 +211,7 @@ export class WorldStore {
     return this.serialise(async () => {
       // Admission happened before enqueue so work already ahead of close may drain. This second
       // check proves the lock still exists when the callback actually reaches the filesystem.
-      this.assertLockHeld();
+      await this.verifyOwnership();
       this.watcher?.suppress();
       const admission = { active: true };
       try {
@@ -225,7 +239,7 @@ export class WorldStore {
   async ownedWrite<T>(fn: () => Promise<T>): Promise<T> {
     this.assertWritable();
     return this.serialise(async () => {
-      this.assertLockHeld();
+      await this.verifyOwnership();
       this.watcher?.suppress();
       try {
         return await fn();
@@ -291,7 +305,7 @@ export class WorldStore {
   ): Promise<CommitResult> {
     this.assertWritable();
     return this.serialise(async () => {
-      this.assertLockHeld();
+      await this.verifyOwnership();
       this.watcher?.suppress();
       try {
         if (precondition) {
@@ -498,7 +512,7 @@ export class WorldStore {
     if (this.closed) throw new Error("world is closed");
     this.assertLockHeld();
     await this.serialise(async () => {
-      this.assertLockHeld();
+      await this.verifyOwnership();
       const edit = this.externalEdits.find((e) => e.path === portablePath);
       if (!edit) return;
       this.watcher?.suppress();
@@ -559,7 +573,7 @@ export class WorldStore {
   async reload(): Promise<WorldBundle> {
     this.assertWritable();
     await this.serialise(async () => {
-      this.assertLockHeld();
+      await this.verifyOwnership();
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.saveScanState();
@@ -631,7 +645,13 @@ export class WorldStore {
     }
   }
 
+  private async verifyOwnership(): Promise<void> {
+    this.assertLockHeld();
+    await this.lock!.assertOwned();
+  }
+
   private assertLockHeld(): void {
+    if (this.ownershipFailure) throw this.ownershipFailure;
     if (!this.lockHeld) throw new Error(this.closed ? "world is closed" : "world is read-only");
   }
 
@@ -667,6 +687,7 @@ export class WorldStore {
   }
 
   private async saveScanState(): Promise<void> {
+    await this.verifyOwnership();
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
     const manifest = { ...this.scanState.manifest };
 
@@ -698,7 +719,10 @@ export class WorldStore {
         const snapshot = historySnapshot(portablePath, content);
         if (snapshot === null) return;
         const existing = await this.readEntity(snapshot.path);
-        if (existing === null) await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+        if (existing === null) {
+          await this.verifyOwnership();
+          await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+        }
         else if (existing !== content) {
           throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
         }

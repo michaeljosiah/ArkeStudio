@@ -94,10 +94,12 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
     displayName: patch.id,
     purpose: "test",
     sizeMb: 400,
+    installLocation: "C:\\ArkeStudio\\models",
     state: "present",
     bytesDone: 0,
     bytesTotal: 0,
     bytesPerSecond: null,
+    pauseSupported: false,
     ...patch,
   };
 }
@@ -335,6 +337,56 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
       },
     });
     assert.match(plain(renderEngine(moving, "ollama")), /Gemma 4 12B[\s\S]{0,40}downloading · 62% · 7\.4 GB/);
+  });
+
+  it("keeps paused progress and Resume on the model row", () => {
+    const paused = stateWith({
+      setup: {
+        running: false,
+        diskFreeMb: 480_000,
+        diskCheckedAt: null,
+        components: [
+          component({
+            id: "ollama-gemma4-12b",
+            state: "paused",
+            sizeMb: 7600,
+            bytesDone: 4_712_000_000,
+            bytesTotal: 7_600_000_000,
+            pauseSupported: true,
+            provides: [GEMMA.id],
+          }),
+        ],
+      },
+    });
+    const html = renderEngine(paused, "ollama");
+    const row = rowFor(html, GEMMA.displayName);
+    assert.match(plain(row), /paused · 62% · 7\.4 GB/);
+    assert.match(plain(row), /Resume/);
+    assert.match(plain(row), /Downloads/);
+    assert.match(row, /width:62%/);
+  });
+
+  it("states when an active model source cannot pause", () => {
+    const downloading = (pauseSupported: boolean) => stateWith({
+      setup: {
+        running: true,
+        diskFreeMb: 480_000,
+        diskCheckedAt: null,
+        components: [
+          component({
+            id: "ollama-gemma4-12b",
+            state: "downloading",
+            pauseSupported,
+            provides: [GEMMA.id],
+          }),
+        ],
+      },
+    });
+    assert.match(plain(rowFor(renderEngine(downloading(true), "ollama"), GEMMA.displayName)), /Pause/);
+    assert.match(
+      plain(rowFor(renderEngine(downloading(false), "ollama"), GEMMA.displayName)),
+      /Cannot be paused/,
+    );
   });
 
   it("dims a declared refusal and leaves a measured shortfall alone (SPEC-034 R-23)", () => {

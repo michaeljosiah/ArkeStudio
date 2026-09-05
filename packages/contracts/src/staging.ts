@@ -187,14 +187,58 @@ function key(t: number, p: readonly [number, number, number], l: readonly [numbe
   };
 }
 
-function figureAction(description: string, sheetId: string): string {
+function figureAction(description: string, sheetId: string, cast: readonly string[]): string {
   const words = description.toLowerCase();
   const mention = `@${sheetId.toLowerCase()}`;
   const start = words.indexOf(mention);
   if (start < 0) return "";
   const after = words.slice(start + mention.length);
-  const nextMention = after.search(/@[a-z0-9]/);
-  return after.slice(0, nextMention < 0 ? 140 : nextMention);
+  const sentenceStart = Math.max(words.lastIndexOf(".", start), words.lastIndexOf("!", start), words.lastIndexOf("?", start)) + 1;
+  const castMentions = cast.map((id) => `@${id.toLowerCase()}`);
+  const hasPreviousCast = castMentions.some((candidate) => words.lastIndexOf(candidate, start - 1) >= sentenceStart);
+  const ends = [140];
+  for (const candidate of castMentions) {
+    const at = after.indexOf(candidate);
+    if (at >= 0) ends.push(at);
+  }
+  const punctuation = after.search(/[.!?]/);
+  if (punctuation >= 0) ends.push(punctuation);
+  const prefix = hasPreviousCast ? "" : words.slice(sentenceStart, start);
+  return `${prefix} ${after.slice(0, Math.min(...ends))}`;
+}
+
+const PROP_PROFILES: ReadonlyArray<{
+  pattern: RegExp;
+  name: string;
+  w: number;
+  h: number;
+  d: number;
+  beside: boolean;
+}> = [
+  { pattern: /\bchairs?\b/, name: "chair", w: 0.5, h: 0.45, d: 0.5, beside: false },
+  { pattern: /\btables?\b/, name: "table", w: 1.4, h: 0.75, d: 0.8, beside: true },
+  { pattern: /\bdesks?\b/, name: "desk", w: 1.4, h: 0.75, d: 0.7, beside: true },
+  { pattern: /\bcounters?\b/, name: "counter", w: 2, h: 0.9, d: 0.7, beside: true },
+  { pattern: /\bbeds?\b/, name: "bed", w: 1.5, h: 0.5, d: 2, beside: false },
+  { pattern: /\b(?:sofas?|couches?)\b/, name: "sofa", w: 1.8, h: 0.45, d: 0.8, beside: false },
+  { pattern: /\bbench(?:es)?\b/, name: "bench", w: 1.4, h: 0.45, d: 0.45, beside: false },
+  { pattern: /\bstools?\b/, name: "stool", w: 0.4, h: 0.45, d: 0.4, beside: false },
+];
+
+function stagingProp(action: string, x: number, z: number): StagingSet | null {
+  const found = PROP_PROFILES
+    .map((profile) => ({ profile, at: action.search(profile.pattern) }))
+    .filter((candidate) => candidate.at >= 0)
+    .sort((left, right) => left.at - right.at)[0]?.profile;
+  if (found === undefined) return null;
+  return {
+    name: found.name,
+    x,
+    z: round(z + (found.beside ? found.d / 2 + 0.25 : 0)),
+    w: found.w,
+    h: found.h,
+    d: found.d,
+  };
 }
 
 /**
@@ -208,10 +252,10 @@ export function stageShot(
   input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"] },
 ): ResolvedShotStaging {
   const framing = input.framing ?? shot.framing;
-  const cast = input.cast.slice(0, 5).map((sheetId, index) => {
+  const blocked = input.cast.slice(0, 5).map((sheetId, index) => {
     const x = round(-1.5 + index * 1.5 - (Math.min(input.cast.length, 5) - 1) * 0.75);
     const z = index % 2 === 0 ? 0 : -0.5;
-    const action = figureAction(shot.description, sheetId);
+    const action = figureAction(shot.description, sheetId, input.cast);
     const pose = /\b(?:sits?|sitting|seated|takes? (?:a )?seat)\b/.test(action)
       ? "sit" as const
       : /\b(?:lies?|lying|reclines?|reclining|prone|supine)\b/.test(action)
@@ -219,22 +263,25 @@ export function stageShot(
         : undefined;
     const walking = pose === undefined && /\b(?:walks?|walking|paces?|pacing|crosses?|crossing)\b/.test(action);
     const distance = Math.min(2.4, Math.max(0.7, input.durationSec * 1.2));
-    return {
+    const figure: StagingFigure = {
       sheetId,
       x,
       z,
       ...(pose === undefined ? {} : { pose }),
       ...(walking ? { to: [x, round(z - distance)] as [number, number] } : {}),
     };
+    return { figure, prop: stagingProp(action, x, z) };
   });
-  const sets = input.sets.slice(0, 2).map((name, index) => ({
+  const cast = blocked.map(({ figure }) => figure);
+  const locations = input.sets.map((name, index) => ({
     name,
-    x: index === 0 ? -3.4 : 4.2,
+    x: index === 0 ? -3.4 : 4.2 + (index - 1) * 3.2,
     z: -3.4,
     w: index === 0 ? 4.4 : 2.6,
     h: index === 0 ? 2.9 : 2.1,
     d: 1.1,
   }));
+  const sets = [...locations, ...blocked.flatMap(({ prop }) => prop === null ? [] : [prop])];
   const subject = cast[0]?.sheetId ?? null;
   // Anchored keys are offsets from the subject; an unanchored scene stands where the subject
   // would have been, so a castless shot still has a camera somewhere sensible.
@@ -448,8 +495,12 @@ export function stagingPromptClause(
         : [],
   );
   const posture = poses.length === 0 ? "" : ` ${poses.join("; ")}.`;
+  const sets = staging.sets.length === 0
+    ? []
+    : [`Set massing — ${staging.sets.map((set) => `${set.name}: ${set.w.toFixed(2)}m wide, ${set.h.toFixed(2)}m high, ${set.d.toFixed(2)}m deep at x ${set.x.toFixed(2)}m, z ${set.z.toFixed(2)}m`).join("; ")}.`];
   return [
     `Camera move, ${stagingMoveWord(keys, staging.cast, staging.rig)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
+    ...sets,
     ...stagingBeats(staging, nameOf, durationSec),
   ].join("\n");
 }

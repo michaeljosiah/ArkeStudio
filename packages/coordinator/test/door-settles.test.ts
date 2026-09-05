@@ -121,11 +121,11 @@ async function drive(where: "prepare" | "create"): Promise<void> {
       appVersion: "test",
       manifest: SHIPPED_MANIFEST,
     });
-    const { port } = await coordinator.start(0);
+    const { port, token } = await coordinator.start(0);
     const client = new TestClient(port);
     await client.open();
     try {
-      client.send({ kind: "hello", lastSeq: 0 });
+      client.send({ kind: "hello", token, lastSeq: 0 });
       await client.until((f) => f.kind === "snapshot", "the opening snapshot");
 
       client.send({

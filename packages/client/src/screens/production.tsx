@@ -182,6 +182,7 @@ import {
   splitOverlayAudio,
   uploadArtifacts,
   setProductionAspect,
+  setProductionModel,
   setShotTrim,
   useExports,
   useStore,
@@ -2968,6 +2969,19 @@ export function GenerateScreen() {
                 take {takes.indexOf(take) + 1} · {take.model} · {seconds(shot?.durationSec)}
                 {take.completedAt ? ` · finished ${take.completedAt.slice(11, 16)}` : ""}
               </span>
+              {(take.provenance.propStates ?? []).length === 0 ? null : (
+                // The five fields frozen at dispatch (design turn 105; issue 536), named rather
+                // than by id — what this take was made with, not what the shot says now.
+                <span className="fy-mono" data-testid="take-prop-provenance" style={{ display: "block" }}>
+                  {take.provenance.propStates!
+                    .map((entry) => {
+                      const prop = world?.props.find((candidate) => candidate.id === entry.propId);
+                      const state = prop?.states.find((candidate) => candidate.id === entry.stateId);
+                      return `prop: ${prop?.name ?? entry.propId} · state: ${state?.name ?? entry.stateId ?? "unresolved"} · ref: ${entry.referenceId ?? "none"} · resolved: ${entry.resolutionSource} · override: ${entry.overrideSource ?? "none"}`;
+                    })
+                    .join("  ")}
+                </span>
+              )}
               <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span className={`fy-dot fy-dot--${decisionTone(decisions[take.id])}`} />
                 <span className="fy-mono">{decisions[take.id] ?? "pending"}</span>
@@ -3120,14 +3134,15 @@ export function VoiceLineDialogScreen() {
   const asked = params.get("shot");
   const shot = spoken.find((s) => s.id === asked) ?? spoken[0];
   const speaker = shot?.audio?.speaker ? world?.sheets.find((c) => c.id === shot.audio!.speaker) : undefined;
-  const voiceModel = speaker?.voice
+  const assignedVoiceModelId = speaker?.voice
+    ? (speaker.voice.model ?? legacyVoiceModel(speaker.voice.provider, speaker.voice.voiceId, world?.clonedVoices ?? []))
+    : null;
+  const voiceModel = speaker?.voice && assignedVoiceModelId
     ? clientState?.app.manifest?.models.find(
         (model) =>
           model.provider === speaker.voice!.provider &&
           model.capability === "voice-tts" &&
-          model.id ===
-            (speaker.voice!.model ??
-              legacyVoiceModel(speaker.voice!.provider, speaker.voice!.voiceId, world?.clonedVoices ?? [])),
+          model.id === assignedVoiceModelId,
       )
     : undefined;
   const voiceDeliveries = supportedDeliveries(voiceModel);
@@ -3135,21 +3150,36 @@ export function VoiceLineDialogScreen() {
     speaker?.voice && voiceModel?.provider === "comfyui"
       ? clientState?.app.comfyui?.recipes.find((recipe) => recipe.recipeId === voiceModel.id)
       : null;
-  const voiceUnavailableReason =
+  const assignedVoiceUnavailableReason =
     voiceReadiness?.state === "disabled" ||
     (voiceReadiness?.state === "unknown" && clientState?.app.comfyui?.engine.locality === "local")
       ? (voiceReadiness.reason ?? "The assigned voice recipe is not ready.")
+      : voiceModel !== undefined && (clientState?.app.models.disabled ?? []).includes(voiceModel.id)
+        ? `${voiceModel.displayName} is turned off in Providers.`
       : voiceModel === undefined && speaker?.voice
         ? "The assigned voice model is no longer available."
         : null;
   const [sending, setSending] = useState(false);
   const [delivery, setDelivery] = useState<Delivery | "">("");
+  const [voiceModelOverride, setVoiceModelOverride] = useState<string | undefined>();
   const [refusal, setRefusal] = useState<string | null>(null);
   const pending = useRef<string | null>(null);
   const [uploadConfirmation, setUploadConfirmation] = useState<{
     destinationLabel: string;
     confirmationToken: string;
   } | null>(null);
+  const rememberedVoiceModelId = production?.meta.models?.["voice-tts"];
+  const effectiveVoiceModelId = voiceModelOverride ?? rememberedVoiceModelId ?? assignedVoiceModelId ?? undefined;
+  const selectedVoiceModel = clientState?.app.manifest?.models.find(
+    (model) => model.id === effectiveVoiceModelId && model.capability === "voice-tts",
+  );
+  const voiceModelConflict =
+    effectiveVoiceModelId !== undefined && assignedVoiceModelId !== null && effectiveVoiceModelId !== assignedVoiceModelId
+      ? selectedVoiceModel === undefined
+        ? `This production still names ${effectiveVoiceModelId}, which is no longer available.`
+        : `This production uses ${selectedVoiceModel.displayName}, but ${speaker?.name ?? "this character"}'s assigned voice uses ${voiceModel?.displayName ?? assignedVoiceModelId}. Choose the assigned model for this line.`
+      : null;
+  const voiceUnavailableReason = voiceModelConflict ?? assignedVoiceUnavailableReason;
   useEffect(
     () =>
       subscribeQueueResults((result) => {
@@ -3177,6 +3207,7 @@ export function VoiceLineDialogScreen() {
       worldId,
       productionId: prodId,
       shotId: shot.id,
+      ...(effectiveVoiceModelId !== undefined ? { modelId: effectiveVoiceModelId } : {}),
       ...(delivery ? { delivery } : {}),
       ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
     });
@@ -3226,7 +3257,35 @@ export function VoiceLineDialogScreen() {
         )}
         {refusal !== null && <p className="fy-refusal">{refusal}</p>}
         {voiceUnavailableReason !== null && (
-          <p className="fy-refusal">Assigned voice unavailable · {voiceUnavailableReason}</p>
+          <p className="fy-refusal">
+            {voiceModelConflict ?? `Assigned voice unavailable · ${assignedVoiceUnavailableReason}`}
+          </p>
+        )}
+        {speaker?.voice && assignedVoiceModelId && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <select
+              aria-label="Voice model"
+              className="fy-bench__chip"
+              value={effectiveVoiceModelId}
+              onChange={(event) => setVoiceModelOverride(event.target.value)}
+            >
+              {rememberedVoiceModelId && rememberedVoiceModelId !== assignedVoiceModelId && (
+                <option value={rememberedVoiceModelId}>
+                  {selectedVoiceModel?.displayName ?? rememberedVoiceModelId} · this production
+                </option>
+              )}
+              <option value={assignedVoiceModelId}>{voiceModel?.displayName ?? assignedVoiceModelId} · assigned voice</option>
+            </select>
+            {effectiveVoiceModelId === assignedVoiceModelId && rememberedVoiceModelId !== assignedVoiceModelId && worldId && prodId && (
+              <button
+                type="button"
+                className="fy-set__link"
+                onClick={() => setProductionModel(worldId, prodId, "voice-tts", assignedVoiceModelId)}
+              >
+                Remember for this production
+              </button>
+            )}
+          </div>
         )}
         {speaker?.voice &&
           (voiceDeliveries.length > 0 ? (

@@ -79,6 +79,9 @@ export const ID_PREFIXES = {
   foundingBuild: "fb",
   /** One durable frame-generation run (SPEC-036 §2.7). */
   frameRun: "fr",
+  /** One prop, and one of its ordered named states (design turn 105; issue 534). */
+  prop: "prop",
+  propState: "pst",
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];

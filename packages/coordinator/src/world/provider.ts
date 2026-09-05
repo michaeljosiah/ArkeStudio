@@ -56,6 +56,7 @@ export class FsWorldProvider implements WorldProvider {
   private closing = false;
   private readonly scopedOperations = new Set<Promise<unknown>>();
   private onAdoptedCb: ((worldId: string) => void) | null = null;
+  private onLockErrorCb: ((worldId: string, message: string, consecutive: number) => void) | null = null;
   private appIndex: AppIndex | null = null;
   private appIndexReady = false;
   readonly pathBudget: PathBudget;
@@ -122,6 +123,17 @@ export class FsWorldProvider implements WorldProvider {
   /** The open world quietly refreshed itself — no accusation, just newer Bible bytes (R-BIBLE-6). */
   onWorldAdopted(cb: (worldId: string) => void): void {
     this.onAdoptedCb = cb;
+  }
+
+  onWorldLockError(cb: (worldId: string, message: string, consecutive: number) => void): void {
+    this.onLockErrorCb = cb;
+  }
+
+  private lockEvents(worldId: string) {
+    return {
+      onHeartbeatError: (error: unknown, consecutive: number) =>
+        this.onLockErrorCb?.(worldId, error instanceof Error ? error.message : String(error), consecutive),
+    };
   }
 
   /**
@@ -356,6 +368,7 @@ export class FsWorldProvider implements WorldProvider {
       clock: this.clock,
       ...(this.sqlite ? { sqlite: this.sqlite } : {}),
       events: {
+        ...this.lockEvents(worldId),
         onAdopted: () => this.onAdoptedCb?.(worldId),
       },
     });
@@ -429,6 +442,7 @@ export class FsWorldProvider implements WorldProvider {
       if (this.store?.worldId === worldId) return fn(this.store);
       const dir = await this.findWorldDir(worldId);
       const scoped = await WorldStore.open(dir, {
+        events: this.lockEvents(worldId),
         clock: this.clock,
         ...(this.sqlite ? { sqlite: this.sqlite } : {}),
       });

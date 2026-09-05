@@ -151,6 +151,7 @@ export function activationOfComponent(state: SetupComponentState): ActivationSta
       return "not-installed";
     case "queued":
     case "downloading":
+    case "paused":
       return "downloading";
     case "installing":
       return "installing";

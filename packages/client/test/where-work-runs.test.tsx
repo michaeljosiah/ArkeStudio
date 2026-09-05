@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { Capability, ClientState, ManifestModel } from "@arke-studio/contracts";
 import { DispatchBar, productionModel, resolveModel, useResolvedModel } from "../src/components/dispatch-bar.js";
+import { ProductionConversation } from "../src/components/conversation.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -26,6 +27,16 @@ const LOCAL: ManifestModel = {
 };
 
 const CLOUD = FIXTURE_STATE.app.manifest!.models[0]!;
+const LANGUAGE: ManifestModel = {
+  id: "gemma4-12b",
+  providerModelId: "gemma4:12b",
+  provider: "ollama",
+  capability: "llm",
+  displayName: "Gemma 4 12B",
+  accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+  limits: { maxContextTokens: 256000 },
+  pricing: { kind: "unmetered" },
+};
 
 function stateWith(models: Partial<Record<Capability, string>> | undefined, opts: { recipeReady?: boolean } = {}): ClientState {
   const base = FIXTURE_STATE;
@@ -183,5 +194,48 @@ describe("the host and the bar resolve one model, never two (R-77, R-78)", () =>
   it("leaves a world-scoped host on the installation's default", () => {
     const state = stateWith({ video: LOCAL.id });
     assert.equal(hostModel(state, `/w/${state.world!.meta.worldId}/art-direction`), CLOUD.id);
+  });
+});
+
+describe("language work reads the production's choice (#587)", () => {
+  function languageState(modelId: string): ClientState {
+    const base = stateWith({ llm: modelId });
+    return {
+      ...base,
+      app: {
+        ...base.app,
+        manifest: { ...base.app.manifest!, models: [...base.app.manifest!.models, LANGUAGE] },
+        harnessModels: [{ id: "gemma4:12b", provider: LANGUAGE.provider, displayName: LANGUAGE.displayName }],
+      },
+    };
+  }
+
+  function renderConversation(state: ClientState): string {
+    __setStateForTest(state);
+    return plain(
+      renderToString(
+        <MemoryRouter>
+          <ProductionConversation
+            worldId={state.world!.meta.worldId}
+            productionId="saltlight"
+            placeholder="Say something"
+            emptyLine="Nothing said yet"
+          />
+        </MemoryRouter>,
+      ),
+    );
+  }
+
+  it("seeds a production conversation with the remembered language model", () => {
+    const text = renderConversation(languageState(LANGUAGE.id));
+    assert.match(text, /Gemma 4 12B/);
+    assert.match(text, /THIS PRODUCTION/);
+  });
+
+  it("names a removed language model instead of falling back", () => {
+    const text = renderConversation(languageState("retired-language-model"));
+    assert.match(text, /retired-language-model/);
+    assert.match(text, /no longer available/);
+    assert.doesNotMatch(text, /HARNESS DEFAULT/);
   });
 });
