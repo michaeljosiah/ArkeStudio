@@ -500,6 +500,7 @@ const state: ClientState = {
     problems: [],
     keyArtCandidates: [],
     keyArt: "world-art.png",
+    keyArtVersion: null,
     masterLookCandidates: [],
     stagedReferences: {},
     externalEdits: [],

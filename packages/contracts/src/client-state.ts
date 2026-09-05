@@ -309,6 +309,15 @@ export const WorldBundleSchema = z
      */
     keyArt: z.string().nullable().default(null),
     /**
+     * When those bytes last changed, as an mtime — null when there is no key art.
+     *
+     * Carried because the path cannot answer it: an uploaded PNG replacing a PNG keeps the same
+     * name, and a picture already on screen at that URL is never re-requested, so the frame goes
+     * on showing what was replaced. The renderer puts this in the media URL, which makes a new
+     * picture a new URL.
+     */
+    keyArtVersion: z.number().nullable().default(null),
+    /**
      * Master looks waiting for a yes, world-relative, by name. Generated or uploaded, the same
      * offer either way: accepting one is a look change, so it lands as the next version's image.
      * A list for the same reason key art's is (design 65) — an upload contributes one.

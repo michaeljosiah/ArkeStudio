@@ -1630,7 +1630,11 @@ export function generateWorldImage(worldId: string, opts: { modelId?: string; pr
   });
 }
 
-/** Or bring your own key art: the host opens the picker, and the renderer never sees the bytes. */
+/**
+ * Or bring your own: the host opens the picker, and the renderer never sees the bytes. The file
+ * chosen becomes the world's key art — a picture picked by name is a decision, not an offer, and
+ * landing it as one more candidate to be asked about read as the button doing nothing.
+ */
 export function uploadWorldImage(worldId: string): void {
   send({ kind: "upload-world-image", worldId, requestId: queueRequest("upload-world-image") });
 }

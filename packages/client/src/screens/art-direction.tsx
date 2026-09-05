@@ -350,6 +350,9 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
               worldSlug={world.meta.slug}
               path={world.keyArt}
               label={`${world.meta.name} key art`}
+              // This is the frame the Upload button sits on, so it is the one frame that must
+              // answer a replacement kept under the same name.
+              version={world.keyArtVersion}
               download
               downloadName={`${world.meta.name} key art`}
             />
