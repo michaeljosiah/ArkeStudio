@@ -46,7 +46,8 @@ it("the bundled preload injects hello credentials but exposes neither the token 
   assert.equal(JSON.stringify(imported), '{"submitted":true,"unresolved":[]}');
   assert.deepEqual(JSON.parse(sent[2]!), { ...target, kind: "upload-artifacts", sourcePaths: ["C:/private/first.mp4", "C:/private/second.mp4"] });
   const unresolved = bridge.importDroppedMedia(target, [{ nativePath: "C:/private/first.mp4" }, {}]);
-  assert.equal(JSON.stringify(unresolved), '{"submitted":false,"unresolved":[1]}');
-  assert.equal(sent.length, 3, "an unresolved batch sends nothing");
+  assert.equal(JSON.stringify(unresolved), '{"submitted":true,"unresolved":[1]}');
+  assert.deepEqual(JSON.parse(sent[3]!), { ...target, kind: "upload-artifacts", sourcePaths: ["C:/private/first.mp4", null] });
+  assert.equal(sent.length, 4, "valid paths retain their original indices alongside virtual files");
   assert.equal(bridge.importDroppedMedia(target, Array.from({ length: 17 }, () => ({ nativePath: "C:/private/file.mp4" }))).submitted, false);
 });

@@ -11,7 +11,8 @@ export function mediaPlacementCommands(
 ): TimelineClipCommand[] {
   const commands: TimelineClipCommand[] = [];
   let current = timeline;
-  let cursor = typeof destination === "number" ? destination : trackEndFrame(basePictureTrack(timeline) ?? { clips: [] });
+  const picture = basePictureTrack(timeline);
+  let cursor = typeof destination === "number" ? destination : trackEndFrame(picture ?? { clips: [] });
   for (const artifact of artifacts) {
     if (!["video", "audio", "image", "board"].includes(artifact.kind)) throw new TimelineOperationRefused(`${artifact.file} has no playable picture or sound`);
     if (typeof destination === "number" && artifact.kind === "audio") throw new TimelineOperationRefused(`${artifact.file} has no picture; import it to the Library or use Import media to add an audio track`);
@@ -24,7 +25,7 @@ export function mediaPlacementCommands(
       const durationFrames = Math.max(1, secondsToFrames(seconds, timeline.frameRate));
       const sound = artifact.kind === "audio";
       const audioTrack = sound ? current.tracks.find(track => track.kind === "audio") : undefined;
-      let trackId: TimelineTrackId = PICTURE_TRACK_ID;
+      let trackId: TimelineTrackId = picture?.id ?? PICTURE_TRACK_ID;
       let startFrame = cursor;
       if (sound) {
         if (audioTrack) {

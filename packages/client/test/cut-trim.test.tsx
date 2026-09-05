@@ -588,6 +588,22 @@ describe("the cut footer of a production with no story (504)", () => {
  * button, 28.000s in the rendered file — and a `0s` cut in the rail one panel to the left.
  */
 describe("the rail and the switcher on a production with no story (508)", () => {
+  it("uses saved audio and upper Picture clips as the media-only runtime", () => {
+    for (const kind of ["audio", "picture"] as const) {
+      const state = mediaOnlyState(), p = state.world!.productions[0]!;
+      p.cut = { overlays: [], audio: [] };
+      const artifact = { ...state.world!.artifacts[0]!, kind: kind === "audio" ? "audio" as const : "video" as const, mediaInfo: { durationSec: 4, hasAudio: true } };
+      state.world!.artifacts = [artifact];
+      p.timeline = { status: "ready", timeline: applyTimelineCommands(seedEmptyPictureTimeline(p), [
+        { kind: "add-track", trackId: "tr_imported", trackKind: kind, name: "Imported" },
+        { kind: "place", trackId: "tr_imported", clip: { id: "cl_media", startFrame: 0, durationFrames: 4 * (p.meta.frameRate ?? 24), sourceInFrames: 0,
+          source: { kind: "artifact", artifactId: artifact.id, label: artifact.file } } },
+      ]) };
+      const html = renderCut(state);
+      assert.match(html, /fy-prodrail__count">4s/);
+      assert.match(html, /fy-prodrail__switchsub">video · 4s cut/);
+    }
+  });
   it("states the length of what was placed, the way the header does", () => {
     const html = renderCut(mediaOnlyState());
     // Clips at 0→4 and 12→16: the film ends where the furthest one ends, not where the canvas does.

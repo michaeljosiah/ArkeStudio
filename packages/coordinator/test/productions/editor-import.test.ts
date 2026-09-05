@@ -175,17 +175,33 @@ it("plans imports after legacy cut migration reserves its audio track ids", asyn
     [["tr_audio-0", "Existing score", 1], ["tr_audio-1", "Existing ambience", 1], ["tr_audio-2", "Audio 2", 1]]);
 });
 
+it("imports into a saved base Picture track with a custom identity", async t => {
+  const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
+  const id = await createProduction(store, { title: "Custom picture", medium: "video", frameRate: 24 });
+  const p = () => store.getBundle().productions.find(production => production.meta.id === id)!;
+  const timeline = seedEmptyPictureTimeline(p()); timeline.tracks[0]!.id = "tr_custom-picture";
+  await store.commit({ kind: "test-timeline", source: "test", files: [{ path: `productions/${id}/timeline.json`, action: "create", baseHash: null, content: JSON.stringify(timeline) }] });
+  const video = join(dir, "custom.mp4"); await writeFile(video, "custom track video");
+  await importEditorMedia(store, [video], { productionId: id, baseRevision: 0, sourceFingerprint: storyTimelineFingerprint(p()), destination: "append" },
+    { mediaProbe: probe, abandoned: () => false });
+  assert.equal(saved(p()).tracks[0]!.id, "tr_custom-picture");
+  assert.equal(saved(p()).tracks[0]!.clips[0]!.durationFrames, 72);
+  const result = buildRenderPlan({ production: p(), timeline: p().timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" });
+  assert.ok(result.ok); assert.equal(result.plan.totalSec, 3);
+});
+
 it("reports non-media and wrong-lane drops by index while placing compatible files", async t => {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
   const id = await createProduction(store, { title: "Mixed selection", medium: "video", frameRate: 24 });
   const p = () => store.getBundle().productions.find(production => production.meta.id === id)!;
   const video = join(dir, "movie.mp4"), text = join(dir, "notes.txt"), audio = join(dir, "sound.wav"), broken = join(dir, "broken.mp4");
   await writeFile(video, "movie"); await writeFile(text, "notes"); await writeFile(audio, "sound"); await writeFile(broken, "unmeasurable");
-  const failures = await importEditorMedia(store, [text, video, audio, broken], {
+  const failures = await importEditorMedia(store, [text, video, audio, broken, null], {
     productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p()), destination: 48,
   }, { mediaProbe: { ...probe, async info(path) { if (path.endsWith("broken.mp4")) throw new Error("Unreadable media"); return { durationSec: 3, hasAudio: true }; } }, abandoned: () => false });
-  assert.deepEqual(failures.map(failure => failure.index), [0, 2, 3]);
+  assert.deepEqual(failures.map(failure => failure.index), [0, 2, 3, 4]);
   assert.match(failures[2]!.reason, /measured duration/);
+  assert.match(failures[3]!.reason, /File 5.*no local file/);
   assert.match(failures[0]!.reason, /no playable/); assert.match(failures[1]!.reason, /no picture/);
   assert.equal(saved(p()).tracks[0]!.clips[0]!.startFrame, 48);
   assert.equal(saved(p()).tracks.length, 1, "audio is not silently redirected onto another track");

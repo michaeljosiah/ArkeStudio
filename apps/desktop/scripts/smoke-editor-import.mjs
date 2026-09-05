@@ -32,9 +32,11 @@ app.whenReady().then(async () => {
   await new Promise(resolve => server.once("listening", resolve));
   let origin;
   const frames = [];
+  let receiveMixed;
+  const mixedImport = new Promise(resolve => { receiveMixed = resolve; });
   const imported = new Promise(resolve => server.on("connection", (socket, request) => {
     origin = request.headers.origin;
-    socket.on("message", bytes => { const frame = JSON.parse(bytes.toString()); frames.push(frame); if (frame.kind === "upload-artifacts") resolve(frame); });
+    socket.on("message", bytes => { const frame = JSON.parse(bytes.toString()); frames.push(frame); if (frame.kind === "upload-artifacts") { if (frame.requestId === "smoke-mixed") receiveMixed(frame); else resolve(frame); } });
   }));
   ipcMain.on("arke:startup-state-ready", event => event.sender.send("arke:startup-state", { status: "ready", port: server.address().port, token }));
   const window = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, preload: ${JSON.stringify(preload)} } });
@@ -55,6 +57,11 @@ app.whenReady().then(async () => {
   assert.deepEqual(frame.sourcePaths, paths);
   assert.equal(frame.editor.destination, 24);
   assert.equal(frame.requestId, "smoke");
+  const mixedResult = await window.webContents.executeJavaScript(
+    'window.arke.importDroppedMedia({worldId:"world",requestId:"smoke-mixed",editor:{productionId:"film",destination:24,baseRevision:0,sourceFingerprint:"story-picture-v1:1234567890abcdef"}},[document.querySelector("#files").files[0],new File(["virtual"],"virtual.mp4"),document.querySelector("#files").files[1]])'
+  );
+  assert.deepEqual(mixedResult, { submitted: true, unresolved: [1] });
+  assert.deepEqual((await mixedImport).sourcePaths, [paths[0], null, paths[1]]);
   const publicState = await window.webContents.executeJavaScript('JSON.stringify(window.arke.startupState())');
   assert.equal(publicState, '{"status":"ready"}');
   window.destroy();

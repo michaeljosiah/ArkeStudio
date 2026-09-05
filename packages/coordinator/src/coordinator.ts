@@ -10831,6 +10831,7 @@ export class Coordinator {
         const failures: Array<{ index: number; reason: string }> = [];
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
+          if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
           const outcome = await fileArtifact(store, {
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether

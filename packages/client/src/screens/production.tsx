@@ -580,7 +580,13 @@ export function ProductionLayout() {
    */
   const mediaOnly =
     cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
-  const filmSec = mediaOnly ? placedFilmSec(production?.cut.overlays ?? [], world?.artifacts ?? []) : 0;
+  let filmSec = 0;
+  if (mediaOnly && production) {
+    if (production.timeline?.status === "ready") {
+      const planned = buildRenderPlan({ production, timeline: production.timeline, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
+      filmSec = planned.ok ? planned.plan.totalSec : 0;
+    } else filmSec = placedFilmSec(production.cut.overlays, world?.artifacts ?? []);
+  }
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes

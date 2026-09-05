@@ -2377,7 +2377,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    */
   z.object({
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
-    sourcePaths: z.array(z.string().min(1)).min(1).max(16).optional(),
+    // Null preserves the original position of a dropped File without a native path.
+    sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
     editor: z.object({
       productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
       sourceFingerprint: TimelineSourceFingerprintSchema,

@@ -11,7 +11,7 @@ import { applyTimelineCommand } from "./timeline.js";
 export type EditorImport = NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>;
 
 /** Filing survives a stale edit; only placement and Library membership form the timeline transaction. */
-export async function importEditorMedia(store: WorldStore, sources: readonly string[], editor: EditorImport, options: {
+export async function importEditorMedia(store: WorldStore, sources: readonly (string | null)[], editor: EditorImport, options: {
   mediaProbe?: MediaProbe;
   abandoned: () => boolean;
   confirmLarge?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
@@ -26,6 +26,7 @@ export async function importEditorMedia(store: WorldStore, sources: readonly str
   const artifacts: ArtifactSidecar[] = [], failures: Array<{ index: number; reason: string }> = [];
   for (const [index, sourcePath] of sources.entries()) {
     if (options.abandoned()) throw new Error("The world closed during import");
+    if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
     try {
       let result = await fileArtifact(store, { sourcePath, production: null, ...options });
       if (result.outcome === "needs-consent" && options.confirmLarge &&
