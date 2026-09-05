@@ -24,8 +24,29 @@ export const VoiceSampleReviewSchema = z.object({
 }).strict();
 export type VoiceSampleReview = z.infer<typeof VoiceSampleReviewSchema>;
 
-/** Only routes verified for imagery + generated speech. Model data still owns price/durations. */
+/**
+ * What a speaking sample actually needs of a route: it must carry the character's face, and the
+ * caller must be able to ask for sound. Both are declared capabilities.
+ *
+ * This used to also pin one provider and two model ids, and that clause was the whole bar in
+ * practice — a route could satisfy both capabilities and still be told "No verified speech-video
+ * route is currently available" for not being on the list (issue 858). Whether the speech is any
+ * *good* is a separate, declared judgement: the row's `speechVideo`.
+ *
+ * An unverified row is excluded for the same reason it carries no references anywhere else: its
+ * declared count was never checked, so dispatch drops the face and the sample would be of nobody.
+ */
 export function supportsCharacterSpeakingVideo(model: ManifestModel): boolean {
-  return model.provider === "fal" && ["seedance-2.0", "seedance-2.0-fast"].includes(model.id) &&
+  return model.capability === "video" && model.unverified !== true &&
     model.accepts.referenceImages > 0 && model.limits.soundChoice === true;
+}
+
+/**
+ * Verified routes first, then untested ones, each group in catalogue order — a picker renders
+ * this list as it comes. Untested routes are offered rather than hidden, and the surface that
+ * offers them has to say so.
+ */
+export function characterSpeakingVideoRoutes(models: readonly ManifestModel[]): ManifestModel[] {
+  const able = models.filter(supportsCharacterSpeakingVideo);
+  return [...able.filter(m => m.speechVideo === "verified"), ...able.filter(m => m.speechVideo !== "verified")];
 }

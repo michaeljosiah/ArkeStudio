@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { FAL_MODELS } from "../src/fal-catalogue.generated.js";
 import {
   characterImageEstimateIsUsable,
+  characterSpeakingVideoRoutes,
   characterImageOutput,
   dispatchDuration,
   durationOptions,
@@ -1137,6 +1138,28 @@ describe("the new video families carry the routes' own numbers (fal catalogue sy
     assert.equal(byId("minimax-h3").limits.maxPromptChars, 50000);
     // wan 2.7 declares no maxLength: "the provider does not say" is not "unlimited".
     assert.equal(byId("wan-2.7").limits.maxPromptChars, undefined);
+  });
+
+  it("admits a speaking-sample route by what it declares, not by its name (issue 858)", () => {
+    /*
+     * The bar used to be `provider === "fal" && ["seedance-2.0", "seedance-2.0-fast"]`, so
+     * seedance 2.5 — same family, same nine references, same sound switch, in the catalogue for
+     * a fortnight — was refused as "No verified speech-video route is currently available". The
+     * capability half of the bar is real and stays; the id half is now a described fact per row.
+     */
+    const offered = characterSpeakingVideoRoutes(SHIPPED_MANIFEST.models).map((m) => m.id);
+    assert.deepEqual(offered.slice(0, 2), ["seedance-2.0", "seedance-2.0-fast"], "verified routes come first");
+    assert.ok(offered.includes("seedance-2.5"), "a capable, undescribed route is offered rather than withheld");
+    assert.equal(byId("seedance-2.5").speechVideo, undefined, "...and it is offered as untested");
+    // Not a promotion of everything: veo and kling emit sound but carry no reference image, so
+    // there is no face to speak with, and minimax-h3 carries a face but publishes no sound switch.
+    for (const id of ["veo-3.1", "kling-3-pro", "minimax-h3"]) {
+      assert.equal(offered.includes(id), false, `${id} misses a capability the sample needs`);
+    }
+    // Nor a row enabled from a catalogue without its description checked: dispatch drops its
+    // references everywhere else, so the sample would be a stranger saying the script.
+    const enabled: ManifestModel = { ...byId("seedance-2.5"), id: "catalogue-row", unverified: true };
+    assert.deepEqual(characterSpeakingVideoRoutes([enabled]), []);
   });
 });
 

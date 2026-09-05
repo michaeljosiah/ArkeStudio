@@ -305,6 +305,20 @@ export const ManifestModelSchema = z
      */
     unverified: z.boolean().optional(),
     /**
+     * Whether this route's *generated speech* was exercised end to end, for the character
+     * speaking sample (issue 858). A separate judgement from `unverified`, which is about what a
+     * row's description was checked against: a model can accept a face and offer a sound switch —
+     * both declared, both true — and still produce mush when asked to say a line.
+     *
+     * Data rather than a predicate, because the previous bar was an allow-list of two fal ids: a
+     * route satisfying every declared capability was refused for not being named, no local route
+     * could ever be admitted however good, and a new fal row needed a code change to be offered.
+     * Absent means untested, and untested routes are offered *stated as untested* rather than
+     * withheld — issue 592's rule, that a false "unavailable" costs the feature where a warning
+     * only costs a surprise.
+     */
+    speechVideo: z.enum(["verified", "untested"]).optional(),
+    /**
      * What this model needs of the machine it runs on. Two kinds of requirement, and they
      * produce different verdicts (SPEC-033 R-18, R-19).
      *

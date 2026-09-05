@@ -214,7 +214,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
           "aspect"
         ]
       }
-    }
+    },
+    "speechVideo": "verified"
   },
   {
     "id": "seedance-2.0-fast",
@@ -277,7 +278,8 @@ export const FAL_MODELS: readonly ManifestModel[] = [
           "aspect"
         ]
       }
-    }
+    },
+    "speechVideo": "verified"
   },
   {
     "id": "seedance-2.5",

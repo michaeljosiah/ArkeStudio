@@ -120,6 +120,10 @@ const CURATED = {
     id: "seedance-2.0",
     capability: "video",
     family: "seedance",
+    // Exercised end to end for the character speaking sample (issue 858): a face in,
+    // a spoken reference script out. The only two routes that judgement was ever made
+    // about — it used to be an id list in code; it is a described fact here now.
+    speechVideo: "verified",
     // SPEC-019 T-1: on this provider a task mode is a ROUTE, not a field — text-to-video,
     // image-to-video and reference-to-video are siblings and the endpoint decides the task. No
     // sentinel is declared for the locked ratio: 2.0's spelling for it is unverified, and
@@ -152,6 +156,10 @@ const CURATED = {
     id: "seedance-2.0-fast",
     capability: "video",
     family: "seedance",
+    // Exercised end to end for the character speaking sample (issue 858): a face in,
+    // a spoken reference script out. The only two routes that judgement was ever made
+    // about — it used to be an id list in code; it is a described fact here now.
+    speechVideo: "verified",
     // SPEC-019 T-1: on this provider a task mode is a ROUTE, not a field — text-to-video,
     // image-to-video and reference-to-video are siblings and the endpoint decides the task. No
     // sentinel is declared for the locked ratio: 2.0's spelling for it is unverified, and
@@ -652,6 +660,10 @@ for (const [route, curated] of Object.entries(CURATED)) {
     // before this existed.
     ...(curated.modes ? { modes: modesFor(curated) } : {}),
     ...(curated.aspectRange ? { aspectRange: curated.aspectRange } : {}),
+    // Issue 858: whether this route's generated speech was exercised end to end. Curated,
+    // because nothing on the wire says it — a row that omits it is offered as untested rather
+    // than refused, so admitting a new one is a description here rather than a code change.
+    ...(curated.speechVideo ? { speechVideo: curated.speechVideo } : {}),
   });
   endpoints[curated.id] = route;
   // An edit route is only emitted when the model also declares it accepts references, so the
