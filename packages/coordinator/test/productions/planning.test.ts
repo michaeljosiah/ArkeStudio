@@ -467,10 +467,9 @@ describe("whole-scene reference budgeting", () => {
     await store.close();
   });
 
-  it("stretches the shot plan to the clip that was actually asked for", async () => {
-    // A pass snapped from 5s to 6s used to send the longer clip with a 0–5s plan behind it:
-    // segmentation reads those boundaries, so the last second was in nobody's take and the
-    // per-shot charge split was prorated over the wrong total.
+  it("keeps authored shot time exact when the provider rounds up its clip duration", async () => {
+    // The provider rounds a 5s request to 6s. Issue 115 keeps the extra second as a
+    // source handle; it must not lengthen authored picture or dialogue slots.
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
@@ -502,7 +501,8 @@ describe("whole-scene reference budgeting", () => {
     const [request] = composeDispatches(bundle.meta.worldId, production.meta.id, scene, plan, veo, bundle);
     assert.equal(request!.params["durationSec"], 6, "the clip asked for");
     const shotPlan = request!.params["shotPlan"] as Array<{ startSec: number; endSec: number }>;
-    assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 6, "and the plan covers all of it");
+    assert.equal(shotPlan[shotPlan.length - 1]!.endSec, 5, "authored content boundaries remain exact");
+    assert.equal(request!.params["providerPaddingSec"], 1, "the unused provider tail is explicit");
     await store.close();
   });
 
