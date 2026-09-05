@@ -32,8 +32,8 @@ export type CharacterAudioPlan = z.infer<typeof CharacterAudioPlanSchema>;
 export function characterAudioRoute(model: { provider: string; id: string }, taskMode = "generate") {
   if (model.provider !== "fal" || !["generate", "keyframe-sequence"].includes(taskMode) ||
     !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)) return null;
-  return { endpoint: `bytedance/${model.id}/reference-to-video`, field: "audio_urls", maxFiles: 3,
-    maxBytesPerFile: 15 * 1024 * 1024, maxTotalDurationSec: 15, maxCombinedReferences: 12,
+  return { endpoint: model.id == "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video", field: "audio_urls", maxFiles: 3,
+    maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxCombinedReferences: 12,
     formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0, providerDurationMode: "requested",
     effects: { wording: "prompt-guided", timing: "not-preserved", identity: "guidance", cadence: "guidance",
       lipSync: "generated", generatedAudio: true, suppliedAudioPreserved: false, separateAudioArtifact: false } } as const;
@@ -72,7 +72,7 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
   }
   if (plan.references.length) {
     if (!input.imageCount) plan.problems.push("Voice references require character imagery on this route.");
-    if (plan.references.length > 3 || plan.references.length + input.imageCount > 12) plan.problems.push("The complete character reference set exceeds this route's shared input budget.");
+    if (input.imageCount > route!.maxImages || plan.references.length > 3 || plan.references.length + input.imageCount > 12) plan.problems.push("The complete character reference set exceeds this route's shared input budget.");
     if (plan.references.reduce((n, r) => n + (r.sample.provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) plan.problems.push("Voice samples exceed the route's combined 15 second limit. Review shorter samples or explicitly disable references.");
   }
   return plan;

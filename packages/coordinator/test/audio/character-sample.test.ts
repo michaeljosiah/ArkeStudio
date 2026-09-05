@@ -70,6 +70,18 @@ it("reviewed assignment survives reopen, leaves source and TTS intact, and clear
   assert.equal(sent!.body.generate_audio, true);
   assert.equal(sent!.body.prompt, prompt);
   assert.equal(sent!.body.audioReferences, undefined);
+  const fastModel = FAL_MODELS.find(m => m.id === "seedance-2.0-fast")!;
+  const fastPlan = planCharacterAudio({ scene, shots: [shot], sheets: bundle.sheets, kits: bundle.referenceKits, model: fastModel, imageCount: 1 });
+  const fastJob = { ...job, model: fastModel.id, params: { ...job.params, audioReferences: fastPlan } };
+  await fal.submit("mock", { ...fastJob, capability: "video", audioReferences: await readCharacterAudioInputs(store, fastJob),
+    imageReferences: [{ name: "character.png", contentType: "image/png", data: new Uint8Array([1]) }] });
+  assert.ok(sent!.url.endsWith("bytedance/seedance-2.0/fast/reference-to-video"));
+  const tooManyImages = Array.from({ length: 10 }, () => "references/maren-kest/head-front.png");
+  assert.match(planCharacterAudio({ scene, shots: [shot], sheets: bundle.sheets, kits: bundle.referenceKits,
+    model, imageCount: 10 }).problems.join(" "), /budget/);
+  await assert.rejects(readCharacterAudioInputs(store, { ...job, params: { ...job.params, references: tooManyImages } }), /budget/);
+  await assert.rejects(fal.submit("mock", { ...job, params: { ...job.params, references: tooManyImages }, capability: "video", audioReferences: audio,
+    imageReferences: tooManyImages.map(() => ({ name: "character.png", contentType: "image/png" as const, data: new Uint8Array([1]) })) }), /budget/);
   const unsupported = planCharacterAudio({ scene, shots: [shot], sheets: bundle.sheets, kits: bundle.referenceKits,
     model: { ...model, id: "unsupported" }, imageCount: 1 });
   assert.match(unsupported.problems.join(" "), /cannot carry/);

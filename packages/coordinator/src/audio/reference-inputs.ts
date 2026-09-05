@@ -17,7 +17,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
   const route = characterAudioRoute({ id: job.model, provider: job.provider }, typeof job.params.taskMode === "string" ? job.params.taskMode : "generate");
   if (!route || route.endpoint !== plan.route || (job.params.route !== undefined && job.params.route !== route.endpoint)) throw new Error("The selected route cannot carry these audio references.");
   const images = Array.isArray(job.params.references) ? job.params.references.length : 0;
-  if (!images || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
+  if (!images || images > route.maxImages || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
   const rights = await readAudioRights(store);
   let seconds = 0;
   const result = [];

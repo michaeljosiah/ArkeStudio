@@ -250,7 +250,7 @@ export class FalClient implements ProviderClient {
     if (audioPlan?.problems.length || (audioPlan?.disabled && (audio.length || audioPlan.references.length)) ||
       audio.length !== (audioPlan?.references.length ?? 0)) throw new Error("fal: incomplete audio reference plan");
     if (audio.length && (!audioRoute || endpoint !== audioRoute.endpoint || audioPlan?.route !== endpoint || !imageUrls.length ||
-      audio.length > 3 || audio.length + imageUrls.length > 12)) throw new Error("fal: unsupported audio reference route or budget");
+      imageUrls.length > audioRoute.maxImages || audio.length > 3 || audio.length + imageUrls.length > 12)) throw new Error("fal: unsupported audio reference route or budget");
     const audioUrls = audio.map((clip, index) => {
       const frozen = audioPlan!.references[index]!;
       if (!audioRoute!.formats.includes(clip.contentType) || clip.data.byteLength > audioRoute!.maxBytesPerFile ||

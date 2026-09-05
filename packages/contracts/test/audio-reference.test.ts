@@ -15,9 +15,10 @@ it("voice guidance and performance sync enforce distinct source authorities", ()
 it("verified voice guidance routes retain truthful limits and effects", () => {
   for (const id of ["seedance-2.0", "seedance-2.0-fast"]) {
     const route = characterAudioRoute({ provider: "fal", id })!;
-    assert.equal(route.endpoint, `bytedance/${id}/reference-to-video`);
+    assert.equal(route.endpoint, id === "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video");
     assert.equal(route.maxFiles, 3); assert.equal(route.maxTotalDurationSec, 15);
     assert.equal(route.maxCombinedReferences, 12);
+    assert.equal(route.maxImages, 9); assert.equal(route.maxBytesPerFile, 15_000_000);
     assert.equal(route.effects.suppliedAudioPreserved, false);
     assert.equal(route.effects.generatedAudio, true);
     assert.equal(characterAudioRoute({ provider: "fal", id }, "first-frame"), null);
