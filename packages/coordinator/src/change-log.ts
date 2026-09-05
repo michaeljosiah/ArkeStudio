@@ -6,6 +6,10 @@ import { dirname } from "node:path";
  * `trace.ts`: all appends are serialised through a write queue so concurrent writers never
  * interleave a partial line, and every record carries a file-level monotonic `seq` resumed
  * from the tail on restart, so records order unambiguously across runs.
+ *
+ * This is a best-effort diagnostic event log, not the world change journal or job recovery
+ * authority. Appends are not fsynced: acknowledged diagnostic rows may disappear after an
+ * OS crash or power loss. The supported journal crash model is SPEC-009 §2.2.1.
  */
 
 /** Serialises appendFile calls into a single chain; a failed write must not poison the chain. */

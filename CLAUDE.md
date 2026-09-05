@@ -73,6 +73,15 @@ measure over days, not hours, or you will sample a quiet afternoon and set the n
 - A test file that hangs freezes the whole runner's log while later files keep running, so a
   frozen tail is not necessarily a dead run.
 
+## Journal flush boundaries (issue #826)
+
+JobJournal, LedgerFile and ProviderCallStore use `appendFlushed` inside their existing WriteQueue:
+write, file sync, close, then acknowledge. Preserve this order before external side effects.
+Repair/compaction replacements must also sync their file. Never retry an uncertain append or
+infer that a rejected write proves no charge occurred. ChangeLog is unflushed diagnostics.
+See [SPEC-009 §2.2.1](docs/specifications/009.the-job-queue-and-dispatch.md#221-supported-crash-model)
+for the crash model, directory-persistence limits and measured cost before considering batching.
+
 ## The coordinator session is authenticated (issue #825)
 
 Loopback is an address, not authorization. `Transport` requires a fresh 32-byte capability for

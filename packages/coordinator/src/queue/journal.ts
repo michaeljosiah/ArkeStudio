@@ -1,5 +1,7 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { appendFlushed } from "../flushed-append.js";
+import { atomicWriteFile } from "../world/atomic.js";
+import { mkdir, readFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { JobSchema, type Job } from "@arke-studio/contracts";
 import { WriteQueue } from "../change-log.js";
 
@@ -7,7 +9,8 @@ import { WriteQueue } from "../change-log.js";
  * The job journal (SPEC-009 §2.2): `%APP_ROOT%\queue\jobs.jsonl`, append-only, global across
  * worlds. State is expressed as appended records, never mutation — a job's current state is
  * its latest record and its history stays readable. Every append is durable before the action
- * it authorises (D1): callers await the append, and the WriteQueue serialises writers.
+ * it authorises (D1, §2.2.1): write, file sync, close, then resolve. The WriteQueue
+ * serialises these complete operations; an OS flush failure rejects the append.
  */
 export class JobJournal {
   private readonly queue = new WriteQueue();
@@ -28,9 +31,7 @@ export class JobJournal {
     if (raw.length === 0 || raw.endsWith("\n")) return;
     const cut = raw.lastIndexOf("\n");
     const keep = cut === -1 ? "" : raw.slice(0, cut + 1);
-    const tmp = join(dirname(this.path), `.tmp-jobs-repair-${process.pid}`);
-    await writeFile(tmp, keep, "utf8");
-    await rename(tmp, this.path);
+    await atomicWriteFile(this.path, keep);
   }
 
   /** Durable append of one full job row. Resolves only after the bytes are down (R-1, D1). */
@@ -39,7 +40,7 @@ export class JobJournal {
     return this.queue.enqueue(async () => {
       await this.repairTail();
       await mkdir(dirname(this.path), { recursive: true });
-      await appendFile(this.path, JSON.stringify(validated) + "\n", "utf8");
+      await appendFlushed(this.path, JSON.stringify(validated) + "\n");
     });
   }
 

@@ -1,6 +1,8 @@
+import { appendFlushed } from "../flushed-append.js";
+import { atomicWriteFile } from "../world/atomic.js";
 import { execFile } from "node:child_process";
-import { appendFile, chmod, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { chmod, mkdir, readFile, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { promisify } from "node:util";
 import {
   ProviderCallRecordSchema,
@@ -81,7 +83,8 @@ function safeError(
   };
 }
 
-/** Bounded, local-only provider payload history. It is deliberately excluded from support diagnostics. */
+/** Bounded, local-only provider payload history, file-synced before acknowledgements (SPEC-009
+ * §2.2.1). Excluded from support diagnostics; it is evidence, not the job recovery authority. */
 export class ProviderCallStore {
   private readonly queue = new WriteQueue();
   private readonly current = new Map<string, ProviderCallRecord>();
@@ -159,7 +162,7 @@ export class ProviderCallStore {
       throw new Error("provider call metadata exceeded the 512 KiB record limit");
     }
     await mkdir(dirname(this.path), { recursive: true });
-    await appendFile(this.path, `${JSON.stringify(clean)}\n`, "utf8");
+    await appendFlushed(this.path, `${JSON.stringify(clean)}\n`);
     if (!this.aclSet) {
       await lockDown(this.path);
       this.aclSet = true;
@@ -176,13 +179,11 @@ export class ProviderCallStore {
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
       .slice(0, MAX_CALLS)
       .reverse();
-    const tmp = join(dirname(this.path), `.tmp-${basename(this.path)}-${process.pid}`);
-    await writeFile(
-      tmp,
+    // A flushed append must not be replaced by an unflushed compacted copy (§2.2.1).
+    await atomicWriteFile(
+      this.path,
       keep.map((record) => JSON.stringify(record)).join("\n") + (keep.length ? "\n" : ""),
-      "utf8",
     );
-    await rename(tmp, this.path);
     await lockDown(this.path);
     this.aclSet = true;
     this.current.clear();
