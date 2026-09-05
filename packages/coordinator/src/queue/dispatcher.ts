@@ -1127,6 +1127,7 @@ export class JobQueue {
     key: string,
     costMicroUsd: number | undefined,
     suppliedArtifacts?: DispatchArtifact[],
+    fetchAttempt = 1,
   ): Promise<void> {
     let landed: string[] = [];
     if (job.landing) {
@@ -1140,8 +1141,12 @@ export class JobQueue {
         if (klass === "terminal") {
           await this.terminalize(job, "failed", `artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`);
         } else {
-          await this.sleep(this.pollIntervalMs);
-          if (!this.disposed) await this.landAndSucceed(job, client, key, costMicroUsd, suppliedArtifacts);
+          // Bounded backoff (R-9) rather than the poll cadence, and the job re-checked before every
+          // re-fetch. A cancelled job kept re-fetching every 1.5s for as long as the app ran, its
+          // poller orphaned from the record the screen said was no longer in flight (#630).
+          await this.sleep(backoffMs(fetchAttempt, this.backoffBaseMs, this.backoffCapMs, this.rng));
+          if (this.disposed || !this.stillActiveRun(job)) return;
+          await this.landAndSucceed(job, client, key, costMicroUsd, suppliedArtifacts, fetchAttempt + 1);
         }
         return;
       }
