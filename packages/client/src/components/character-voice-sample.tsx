@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
-import { estimateMicroUsd, supportsCharacterSpeakingVideo, ulid, type ClientMessage, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, estimateMicroUsd, ulid, type ClientMessage, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
@@ -13,7 +13,7 @@ const ReviewOperationId = z.string().uuid();
 export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
   const { state } = useStore();
   const sample = world.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
-  const models = state?.app.manifest?.models.filter(supportsCharacterSpeakingVideo) ?? [];
+  const models = characterSpeakingVideoRoutes(state?.app.manifest?.models ?? []);
   const [modelId, setModelId] = useState(""), [script, setScript] = useState("");
   const [durationSec, setDurationSec] = useState(8), [sourceId, setSourceId] = useState("");
   const [trim, setTrim] = useState(false), [inSec, setInSec] = useState(0), [outSec, setOutSec] = useState(8);
@@ -31,7 +31,11 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
   const photo = kit?.mainPhoto?.file ?? kit?.anchor;
   const selectedArtifact = sourceId.startsWith("artifact:") ? world.artifacts.find(a => a.id === sourceId.slice(9)) : undefined;
   const model = models.find(m => m.id === modelId) ?? models[0];
-  const estimate = model ? estimateMicroUsd(model, { durationSec, resolution: model.limits.resolutions?.[0] ?? "720p" }) : 0;
+  // Only lengths this route declares. The coordinator refuses one it does not, and now that a
+  // route is admitted by description rather than by name, the offered list cannot stay a constant.
+  const durations = [5, 6, 7, 8, 9, 10].filter(n => model?.limits.durations?.[String(n)]);
+  const length = durations.includes(durationSec) ? durationSec : durations[0] ?? durationSec;
+  const estimate = model ? estimateMicroUsd(model, { durationSec: length, resolution: model.limits.resolutions?.[0] ?? "720p" }) : 0;
   const artifacts = world.artifacts.filter(a => ["audio", "video"].includes(a.kind) && !world.artifacts.some(other => other.supersedes === a.id));
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   useEffect(() => subscribeVoiceSampleResults(result => {
@@ -71,16 +75,17 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
       </label>
       <p>The character speaks these words in a clean, isolated voice. Later scenes use their own dialogue.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        <label>Model <select value={model?.id ?? ""} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}</option>)}</select></label>
-        <label>Duration <select value={durationSec} onChange={e => setDurationSec(Number(e.target.value))}>{[5, 6, 7, 8, 9, 10].map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
+        <label>Model <select value={model?.id ?? ""} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.speechVideo === "verified" ? "" : " · untested"}</option>)}</select></label>
+        <label>Duration <select value={length} onChange={e => setDurationSec(Number(e.target.value))}>{durations.map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
       </div>
       {photo && <img alt={`${sheet.name} · accepted character imagery`} src={mediaUrl(world.meta.slug, `references/${sheet.id}/${photo}`)} style={{ width: 100, maxHeight: 140, objectFit: "contain" }} />}
       {!photo && <p>Accept a character photo before generating a speaking video.</p>}
-      {models.length === 0 && <p>No verified speech-video route is currently available.</p>}
+      {models.length === 0 && <p>No route here can carry a photo and make sound.</p>}
+      {model && model.speechVideo !== "verified" && <p>Untested for speech. It may not lip-sync or speak clearly.</p>}
       <p>Uses the accepted character photo. Creates a video candidate with speech; audition before assigning.</p>
       <Button disabled={busy || !model || !script.trim() || !world.referenceKits.some(k => k.sheetId === sheet.id && (k.mainPhoto || k.anchor))}
         onClick={() => { if (!model) return; setBusy(true); generation.current = generateCharacterVoiceSample({ worldId: world.meta.worldId,
-          sheetId: sheet.id, modelId: model.id, script, durationSec, confirmedMicroUsd: estimate });
+          sheetId: sheet.id, modelId: model.id, script, durationSec: length, confirmedMicroUsd: estimate });
           if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>Generate speaking video · ${(estimate / 1_000_000).toFixed(2)}</Button>
     </details>
     <div style={{ marginTop: 16 }}>
