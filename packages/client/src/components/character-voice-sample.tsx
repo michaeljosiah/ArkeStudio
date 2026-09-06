@@ -81,6 +81,10 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
       {photo && <img alt={`${sheet.name} · accepted character imagery`} src={mediaUrl(world.meta.slug, `references/${sheet.id}/${photo}`)} style={{ width: 100, maxHeight: 140, objectFit: "contain" }} />}
       {!photo && <p>Accept a character photo before generating a speaking video.</p>}
       {models.length === 0 && <p>No route here can carry a photo and make sound.</p>}
+      {/* The trade a local route makes, said where the price would be (issue 863). It is the free
+          option for someone willing to wait, not the default — so it is stated rather than left
+          to be discovered by a $0.00 button that takes a quarter of an hour. */}
+      {model?.pricing.kind === "unmetered" && <p>Runs on this machine · free · minutes, not seconds.</p>}
       {model && model.speechVideo !== "verified" && <p>Untested for speech. It may not lip-sync or speak clearly.</p>}
       <p>Uses the accepted character photo. Creates a video candidate with speech; audition before assigning.</p>
       <Button disabled={busy || !model || !script.trim() || !world.referenceKits.some(k => k.sheetId === sheet.id && (k.mainPhoto || k.anchor))}

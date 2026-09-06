@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
 import { COMFYUI_VERSION_FLOOR, compareComfyUiVersions, meetsComfyUiVersion } from "@arke-studio/contracts";
 import {
@@ -8,6 +9,7 @@ import {
   substituteRecipeParams,
   VIDEO_DERIVATIONS,
   type ComfyUiRecipe,
+  type RecipeGraph,
   type RecipeParamValues,
 } from "../comfyui/recipes.js";
 import { scrubPaths } from "../comfyui/redact.js";
@@ -67,6 +69,33 @@ function isRedirect(status: number): boolean {
   return status >= 300 && status < 400;
 }
 
+/**
+ * The engine's `input/` folder is one flat namespace shared by every world on this machine, so a
+ * reference image is named by its own bytes before it is sent. The world reader names references
+ * positionally (`reference-01.png`), which two characters would collide on within a minute.
+ */
+function contentAddressedName(data: Uint8Array, contentType: string): string {
+  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  return `${createHash("sha256").update(data).digest("hex")}.${extension}`;
+}
+
+/**
+ * Take the optional first frame back out (issue 863): the carrier nodes go, and with them the
+ * slot they fed. Authored into the graph and removed here rather than the other way round,
+ * because what is in the template is what the digest covers and what the compatibility probe
+ * asks the engine about — and because `LoadImage.image` is a combo over the engine's own files,
+ * so leaving an empty placeholder connected would refuse every text-to-video dispatch.
+ */
+function dropReferenceFrame(recipe: ComfyUiRecipe, graph: RecipeGraph): RecipeGraph {
+  const attachment = recipe.referenceFrame;
+  if (attachment === undefined) return graph;
+  const [nodeId, inputKey] = attachment.slot;
+  const consumer = graph[nodeId];
+  if (consumer) delete consumer.inputs[inputKey];
+  for (const carrier of attachment.nodes) delete graph[carrier];
+  return graph;
+}
+
 /** "0.33.1" ≥ "0.3.45"? Numeric segment compare; anything unparseable compares as unknown. */
 export function meetsVersionFloor(version: string, floor: string = COMFYUI_VERSION_FLOOR): boolean | null {
   return meetsComfyUiVersion(version, floor);
@@ -115,6 +144,15 @@ const INTERNAL_PARAMS = new Set([
   "route",
   "framesField",
   "sound",
+  /*
+   * What the character speaking sample carries beyond the prompt (issue 863): the words it asked
+   * for verbatim, whose sheet they belong to, and the cloud routes' own sound switch. H3 needs
+   * none of them — it always makes sound and the script is already inside the prompt — but a
+   * refusal here would be a terminal failure for a route the picker openly offers.
+   */
+  "referenceScript",
+  "characterName",
+  "generate_audio",
   "output",
   "aspect_ratio",
   "durationSec",
@@ -480,28 +518,33 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   /**
-   * Put a speaker clip where the engine can name it, and answer with that name.
+   * Put a file where the engine can name it, and answer with that name.
    *
-   * `LoadAudio.audio` is a COMBO over the engine's own `input/` directory, not a path input, so
-   * a clip this machine owns has to cross the wire before the graph can reference it. ComfyUI's
-   * upload endpoint is `/upload/image` for audio too — the name is the engine's, not a mistake.
+   * `LoadAudio.audio` and `LoadImage.image` are both COMBOs over the engine's own `input/`
+   * directory, not path inputs, so a file this machine owns has to cross the wire before a graph
+   * can reference it. ComfyUI's upload endpoint is `/upload/image` for audio too — the name is
+   * the engine's, not a mistake — which is why one path serves both rather than a second being
+   * written for the face (issue 863).
    *
-   * The name is content-addressed before it reaches this client, so two worlds cannot overwrite
-   * each other's reference clips and repeated use of identical bytes remains stable.
+   * The name is content-addressed, so two worlds cannot overwrite each other's uploads and
+   * repeated use of identical bytes remains stable. A voice clip arrives already named that way
+   * from the library; a reference image is named positionally by the world reader, so its
+   * content name is computed here — the same guarantee, one place either way.
    */
-  private async uploadClip(
+  private async uploadInput(
     base: string,
-    clip: NonNullable<SubmitRequest["voiceReference"]>,
+    file: { name: string; contentType: string; data: Uint8Array },
+    what: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    if (!/^[0-9a-f]{64}\.(wav|mp3)$/.test(clip.name)) {
-      throw new ProviderRequestRejectedError("comfyui: the voice recording has no safe content-addressed name");
+    if (!/^[0-9a-f]{64}\.(wav|mp3|png|jpg|webp)$/.test(file.name)) {
+      throw new ProviderRequestRejectedError(`comfyui: the ${what} has no safe content-addressed name`);
     }
     const form = new FormData();
     // Copied into a plain ArrayBuffer: a Uint8Array view can sit on a larger pooled buffer, and
     // handing Blob the view's buffer would upload whatever else is in it.
-    const body = clip.data.slice().buffer as ArrayBuffer;
-    form.append("image", new Blob([body], { type: clip.contentType }), clip.name);
+    const body = file.data.slice().buffer as ArrayBuffer;
+    form.append("image", new Blob([body], { type: file.contentType }), file.name);
     form.append("overwrite", "true");
     const response = await this.fetchImpl(`${base}/upload/image`, {
       method: "POST",
@@ -511,20 +554,20 @@ export class ComfyUiClient implements ProviderClient {
     });
     if (isRedirect(response.status)) {
       throw new ProviderRequestRejectedError(
-        `comfyui: the engine redirected the voice recording upload (HTTP ${response.status}); Arke refused to send it to another destination`,
+        `comfyui: the engine redirected the ${what} upload (HTTP ${response.status}); Arke refused to send it to another destination`,
       );
     }
     if (!response.ok) {
       throw new ProviderRequestRejectedError(
-        `comfyui: the engine would not accept the voice recording (HTTP ${response.status})`,
+        `comfyui: the engine would not accept the ${what} (HTTP ${response.status})`,
       );
     }
     const answered = (await response.json()) as { name?: string; subfolder?: string } | null;
     const uploaded = answered?.name;
     if (typeof uploaded !== "string" || uploaded.length === 0) {
-      throw new ProviderRequestRejectedError("comfyui: the engine did not say where it put the voice recording");
+      throw new ProviderRequestRejectedError(`comfyui: the engine did not say where it put the ${what}`);
     }
-    // A subfolder is part of the name the dropdown shows, so it is part of what LoadAudio takes.
+    // A subfolder is part of the name the dropdown shows, so it is part of what the loader takes.
     return answered?.subfolder ? `${answered.subfolder}/${uploaded}` : uploaded;
   }
 
@@ -609,7 +652,6 @@ export class ComfyUiClient implements ProviderClient {
         );
       }
     }
-    // R-10 said no references before commit; this is the backstop for a mis-planned dispatch.
     /*
      * The engine version frozen at enqueue is re-read from the engine now (R-19; issue 592): a
      * job either runs on the version recorded against it or never reaches /prompt. Asked only
@@ -633,9 +675,31 @@ export class ComfyUiClient implements ProviderClient {
         }
       }
     }
+    /*
+     * R-10 said no references before commit, and this is the backstop for a mis-planned dispatch.
+     * Narrowed to the recipes that really take none (issue 863): the blanket refusal was written
+     * when no recipe had an image input, and once H3 grew one it was the thing standing between a
+     * character's face and the only free speaking sample there is.
+     *
+     * Bytes AND paths, because they fail in opposite directions. More pictures than the row
+     * declares would be silently dropped past the first; a path list that arrived with nothing
+     * prepared would generate a stranger under the sample's name, which is the failure the
+     * original allow-list existed to prevent.
+     */
     const durable = request.params["references"];
-    if ((Array.isArray(durable) && durable.length > 0) || (request.imageReferences?.length ?? 0) > 0) {
-      throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes no reference images`);
+    const asked = Array.isArray(durable) ? durable.length : 0;
+    const prepared = request.imageReferences ?? [];
+    const frame = recipe.referenceFrame === undefined ? null : (prepared[0] ?? null);
+    if (recipe.referenceFrame === undefined) {
+      if (asked > 0 || prepared.length > 0) {
+        throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes no reference images`);
+      }
+    } else if (asked > 1 || prepared.length > 1) {
+      throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes one reference image`);
+    } else if (asked > 0 && frame === null) {
+      throw new ProviderRequestRejectedError(
+        `comfyui: ${recipe.displayName} was asked to carry a reference image that never arrived`,
+      );
     }
     const values = this.valuesFor(recipe, request);
     // The last check before the wire (§2.5, R-16): a checkpoint replaced since the picker
@@ -644,13 +708,26 @@ export class ComfyUiClient implements ProviderClient {
     if (!verified.ok) throw new ProviderRequestRejectedError(verified.reason);
     const base = this.require();
     await this.ensureRoomOnTheCard(base, recipe, request.signal);
-    // The clip becomes a name the engine knows. Done after preflight so a job that was going to
+    // The file becomes a name the engine knows. Done after preflight so a job that was going to
     // be refused never puts a file on the engine, and before the graph is built because the
     // uploaded name IS the graph value.
     if (recipe.capability === "voice-tts") {
-      values["speakerFile"] = await this.uploadClip(base, request.voiceReference!, request.signal);
+      const clip = request.voiceReference!;
+      values["speakerFile"] = await this.uploadInput(base, clip, "voice recording", request.signal);
     }
-    const graph = substituteRecipeParams(recipe, values);
+    if (frame !== null) {
+      values[recipe.referenceFrame!.param] = await this.uploadInput(
+        base,
+        { ...frame, name: contentAddressedName(frame.data, frame.contentType) },
+        "reference image",
+        request.signal,
+      );
+    }
+    // Substitute first, then drop: the size params bind into the scaler as well as the canvas,
+    // and a graph pruned before substitution would refuse its own bindings.
+    const graph = frame === null
+      ? dropReferenceFrame(recipe, substituteRecipeParams(recipe, values))
+      : substituteRecipeParams(recipe, values);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",
