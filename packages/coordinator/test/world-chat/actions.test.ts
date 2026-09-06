@@ -2155,6 +2155,16 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
     assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, grouped), /This ask was for a reply only/, "a group change is a change too");
   });
 
+  it("the guard folds emphasis as the matcher does: a quote of the file's __not__ is within a selection served as **not** (codex on PR 903, round four)", async () => {
+    const w = await setup(context);
+    const held = (find: string, text: string) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [revision("neap", find, 2)], subject: { ...subject, text } }));
+    // Within, once the markers fold: the next refusal is the missing read receipt, which is the
+    // proof the guard let it through.
+    assert.throws(() => held("__not__ wrong", "She was **not** wrong."), (err: unknown) => !/This ask was about|not within the words/.test(String(err)));
+    assert.throws(() => held("not right", "She was **not** wrong."), /not within the words this ask was about/);
+  });
+
   it("the paragraph the ask named must come back, and either spelling of the chapter is the chapter (codex, round five)", async () => {
     const w = await setup(context);
     const held = (action: ReturnType<typeof revision>) =>

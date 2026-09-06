@@ -262,7 +262,7 @@ import {
   jobsFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
-import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { foldedText, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -967,8 +967,13 @@ function heldToPassage(store: WorldStore, action: ModelWorldChatAction, subject:
   if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
     throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision names paragraph ${passage.paragraph}.`);
   }
-  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
-  if (!fold(subject.text).includes(fold(passage.find))) {
+  // Folded as the replacement matcher folds (codex on PR 903, round four): whitespace, and then
+  // the emphasis markers too, so a quote of the file's `__not__` is within a selection the
+  // editor served as `**not**` — the same fallback the matcher advertises, or the guard would
+  // refuse what the matcher would have found.
+  const within = foldedText(subject.text, false).includes(foldedText(passage.find, false))
+    || foldedText(subject.text, true).includes(foldedText(passage.find, true));
+  if (!within) {
     throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
   }
 }

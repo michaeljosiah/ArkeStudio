@@ -126,6 +126,8 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     // An underscore inside a word is the word's, not a marker (codex on PR 903, round three): a
     // quote of the word never matches prose the author has since joined up.
     assert.deepEqual(foldedOccurrences("call foo_bar now", "foobar"), [], "foo_bar is one word");
+    assert.deepEqual(foldedOccurrences("call foo*bar now", "foobar"), [], "and so is foo*bar (codex, round four)");
+    assert.deepEqual(foldedOccurrences("She was *not* wrong.", "not wrong"), [{ start: 8, end: 19 }], "a star at a word's edge is emphasis");
     assert.deepEqual(foldedOccurrences("call foo_bar now", "foo_bar"), [{ start: 5, end: 12 }]);
     assert.deepEqual(foldedOccurrences("She was _not_ wrong.", "not wrong"), [{ start: 8, end: 19 }], "a single underscore at a word's edge is emphasis");
     // Plain and emphasised copies are two occurrences whichever way the quote was spelled (codex

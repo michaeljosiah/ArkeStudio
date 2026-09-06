@@ -534,19 +534,28 @@ export class WorldChatRunner {
     // else — are worth the fence; the other subjects only colour the narration, as they always
     // did, and are not written.
     const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage");
-    if (constrained) {
-      await this.deps.raiseSchemaBoundary?.(TURN_CONSTRAINTS_SCHEMA_VERSION);
+    try {
+      if (constrained) {
+        await this.deps.raiseSchemaBoundary?.(TURN_CONSTRAINTS_SCHEMA_VERSION);
+        await store.append(
+          { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
+          { at },
+        );
+      }
+      // The user's words are durable before the model is asked. Whatever happens next, they said it.
+      // On a retry they already are, so only the new run is recorded.
       await store.append(
-        { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
+        existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
         { at },
       );
+    } catch (err) {
+      // A write the world refuses — the boundary, with an external edit waiting to be reconciled,
+      // or the log itself — ends the turn before it began (codex on PR 903, round four): the
+      // controller registered above is let go, or the conversation would stay live with no run
+      // and no way to send again until the app restarted.
+      this.cancelling.delete(conversationId);
+      throw err;
     }
-    // The user's words are durable before the model is asked. Whatever happens next, they said it.
-    // On a retry they already are, so only the new run is recorded.
-    await store.append(
-      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
-      { at },
-    );
     if (modelChoice.reason !== undefined) {
       const reason = `rejected: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);

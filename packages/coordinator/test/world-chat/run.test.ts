@@ -180,6 +180,21 @@ describe("taking a turn", () => {
     assert.deepEqual(raised, [11, 11]);
   });
 
+  it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {
+    const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply]), {
+      raiseSchemaBoundary: async () => {
+        throw new Error("external edits awaiting reconciliation");
+      },
+    });
+    await assert.rejects(() => runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true), /awaiting reconciliation/);
+    assert.equal((await store.read()).events.some((e) => e.event.type === "turn.started"), false, "nothing was written for the turn");
+    // The next line goes through: the controller of the turn that never began is not in the way.
+    const outcome = await runner.send(store, conversationId, "And now?");
+    assert.notEqual(outcome.status, "unavailable");
+    assert.ok((await store.read()).events.some((e) => e.event.type === "turn.started"), "the conversation is still live");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");
