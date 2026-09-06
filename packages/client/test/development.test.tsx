@@ -220,19 +220,19 @@ describe("the season page (design turn 91)", () => {
     assert.match(html, /Every episode answers one bell/);
   });
 
-  it("counts the season it promised, not the episodes that happen to exist", () => {
-    // Seven were declared on the day it was made (turn 87), so the board is seven wide at once.
+  it("shows only existing episodes even when an old season has a target", () => {
     const html = seasonPage([ONE]);
-    assert.match(html, /of 7 written/, "the meter states the promise and how much of it is written");
-    assert.match(html, /1 of 7 written/);
-    assert.match(html, /6 of 7 promised by the season and not started/);
-    assert.match(html, /not written yet/i, "the unwritten ones are a place to start, not a gap");
+    assert.match(html, /1 episode/);
+    assert.match(html, /Add episode/);
+    assert.doesNotMatch(html, /of 7|promised by|not written yet/);
+    assert.equal((html.match(/class="fy-seasontile"/g) ?? []).length, 1);
   });
 
-  it("shows the board with nothing written, because that is when it is looked for", () => {
+  it("offers the first episode on an empty season", () => {
     const html = seasonPage([]);
-    assert.match(html, /of 7 written/, "the board is not hidden until an episode exists");
-    assert.match(html, /0 of 7 written/);
+    assert.match(html, /0 episodes/);
+    assert.match(html, /Create the first episode/);
+    assert.doesNotMatch(html, /class="fy-seasontile"/);
   });
 
   it("says where the season was decided", () => {
@@ -382,7 +382,7 @@ describe("a press that stages something says so where it was pressed (design tur
     assert.match(html, /STAGED/, "the mark is on the frame that was pressed");
     assert.match(html, /1 started and waiting on the gate/, "and the board counts it");
     // Seven promised, one written, one started — five untouched, not six.
-    assert.match(html, /5 of 7 promised by the season and not started/);
+    assert.doesNotMatch(html, /promised by the season/);
   });
 
   it("the gate's own labels are what the board reads, whatever their case", () => {
@@ -487,7 +487,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
   it("the production's own address shows the season, not a second screen", () => {
     const html = home(PROD);
     assert.match(html, /data-screen="development"/, "the season page is the front page");
-    assert.match(html, /of 7 written/);
+    assert.match(html, /1 episode/);
     assert.doesNotMatch(html, /Nothing written yet/, "and never contradicts it with a day one");
   });
 
@@ -619,7 +619,7 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const html = renderApp(stripped, `/w/${FIXTURE_WORLD_ID}/p/${PROD}`);
     assert.match(html, /Let’s shape the season\. What is it about\?/, "Arke opens rather than a card explaining");
     assert.doesNotMatch(html, /is where the season gets shaped/, "the card that pointed at a page is gone");
-    assert.match(html, /not written yet/i, "beside the shape it was promised");
+    assert.match(html, /Create the first episode/);
   });
 });
 

@@ -253,34 +253,17 @@ export function DevelopmentWorkspace() {
   }
   const season = production.season ?? null;
   const episodes = production.episodes;
-  const defaults = season?.defaults;
-  // The season promises a number of episodes on the day it is made (turn 87), so the board is
-  // that many wide from the start — never however many happen to exist.
-  const declared = Math.max(defaults?.episodeCount ?? 0, episodes.length);
-  const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
-      {/*
-        The counts were six outlined pills repeating what the rail and the board already say
-        (turn 120). What survives is a seven-segment meter in episode order — the rack's own
-        shape at header size — filled for written and amber for staged.
-      */}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
         {/* Page scale (issue 859): the three cards below read through, in the order drawn. The
             speaker on each of them still reads that one alone. */}
         {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the season" />}
         <span style={{ flex: 1 }} />
-        <span style={{ textAlign: "right" }}>
-          <span className="fy-seasonmeter" aria-hidden="true">
-            {Array.from({ length: declared }, (_, i) => (
-              <span key={i} {...(i < written ? { "data-state": "written" } : {})} />
-            ))}
-          </span>
-          <span className="fy-h1row__meta" style={{ display: "block", marginTop: 6 }}>
-            {written} of {declared} written
-          </span>
+        <span className="fy-h1row__meta">
+          {episodes.length} episode{episodes.length === 1 ? "" : "s"}
         </span>
       </div>
       {/* The season record itself, in the header rather than behind a tab of its own (turn 91).
@@ -427,19 +410,8 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
 function EpisodesBoard() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
-  /*
-   * The press is answered before the round trip is. Staging goes to the coordinator and comes
-   * back as a proposal a moment later; until it does, the tile that was pressed says so itself
-   * rather than leaving the board looking untouched (turn 92).
-   */
-  const [starting, setStarting] = useState<Set<number>>(() => new Set());
   const episodes = production?.episodes ?? [];
-  /* A pressed tile yields to the episode it became (review 2026-08-22): nothing removed a
-     number from `starting` once the proposal was accepted, so a phantom STARTING tile stood
-     beside the real episode forever. */
-  const startingOpen = new Set([...starting].filter((n) => !episodes.some((e) => e.order === n)));
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
-  const declared = Math.max(production?.season?.defaults?.episodeCount ?? 0, episodes.length);
   /*
    * Episodes that have been started and are waiting on the gate (turn 92). A staged proposal
    * against a file that is not yet an episode on disk is a started one: it has a name and an
@@ -447,7 +419,6 @@ function EpisodesBoard() {
    * Without this the press that staged it changed nothing anybody could see.
    */
   const stems = new Set(Object.values(production?.episodeFiles ?? {}));
-  const startedByPress = starting;
   const started = (world?.proposals ?? []).flatMap((sp) =>
     sp.proposal.targets.flatMap((t) => {
       // Prefix and suffix rather than a built pattern: a production id interpolated into a
@@ -466,12 +437,7 @@ function EpisodesBoard() {
       return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
     }),
   );
-  /** The episodes the season promised and nobody has started (turn 87). */
-  const untouched = Math.max(0, declared - episodes.length - started.length);
-  const firstBlank = episodes.length + started.length + 1;
-  const blanks = Array.from({ length: untouched }, (_, i) => firstBlank + i).filter(
-    (order) => !startedByPress.has(order),
-  );
+  const nextOrder = Math.max(0, ...episodes.map((e) => e.order), ...started.map((e) => e.order ?? 0)) + 1;
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
     const ids = episodes.map((e) => e.id);
@@ -512,36 +478,18 @@ function EpisodesBoard() {
         {started.map((one) => (
           <SeasonTile key={one.id} number={one.order} title={one.title} state="staged" />
         ))}
-        {[...startingOpen]
-          .filter((order) => !started.some((one) => one.order === order))
-          .map((order) => (
-            <SeasonTile key={`starting-${order}`} number={order} title={`Episode ${pad(order)}`} state="staged" />
-          ))}
-        {/*
-          Making an episode happens in the rack, where the others already are (turn 87): no screen
-          asks for a title before there is anything to title, so opening a blank frame stages the
-          episode under its number and the conversation is what names it. The tile writes it live
-          (issue 728): the press is the decision, and a proposal here waited on a screen elsewhere.
-        */}
-        {blanks.map((order) => (
-          <SeasonTile
-            key={`blank-${order}`}
-            number={order}
-            state="blank"
-            onOpen={() => {
-              if (!worldId || !prodId) return;
-              createEpisode(worldId, prodId, { title: `Episode ${pad(order)}`, order });
-              setStarting((prev) => new Set(prev).add(order));
-            }}
-          />
-        ))}
+        <button
+          type="button"
+          className="fy-linkbtn"
+          onClick={() => {
+            if (worldId && prodId) createEpisode(worldId, prodId, { title: `Episode ${pad(nextOrder)}`, order: nextOrder });
+          }}
+        >
+          {episodes.length === 0 && started.length === 0 ? "Create the first episode" : "Add episode"}
+        </button>
       </div>
-      {(blanks.length > 0 || started.length > 0) && (
-        <div className="fy-mono">
-          {started.length > 0 &&
-            `${started.length} started and waiting on the gate — accept them in Proposals · `}
-          {blanks.length} of {declared} promised by the season and not started · starting one stages it for the gate
-        </div>
+      {started.length > 0 && (
+        <div className="fy-mono">{started.length} started and waiting on the gate — accept them in Proposals</div>
       )}
       <FindingsPanel findings={findings} />
     </div>
