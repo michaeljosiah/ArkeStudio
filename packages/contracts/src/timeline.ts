@@ -1,4 +1,5 @@
-import { resolveProductionArtifact, type ArtifactSidecar } from "./artifact.js";
+import type { ArtifactSidecar } from "./artifact.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import { FullSha256Schema } from "./audio.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";

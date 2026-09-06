@@ -1,5 +1,5 @@
 import type { ProductionBundle } from "./client-state.js";
-import { resolveProductionArtifact } from "./artifact.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import type { AudioTrack, CutOverlay } from "./cut.js";
 import {
   AUDIO_TRACK_KINDS,

@@ -1,5 +1,5 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
-import { resolveProductionArtifact } from "./artifact.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   buildExportPlan,
