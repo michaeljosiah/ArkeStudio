@@ -78,14 +78,27 @@ export function foldedOccurrences(text: string, find: string): Array<{ start: nu
 function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {
   // Only the two spellings of emphasis fold (codex on PR 903): `*` and `_` say the same thing,
   // while a backtick or a tilde changes what the words are, and a quote must not match across it.
-  const marker = (c: string) => markers && /[*_]/.test(c);
+  // And an underscore between two word characters is not emphasis at all in Markdown —
+  // `foo_bar` is one word — so it stays a character of the words, and a quote of `foo_bar`
+  // never matches prose that has since become `foobar` (codex, round three).
+  const marker = (source: string, i: number): boolean => {
+    if (!markers) return false;
+    const c = source[i]!;
+    if (c === "*") return true;
+    if (c !== "_") return false;
+    // A letter or a digit on both sides, and only those: `\w` would count the underscore
+    // itself, and read the inner pair of `__not__` as the middle of a word.
+    const before = i > 0 ? source[i - 1]! : " ";
+    const after = i + 1 < source.length ? source[i + 1]! : " ";
+    return !(/[^\W_]/.test(before) && /[^\W_]/.test(after));
+  };
   const fold = (source: string) => {
     const starts: number[] = [];
     const ends: number[] = [];
     let folded = "";
     for (let i = 0; i < source.length; i++) {
       const c = source[i]!;
-      if (marker(c)) continue;
+      if (marker(source, i)) continue;
       if (/\s/.test(c)) {
         if (folded.endsWith(" ")) {
           ends[ends.length - 1] = i + 1;
@@ -110,8 +123,8 @@ function foldedOccurrencesWith(text: string, find: string, markers: boolean): Ar
     // The markers that wrap the matched words go with them: a span that began after `__` and
     // ended before it would leave half a mark standing on either side of the replacement.
     if (markers) {
-      while (start > 0 && marker(text[start - 1]!)) start--;
-      while (end < text.length && marker(text[end]!)) end++;
+      while (start > 0 && marker(text, start - 1)) start--;
+      while (end < text.length && marker(text, end)) end++;
     }
     hits.push({ start, end });
   }

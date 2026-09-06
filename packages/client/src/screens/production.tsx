@@ -2044,8 +2044,12 @@ function OverviewStoryScreen() {
   const overviewTitle = production?.meta.title ?? "Overview";
   /* The style the book is written in (turn 128): its cards sit under the overview's. */
   const style = production?.proseStyle ?? null;
-  // A blank sample in a hand-edited record is no listen and no card line (codex on PR 903).
-  const samples = (style?.samples ?? []).filter((sample) => sample.trim() !== "");
+  // A blank sample in a hand-edited record is no listen and no card line (codex on PR 903) —
+  // and the ones that remain keep their places in the record, because the read names a sample
+  // by its index there, and a compacted list would read the wrong one aloud.
+  const samples = (style?.samples ?? [])
+    .map((sample, index) => ({ sample, index }))
+    .filter(({ sample }) => sample.trim() !== "");
   const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = [
     ...(
       [
@@ -2063,10 +2067,10 @@ function OverviewStoryScreen() {
         source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
       })),
     // One block per sample (codex on turn 128), so no single read outruns a narrator's cap.
-    ...samples.map((sample, i) => ({
-      heading: `Sample ${i + 1}`,
+    ...samples.map(({ sample, index }) => ({
+      heading: `Sample ${index + 1}`,
       body: sample,
-      source: { of: "story", productionId: prodId ?? "", field: "samples", sample: i } as ProseReadSource,
+      source: { of: "story", productionId: prodId ?? "", field: "samples", sample: index } as ProseReadSource,
     })),
   ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
@@ -2197,12 +2201,12 @@ function OverviewStoryScreen() {
                       <div className="fy-eyebrow-sm">SAMPLES · {samples.length}</div>
                       {/* One read per sample (codex on turn 128): six at their bound read as one
                           block outrun a narrator's prompt cap, so each sample is its own listen. */}
-                      {samples.map((sample, i) => (
-                        <div key={`${i}:${sample}`} style={{ marginTop: 4 }}>
+                      {samples.map(({ sample, index }) => (
+                        <div key={`${index}:${sample}`} style={{ marginTop: 4 }} data-sample={index}>
                           <div className="fy-draftcard__logline">“{sample}”</div>
                           <ReadAloud
-                            source={{ of: "story", productionId: prodId ?? "", field: "samples", sample: i }}
-                            title={`${overviewTitle} · sample ${i + 1}`}
+                            source={{ of: "story", productionId: prodId ?? "", field: "samples", sample: index }}
+                            title={`${overviewTitle} · sample ${index + 1}`}
                             text={sample}
                           />
                         </div>

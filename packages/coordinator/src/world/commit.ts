@@ -240,6 +240,13 @@ const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
 
 /** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
 export const PROSE_STYLE_SCHEMA_VERSION = 10;
+/**
+ * A World Chat turn held to a passage or to a reply (turn 128) is recorded under a
+ * `turn.constraints` event a build older than the constraints reads as corruption, so the
+ * world is fenced here first and that build refuses it by name instead (codex on PR 903).
+ * The same boundary as the style's: both shipped in the one turn.
+ */
+export const TURN_CONSTRAINTS_SCHEMA_VERSION = 10;
 
 /**
  * Would writing this actually change what the world says?

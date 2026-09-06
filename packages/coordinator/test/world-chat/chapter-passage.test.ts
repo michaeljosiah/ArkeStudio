@@ -7,7 +7,7 @@ import { ProposalManager } from "../../src/gate/proposals.js";
 import { overviewSteer, proseStyleSteer } from "../../src/productions/ops.js";
 import { foldedOccurrences, replacePassage, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { storyFence } from "../../src/world-chat/target-reads.js";
-import { MarkdownFile } from "../../src/world/text-files.js";
+import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -123,6 +123,11 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.deepEqual(foldedOccurrences("She was __not__ wrong.", "not wrong"), [{ start: 8, end: 21 }], "the file's own markers are inside the span");
     assert.deepEqual(foldedOccurrences("She was __not__ wrong.", "**not** wrong"), [{ start: 8, end: 21 }]);
     assert.deepEqual(foldedOccurrences("She was not wrong.", "not wrong"), [{ start: 8, end: 17 }], "plain words match plainly first");
+    // An underscore inside a word is the word's, not a marker (codex on PR 903, round three): a
+    // quote of the word never matches prose the author has since joined up.
+    assert.deepEqual(foldedOccurrences("call foo_bar now", "foobar"), [], "foo_bar is one word");
+    assert.deepEqual(foldedOccurrences("call foo_bar now", "foo_bar"), [{ start: 5, end: 12 }]);
+    assert.deepEqual(foldedOccurrences("She was _not_ wrong.", "not wrong"), [{ start: 8, end: 19 }], "a single underscore at a word's edge is emphasis");
   });
 
   it("a style written by hand into a world below its boundary is adopted and the boundary raised on open (codex, round five)", async () => {
@@ -136,6 +141,51 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     const production = bundle.productions.find((p) => p.meta.id === PRODUCTION)!;
     assert.equal(production.proseStyle?.pov, "close third", "and the record is the author's, adopted");
     assert.ok((production.proseStyle?.version ?? 0) >= 1);
+  });
+
+  it("a style in a world that opened with an edit waiting is adopted the moment the edit clears, even by being put back (codex on PR 903, round three)", async () => {
+    const dir = await makeTempWorld();
+    const sheet = join(dir, "characters", "bray-half-hitch.md");
+    const committed = await readFile(sheet, "utf8");
+    // A world a build between the style and its boundary left behind: the scan state knows the
+    // style's bytes, and world.json still says 9. Made by adopting the style once, then putting
+    // the version back by hand and telling the scan state so, so the only edit waiting is the
+    // sheet's.
+    await writeFile(join(dir, "productions", PRODUCTION, "prose-style.json"), `${JSON.stringify({ version: 1, pov: "close third" }, null, 2)}\n`, "utf8");
+    const first = await WorldStore.open(dir, { clock: NOW });
+    assert.equal(first.getBundle().meta.schemaVersion, 10);
+    await first.close();
+    const worldPath = join(dir, "world.json");
+    const world = JSON.parse(await readFile(worldPath, "utf8")) as Record<string, unknown>;
+    const belowRaw = `${JSON.stringify({ ...world, schemaVersion: 9 }, null, 2)}\n`;
+    await writeFile(worldPath, belowRaw, "utf8");
+    const statePath = join(dir, ".index", "scan-state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8")) as { manifest: Record<string, string> };
+    state.manifest["world.json"] = sha256(belowRaw);
+    await writeFile(statePath, JSON.stringify(state), "utf8");
+    await writeFile(sheet, `${committed}\nEdited outside.\n`, "utf8");
+
+    const store = await WorldStore.open(dir, { clock: NOW });
+    closeOnCleanup(() => store.close());
+    assert.deepEqual(store.getBundle().externalEdits.map((edit) => edit.path), ["characters/bray-half-hitch.md"], "the sheet's edit waits");
+    assert.equal(store.getBundle().meta.schemaVersion, 9, "and adoption waited with it");
+    // Put back, not committed: the branch that clears the edit without a commit.
+    await writeFile(sheet, committed, "utf8");
+    await store.reconcileExternalEdit("characters/bray-half-hitch.md");
+    assert.equal(store.getBundle().externalEdits.length, 0);
+    assert.equal(store.getBundle().meta.schemaVersion, 10, "cleared is cleared, however it cleared, and cleared is adopted");
+  });
+
+  it("a world is fenced at a boundary on request, once, and only upward (codex on PR 903, round three)", async () => {
+    const { store } = await open();
+    const before = store.getBundle().meta.schemaVersion;
+    assert.ok(before < 10, "the fixture is below the style's boundary");
+    await store.raiseSchemaBoundary(10, "world-chat-constraints");
+    assert.equal(store.getBundle().meta.schemaVersion, 10);
+    const change = store.getBundle().changes.findLast((line) => line.entity === "world");
+    assert.deepEqual(change?.fieldsChanged, ["schemaVersion"], "the crossing is in the audit trail");
+    await store.raiseSchemaBoundary(9, "world-chat-constraints");
+    assert.equal(store.getBundle().meta.schemaVersion, 10, "a lower request is left alone");
   });
 });
 

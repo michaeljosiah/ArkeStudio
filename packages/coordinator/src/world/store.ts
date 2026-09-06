@@ -538,11 +538,13 @@ export class WorldStore {
         if (live !== null && committedHash === sha256(live)) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
         if (live === null && committedHash === undefined) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
 
@@ -568,12 +570,7 @@ export class WorldStore {
         });
         this.externalEdits = this.externalEdits.filter((e) => e.path !== portablePath);
         await this.rescan();
-        if (this.externalEdits.length === 0) {
-        await this.adoptBibleIfMoved();
-        // The style's boundary too (codex on PR 903): a world that opened with other external
-        // edits waiting skipped adoption, and the moment they clear is the moment it can happen.
-        await this.adoptProseStyleBoundary();
-      }
+        await this.afterExternalEditsCleared();
       } catch (err) {
         const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
         this.externalEdits = this.externalEdits.map((candidate) =>
@@ -595,14 +592,35 @@ export class WorldStore {
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.saveScanState();
-      if (this.externalEdits.length === 0) {
-        await this.adoptBibleIfMoved();
-        // The style's boundary too (codex on PR 903): a world that opened with other external
-        // edits waiting skipped adoption, and the moment they clear is the moment it can happen.
-        await this.adoptProseStyleBoundary();
-      }
+      await this.afterExternalEditsCleared();
     });
     return this.getBundle();
+  }
+
+  /**
+   * What waited on the last external edit clearing (codex on PR 903, rounds two and three): the
+   * Bible adopted if it moved, and the style's boundary. A world that opened with edits waiting
+   * skipped both, and every path that empties the set comes through here — an edit committed,
+   * an edit found put back or already gone, a reload — because the moment they clear is the
+   * moment adoption can happen, whichever way they cleared.
+   */
+  private async afterExternalEditsCleared(): Promise<void> {
+    if (this.externalEdits.length > 0) return;
+    await this.adoptBibleIfMoved();
+    await this.adoptProseStyleBoundary();
+  }
+
+  /**
+   * Fence the world at a boundary a feature needs with no file of its own to carry it (codex on
+   * PR 903): a World Chat turn held to a passage or to a reply is recorded as an event a build
+   * older than the constraints reads as corruption, so the world is raised first and that build
+   * refuses it by name instead. Only ever raises; a world already there is left alone, and a
+   * world with external edits waiting is refused like any other write.
+   */
+  async raiseSchemaBoundary(version: number, kind: string): Promise<void> {
+    const current = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (current >= version) return;
+    await this.commit({ kind, source: "app", files: [], raiseSchemaVersion: version });
   }
 
   close(): Promise<void> {
