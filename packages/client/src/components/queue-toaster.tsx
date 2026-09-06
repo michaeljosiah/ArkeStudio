@@ -7,6 +7,7 @@ import {
   subscribeJobReady,
   isOwnSceneCreate,
   subscribeQueueResults,
+  subscribeCommandFailures,
   subscribeSceneCreateResults,
   subscribeSceneRefusals,
   useStore,
@@ -133,6 +134,9 @@ function duration(note: QueueNote): number {
 
 export function QueueToaster() {
   const navigate = useNavigate();
+  useEffect(() => subscribeCommandFailures((event) => {
+    toast.error(event.reason, { id: event.requestId ?? undefined, duration: 12000 });
+  }), []);
   const update = useUpdateStatus();
   const { state } = useStore();
 

@@ -2241,6 +2241,15 @@ export class Coordinator {
               command: msg.kind,
               message: err instanceof Error ? err.message : String(err),
             });
+            // A crash may follow a durable write or submission. Do not claim nothing happened
+            // or expose exception details (which can contain private paths or credentials).
+            this.emit({
+              at: new Date().toISOString(),
+              type: "command.failed",
+              command: msg.kind,
+              requestId: "requestId" in msg ? msg.requestId ?? null : null,
+              reason: "That didn't finish. Check the current state of your work before trying again.",
+            });
           })
           .finally(() => this.activeMessages.delete(handling));
         if (!updateCommand) this.activeMessages.add(handling);
@@ -5652,12 +5661,11 @@ export class Coordinator {
       case "generate-look-preview": {
         // One picture of the look, before any world exists (SPEC-031 R-50). A person pressed
         // this — the agent can only propose (R-51) — and the spend is conversation-scoped (R-55).
-        const genesisDir = this.opts.provider.genesisDir;
-        if (!genesisDir || !this.opts.manifest) {
+        if (!this.opts.provider.genesisDir || !this.opts.manifest) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Look previews are unavailable.");
           return;
         }
-        const sandbox = await genesisDir(msg.genesisId);
+        const sandbox = await this.opts.provider.genesisDir(msg.genesisId);
         const blueprint = await foldBlueprint(sandbox);
         if (blueprint.look === undefined) {
           this.rejectEnqueue(msg.requestId, msg.kind, "The conversation has not settled a look yet.");
