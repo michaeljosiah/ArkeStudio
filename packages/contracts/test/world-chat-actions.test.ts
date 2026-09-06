@@ -20,6 +20,8 @@ describe("the craft loop's actions (design turn 128, issue 896)", () => {
   it("a chapter edit carries a passage, sized, and never beside a body", () => {
     assert.ok(edit({ passage: { find: "the seventh bell", with: "the last bell" } }).success);
     assert.ok(edit({ passage: { find: "the seventh bell", with: "" } }).success, "an empty replacement removes the passage");
+    assert.ok(edit({ passage: { find: "the seventh bell", with: "the last bell", paragraph: 3 } }).success, "anchored to the paragraph the ask named");
+    assert.equal(edit({ passage: { find: "the seventh bell", with: "the last bell", paragraph: 0 } }).success, false, "paragraphs are counted from one");
     assert.equal(edit({ passage: { find: "", with: "x" } }).success, false, "a passage names what it replaces");
     assert.equal(edit({ passage: { find: "x".repeat(1_201), with: "y" } }).success, false, "at most 1,200 characters found");
     assert.equal(edit({ passage: { find: "x", with: "y".repeat(2_401) } }).success, false, "at most 2,400 put in its place");

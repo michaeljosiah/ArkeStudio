@@ -4,8 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ChapterSummary, ClientMessage, ClientState, ProseStyle, StagedProposal } from "@arke-studio/contracts";
-import { ChapterScreen, firstPrompt, paragraphSpans, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { paragraphSpans, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal } from "@arke-studio/contracts";
+import { ChapterScreen, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -345,7 +345,9 @@ describe("the craft loop (turn 128)", () => {
     await act(async () => {
       prompt.click();
     });
-    assert.match(JSON.stringify(m.sent), /About this passage in chapter 02: «Maren counted the bells.» Tighten this/);
+    // The chapter and the paragraph ride with the words (codex on turn 128), so the passage can
+    // be looked for where it was and nowhere else.
+    assert.match(JSON.stringify(m.sent), /About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Tighten this/);
 
     await keyup(area, 3, 3);
     assert.doesNotMatch(text(m), /Ask Arke · /, "the selection collapsed, the press goes");
@@ -383,6 +385,9 @@ describe("the craft loop (turn 128)", () => {
       { text: "C d.", start: 6, end: 10 },
     ]);
     assert.deepEqual(paragraphSpans(""), []);
+    assert.equal(paragraphAt("A b.\n\nC d.", 0), 1, "the paragraph is counted from one");
+    assert.equal(paragraphAt("A b.\n\nC d.", 7), 2);
+    assert.equal(paragraphAt("", 0), null, "no paragraph in nothing");
     assert.equal(stagedChapterDraft([PASSAGE], PATH)?.before, BODY, "the review's before rides with the proposed");
   });
 });

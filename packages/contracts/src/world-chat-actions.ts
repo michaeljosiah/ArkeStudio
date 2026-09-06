@@ -708,8 +708,11 @@ const ProductionChapterModelActionSchema = z
                */
               passage: z
                 .object({
-                  find: z.string().min(1).max(1_200).describe("The passage to replace, quoted exactly as get_chapter returns it; it must occur exactly once."),
+                  find: z.string().min(1).max(1_200).describe("The passage to replace, quoted exactly as the chapter holds it."),
                   with: z.string().max(2_400).describe("The words that take its place; empty removes the passage."),
+                  paragraph: z.number().int().min(1).optional().describe(
+                    "The paragraph the passage is in, counted from 1 by blank lines, when the ask named it (About this passage in chapter 07, paragraph 3). The passage is looked for there and only there. Without it the passage must occur exactly once in the chapter.",
+                  ),
                 })
                 .strict()
                 .optional()

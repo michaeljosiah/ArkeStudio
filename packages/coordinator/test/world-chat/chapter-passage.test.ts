@@ -79,6 +79,29 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.equal(replacePassage("a b c", { find: "b", with: "B" }, "chapter 01"), "a B c");
     assert.equal(replacePassage("a b c", { find: "b", with: "" }, "chapter 01"), "a  c", "an empty replacement removes the passage");
   });
+
+  it("an ask that named its paragraph is looked for there and only there (codex on turn 128)", async () => {
+    const { store, gate, intent } = await open();
+    // "Maren" is in two paragraphs of the fixture; the paragraph decides which one, and current
+    // uniqueness never does.
+    const anchored = (paragraph: number) => stageWorldChatProductionAuthoredAction(store, gate, intent, {
+      kind: "world-chat-production-chapter",
+      worldId: store.worldId,
+      action: {
+        kind: "production-chapter",
+        productionId: PRODUCTION,
+        change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "Maren", with: "Ines", paragraph } } },
+        checkReceiptIds: [],
+      },
+    });
+    const body = "The ledger of the Vigil is kept in a hand.\n\nMaren has the 1820 volume open.\n\nMaren is not reading it.";
+    assert.equal(replacePassage(body, { find: "Maren", with: "Ines", paragraph: 3 }, "chapter 01"), body.replace("Maren is not", "Ines is not"), "the third paragraph's occurrence, not the second's");
+    assert.throws(() => replacePassage(body, { find: "Maren", with: "Ines", paragraph: 1 }, "chapter 01"), /that passage is not in paragraph 1 of chapter 01 as it stands/);
+    assert.throws(() => replacePassage(body, { find: "Maren", with: "Ines", paragraph: 9 }, "chapter 01"), /not in paragraph 9 of chapter 01/, "a paragraph the chapter no longer has");
+    const proposal = await anchored(2);
+    assert.match(proposal.summary, /^Revise a passage/);
+    await assert.rejects(() => anchored(1), /not in paragraph 1 of chapter 01 as it stands · read the chapter again/);
+  });
 });
 
 describe("the style the book is written in (turn 128)", () => {

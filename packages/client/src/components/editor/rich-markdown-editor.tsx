@@ -53,10 +53,11 @@ interface RichMarkdownEditorProps {
    */
   readOnly?: boolean;
   /**
-   * The words selected, as plain text, or null when the selection collapses (turn 128). What
+   * The words selected, as plain text, or null when the selection collapses (turn 128), with the
+   * top-level block the selection starts in counted from one — the paragraph, for prose. What
    * the chapter workspace makes the dock's subject; nothing is done with it here.
    */
-  onSelect?: (text: string | null) => void;
+  onSelect?: (text: string | null, paragraph: number | null) => void;
 }
 
 export function RichMarkdownEditor({
@@ -239,8 +240,8 @@ export function RichMarkdownEditor({
       syncMenu(instance);
       // The selected words as text, not as document positions: what is said about them goes
       // into a thread that never sees the editor, so the words themselves are the address.
-      const { from, to, empty } = instance.state.selection;
-      onSelectRef.current?.(empty ? null : instance.state.doc.textBetween(from, to, "\n\n"));
+      const { from, to, empty, $from } = instance.state.selection;
+      onSelectRef.current?.(empty ? null : instance.state.doc.textBetween(from, to, "\n\n"), empty ? null : $from.index(0) + 1);
     },
   });
   editorRef.current = editor;

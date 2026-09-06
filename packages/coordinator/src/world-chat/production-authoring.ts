@@ -10,6 +10,7 @@ import {
   SeriesSchema,
   StoryOverviewSchema,
   countWords,
+  paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
   productionShape,
@@ -60,16 +61,32 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
 }
 
 /**
- * One passage replaced in a chapter's body (turn 128), refused by name unless the quoted span is
- * there exactly once. A quote that matches nothing is a stale read of the chapter; one that
- * matches twice would change the wrong one, so the ask is for more of it rather than a guess.
+ * One passage replaced in a chapter's body (turn 128). An ask that named its paragraph is looked
+ * for there and only there — current uniqueness is never passage identity, because the author
+ * may have typed over the selected occurrence while Arke answered, and a quote that then matches
+ * elsewhere would change prose nobody pointed at. Without a paragraph the quote must occur exactly
+ * once: a quote that matches nothing is a stale read, and one that matches twice would change the
+ * wrong one, so the ask is for more of it rather than a guess.
  */
-export function replacePassage(body: string, passage: { find: string; with: string }, label: string): string {
+export function replacePassage(
+  body: string,
+  passage: { find: string; with: string; paragraph?: number | undefined },
+  label: string,
+): string {
+  if (passage.paragraph !== undefined) {
+    const span = paragraphSpans(body)[passage.paragraph - 1];
+    const within = span === undefined ? -1 : body.slice(span.start, span.end).indexOf(passage.find);
+    if (span === undefined || within < 0) {
+      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+    }
+    const at = span.start + within;
+    return body.slice(0, at) + passage.with + body.slice(at + passage.find.length);
+  }
   const first = body.indexOf(passage.find);
   if (first < 0) throw new Error(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
   let count = 1;
   for (let at = body.indexOf(passage.find, first + passage.find.length); at >= 0; at = body.indexOf(passage.find, at + passage.find.length)) count++;
-  if (count > 1) throw new Error(`that passage occurs ${count} times in ${label} · quote more of it`);
+  if (count > 1) throw new Error(`that passage occurs ${count} times in ${label} · quote more of it, or say which paragraph`);
   return body.slice(0, first) + passage.with + body.slice(first + passage.find.length);
 }
 

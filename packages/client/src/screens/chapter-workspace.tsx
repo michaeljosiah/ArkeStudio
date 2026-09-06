@@ -3,6 +3,7 @@ import { Link, useParams, useNavigate } from "react-router";
 import {
   chapterParagraphs,
   countWords,
+  paragraphSpans,
   passageOf,
   targetWords,
   type ChangedSpan,
@@ -190,21 +191,13 @@ export function passageSubject(text: string | null): string | null {
 }
 
 /**
- * Paragraphs with the offsets they occupy in the body, so the one a changed span falls in can be
- * marked. Splits as `chapterParagraphs` does — blank lines — but keeps the positions it would drop.
+ * The paragraph a selection starts in, counted from one by blank lines as the coordinator counts
+ * them (turn 128), or null when the text has no such paragraph. What anchors the ask: the
+ * coordinator looks for the passage there and only there.
  */
-export function paragraphSpans(body: string): Array<{ text: string; start: number; end: number }> {
-  const spans: Array<{ text: string; start: number; end: number }> = [];
-  const breaks = /\r?\n[ \t]*\r?\n/g;
-  let start = 0;
-  for (let match = breaks.exec(body); ; match = breaks.exec(body)) {
-    const end = match === null ? body.length : match.index;
-    const text = body.slice(start, end).trim();
-    if (text !== "") spans.push({ text, start, end });
-    if (match === null) break;
-    start = match.index + match[0].length;
-  }
-  return spans;
+export function paragraphAt(text: string, offset: number): number | null {
+  const index = paragraphSpans(text).findIndex((span) => offset >= span.start && offset <= span.end);
+  return index < 0 ? null : index + 1;
 }
 
 /**
@@ -587,17 +580,19 @@ export function ChapterWorkspace({
    * end, for the press beside them. The words rather than positions, because what is said about
    * them goes into the production's thread, which never sees the editor.
    */
-  const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(null);
+  const [selection, setSelection] = useState<{ text: string; paragraph: number | null; top: number; left: number } | null>(null);
   const manuscriptRef = useRef<HTMLDivElement | null>(null);
-  const onSelect = useCallback((text: string | null) => {
+  // The paragraph rides with the words (codex on turn 128): the coordinator looks for the passage
+  // there and only there, so an occurrence elsewhere can never be the one changed.
+  const onSelect = useCallback((text: string | null, paragraph: number | null = null) => {
     const subject = passageSubject(text);
-    setSelection(subject === null ? null : { text: subject, ...askAt(manuscriptRef.current) });
+    setSelection(subject === null ? null : { text: subject, paragraph, ...askAt(manuscriptRef.current) });
   }, []);
   // The words come from the text the editor holds, not the element's value: the two are the same
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
     const { selectionStart, selectionEnd } = e.currentTarget;
-    onSelect(selectionStart === selectionEnd ? null : text.slice(selectionStart, selectionEnd));
+    onSelect(selectionStart === selectionEnd ? null : text.slice(selectionStart, selectionEnd), paragraphAt(text, selectionStart));
   };
   useEffect(() => {
     if (locked) setSelection(null);
@@ -947,7 +942,9 @@ export function ChapterWorkspace({
               : [firstPrompt(live, chapter.synopsis), style !== null ? "Hold this against the style" : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
-            subjectPrefix: passage !== null ? `About this passage in ${chapterLabel}: «${passage}»` : `About ${chapterLabel}:`,
+            subjectPrefix: passage !== null
+              ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
+              : `About ${chapterLabel}:`,
             ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
             note: waiting === "passage"
               ? "talking changes nothing here · a passage waits for your yes"

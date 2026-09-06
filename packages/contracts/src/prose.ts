@@ -126,6 +126,25 @@ export function overviewMoved(
   );
 }
 
+/**
+ * Paragraphs with the offsets they occupy in the body (turn 128): what anchors a passage to the
+ * paragraph an ask named, and what marks the paragraph a changed span falls in. Splits as
+ * `chapterParagraphs` does — blank lines — but keeps the positions it would drop.
+ */
+export function paragraphSpans(body: string): Array<{ text: string; start: number; end: number }> {
+  const spans: Array<{ text: string; start: number; end: number }> = [];
+  const breaks = /\r?\n[ \t]*\r?\n/g;
+  let start = 0;
+  for (let match = breaks.exec(body); ; match = breaks.exec(body)) {
+    const end = match === null ? body.length : match.index;
+    const text = body.slice(start, end).trim();
+    if (text !== "") spans.push({ text, start, end });
+    if (match === null) break;
+    start = match.index + match[0].length;
+  }
+  return spans;
+}
+
 /** The one span two texts differ in, or null when they are the same text (turn 128). */
 export interface ChangedSpan {
   /** The words the span held before. */
