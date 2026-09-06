@@ -3,7 +3,9 @@ import { Link, useParams, useNavigate } from "react-router";
 import {
   chapterParagraphs,
   countWords,
+  passageOf,
   targetWords,
+  type ChangedSpan,
   type ChapterSummary,
   type ProductionBundle,
   type ProseReadSource,
@@ -160,7 +162,7 @@ function chapterPath(production: ProductionBundle, chapter: ChapterSummary): str
 export function stagedChapterDraft(
   proposals: readonly StagedProposal[],
   path: string,
-): { staged: StagedProposal; body: string | null } | undefined {
+): { staged: StagedProposal; body: string | null; before: string | null } | undefined {
   const staged = [...proposals]
     .filter((entry) => entry.proposal.kind === "chapter-draft" && entry.proposal.targets.some((t) => t.path === path))
     .sort((left, right) =>
@@ -169,7 +171,56 @@ export function stagedChapterDraft(
     .at(-1);
   if (!staged) return undefined;
   const prose = staged.review?.targets.find((t) => t.path === path)?.fields.find((f) => f.field === "Prose");
-  return { staged, body: prose?.proposed ?? null };
+  // Both sides, so the passage a revision changed is drawn from the two rather than carried twice
+  // (turn 128).
+  return { staged, body: prose?.proposed ?? null, before: prose?.before ?? null };
+}
+
+/** The most a selection may hold to be asked about (turn 128). */
+const PASSAGE_MAX = 1_200;
+
+/**
+ * The selection as a subject, or null when it is not one (turn 128): three words or more and at
+ * most 1,200 characters. Under or over, nothing is offered, and the reason is not on the screen.
+ */
+export function passageSubject(text: string | null): string | null {
+  const trimmed = text?.trim() ?? "";
+  if (trimmed === "" || countWords(trimmed) < 3 || trimmed.length > PASSAGE_MAX) return null;
+  return trimmed;
+}
+
+/**
+ * Paragraphs with the offsets they occupy in the body, so the one a changed span falls in can be
+ * marked. Splits as `chapterParagraphs` does — blank lines — but keeps the positions it would drop.
+ */
+export function paragraphSpans(body: string): Array<{ text: string; start: number; end: number }> {
+  const spans: Array<{ text: string; start: number; end: number }> = [];
+  const breaks = /\r?\n[ \t]*\r?\n/g;
+  let start = 0;
+  for (let match = breaks.exec(body); ; match = breaks.exec(body)) {
+    const end = match === null ? body.length : match.index;
+    const text = body.slice(start, end).trim();
+    if (text !== "") spans.push({ text, start, end });
+    if (match === null) break;
+    start = match.index + match[0].length;
+  }
+  return spans;
+}
+
+/**
+ * Where the press beside a selection goes: at the end of the selected words, in the manuscript's
+ * own coordinates. Off screen (no DOM selection to measure, as under test) it sits at the top.
+ */
+function askAt(host: HTMLElement | null): { top: number; left: number } {
+  const selection = typeof window.getSelection === "function" ? window.getSelection() : null;
+  if (!host || !selection || selection.rangeCount === 0) return { top: 0, left: 0 };
+  const rect = selection.getRangeAt(0).getBoundingClientRect();
+  const frame = host.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return { top: 0, left: 0 };
+  return {
+    top: Math.max(0, rect.bottom - frame.top - 22),
+    left: Math.max(0, Math.min(rect.right - frame.left + 8, frame.width - 150)),
+  };
 }
 
 export function ChapterWorkspace({
@@ -528,8 +579,40 @@ export function ChapterWorkspace({
   const draws = chapter.draws ?? { sheets: [], canon: [] };
   const drawsEmpty = draws.sheets.length === 0 && draws.canon.length === 0;
   const chapterLabel = `chapter ${String(chapter.order).padStart(2, "0")}`;
+  /* The style the book is written in (turn 128), said in one line beside the manuscript. */
+  const style = production.proseStyle ?? null;
+
+  /*
+   * The passage selected (turn 128): the words, which become the dock's subject, and where they
+   * end, for the press beside them. The words rather than positions, because what is said about
+   * them goes into the production's thread, which never sees the editor.
+   */
+  const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(null);
+  const manuscriptRef = useRef<HTMLDivElement | null>(null);
+  const onSelect = useCallback((text: string | null) => {
+    const subject = passageSubject(text);
+    setSelection(subject === null ? null : { text: subject, ...askAt(manuscriptRef.current) });
+  }, []);
+  // The words come from the text the editor holds, not the element's value: the two are the same
+  // string in a browser, and only the first is there under test.
+  const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {
+    const { selectionStart, selectionEnd } = e.currentTarget;
+    onSelect(selectionStart === selectionEnd ? null : text.slice(selectionStart, selectionEnd));
+  };
+  useEffect(() => {
+    if (locked) setSelection(null);
+  }, [locked]);
+  const passage = selection?.text ?? null;
+
+  /*
+   * A passage waits (turn 128): the staged draft changes one span and leaves the rest of the
+   * chapter as it was. Drawn from the review's before and proposed; a draft that changes more
+   * than one span is a draft, and is drawn as one.
+   */
+  const passageChange: ChangedSpan | null = stagedDraft === undefined ? null : passageOf(stagedDraft.before, stagedDraft.body);
+  const waiting = stagedDraft === undefined ? null : passageChange === null ? "draft" : "passage";
   const foot = locked && stagedDraft !== undefined
-    ? `Locked while a draft waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
+    ? `Locked while a ${waiting} waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
     : saveRefusal !== null
       ? `Not saved · ${saveRefusal}`
       : saving
@@ -599,7 +682,7 @@ export function ChapterWorkspace({
             </span>
             <span>{chapter.status}</span>
             <span>{words.toLocaleString()} words</span>
-            <span>{stagedDraft !== undefined ? "draft waiting" : saving ? "saving" : "saved"}</span>
+            <span>{waiting !== null ? `${waiting} waiting` : saving ? "saving" : "saved"}</span>
             {stale && (
               <span className="fy-ch__moved">
                 overview moved · v{chapter.draftedAgainst} → v{production.story?.version}
@@ -609,11 +692,33 @@ export function ChapterWorkspace({
         </header>
 
         <div className="fy-ch__body">
-          <div className="fy-ch__manuscript">
+          <div className="fy-ch__manuscript" ref={manuscriptRef}>
             {openFailure !== null ? (
               <EmptyState title={openFailure} />
             ) : record === null ? (
               <EmptyState title="Opening…" />
+            ) : stagedDraft !== undefined && passageChange !== null ? (
+              <div className="fy-ch__prose">
+                {/* A passage waits (turn 128): the replacement stands in the passage's place, the
+                    rest of the chapter untouched, and the band counts the span both ways. */}
+                <div className="fy-ch__band">
+                  <span className="fy-ch__band-who">Arke&rsquo;s passage</span>
+                  <span>· {countWords(passageChange.before).toLocaleString()} → {countWords(passageChange.after).toLocaleString()} words</span>
+                  <span>· against v{record.version}</span>
+                  <span className="fy-ch__band-push" />
+                  <span>decide in the thread</span>
+                </div>
+                <div className="fy-ch__draft-passage" aria-label="Arke's passage">
+                  {paragraphSpans(stagedDraft.body ?? live).map((paragraph, i) => {
+                    const changed = paragraph.end > passageChange.start && paragraph.start < passageChange.start + passageChange.after.length;
+                    return (
+                      <p key={i} className={changed ? "fy-ch__passage" : undefined}>
+                        {paragraph.text}
+                      </p>
+                    );
+                  })}
+                </div>
+              </div>
             ) : stagedDraft !== undefined ? (
               <div className="fy-ch__prose">
                 <div className="fy-ch__band">
@@ -639,6 +744,7 @@ export function ChapterWorkspace({
                   key={`${chapter.id}:${record.version}`}
                   value={text}
                   onChange={onChange}
+                  onSelect={onSelect}
                   placeholder={PLACEHOLDER}
                   ariaLabel={`Chapter ${chapter.order}`}
                 />
@@ -648,10 +754,26 @@ export function ChapterWorkspace({
                 className="fy-ch__source"
                 value={text}
                 onChange={(e) => onChange(e.target.value)}
+                onSelect={onTextareaSelect}
+                onKeyUp={onTextareaSelect}
+                onMouseUp={onTextareaSelect}
                 spellCheck
                 placeholder={PLACEHOLDER}
                 aria-label={`Chapter ${chapter.order}`}
               />
+            )}
+            {/* The press beside a selection (turn 128). Mouse-down is swallowed so the press does
+                not collapse the selection it is about before the click lands. */}
+            {selection !== null && !locked && (
+              <button
+                type="button"
+                className="fy-ch__ask"
+                style={{ top: selection.top, left: selection.left }}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => setDock(true)}
+              >
+                Ask Arke · {countWords(selection.text).toLocaleString()} words
+              </button>
             )}
             <div className="fy-ch__foot">
               <span className="fy-mono">{foot}</span>
@@ -680,6 +802,17 @@ export function ChapterWorkspace({
                 </div>
               )}
             </section>
+
+            {/* The style, in one line (turn 128); the cards are on the Overview, where it was settled. */}
+            {style !== null && (
+              <section className="fy-bible__panel" data-testid="chapter-style">
+                <h2 className="fy-bible__paneltitle">Style</h2>
+                <p className="fy-ch__style">
+                  {[...(style.pov !== undefined ? [style.pov] : []), ...(style.tense !== undefined ? [style.tense] : []), `v${style.version}`].join(" · ")}
+                </p>
+                <p className="fy-bible__empty fy-mono">settled in Develop · read by every draft</p>
+              </section>
+            )}
 
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">
@@ -807,12 +940,18 @@ export function ChapterWorkspace({
             conversationFirst: true,
             onPutAway: () => setDock(false),
             // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
-            // from; a chapter with prose is continued.
-            prompts: [firstPrompt(live, chapter.synopsis), "What does this chapter draw on?"],
+            // from; a chapter with prose is continued. While a passage is selected the prompts
+            // are a revision's (turn 128), and the passage is the subject.
+            prompts: passage !== null
+              ? ["Tighten this", "Hold this against the style"]
+              : [firstPrompt(live, chapter.synopsis), style !== null ? "Hold this against the style" : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
-            subjectPrefix: `About ${chapterLabel}:`,
-            note: "talking changes nothing here · a draft waits for your yes",
+            subjectPrefix: passage !== null ? `About this passage in ${chapterLabel}: «${passage}»` : `About ${chapterLabel}:`,
+            ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
+            note: waiting === "passage"
+              ? "talking changes nothing here · a passage waits for your yes"
+              : "talking changes nothing here · a draft waits for your yes",
           }}
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
@@ -825,12 +964,17 @@ export function ChapterWorkspace({
                     worldId={worldId}
                     subject={chapterLabel}
                     staged={stagedDraft.staged}
-                    writes="Replaces the chapter's prose."
+                    writes={passageChange !== null ? "Replaces one passage · the rest of the chapter is untouched" : "Replaces the chapter's prose."}
                     items={[
-                      {
-                        label: `${chapterLabel} · draft`,
-                        meta: stagedDraft.body !== null ? `${countWords(stagedDraft.body).toLocaleString()} words` : "draft",
-                      },
+                      passageChange !== null
+                        ? {
+                            label: `${chapterLabel} · passage`,
+                            meta: `${countWords(passageChange.before).toLocaleString()} → ${countWords(passageChange.after).toLocaleString()} words`,
+                          }
+                        : {
+                            label: `${chapterLabel} · draft`,
+                            meta: stagedDraft.body !== null ? `${countWords(stagedDraft.body).toLocaleString()} words` : "draft",
+                          },
                     ]}
                   />
                 ),

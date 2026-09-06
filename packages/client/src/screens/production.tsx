@@ -1933,10 +1933,17 @@ export function ProductionChatScreen() {
    * both, so a single match is the whole answer.
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
+  // The style the book is written in is settled here too (turn 128), in its own file.
   const staged =
     (world?.proposals ?? []).find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
-    ) ?? null;
+    ) ??
+    (shape?.isEpisodic
+      ? null
+      : (world?.proposals ?? []).find((sp) =>
+          sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
+        ) ?? null);
+  const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -1976,9 +1983,9 @@ export function ProductionChatScreen() {
               side: (
                 <StagedDecision
                   worldId={worldId}
-                  subject={shape?.isEpisodic ? "the season" : "the overview"}
+                  subject={stagedStyle ? "the style" : shape?.isEpisodic ? "the season" : "the overview"}
                   staged={staged}
-                  writes={`the gate writes ${file} · nothing else moves`}
+                  writes={`the gate writes ${stagedStyle ? "prose-style.json" : file} · nothing else moves`}
                   onAccepted={() => navigate(detailsPath)}
                 />
               ),
@@ -2014,7 +2021,7 @@ function OverviewStoryScreen() {
    * screen cannot claim a change the gate would not make.
    */
   const staged = (world?.proposals ?? []).find((sp) =>
-    sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json`),
+    sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json` || t.path === `productions/${prodId}/prose-style.json`),
   );
   /** Every field the staged proposal would change, flattened out of its per-target review. */
   const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
@@ -2033,12 +2040,17 @@ function OverviewStoryScreen() {
     .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
     .join(" ");
   const overviewTitle = production?.meta.title ?? "Overview";
+  /* The style the book is written in (turn 128): its cards sit under the overview's. */
+  const style = production?.proseStyle ?? null;
+  const samples = style?.samples ?? [];
   const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = (
     [
       ["logline", "Logline", story?.logline ?? ""],
       ["spine", "Spine", story?.spine ?? ""],
       ["acts", "Acts", actsSpoken],
       ["treatment", "Treatment", production?.treatment ?? ""],
+      ["voice", "Voice", style?.voice ?? ""],
+      ["samples", "Samples", samples.join(" ")],
     ] as const
   )
     .filter(([, , body]) => body.trim() !== "")
@@ -2131,6 +2143,57 @@ function OverviewStoryScreen() {
                     text={production.treatment}
                   />
                 </div>
+              )}
+              {/*
+                The style the book is written in (turn 128): the overview's cards, at the
+                overview's measure, under a heading that says where it was settled and who reads
+                it. Voice and samples read aloud; point of view and tense are labels, not a listen.
+              */}
+              {style !== null && (
+                <>
+                  <div className="fy-story__stylehead" data-testid="prose-style">
+                    <span style={{ font: "600 13px var(--font-sans)" }}>Style</span>
+                    <span className="fy-mono">v{style.version} · settled in Develop · read by every draft and every revision</span>
+                  </div>
+                  {style.pov !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">POINT OF VIEW</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.pov}</div>
+                    </div>
+                  )}
+                  {style.tense !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">TENSE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.tense}</div>
+                    </div>
+                  )}
+                  {style.voice !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">VOICE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}>{style.voice}</div>
+                      <ReadAloud
+                        source={{ of: "story", productionId: prodId ?? "", field: "voice" }}
+                        title={`${overviewTitle} · voice`}
+                        text={style.voice}
+                      />
+                    </div>
+                  )}
+                  {samples.length > 0 && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">SAMPLES · {samples.length}</div>
+                      {samples.map((sample, i) => (
+                        <div key={`${i}:${sample}`} className="fy-draftcard__logline" style={{ marginTop: 4 }}>
+                          “{sample}”
+                        </div>
+                      ))}
+                      <ReadAloud
+                        source={{ of: "story", productionId: prodId ?? "", field: "samples" }}
+                        title={`${overviewTitle} · samples`}
+                        text={samples.join(" ")}
+                      />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ) : (

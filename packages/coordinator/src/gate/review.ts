@@ -9,6 +9,7 @@ import {
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
+  ProseStyleSchema,
   StoryOverviewSchema,
   type Proposal,
 } from "@arke-studio/contracts";
@@ -103,6 +104,21 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       }
       if (overview.targetLength !== undefined) fields.set("Target length", overview.targetLength);
       return { label: `Story overview v${overview.version}`, kind: "story overview", fields };
+    } catch {
+      return null;
+    }
+  }
+
+  // The style the book is written in (turn 128): the card shows each piece a change would settle.
+  if (/^productions\/[a-z0-9-]+\/prose-style\.json$/.test(path)) {
+    try {
+      const style = ProseStyleSchema.parse(JSON.parse(content));
+      const fields = new Map<string, string>();
+      if (style.pov !== undefined) fields.set("Point of view", style.pov);
+      if (style.tense !== undefined) fields.set("Tense", style.tense);
+      if (style.voice !== undefined) fields.set("Voice", style.voice);
+      for (const [i, sample] of (style.samples ?? []).entries()) fields.set(`Sample ${i + 1}`, sample);
+      return { label: `Prose style v${style.version}`, kind: "prose style", fields };
     } catch {
       return null;
     }

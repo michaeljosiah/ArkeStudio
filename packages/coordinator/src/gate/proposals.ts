@@ -19,6 +19,7 @@ import {
   SeriesSchema,
   validateSceneFlow,
   RoutingSchema,
+  ProseStyleSchema,
   StoryOverviewSchema,
   type SceneRecord,
   type Proposal,
@@ -78,6 +79,7 @@ import { projectReview, type ReviewProjection } from "./review.js";
  */
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
+  "prose-style": ProseStyleSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,

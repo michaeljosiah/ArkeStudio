@@ -31,6 +31,7 @@ import {
   type ScenePlan,
   type Season,
   type Series,
+  type ProseStyle,
   type StoryOverview,
   type SceneRecord,
   type WorldBundle,
@@ -382,18 +383,37 @@ export async function productionCreatedBy(worldDir: string, requestId: string): 
  * helper so scene drafting and chapter drafting steer from the same accepted facts — the UI
  * says the overview steers drafting, and this is where that claim is made true.
  */
-export function overviewSteer(story: StoryOverview | null | undefined): string {
-  if (!story) return "";
+export function overviewSteer(story: StoryOverview | null | undefined, style?: ProseStyle | null): string {
+  const lines = story
+    ? [
+        ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
+        ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
+        ...(story.acts ?? []).map(
+          (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
+        ),
+        ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+      ]
+    : [];
+  const overview = story && lines.length > 0
+    ? `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`
+    : "";
+  return overview + proseStyleSteer(style);
+}
+
+/**
+ * The style the book is written in, as a drafting instruction (turn 128), or "" when none is
+ * settled. Every draft and every revision reads it; nothing applies it to prose by itself.
+ */
+export function proseStyleSteer(style: ProseStyle | null | undefined): string {
+  if (!style) return "";
   const lines = [
-    ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
-    ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
-    ...(story.acts ?? []).map(
-      (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
-    ),
-    ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+    ...(style.pov !== undefined ? [`- point of view: ${style.pov}`] : []),
+    ...(style.tense !== undefined ? [`- tense: ${style.tense}`] : []),
+    ...(style.voice !== undefined ? [`- voice: ${style.voice}`] : []),
+    ...(style.samples ?? []).map((sample) => `- sounds like: "${sample}"`),
   ];
   if (lines.length === 0) return "";
-  return `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`;
+  return `\n\nThe prose style (v${style.version}) is how this book is written — hold to it in every sentence:\n${lines.join("\n")}`;
 }
 
 /**

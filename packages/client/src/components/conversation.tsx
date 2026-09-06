@@ -788,6 +788,11 @@ export function ProductionConversation({
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
     subjectPrefix?: string;
+    /**
+     * A line over the prompts that says what the subject is right now — `about this passage ·
+     * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
+     */
+    subjectLine?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
     /**
@@ -1172,10 +1177,13 @@ export function ProductionConversation({
         ) : null}
         <div className="fy-arke__foot">
           {languageControl}
+          {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
               {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(prompt)}>
+                // A prompt is said with the subject before it, as a typed line is (turn 128):
+                // `Tighten this` said bare names nothing, and the thread never sees the selection.
+                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`)}>
                   {prompt}
                 </button>
               ))}

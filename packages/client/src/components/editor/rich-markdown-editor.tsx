@@ -52,6 +52,11 @@ interface RichMarkdownEditorProps {
    * is, the honest surface is one that cannot be typed into and says so.
    */
   readOnly?: boolean;
+  /**
+   * The words selected, as plain text, or null when the selection collapses (turn 128). What
+   * the chapter workspace makes the dock's subject; nothing is done with it here.
+   */
+  onSelect?: (text: string | null) => void;
 }
 
 export function RichMarkdownEditor({
@@ -60,7 +65,10 @@ export function RichMarkdownEditor({
   placeholder,
   ariaLabel,
   readOnly = false,
+  onSelect,
 }: RichMarkdownEditorProps) {
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
 
@@ -227,7 +235,13 @@ export function RichMarkdownEditor({
         commit();
       }, SERIALIZE_MS);
     },
-    onSelectionUpdate: ({ editor: instance }) => syncMenu(instance),
+    onSelectionUpdate: ({ editor: instance }) => {
+      syncMenu(instance);
+      // The selected words as text, not as document positions: what is said about them goes
+      // into a thread that never sees the editor, so the words themselves are the address.
+      const { from, to, empty } = instance.state.selection;
+      onSelectRef.current?.(empty ? null : instance.state.doc.textBetween(from, to, "\n\n"));
+    },
   });
   editorRef.current = editor;
 

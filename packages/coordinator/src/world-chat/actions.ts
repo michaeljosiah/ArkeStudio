@@ -43,6 +43,7 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -419,6 +420,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-model": ["production-metadata"],
   "production-series": ["production-metadata", "series"],
   "production-overview": ["story"],
+  "production-prose-style": ["story"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
   "production-chapter": ["chapters"],
@@ -550,7 +552,8 @@ function productionActionTargets(
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
     ];
-    case "production-overview": return [{ requirement: "story", target: action.productionId }];
+    case "production-overview":
+    case "production-prose-style": return [{ requirement: "story", target: action.productionId }];
     case "production-season": return [
       { requirement: "seasons", target: action.productionId },
       ...(action.changes.arcs !== undefined && action.changes.arcs !== null
@@ -740,6 +743,7 @@ function preparedWorldPayload(
     case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
     case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
     case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
+    case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -996,6 +1000,7 @@ function worldActionTargets(
       label: action.change.operation === "edit" ? action.change.seriesId : action.change.title,
     }];
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
+    case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -4448,6 +4453,14 @@ export function worldChatActionAdapters(
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
     },
   );
+  const productionProseStyle = proposalBacked(
+    "world-chat-production-prose-style",
+    (value) => WorldChatProductionProseStyleActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
   const productionSeason = proposalBacked(
     "world-chat-production-season",
     (value) => WorldChatProductionSeasonActionSchema.parse(value),
@@ -4571,6 +4584,7 @@ export function worldChatActionAdapters(
     artDirectionRestore,
     productionSeries,
     productionOverview,
+    productionProseStyle,
     productionSeason,
     productionEpisode,
     productionChapter,

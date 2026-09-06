@@ -7229,6 +7229,7 @@ export class Coordinator {
                   purpose: "drafting",
                   instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
                     store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
+                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.proseStyle,
                   )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts in the chapter's frontmatter under \`implies\`, each as a kind (canon, character, location or faction) and one sentence, for separate proposal (turn 127). Never put them in the prose.`,
                 },
                 worldQueryUrl,

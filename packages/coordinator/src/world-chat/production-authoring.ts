@@ -4,10 +4,12 @@ import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
   EpisodeSchema,
+  ProseStyleSchema,
   SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
   StoryOverviewSchema,
+  countWords,
   isGraphScene,
   migrateLegacyScene,
   productionShape,
@@ -16,6 +18,7 @@ import {
   type WorldChatProductionChapterAction,
   type WorldChatProductionEpisodeAction,
   type WorldChatProductionOverviewAction,
+  type WorldChatProductionProseStyleAction,
   type WorldChatProductionSceneAction,
   type WorldChatProductionSeasonAction,
   type WorldChatProductionSeriesAction,
@@ -29,6 +32,7 @@ import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 export type WorldChatProductionAuthoredAction =
   | WorldChatProductionSeriesAction
   | WorldChatProductionOverviewAction
+  | WorldChatProductionProseStyleAction
   | WorldChatProductionSeasonAction
   | WorldChatProductionEpisodeAction
   | WorldChatProductionChapterAction
@@ -53,6 +57,20 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (raw === null) throw new Error(`${path} does not exist`);
   return raw;
+}
+
+/**
+ * One passage replaced in a chapter's body (turn 128), refused by name unless the quoted span is
+ * there exactly once. A quote that matches nothing is a stale read of the chapter; one that
+ * matches twice would change the wrong one, so the ask is for more of it rather than a guess.
+ */
+export function replacePassage(body: string, passage: { find: string; with: string }, label: string): string {
+  const first = body.indexOf(passage.find);
+  if (first < 0) throw new Error(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
+  let count = 1;
+  for (let at = body.indexOf(passage.find, first + passage.find.length); at >= 0; at = body.indexOf(passage.find, at + passage.find.length)) count++;
+  if (count > 1) throw new Error(`that passage occurs ${count} times in ${label} · quote more of it`);
+  return body.slice(0, first) + passage.with + body.slice(first + passage.find.length);
 }
 
 function withoutCleared<T extends Record<string, unknown>>(
@@ -220,6 +238,22 @@ export async function stageWorldChatProductionAuthoredAction(
     }, precondition);
   }
 
+  if (payload.kind === "world-chat-production-prose-style") {
+    // The style the book is written in (turn 128): its own file beside the overview, with its own
+    // version, so settling a sample never marks every chapter stale against the plan.
+    const current = production.proseStyle ?? { version: 1 };
+    const record = ProseStyleSchema.parse(withoutCleared(current, payload.action.changes));
+    return gate.stage({
+      kind: "prose-style",
+      summary: `Prose style: ${production.meta.title}`,
+      ...context,
+      targets: [{
+        path: `productions/${production.meta.id}/prose-style.json`,
+        content: `${JSON.stringify(record, null, 2)}\n`,
+      }],
+    }, precondition);
+  }
+
   if (payload.kind === "world-chat-production-season") {
     if (!productionShape(production.meta).isEpisodic) {
       throw new Error(`${production.meta.title} is not an episodic production`);
@@ -353,6 +387,15 @@ export async function stageWorldChatProductionAuthoredAction(
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
     const doc = MarkdownFile.parse(await readLive(store, path));
     const changes = change.changes;
+    /*
+     * A revision is a passage, never a chapter (turn 128). The one span it names is replaced in
+     * the live body here, so the staged file is the whole chapter with one change and the card
+     * can say exactly that. It is not a draft: the words are restamped, the overview version the
+     * chapter was drafted against is not.
+     */
+    const body = changes.passage === undefined
+      ? changes.body
+      : replacePassage(doc.body, changes.passage, `chapter ${String(chapter.order).padStart(2, "0")}`);
     doc.setData({
       ...(changes.title !== undefined ? { title: changes.title } : {}),
       ...(changes.status !== undefined ? { status: changes.status } : {}),
@@ -361,19 +404,17 @@ export async function stageWorldChatProductionAuthoredAction(
       ...(changes.pov !== undefined ? { pov: changes.pov ?? undefined } : {}),
       ...(changes.when !== undefined ? { when: changes.when || undefined } : {}),
       ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? withImpliedIds(changes.implies) : undefined } : {}),
-      ...(changes.body !== undefined
-        ? { words: changes.body.trim() === "" ? 0 : changes.body.trim().split(/\s+/).length }
-        : {}),
+      ...(body !== undefined ? { words: countWords(body) } : {}),
       // A new draft is against the overview as it is now; a plan edit alone restamps nothing.
       ...(changes.body !== undefined && changes.body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
     });
     // Cleared fields are dropped, not left as nulls the read schema would refuse.
     for (const key of ["draws", "synopsis", "pov", "when", "implies"] as const) if (doc.data[key] === undefined) delete doc.data[key];
-    if (changes.body !== undefined) doc.setBody(changes.body);
+    if (body !== undefined) doc.setBody(body);
     ChapterFrontmatterSchema.parse(doc.data);
     return gate.stage({
       kind: "chapter-draft",
-      summary: `Edit chapter: ${chapter.title}`,
+      summary: changes.passage === undefined ? `Edit chapter: ${chapter.title}` : `Revise a passage: ${chapter.title}`,
       ...context,
       targets: [{ path, content: doc.serialize() }],
     }, precondition);

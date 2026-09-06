@@ -189,6 +189,7 @@ type Classified =
   | { track: "scene"; production: string; file: string }
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
+  | { track: "prose-style"; production: string }
   | { track: "routing"; production: string }
   | { track: "season"; production: string }
   | { track: "episode"; production: string; file: string }
@@ -210,6 +211,8 @@ export function classify(path: string): Classified {
   if (m) return { track: "chapter", production: m[1]!, file: m[2]! };
   m = /^productions\/([a-z0-9-]+)\/story\.json$/.exec(path);
   if (m) return { track: "story", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/prose-style\.json$/.exec(path);
+  if (m) return { track: "prose-style", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/routing\.json$/.exec(path);
   if (m) return { track: "routing", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/season\.json$/.exec(path);
@@ -302,6 +305,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
     }
     if (
       track === "story" ||
+      track === "prose-style" ||
       track === "routing" ||
       track === "season" ||
       track === "episode" ||
@@ -474,6 +478,7 @@ export class Committer {
       } else if (
         kind.track === "scene" ||
         kind.track === "story" ||
+        kind.track === "prose-style" ||
         kind.track === "routing" ||
         kind.track === "season" ||
         kind.track === "episode" ||

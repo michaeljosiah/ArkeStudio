@@ -192,9 +192,11 @@ export function bibleFence(bundle: WorldBundle): string {
 }
 
 export function storyFence(production: ProductionBundle | undefined): string {
+  // The style is in the read, so it is in the fence: a draft asked for against a style that has
+  // since been settled reads again rather than drafting against the old one.
   return fence(
-    { story: production?.story ?? null, treatment: production?.treatment ?? null },
-    production?.story?.version ?? "absent",
+    { story: production?.story ?? null, style: production?.proseStyle ?? null, treatment: production?.treatment ?? null },
+    `${production?.story ? `v${production.story.version}` : "absent"}+${production?.proseStyle ? `v${production.proseStyle.version}` : "absent"}`,
   );
 }
 
@@ -594,6 +596,9 @@ export class WorldChatTargetReads {
         readTarget = target("story", productionId);
         rows = [
           ...(production?.story ? [{ key: "overview", value: production.story }] : []),
+          // The style the book is written in rides with the overview (turn 128), so every draft
+          // and every revision reads it in the one read they already make.
+          ...(production?.proseStyle ? [{ key: "style", value: production.proseStyle }] : []),
           ...chunks(production?.treatment ?? ""),
         ];
         revisionOrDigest = storyFence(production);

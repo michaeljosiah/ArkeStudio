@@ -8,6 +8,37 @@ import {
 
 const CHECK = "check_01J8F3K2QW9VZX4N7M0RTYB6HC";
 
+describe("the craft loop's actions (design turn 128, issue 896)", () => {
+  const edit = (changes: Record<string, unknown>) =>
+    ModelWorldChatActionSchema.safeParse({
+      kind: "production-chapter",
+      productionId: "saltlight",
+      change: { operation: "edit", chapterId: "the-vigil", changes },
+      checkReceiptIds: [CHECK],
+    });
+
+  it("a chapter edit carries a passage, sized, and never beside a body", () => {
+    assert.ok(edit({ passage: { find: "the seventh bell", with: "the last bell" } }).success);
+    assert.ok(edit({ passage: { find: "the seventh bell", with: "" } }).success, "an empty replacement removes the passage");
+    assert.equal(edit({ passage: { find: "", with: "x" } }).success, false, "a passage names what it replaces");
+    assert.equal(edit({ passage: { find: "x".repeat(1_201), with: "y" } }).success, false, "at most 1,200 characters found");
+    assert.equal(edit({ passage: { find: "x", with: "y".repeat(2_401) } }).success, false, "at most 2,400 put in its place");
+    assert.equal(edit({ body: "Whole.", passage: { find: "x", with: "y" } }).success, false, "a body or a passage, never both");
+  });
+
+  it("the prose style action settles each field, clears with null, and refuses an empty change", () => {
+    const style = (changes: Record<string, unknown>) =>
+      ModelWorldChatActionSchema.safeParse({ kind: "production-prose-style", productionId: "saltlight", changes, checkReceiptIds: [CHECK] });
+    assert.ok(style({ pov: "close third", tense: "past", voice: "Short declaratives.", samples: ["Six, and the tide not yet called."] }).success);
+    assert.ok(style({ samples: null }).success, "null clears");
+    assert.equal(style({}).success, false, "at least one field");
+    assert.equal(style({ voice: "v".repeat(2_001) }).success, false, "voice at most 2,000");
+    assert.equal(style({ samples: Array.from({ length: 7 }, () => "s") }).success, false, "at most six samples");
+    assert.equal(style({ samples: ["s".repeat(1_201)] }).success, false, "each at most 1,200");
+    assert.equal(style({ mood: "dark" }).success, false, "nothing outside the record");
+  });
+});
+
 describe("World Chat authored action contracts", () => {
   it("inherits every registered authored world field", () => {
     const changes = Object.fromEntries(

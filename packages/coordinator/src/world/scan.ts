@@ -40,6 +40,7 @@ import {
   type TakeMediaInfoRecord,
   SheetSchema,
   RoutingSchema,
+  ProseStyleSchema,
   StoryOverviewSchema,
   TakeSchema,
   WorldMetaSchema,
@@ -460,6 +461,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     const story = (await exists(join(pdir, "story.json")))
       ? await tryParse(`productions/${id}/story.json`, (raw) => StoryOverviewSchema.parse(JSON.parse(raw)))
       : null;
+    // prose-style.json — the style the book is written in, beside the overview (turn 128).
+    const proseStyle = (await exists(join(pdir, "prose-style.json")))
+      ? await tryParse(`productions/${id}/prose-style.json`, (raw) => ProseStyleSchema.parse(JSON.parse(raw)))
+      : null;
     const routing = (await exists(join(pdir, "routing.json")))
       ? await tryParse(`productions/${id}/routing.json`, (raw) => RoutingSchema.parse(JSON.parse(raw)))
       : null;
@@ -731,6 +736,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       performances,
       meta: metaDoc,
       story,
+      proseStyle,
       season,
       routing,
       treatment,
