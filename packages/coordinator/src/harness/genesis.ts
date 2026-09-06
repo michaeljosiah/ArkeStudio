@@ -106,6 +106,13 @@ subject facts only — who or what would be in a picture. Never style, medium, l
 aimed at an image model; the look covers that once, for everything. If the author takes an
 entity back out of the story, set "withdrawn": true in its file.
 
+"keyArt" is sent to an image model with the cast's photos alongside it, so compose it the way
+a poster would: a face, a hand, an object, a doorway, the thing the story turns on — one
+detail rather than a room full of figures. Keep bodies and sleepwear out of the frame, and
+never put young cast in bedrooms, nightclothes, bathing or undress: the image model refuses
+such a picture outright and the world is founded without its art. The narrower image is
+almost always the stronger one.
+
 Propose "look" yourself once tone and genre have settled — your reading of everything
 discussed, which the author sees and can rewrite. Keep quiet track of what is still blank —
 premise, cast, places, the through-line, the look, and the world's one image — and when the

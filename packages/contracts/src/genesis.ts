@@ -100,6 +100,9 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
     brief.stakes !== undefined ? `At stake: ${brief.stakes}` : null,
   ]
     .filter((clause): clause is string => clause !== null && clause !== undefined)
+    // Each clause is a sentence of its own; one that arrived with its full stop would
+    // otherwise read `beds.. The moment` once joined (issue 906).
+    .map((clause) => clause.trim().replace(/\.+$/, ""))
     .join(". ");
 }
 
