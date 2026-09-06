@@ -10,6 +10,8 @@ import {
   exportOverlays,
   pictureAtSec,
   pictureEdges,
+  migrateLegacyCut,
+  seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
   type ExportPlan,
   type ProductionBundle,
@@ -39,6 +41,46 @@ const artifacts: RenderArtifact[] = [
   { id: BELLS, file: "bells.wav", kind: "audio" },
   { id: NOTES, file: "notes.md", kind: "document" },
 ];
+
+describe("production-owned media in render plans and migration (#895)", () => {
+  for (const lane of ["base", "overlay", "audio"] as const) {
+    it(`distinguishes missing and scoped media on ${lane}, while allowing own and world media`, () => {
+      const value = production({ cut: { audio: [], overlays: [] } });
+      const seed = seedEmptyPictureTimeline(value);
+      const trackId = lane === "base" ? "tr_picture" : "tr_media";
+      const timeline = applyTimelineCommands(seed, [
+        ...(lane === "base" ? [] : [{ kind: "add-track" as const, trackId: "tr_media" as const, trackKind: lane === "audio" ? "audio" as const : "picture" as const, name: "Media" }]),
+        { kind: "place", trackId, clip: { id: "cl_scoped", startFrame: 0, durationFrames: 50, sourceInFrames: 0, source: { kind: "artifact", artifactId: INSERT, label: "insert.mp4" } } },
+      ]);
+      const plan = (catalog: RenderArtifact[]) => buildRenderPlan({ production: value, artifacts: catalog, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+      for (const owner of [undefined, null, value.meta.id]) {
+        assert.equal(plan(artifacts.map(artifact => ({ ...artifact, production: owner }))).ok, true);
+      }
+      const foreign = plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" })));
+      assert.ok(!foreign.ok);
+      assert.match(foreign.reason, /cl_scoped cites artifact .*belongs to another production/);
+      assert.match(foreign.reason, /Import the file into this production or remove this reference/);
+      assert.doesNotMatch(foreign.reason, /which this world does not have/);
+      const missing = plan([]);
+      assert.ok(!missing.ok); assert.match(missing.reason, /which this world does not have/);
+    });
+  }
+
+  it("names scoped legacy overlays and audio entries during migration and refuses legacy delivery", () => {
+    const value = production({ cut: {
+      overlays: [{ id: "ov_01J8G0000000000000000000B1", artifactId: INSERT, startSec: 0, endSec: 2, lane: 0, audio: "keep" }],
+      audio: [{ kind: "score", label: "Legacy score", entries: [{ artifactId: BELLS, offsetSec: 0 }] }],
+    } });
+    const catalog = artifacts.map(artifact => ({ ...artifact, production: "another-production" }));
+    const plan = buildRenderPlan({ production: value, artifacts: catalog, timeline: { status: "absent" }, scope: { kind: "production" }, preset: "review-cut" });
+    assert.ok(!plan.ok); assert.match(plan.reason, /ov_.*belongs to another production/);
+    const migrated = migrateLegacyCut(seedEmptyPictureTimeline(value), value, catalog);
+    assert.equal(migrated.dropped.length, 2);
+    assert.match(migrated.dropped[0]!, /ov_.*belongs to another production/);
+    assert.match(migrated.dropped[1]!, /Legacy score entry 1.*belongs to another production/);
+    assert.equal(migrated.timeline.tracks.flatMap(track => track.clips).length, 0);
+  });
+});
 
 function scene(id: string, order: number, shots: Array<{ id: string; durationSec?: number }>): Scene {
   return {

@@ -149,7 +149,7 @@ function valid(timeline: ProductionTimeline): ProductionTimeline {
   return timeline;
 }
 
-describe("independent sound and roles (SPEC-042)", () => {
+describe("independent sound and roles (SPEC-043)", () => {
   it("records neutral roles on new legacy-lane placements while preserving pre-existing roles", () => {
     for (const kind of ["dialogue", "music", "ambience"] as const) {
       const timeline = applyTimelineCommands(seedStoryPictureTimeline(production()), [{ kind: "add-track", trackId: "tr_old", trackKind: kind, name: "Old" }]);

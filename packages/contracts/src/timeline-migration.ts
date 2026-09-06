@@ -1,4 +1,5 @@
 import type { ProductionBundle } from "./client-state.js";
+import { resolveProductionArtifact } from "./artifact.js";
 import type { AudioTrack, CutOverlay } from "./cut.js";
 import {
   AUDIO_TRACK_KINDS,
@@ -32,6 +33,7 @@ export interface MigrationArtifact {
   id: string;
   file: string;
   kind: string;
+  production?: string | null;
   mediaInfo?: { hasAudio: boolean; durationSec?: number };
 }
 
@@ -99,13 +101,13 @@ export interface MigrationResult {
 export function migrateLegacyCut(
   timeline: ProductionTimeline,
   production: ProductionBundle,
+  // Pass the whole world catalog, including scoped artifacts, for accurate dropped reasons.
   artifacts: readonly MigrationArtifact[],
 ): MigrationResult {
   if (timeline.migratedCut === true) return { timeline, dropped: [] };
   const frameRate = timeline.frameRate;
   const dropped: string[] = [];
   const tracks: TimelineTrack[] = [...timeline.tracks];
-  const artifactsById = new Map(artifacts.map((artifact) => [artifact.id, artifact] as const));
   const existingIds = new Set(tracks.flatMap((candidate) => candidate.clips.map((clip) => clip.id)));
 
   // ---- Lanes: picture above the story, sound beside it ---------------------------------------
@@ -119,11 +121,12 @@ export function migrateLegacyCut(
     const picture: TimelineClip[] = [];
     const sound: TimelineClip[] = [];
     for (const overlay of [...overlays].sort((a, b) => a.startSec - b.startSec)) {
-      const artifact = artifactsById.get(overlay.artifactId);
-      if (artifact === undefined) {
-        dropped.push(`${overlay.id} cites artifact ${overlay.artifactId}, which this world does not have`);
+      const resolved = resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id);
+      if (!resolved.ok) {
+        dropped.push(`${overlay.id} cites ${resolved.reason}`);
         continue;
       }
+      const artifact = resolved.artifact;
       const id = clipIdFor(overlay.id);
       if (existingIds.has(id)) {
         dropped.push(`${overlay.id} is already on the timeline as ${id}`);
@@ -227,11 +230,12 @@ export function migrateLegacyCut(
         return;
       }
       if (entry.artifactId !== undefined) {
-        const artifact = artifactsById.get(entry.artifactId);
-        if (artifact === undefined) {
-          dropped.push(`${legacy.label} entry ${entryIndex + 1} cites artifact ${entry.artifactId}, which this world does not have`);
+        const resolved = resolveProductionArtifact(artifacts, entry.artifactId, production.meta.id);
+        if (!resolved.ok) {
+          dropped.push(`${legacy.label} entry ${entryIndex + 1} cites ${resolved.reason}`);
           return;
         }
+        const artifact = resolved.artifact;
         // The legacy schema let a bed cite anything; a typed audio track refuses a source with
         // no sound, so the entry is named here rather than saved and refused by every render.
         if (!(artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true))) {

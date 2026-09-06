@@ -34,11 +34,28 @@ async function mount(state: ClientState) {
     <Routes><Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} /></Routes>
   </MemoryRouter>));
   const button = (text: string) => {
-    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text);
+    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
   return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
 }
+it("distinguishes unavailable ownership from missing media and keeps the clip removable (#895)", async () => {
+  const state = stateWithVideo(true);
+  state.world!.artifacts[0]!.production = "another-production";
+  const screen = await mount(state);
+  try {
+    assert.match(screen.container.textContent!, /cl_holiday cites artifact .*belongs to another production/);
+    assert.match(screen.container.textContent!, /Import the file into this production or remove this reference/);
+    assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
+    assert.equal(screen.container.querySelector("[data-library-item^='artifact:']"), null, "the picker still hides another production's material");
+    await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!.click());
+    assert.equal(screen.button("Delete").disabled, false);
+    await act(async () => screen.button("Delete").click());
+    const batch = screen.sent.find(message => message.kind === "timeline-command");
+    assert.ok(batch?.kind === "timeline-command");
+    assert.deepEqual(batch.commands, [{ kind: "delete", clipId: "cl_holiday" }]);
+  } finally { await screen.close(); }
+});
 it("imports onto the main timeline without scenes or predefined audio lanes", async () => {
   const screen = await mount(stateWithVideo(false));
   try {

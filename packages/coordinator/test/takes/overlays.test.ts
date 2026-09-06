@@ -69,7 +69,7 @@ describe("overlays on the cut (82a)", () => {
     const { store } = await open();
     await assert.rejects(
       () => placeOverlay(store, "saltlight", { artifactId: "ar_01J8G0000000000000000000ZZ", startSec: 0, endSec: 5 }),
-      /is not in this world/,
+      /which this world does not have/,
     );
     await store.close();
   });

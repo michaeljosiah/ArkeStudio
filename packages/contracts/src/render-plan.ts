@@ -1,4 +1,5 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
+import { resolveProductionArtifact } from "./artifact.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   buildExportPlan,
@@ -117,11 +118,13 @@ export interface RenderArtifact {
   id: string;
   file: string;
   kind: string;
+  production?: string | null;
   mediaInfo?: { hasAudio: boolean; durationSec?: number };
 }
 
 export interface RenderPlanInput {
   production: ProductionBundle;
+  /** The whole world's catalog; this planner checks ownership before using a referenced file. */
   artifacts: readonly RenderArtifact[];
   timeline: TimelineState | undefined;
   scope: RenderScope;
@@ -269,8 +272,9 @@ function overlaysFromTimeline(
         return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const still = STILL_KINDS.has(artifact.kind);
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
@@ -313,8 +317,9 @@ function audioFromTimeline(
       let physicalInSec: number | undefined;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
-        const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-        if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+        const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+        if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+        const artifact = resolved.artifact;
         const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
         if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
@@ -373,6 +378,14 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
+  if (timeline?.status !== "ready" || timeline.timeline.migratedCut !== true) {
+    // Legacy missing files retain their existing projection; scoped files cannot be delivered
+    // merely because the placement predates the typed timeline (SPEC-020 R-13, issue #895).
+    for (const overlay of production.cut.overlays) {
+      const resolved = resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id);
+      if (!resolved.ok && resolved.code === "other-production") return { ok: false, reason: `${overlay.id} cites ${resolved.reason}` };
+    }
+  }
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
   if (production.spine !== null && (timeline === undefined || timeline.status === "absent")) {
@@ -451,8 +464,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     const clip: TimelineClip | undefined = base?.clips.find((candidate) => candidate.id === entry.clipId);
     if (clip !== undefined && clip.source.kind === "artifact") {
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });

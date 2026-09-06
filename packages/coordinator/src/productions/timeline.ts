@@ -12,6 +12,7 @@ import {
   historySelectionChanges,
   migrateLegacyCut,
   redoTimelineHistory,
+  resolveProductionArtifact,
   seedSpinePictureTimeline,
   seedFirstPictureTimeline,
   sourceLengthFramesFor,
@@ -404,15 +405,14 @@ export function refuseUnknownLibraryItems(
   artifacts: ReadonlyArray<{ id: string; production?: string | null }>,
 ): void {
   const shots = new Set(production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)));
-  // What this production may see (SPEC-020 R-13): the world's own files and the ones it owns.
-  const known = new Set(
-    artifacts.filter((artifact) => artifact.production === undefined || artifact.production === null || artifact.production === production.meta.id).map((artifact) => artifact.id),
-  );
   for (const command of commands) {
     if (command.kind !== "add-to-library") continue;
     for (const item of command.items) {
       if (item.kind === "shot" && !shots.has(item.shotId)) throw new TimelineCommandRefused(`the library cannot hold ${item.shotId}: this production has no such shot`);
-      if (item.kind === "artifact" && !known.has(item.artifactId)) throw new TimelineCommandRefused(`the library cannot hold ${item.artifactId}: this world has no such artifact`);
+      if (item.kind === "artifact") {
+        const resolved = resolveProductionArtifact(artifacts, item.artifactId, production.meta.id);
+        if (!resolved.ok) throw new TimelineCommandRefused(`the library cannot hold ${resolved.reason}`);
+      }
     }
   }
 }
@@ -421,7 +421,7 @@ export function refuseUnrenderablePlacements(
   commands: readonly TimelineCommand[],
   timeline: Pick<ProductionTimeline, "tracks">,
   production: ProductionBundle,
-  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; mediaInfo?: { hasAudio: boolean; durationSec: number } }>,
+  artifacts: ReadonlyArray<{ id: string; kind: string; file: string; production?: string | null; mediaInfo?: { hasAudio: boolean; durationSec: number } }>,
 ): void {
   const kinds = new Map(timeline.tracks.map((track) => [track.id, track.kind] as const));
   const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
@@ -436,8 +436,9 @@ export function refuseUnrenderablePlacements(
     const audio = kind !== undefined && AUDIO_TRACK_KINDS.has(kind);
     const source = command.clip.source;
     if (source.kind === "artifact") {
-      const artifact = artifacts.find((candidate) => candidate.id === source.artifactId);
-      if (artifact === undefined) throw new TimelineCommandRefused(`${command.clip.id} cites artifact ${source.artifactId}, which this world does not have`);
+      const resolved = resolveProductionArtifact(artifacts, source.artifactId, production.meta.id);
+      if (!resolved.ok) throw new TimelineCommandRefused(`${command.clip.id} cites ${resolved.reason}`);
+      const artifact = resolved.artifact;
       const carriesSound = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
       const carriesPicture = artifact.kind === "image" || artifact.kind === "board" || artifact.kind === "video";
       if (audio && !carriesSound) refuse(`${command.clip.id} cites ${artifact.file}, which is not known to carry sound`);

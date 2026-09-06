@@ -5942,7 +5942,7 @@ export function CutScreen() {
     production && (!production.spine || timelineState.status === "ready") && timelineError === null
       ? buildRenderPlan({
           production,
-          artifacts,
+          artifacts: world?.artifacts ?? [],
           timeline: previewState,
           scope: { kind: "production" },
           preset: "review-cut",
@@ -6008,7 +6008,7 @@ export function CutScreen() {
     }
   }
   // Allocation must reserve the same legacy ids the first coordinator write migrates.
-  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, artifacts).timeline : null;
+  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, world?.artifacts ?? []).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
