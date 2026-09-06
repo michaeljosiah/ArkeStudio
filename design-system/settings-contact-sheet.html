@@ -2,40 +2,38 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Settings · variation B · the contact sheet</title>
+<title>Settings · the contact sheet</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
 <style>
 /* ---------------------------------------------------------------------------
-   Variation B — the contact sheet.
+   Settings — the contact sheet.
 
-   The premise: this screen is where you decide what is in the kit, and the one
-   fact that decides it is what the model makes. So the pictures ARE the layout:
-   they touch, edge to edge, the way frames do on a contact sheet, and every
-   piece of chrome that competed with them is gone — no card borders, no radius,
-   no shadows, no coloured status dots, no tracked-out capitals, no monospace,
-   no middle-dot meta strings. What is left is a sheet of pictures and a ruled
-   strip of data under each row.
+   The pictures are the layout. Frames touch, edge to edge, the way they do on a
+   contact sheet, and every piece of chrome that was competing with them is gone:
+   no card borders, no radius, no shadows, no coloured status dots, no
+   tracked-out capitals, no monospace, no middle-dot meta strings. What is left
+   is a sheet of pictures over a ruled caption strip.
 
    Colour comes from the previews. The interface is achromatic apart from one
-   signal, reserved for a measured shortfall and used nowhere else.
+   signal, reserved for something a person has to act on and used nowhere else.
+
+   Two surfaces, not one. Providers holds credentials — a key, a sign-in, an
+   engine's address — and never a model. AI models holds every model, cloud and
+   local, grouped by what it makes. The seam that split created is a model whose
+   provider has no key, and it is repaired ON the model: `Needs a key` is the
+   control, not a route to the tab that owns one.
    --------------------------------------------------------------------------- */
 
 :root {
-  /* The app's own semantic tokens, kept so this is implementable rather than a
-     separate palette that would have to be maintained beside the real one. */
   --background: #FFFFFF;
   --foreground: #000000;
   --secondary-text: #6B6B6B;
   --edge: #E4E4E2;
   --rule: #EFEFED;
-  --warning: #B45309;
+  --signal: #B45309;
   --raise: rgba(0, 0, 0, 0.22);
-
-  /* Three the direction needs. `unexposed` is the flat tone a frame takes when
-     the model cannot run here — a frame that was never shot, not a dimmed one. */
   --unexposed: #DCDCD8;
   --plate: #FAFAF9;
-  --kit-mark: var(--foreground);
 
   --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -46,7 +44,7 @@ html.dark {
   --secondary-text: #8F8F8F;
   --edge: #262626;
   --rule: #1C1C1C;
-  --warning: #F0A83A;
+  --signal: #F0A83A;
   --raise: rgba(0, 0, 0, 0.7);
   --unexposed: #1E1E1E;
   --plate: #101010;
@@ -74,8 +72,6 @@ html.dark body { background: #050505; }
   overflow: hidden;
   box-shadow: 0 2px 22px rgba(0, 0, 0, 0.14);
 }
-.shot--narrow { width: 880px; height: 800px; }
-
 .caption {
   width: 1360px;
   margin: 0 auto;
@@ -127,13 +123,7 @@ html.dark .caption { color: #8F8F8F; }
   display: flex;
   flex-direction: column;
 }
-.shot--narrow .rail { width: 158px; padding-left: 20px; }
-.rail__title {
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: -0.03em;
-  margin: 0 0 20px;
-}
+.rail__title { font-size: 21px; font-weight: 600; letter-spacing: -0.03em; margin: 0 0 20px; }
 .rail a {
   display: block;
   padding: 6px 0;
@@ -159,20 +149,13 @@ html.dark .caption { color: #8F8F8F; }
   flex-direction: column;
   overflow: hidden;
 }
-.shot--narrow .body { padding: 24px 22px 0; }
 
-/* --- who you are connected to ---------------------------------------------- */
+/* --- Providers: who you connect to ----------------------------------------- */
 
 .sources { border-bottom: 1px solid var(--rule); padding-bottom: 16px; }
 .sources__band { display: flex; align-items: baseline; gap: 8px; }
 .sources__band + .sources__band { margin-top: 10px; }
-.sources__what {
-  width: 150px;
-  flex: none;
-  font-size: 12.5px;
-  color: var(--secondary-text);
-}
-.shot--narrow .sources__what { width: 108px; font-size: 12px; }
+.sources__what { width: 150px; flex: none; font-size: 12.5px; color: var(--secondary-text); }
 .sources__list { display: flex; flex-wrap: wrap; gap: 18px; }
 .source {
   font-size: 13.5px;
@@ -181,46 +164,43 @@ html.dark .caption { color: #8F8F8F; }
   border-bottom: 2px solid transparent;
   white-space: nowrap;
 }
-.source b { font-weight: 400; }
-.source[aria-current] {
-  color: var(--foreground);
-  font-weight: 500;
-  border-bottom-color: var(--foreground);
-}
+.source[aria-current] { color: var(--foreground); font-weight: 500; border-bottom-color: var(--foreground); }
 .source__count { color: var(--secondary-text); font-weight: 400; }
 .source--away { opacity: 0.45; }
 
-/* --- the provider, and what it needs to say -------------------------------- */
-
 .head { display: flex; align-items: flex-end; gap: 14px; margin: 26px 0 0; }
-.head__name {
-  font-size: 30px;
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1;
-  margin: 0;
-}
-.shot--narrow .head__name { font-size: 24px; }
+.head__name { font-size: 30px; font-weight: 600; letter-spacing: -0.035em; line-height: 1; margin: 0; }
 .head__does { font-size: 13px; color: var(--secondary-text); flex: 1; }
 .head__state { font-size: 13px; color: var(--secondary-text); }
-.head__state--short { color: var(--warning); }
+.head__state--short { color: var(--signal); }
 
-.facts { margin-top: 18px; display: flex; flex-direction: column; gap: 9px; }
+.facts { margin-top: 20px; display: flex; flex-direction: column; gap: 11px; max-width: 860px; }
 .fact { display: flex; align-items: baseline; gap: 14px; font-size: 13px; }
 .fact__what { width: 150px; flex: none; color: var(--secondary-text); }
 .fact__is { flex: 1; font-variant-numeric: tabular-nums; }
 .fact__do { color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
 .fact__do + .fact__do { margin-left: 14px; }
 
-/* The machine's one figure that changes a decision: what is left to fill. */
-.disk { margin-top: 16px; }
-.disk__line { display: flex; align-items: baseline; gap: 14px; font-size: 13px; }
-.disk__what { width: 150px; flex: none; color: var(--secondary-text); }
-.disk__is { flex: 1; font-variant-numeric: tabular-nums; }
+/* The one line Providers says about models: a count, and the way to them. Never
+   a list, and never a control that belongs to the other surface. */
+.aside { margin: 30px 0 0; font-size: 13px; color: var(--secondary-text); }
+.aside a { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
 
-/* --- the sheet ------------------------------------------------------------- */
+/* --- AI models: the two halves --------------------------------------------- */
 
-.sheet { margin-top: 26px; }
+.halves { display: flex; gap: 26px; border-bottom: 1px solid var(--rule); }
+.half {
+  font-size: 15px;
+  color: var(--secondary-text);
+  padding-bottom: 10px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.half[aria-current] { color: var(--foreground); font-weight: 500; border-bottom-color: var(--foreground); }
+
+/* --- a group of one kind of model ------------------------------------------ */
+
+.sheet { margin-top: 24px; }
 .sheet__head {
   display: flex;
   align-items: baseline;
@@ -231,20 +211,23 @@ html.dark .caption { color: #8F8F8F; }
 .sheet__what { font-weight: 500; }
 .sheet__count { color: var(--secondary-text); font-variant-numeric: tabular-nums; }
 
+/* A sheet is as wide as the frames it holds: a group of three is a strip of
+   three, not three and a hole. */
 .sheet__frames {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 0;                       /* frames touch. this is the whole idea. */
+  display: flex;
+  flex-wrap: wrap;
+  width: max-content;
+  max-width: 100%;
   border: 1px solid var(--edge);
 }
-.sheet__frames--three { grid-template-columns: repeat(3, 1fr); }
-.shot--narrow .sheet__frames { grid-template-columns: repeat(2, 1fr); }
 
 .frame {
   appearance: none;
   border: 0;
   padding: 0;
   margin: 0;
+  width: 270px;
+  flex: none;
   background: var(--background);
   font: inherit;
   color: inherit;
@@ -269,15 +252,13 @@ html.dark .caption { color: #8F8F8F; }
   object-fit: cover;
   background: var(--unexposed);
 }
-.frame__pic--none { display: block; width: 100%; aspect-ratio: 16 / 9; background: var(--unexposed); }
+.frame__pic--none { background: var(--unexposed); }
 
-/* Off is a ghost of the picture: you can still see what it makes, and you can
-   see you are not using it. Never confused with a model that cannot run. */
-.frame--out .frame__pic { opacity: 0.42; filter: grayscale(1); }
-.frame--out .frame__name { color: var(--secondary-text); }
-
-/* Cannot run here: the frame was never exposed. */
-.frame--short .frame__pic { opacity: 0.42; filter: grayscale(1); }
+/* Off is a ghost of the picture: you can still see what you are declining.
+   A model that cannot run here reads the same and is told apart by its clause,
+   which stays at full weight because it is the half you can act on. */
+.frame--out .frame__pic, .frame--short .frame__pic { opacity: 0.42; filter: grayscale(1); }
+.frame--out .frame__name, .frame--short .frame__name { color: var(--secondary-text); }
 
 .frame__plate {
   border-top: 1px solid var(--edge);
@@ -289,19 +270,21 @@ html.dark .caption { color: #8F8F8F; }
   flex-direction: column;
   gap: 3px;
 }
-.frame + .frame .frame__plate { border-left: 1px solid var(--edge); }
-.frame__row { display: flex; align-items: baseline; gap: 8px; }
+.frame .frame__plate { border-left: 1px solid var(--edge); }
+.frame:nth-child(4n+1) .frame__plate { border-left: 0; }
 
+.frame__row { display: flex; align-items: baseline; gap: 8px; }
+.frame__row--who { gap: 10px; }
 .frame__mark {
   width: 10px; height: 10px;
   flex: none;
   border: 1px solid var(--foreground);
-  background: var(--kit-mark);
+  background: var(--foreground);
   transform: translateY(-1px);
 }
-.frame--out .frame__mark,
-.frame--short .frame__mark { background: transparent; border-color: var(--secondary-text); }
+.frame--out .frame__mark, .frame--short .frame__mark { background: transparent; border-color: var(--secondary-text); }
 .frame:hover .frame__mark { box-shadow: 0 0 0 3px var(--rule); }
+
 .frame__name {
   font-size: 13.5px;
   font-weight: 500;
@@ -312,39 +295,49 @@ html.dark .caption { color: #8F8F8F; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.frame__cost {
-  font-size: 13px;
-  color: var(--secondary-text);
-  font-variant-numeric: tabular-nums;
+.frame__cost { font-size: 13px; color: var(--secondary-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.frame__who { font-size: 12px; color: var(--secondary-text); flex: 1; min-width: 0; }
+.frame__note { font-size: 12px; color: var(--secondary-text); white-space: nowrap; }
+.frame__note--busy { display: flex; align-items: center; gap: 8px; }
+.frame__meter { width: 54px; height: 2px; background: var(--edge); position: relative; }
+.frame__meter i { position: absolute; inset: 0 auto 0 0; background: var(--secondary-text); }
+
+/* The remedy is the label. Naming the problem and fixing it are one control,
+   here, on the model — never a button that sends you to the tab that owns it. */
+.frame__note--short { color: var(--signal); }
+.frame__fix {
+  font-size: 12px;
+  color: var(--signal);
+  text-decoration: underline;
+  text-underline-offset: 3px;
   white-space: nowrap;
 }
-.frame__note { font-size: 12px; color: var(--secondary-text); padding-left: 17px; }
-.frame__note--short { color: var(--warning); }
-.frame__note--busy { display: flex; align-items: center; gap: 8px; }
-.frame__meter { flex: 1; height: 2px; background: var(--edge); position: relative; max-width: 74px; }
-.frame__meter i { background: var(--secondary-text); }
-.frame__meter i { position: absolute; inset: 0 auto 0 0; background: var(--foreground); }
 
+/* --- kinds with nothing to show -------------------------------------------- */
 
-/* --- things with no picture ------------------------------------------------ */
-
-.list { margin-top: 26px; }
+.list { border-top: 1px solid var(--rule); max-width: 1082px; }
 .list__row {
   display: flex;
   align-items: baseline;
   gap: 12px;
-  padding: 11px 0;
-  border-top: 1px solid var(--rule);
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--rule);
   font-size: 13.5px;
 }
-.list__row:last-child { border-bottom: 1px solid var(--rule); }
-.list__mark { width: 9px; height: 9px; flex: none; border: 1px solid var(--secondary-text); }
+.list__mark { width: 10px; height: 10px; flex: none; border: 1px solid var(--secondary-text); transform: translateY(1px); }
 .list__mark--in { background: var(--foreground); border-color: var(--foreground); }
-.list__name { flex: 1; font-weight: 500; }
+.list__play {
+  width: 0; height: 0; flex: none;
+  border-left: 8px solid var(--foreground);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  transform: translateY(1px);
+}
+.list__name { font-weight: 500; }
+.list__who { flex: 1; font-size: 12px; color: var(--secondary-text); }
+.list__note { font-size: 12px; color: var(--secondary-text); }
 .list__at { color: var(--secondary-text); font-variant-numeric: tabular-nums; }
 .list__do { color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
-.list__note { font-size: 12px; color: var(--warning); padding: 0 0 10px 0; margin-top: -4px; }
-.list__note--quiet { color: var(--secondary-text); }
 
 /* --- the foot -------------------------------------------------------------- */
 
@@ -359,19 +352,6 @@ html.dark .caption { color: #8F8F8F; }
 .foot a { color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
 .foot__spring { flex: 1; }
 
-/* --- the column a page of rows keeps --------------------------------------- */
-
-.reading { max-width: 720px; }
-
-/* --- the states study ------------------------------------------------------ */
-
-.study { flex: 1; padding: 54px 60px; }
-.study__title { font-size: 26px; font-weight: 600; letter-spacing: -0.03em; margin: 0 0 34px; }
-.study__grid { display: grid; grid-template-columns: repeat(3, 272px); gap: 34px 30px; }
-.study__label { font-size: 12.5px; color: var(--secondary-text); margin-bottom: 8px; }
-.study__frame { border: 1px solid var(--edge); }
-.study__frame .frame__plate { border-left: 0; }
-
 @media (prefers-reduced-motion: reduce) {
   .frame { transition: none; }
   .frame:hover, .frame:focus-visible { transform: none; }
@@ -380,402 +360,9 @@ html.dark .caption { color: #8F8F8F; }
 <script>if (location.search.includes('dark')) document.documentElement.classList.add('dark');</script>
 </head>
 <body>
-
-<p class="caption">B&#8202;·&#8202;a &nbsp;ComfyUI — the recipes as a sheet, the disk as the one figure that decides</p>
-<div class="shot" data-shot="Ba">
-  <div class="chrome">
-    <div class="chrome__where">Settings</div>
-    <div class="chrome__mark">Arke <span>Studio</span></div>
-    <div class="chrome__tools">
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span>
-      <span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span>
-    </div>
-  </div>
-
-  <div class="page">
-    <nav class="rail">
-      <h1 class="rail__title">Settings</h1>
-      <a href="#" aria-current="page">Providers</a>
-      <a href="#">General</a>
-      <a href="#">Harness</a>
-      <a href="#">Appearance</a>
-      <a href="#">Notifications</a>
-      <a href="#">Sign-in</a>
-      <a href="#">Sample world</a>
-      <a href="#">Diagnostics</a>
-      <a href="#">About</a>
-      <span class="rail__spring"></span>
-      <span class="rail__build">0.4.1</span>
-    </nav>
-
-    <div class="body">
-      <div class="sources">
-        <div class="sources__band">
-          <div class="sources__what">Services you connect</div>
-          <div class="sources__list">
-            <span class="source">fal <span class="source__count">8</span></span>
-            <span class="source">OpenAI <span class="source__count">2</span></span>
-            <span class="source">Anthropic <span class="source__count">1</span></span>
-            <span class="source">ElevenLabs <span class="source__count">1</span></span>
-            <span class="source source--away">Higgsfield</span>
-          </div>
-        </div>
-        <div class="sources__band">
-          <div class="sources__what">Engines you run</div>
-          <div class="sources__list">
-            <span class="source" aria-current="page">ComfyUI <span class="source__count">3</span></span>
-            <span class="source">Ollama <span class="source__count">1</span></span>
-            <span class="source">Voxa <span class="source__count">2</span></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="head">
-        <h2 class="head__name">ComfyUI</h2>
-        <div class="head__does">Pictures, video, speech</div>
-        <div class="head__state">Running</div>
-      </div>
-
-      <div class="facts">
-        <div class="fact">
-          <div class="fact__what">Engine</div>
-          <div class="fact__is">Arke-managed 0.3.48, at 127.0.0.1:8188</div>
-          <a class="fact__do" href="#">Change</a><a class="fact__do" href="#">Use a URL</a>
-        </div>
-        <div class="fact">
-          <div class="fact__what">Models folder</div>
-          <div class="fact__is">D:\ai\models</div>
-          <a class="fact__do" href="#">Change</a>
-        </div>
-      </div>
-
-      <div class="disk">
-        <div class="disk__line">
-          <div class="disk__what">Weights on disk</div>
-          <div class="disk__is">55 GB here, 480 GB free</div>
-        </div>
-      </div>
-
-      <div class="sheet">
-        <div class="sheet__head">
-          <span class="sheet__what">Recipes</span>
-          <span class="sheet__count">3 of 4 ready</span>
-        </div>
-        <div class="sheet__frames sheet__frames--three">
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/art-direction-illustrated.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">Draft Image</span><span class="frame__cost">6.8 GB</span></span>
-              <span class="frame__note">Ready</span>
-            </span>
-          </button>
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/scene4-shot14.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">Draft Video</span><span class="frame__cost">14.2 GB</span></span>
-              <span class="frame__note">Ready</span>
-            </span>
-          </button>
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/saltlight-shot15.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">H3 Video</span><span class="frame__cost">34 GB</span></span>
-              <span class="frame__note frame__note--busy">9 of 34 GB <i class="frame__meter"><i style="width:26%"></i></i></span>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div class="list">
-        <div class="list__row">
-          <span class="list__name">Cloned Voice</span>
-          <span class="list__at">10.5 GB</span>
-          <a class="list__do" href="#">Download</a>
-        </div>
-        <div class="list__note list__note--quiet">Weights not here yet</div>
-      </div>
-
-      <div class="foot">
-        <a href="#">Restart</a>
-        <a href="#">Check again</a>
-        <a href="#">Logs</a>
-        <span class="foot__spring"></span>
-        <a href="#">Downloads</a>
-      </div>
-    </div>
-  </div>
-</div>
-
-<p class="caption">B&#8202;·&#8202;b &nbsp;fal — two sheets, and the price where the eye already is</p>
-<div class="shot" data-shot="Bb">
-  <div class="chrome">
-    <div class="chrome__where">Settings</div>
-    <div class="chrome__mark">Arke <span>Studio</span></div>
-    <div class="chrome__tools">
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span>
-      <span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span>
-    </div>
-  </div>
-
-  <div class="page">
-    <nav class="rail">
-      <h1 class="rail__title">Settings</h1>
-      <a href="#" aria-current="page">Providers</a>
-      <a href="#">General</a>
-      <a href="#">Harness</a>
-      <a href="#">Appearance</a>
-      <a href="#">Notifications</a>
-      <a href="#">Sign-in</a>
-      <a href="#">Sample world</a>
-      <a href="#">Diagnostics</a>
-      <a href="#">About</a>
-      <span class="rail__spring"></span>
-      <span class="rail__build">0.4.1</span>
-    </nav>
-
-    <div class="body">
-      <div class="sources">
-        <div class="sources__band">
-          <div class="sources__what">Services you connect</div>
-          <div class="sources__list">
-            <span class="source" aria-current="page">fal <span class="source__count">8</span></span>
-            <span class="source">OpenAI <span class="source__count">2</span></span>
-            <span class="source">Anthropic <span class="source__count">1</span></span>
-            <span class="source">ElevenLabs <span class="source__count">1</span></span>
-            <span class="source source--away">Higgsfield</span>
-          </div>
-        </div>
-        <div class="sources__band">
-          <div class="sources__what">Engines you run</div>
-          <div class="sources__list">
-            <span class="source">ComfyUI <span class="source__count">3</span></span>
-            <span class="source">Ollama <span class="source__count">1</span></span>
-            <span class="source">Voxa <span class="source__count">2</span></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="head">
-        <h2 class="head__name">fal</h2>
-        <div class="head__does">Pictures, video, music</div>
-        <div class="head__state">Connected</div>
-      </div>
-
-      <div class="facts">
-        <div class="fact">
-          <div class="fact__what">Key</div>
-          <div class="fact__is">fal-&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;1C7D</div>
-          <a class="fact__do" href="#">Replace</a><a class="fact__do" href="#">Test</a>
-        </div>
-      </div>
-
-      <div class="sheet">
-        <div class="sheet__head">
-          <span class="sheet__what">Pictures</span>
-          <span class="sheet__count">2 of 4 on</span>
-        </div>
-        <div class="sheet__frames">
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/art-direction-cinematic.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Nano Banana Pro</span><span class="frame__cost">$0.15 an image</span></span>
-            </span>
-          </button>
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/art-direction-world.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Seedream 4</span><span class="frame__cost">$0.03 an image</span></span>
-            </span>
-          </button>
-          <button class="frame frame--out" type="button" aria-pressed="false">
-            <img class="frame__pic" src="assets/drowned-quarter.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Flux 2 Pro</span><span class="frame__cost">$0.03 a megapixel</span></span>
-            </span>
-          </button>
-          <button class="frame frame--out" type="button" aria-pressed="false">
-            <img class="frame__pic" src="assets/art-direction-animated.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">GPT Image 2</span><span class="frame__cost">$0.20 an image</span></span>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      <div class="sheet">
-        <div class="sheet__head">
-          <span class="sheet__what">Video</span>
-          <span class="sheet__count">2 of 4 on</span>
-        </div>
-        <div class="sheet__frames">
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/scene4-shot13.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Kling 2.5</span><span class="frame__cost">$0.35 a second</span></span>
-            </span>
-          </button>
-          <button class="frame" type="button" aria-pressed="true">
-            <img class="frame__pic" src="assets/scene4-shot15.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Seedance 2.0</span><span class="frame__cost">$0.30 a second</span></span>
-            </span>
-          </button>
-          <button class="frame frame--out" type="button" aria-pressed="false">
-            <img class="frame__pic" src="assets/scene4-shot12.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">MiniMax Hailuo 3</span><span class="frame__cost">$0.45 a second</span></span>
-            </span>
-          </button>
-          <button class="frame frame--out" type="button" aria-pressed="false">
-            <img class="frame__pic" src="assets/scene4-shot14b.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Wan 2.5</span><span class="frame__cost">$0.20 a second</span></span>
-            </span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<p class="caption">B&#8202;·&#8202;c &nbsp;Every state a frame has to carry</p>
-<div class="shot" data-shot="Bc">
-  <div class="study">
-    <h2 class="study__title">Every state a frame has to carry</h2>
-    <div class="study__grid">
-      <div>
-        <div class="study__label">On</div>
-        <div class="study__frame">
-          <span class="frame">
-            <img class="frame__pic" src="assets/art-direction-world.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Seedream 4</span><span class="frame__cost">$0.03 an image</span></span>
-            </span>
-          </span>
-        </div>
-      </div>
-      <div>
-        <div class="study__label">Off</div>
-        <div class="study__frame">
-          <span class="frame frame--out">
-            <img class="frame__pic" src="assets/scene4-shot12.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">MiniMax Hailuo 3</span><span class="frame__cost">$0.45 a second</span></span>
-            </span>
-          </span>
-        </div>
-      </div>
-      <div>
-        <div class="study__label">Still arriving</div>
-        <div class="study__frame">
-          <span class="frame">
-            <img class="frame__pic" src="assets/saltlight-shot15.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">H3 Video</span><span class="frame__cost">34 GB</span></span>
-              <span class="frame__note frame__note--busy">9 of 34 GB <i class="frame__meter"><i style="width:26%"></i></i></span>
-            </span>
-          </span>
-        </div>
-      </div>
-      <div>
-        <div class="study__label">Too big for this card</div>
-        <div class="study__frame">
-          <span class="frame frame--short">
-            <img class="frame__pic" src="assets/scene4-shot14b.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">H3 Video 720p</span><span class="frame__cost">18 GB</span></span>
-              <span class="frame__note frame__note--short">Wants 20 GB, this card has 12</span>
-            </span>
-          </span>
-        </div>
-      </div>
-      <div>
-        <div class="study__label">What Arke reaches for first</div>
-        <div class="study__frame">
-          <span class="frame">
-            <img class="frame__pic" src="assets/scene4-shot14.png" alt="">
-            <span class="frame__plate">
-              <span class="frame__row"><span class="frame__name">Draft Video</span><span class="frame__cost">14.2 GB</span></span>
-              <span class="frame__note">Ready, first pick</span>
-            </span>
-          </span>
-        </div>
-      </div>
-      <div>
-        <div class="study__label">No sample shipped</div>
-        <div class="study__frame">
-          <span class="frame">
-            <span class="frame__pic--none"></span>
-            <span class="frame__plate">
-              <span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Higgsfield Soul</span><span class="frame__cost">$0.10 an image</span></span>
-            </span>
-          </span>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<p class="caption">B&#8202;·&#8202;d &nbsp;General — a page of rows keeps a reading column</p>
-<div class="shot" data-shot="Bd">
-  <div class="chrome">
-    <div class="chrome__where">Settings</div>
-    <div class="chrome__mark">Arke <span>Studio</span></div>
-    <div class="chrome__tools">
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span>
-      <span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span>
-      <span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span>
-    </div>
-  </div>
-
-  <div class="page">
-    <nav class="rail">
-      <h1 class="rail__title">Settings</h1>
-      <a href="#">Providers</a>
-      <a href="#" aria-current="page">General</a>
-      <a href="#">Harness</a>
-      <a href="#">Appearance</a>
-      <a href="#">Notifications</a>
-      <a href="#">Sign-in</a>
-      <a href="#">Sample world</a>
-      <a href="#">Diagnostics</a>
-      <a href="#">About</a>
-      <span class="rail__spring"></span>
-      <span class="rail__build">0.4.1</span>
-    </nav>
-
-    <div class="body">
-      <div class="reading">
-        <div class="head">
-          <h2 class="head__name">General</h2>
-          </div>
-
-        <div class="sheet" style="margin-top:22px">
-          <div class="sheet__head">
-            <span class="sheet__what">Defaults</span>
-            <span class="sheet__count">5 set</span>
-          </div>
-        </div>
-
-        <div class="list" style="margin-top:0">
-          <div class="list__row"><span class="list__name">Pictures</span><span class="list__at">Nano Banana Pro, on fal</span><a class="list__do" href="#">Change</a></div>
-          <div class="list__row"><span class="list__name">Video</span><span class="list__at">Draft Video, on this machine</span><a class="list__do" href="#">Change</a></div>
-          <div class="list__row"><span class="list__name">Speech</span><span class="list__at">ElevenLabs v3</span><a class="list__do" href="#">Change</a></div>
-          <div class="list__row"><span class="list__name">Dictation</span><span class="list__at">Whisper large-v3 turbo</span><a class="list__do" href="#">Change</a></div>
-          <div class="list__row"><span class="list__name">Music</span><span class="list__at">Lyria 2, on fal</span><a class="list__do" href="#">Change</a></div>
-          <div class="list__row"><span class="list__name">Language</span><span class="list__at">Claude Opus 4.5, set in Harness</span></div>
-        </div>
-
-        <div class="foot">
-          <span class="foot__spring"></span>
-          <a href="#">Diagnostics</a>
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-
+<p class="caption">C&#8202;&#183;&#8202;a &nbsp;Providers &#183; a service is a credential</p><div class="shot" data-shot="Ca"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#" aria-current="page">Providers</a><a href="#">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><div class="body"><div class="sources"><div class="sources__band"><div class="sources__what">Services you connect</div><div class="sources__list"><span class="source" aria-current="page">fal</span><span class="source">OpenAI <span class="source__count">no key</span></span><span class="source">Anthropic</span><span class="source">ElevenLabs</span><span class="source">Higgsfield <span class="source__count">not signed in</span></span></div></div><div class="sources__band"><div class="sources__what">Engines you run</div><div class="sources__list"><span class="source">ComfyUI</span><span class="source">Ollama</span><span class="source">Voxa</span></div></div></div><div class="head"><h2 class="head__name">fal</h2><div class="head__does">Images, video, music</div><div class="head__state">Connected</div></div><div class="facts"><div class="fact"><div class="fact__what">Key</div><div class="fact__is">fal-&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;1C7D</div><a class="fact__do" href="#">Replace</a><a class="fact__do" href="#">Remove</a></div><div class="fact"><div class="fact__what">Last tested</div><div class="fact__is">Today at 09:14, images and video answered</div><a class="fact__do" href="#">Test again</a></div><div class="fact"><div class="fact__what">Bills to</div><div class="fact__is">Salt Light Pictures, team plan</div><a class="fact__do" href="#">Change</a></div></div><p class="aside">8 fal models, 4 of them on. <a href="#">AI models</a></p></div></div></div>
+<p class="caption">C&#8202;&#183;&#8202;b &nbsp;Providers &#183; an engine is an address</p><div class="shot" data-shot="Cb"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#" aria-current="page">Providers</a><a href="#">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><div class="body"><div class="sources"><div class="sources__band"><div class="sources__what">Services you connect</div><div class="sources__list"><span class="source">fal</span><span class="source">OpenAI <span class="source__count">no key</span></span><span class="source">Anthropic</span><span class="source">ElevenLabs</span><span class="source">Higgsfield <span class="source__count">not signed in</span></span></div></div><div class="sources__band"><div class="sources__what">Engines you run</div><div class="sources__list"><span class="source" aria-current="page">ComfyUI</span><span class="source">Ollama</span><span class="source">Voxa</span></div></div></div><div class="head"><h2 class="head__name">ComfyUI</h2><div class="head__does">Images, video, voice clone</div><div class="head__state">Running</div></div><div class="facts"><div class="fact"><div class="fact__what">Source</div><div class="fact__is">Arke-managed, version 0.3.48</div><a class="fact__do" href="#">Change</a><a class="fact__do" href="#">Use a URL</a></div><div class="fact"><div class="fact__what">Address</div><div class="fact__is">127.0.0.1:8188</div><a class="fact__do" href="#">Test again</a></div><div class="fact"><div class="fact__what">Models folder</div><div class="fact__is">D:\ai\models</div><a class="fact__do" href="#">Change</a></div><div class="fact"><div class="fact__what">Weights on disk</div><div class="fact__is">55 GB here, 480 GB free</div><a class="fact__do" href="#">Downloads</a></div></div><p class="aside">4 ComfyUI models, 3 of them ready. <a href="#">AI models</a></p><div class="foot"><a href="#">Restart</a><a href="#">Logs</a><span class="foot__spring"></span></div></div></div></div>
+<p class="caption">C&#8202;&#183;&#8202;c &nbsp;AI models &#183; cloud, grouped by what it makes</p><div class="shot" data-shot="Cc"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><div class="body"><div class="halves"><span class="half" aria-current="page">Cloud</span><span class="half">On this machine</span></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Images</span><span class="sheet__count">2 of 4 on</span></div><div class="sheet__frames"><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/art-direction-cinematic.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Nano Banana Pro</span><span class="frame__cost">$0.15 an image</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/art-direction-world.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Seedream 4</span><span class="frame__cost">$0.03 an image</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame frame--out" type="button" aria-pressed="false"><img class="frame__pic" src="assets/drowned-quarter.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Flux 2 Pro</span><span class="frame__cost">$0.03 a megapixel</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame frame--out frame--short" type="button" aria-pressed="false"><img class="frame__pic" src="assets/art-direction-animated.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">GPT Image 2</span><span class="frame__cost">$0.20 an image</span></span><span class="frame__row frame__row--who"><span class="frame__who">OpenAI</span><a class="frame__fix" href="#">Add a key</a></span></span></button></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Video</span><span class="sheet__count">2 of 4 on</span></div><div class="sheet__frames"><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/scene4-shot13.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Kling 2.5</span><span class="frame__cost">$0.35 a second</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/scene4-shot15.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Seedance 2.0</span><span class="frame__cost">$0.30 a second</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame frame--out" type="button" aria-pressed="false"><img class="frame__pic" src="assets/scene4-shot12.png" alt=""><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">MiniMax Hailuo 3</span><span class="frame__cost">$0.45 a second</span></span><span class="frame__row frame__row--who"><span class="frame__who">fal</span></span></span></button><button class="frame frame--out frame--short" type="button" aria-pressed="false"><span class="frame__pic frame__pic--none"></span><span class="frame__plate"><span class="frame__row"><i class="frame__mark"></i><span class="frame__name">Higgsfield Soul</span><span class="frame__cost">$0.10 a second</span></span><span class="frame__row frame__row--who"><span class="frame__who">Higgsfield</span><a class="frame__fix" href="#">Sign in</a></span></span></button></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Text-to-Speech</span><span class="sheet__count">1 of 2 on</span></div><div class="list"><div class="list__row"><i class="list__mark list__mark--in"></i><span class="list__play" aria-hidden="true"></span><span class="list__name">ElevenLabs v3</span><span class="list__who">ElevenLabs</span><span class="list__at">$0.30 a minute</span></div><div class="list__row"><i class="list__mark"></i><span class="list__play" aria-hidden="true"></span><span class="list__name">GPT Realtime Voice</span><span class="list__who">OpenAI</span><span class="list__at">$0.24 a minute</span></div></div></div></div></div></div>
+<p class="caption">C&#8202;&#183;&#8202;d &nbsp;AI models &#183; on this machine, the same grouping</p><div class="shot" data-shot="Cd"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><div class="body"><div class="halves"><span class="half">Cloud</span><span class="half" aria-current="page">On this machine</span></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Images</span><span class="sheet__count">1 of 1 ready</span></div><div class="sheet__frames"><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/art-direction-illustrated.png" alt=""><span class="frame__plate"><span class="frame__row"><span class="frame__name">Draft Image</span><span class="frame__cost">6.8 GB</span></span><span class="frame__row frame__row--who"><span class="frame__who">ComfyUI</span><span class="frame__note">Ready</span></span></span></button></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Video</span><span class="sheet__count">2 of 3 ready</span></div><div class="sheet__frames"><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/scene4-shot14.png" alt=""><span class="frame__plate"><span class="frame__row"><span class="frame__name">Draft Video</span><span class="frame__cost">14.2 GB</span></span><span class="frame__row frame__row--who"><span class="frame__who">ComfyUI</span><span class="frame__note">Ready, first pick</span></span></span></button><button class="frame" type="button" aria-pressed="true"><img class="frame__pic" src="assets/saltlight-shot15.png" alt=""><span class="frame__plate"><span class="frame__row"><span class="frame__name">H3 Video</span><span class="frame__cost">34 GB</span></span><span class="frame__row frame__row--who"><span class="frame__who">ComfyUI</span><span class="frame__note frame__note--busy">9 of 34 GB <i class="frame__meter"><i style="width:26%"></i></i></span></span></span></button><button class="frame frame--short" type="button" aria-pressed="true"><img class="frame__pic" src="assets/scene4-shot14b.png" alt=""><span class="frame__plate"><span class="frame__row"><span class="frame__name">H3 Video 720p</span><span class="frame__cost">18 GB</span></span><span class="frame__row frame__row--who"><span class="frame__who">ComfyUI</span><span class="frame__note frame__note--short">Wants 20 GB, this card has 12</span></span></span></button></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Text-to-Speech</span><span class="sheet__count">1 of 1 ready</span></div><div class="list"><div class="list__row"><span class="list__play" aria-hidden="true"></span><span class="list__name">Kokoro 82M</span><span class="list__who">Voxa</span><span class="list__at">400 MB</span></div></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Speech-to-Text</span><span class="sheet__count">1 of 2 ready</span></div><div class="list"><div class="list__row"><span class="list__name">whisper large-v3 turbo</span><span class="list__who">Voxa</span><span class="list__at">1.6 GB</span></div><div class="list__row"><span class="list__name">whisper large-v3</span><span class="list__who">Voxa</span><span class="list__note list__note--quiet">Runs slowly here</span><span class="list__at">3.1 GB</span><a class="list__do" href="#">Download</a></div></div></div><div class="sheet"><div class="sheet__head"><span class="sheet__what">Voice clone</span><span class="sheet__count">0 of 1 ready</span></div><div class="list"><div class="list__row"><span class="list__name">Cloned Voice</span><span class="list__who">ComfyUI</span><span class="list__note list__note--quiet">Weights not here yet</span><span class="list__at">10.5 GB</span><a class="list__do" href="#">Download</a></div></div></div></div></div></div>
 </body>
 </html>
