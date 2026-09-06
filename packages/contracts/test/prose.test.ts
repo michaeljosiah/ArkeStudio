@@ -43,6 +43,8 @@ describe("the passage a revision changed (turn 128)", () => {
       assert.ok(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field }).success, `${field} reads aloud`);
     }
     assert.equal(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field: "pov" }).success, false, "point of view is a label, not a listen");
+    assert.ok(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field: "samples", sample: 2 }).success, "one sample is its own block");
+    assert.equal(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field: "samples", sample: -1 }).success, false);
   });
 });
 

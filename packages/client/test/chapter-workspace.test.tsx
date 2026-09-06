@@ -410,6 +410,31 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered on a locked manuscript");
   });
 
+  it("a deletion at a paragraph's first word still marks the paragraph it touches (codex on PR 899)", async () => {
+    const deletion: StagedProposal = {
+      ...PASSAGE,
+      proposal: { ...PASSAGE.proposal, id: "pr_01J8H0000000000000000000PA" },
+      review: {
+        targets: [
+          {
+            path: PATH,
+            label: "The counting of bells",
+            kind: "chapter",
+            action: "amend",
+            // The word goes and its space stays, which is what leaves a zero-width replacement at
+            // the paragraph's first character.
+            fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted", " counted") }],
+          },
+        ],
+      },
+    };
+    const m = await mount(inkbound([deletion]));
+    await answerOpen(m);
+    assert.match(text(m), /Arke’s passage ?· 1 → 0 words/, "a zero-width replacement is still a passage");
+    const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
+    assert.deepEqual(marked, ["counted the bells."], "the paragraph the deletion sat in is the one marked");
+  });
+
   it("the selection and the span are decided by two small rules", () => {
     assert.equal(passageSubject(null), null);
     assert.equal(passageSubject("one two"), null, "under three words");

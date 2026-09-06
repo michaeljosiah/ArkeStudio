@@ -20,6 +20,7 @@ import { readChanges } from "./change-writer.js";
 import {
   CommitPlanError,
   Committer,
+  PROSE_STYLE_SCHEMA_VERSION,
   classify,
   type CommitHooks,
   type CommitInput,
@@ -181,6 +182,7 @@ export class WorldStore {
       );
       if (!opts.readOnly) {
         await store.adoptBibleIfMoved();
+        await store.adoptProseStyleBoundary();
         await store.ensureCurrentHistorySnapshots();
         await store.saveScanState();
         store.startWatcher();
@@ -831,6 +833,46 @@ export class WorldStore {
             baseHash: sha256(live),
             committedBase: committed,
             committedBaseHash: sha256(committed),
+          },
+        ],
+      });
+      await this.rescan();
+      this.events.onAdopted?.();
+    } finally {
+      this.watcher?.unsuppress();
+    }
+  }
+
+  /**
+   * A prose style written by hand into a world below its boundary (turn 128, codex on PR 897):
+   * the record is adopted through the committer — the one funnel that raises the schema when
+   * style bytes land — so a build older than the style refuses the world rather than drafting
+   * without a style the author plainly meant. Nothing in the record changes; adoption bumps its
+   * version and stamps it, as every external edit's does. Skipped while other external edits
+   * wait, since those gate every write until they are reconciled.
+   */
+  private async adoptProseStyleBoundary(): Promise<void> {
+    if (this.closed || this.externalEdits.length > 0) return;
+    const schemaVersion = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (schemaVersion >= PROSE_STYLE_SCHEMA_VERSION) return;
+    const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+    if (styled === undefined) return;
+    const path = `productions/${styled.meta.id}/prose-style.json`;
+    const live = await this.readEntity(path);
+    if (live === null) return;
+    const committed = await latestHistoryContent(this.dir, path);
+    this.watcher?.suppress();
+    try {
+      await this.committer.commit({
+        kind: "prose-style-adopted",
+        source: "external-edit",
+        files: [
+          {
+            path,
+            action: "replace",
+            content: live,
+            baseHash: sha256(live),
+            ...(committed !== null ? { committedBase: committed, committedBaseHash: sha256(committed) } : { committedBaseHash: null }),
           },
         ],
       });

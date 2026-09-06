@@ -70,6 +70,13 @@ describe("the style the book is written in, on the Overview (turn 128)", () => {
     assert.match(html, /SAMPLES · 2/);
     assert.match(html, /Six, and the tide not yet called\./);
     assert.ok(html.indexOf("LOGLINE") < html.indexOf("POINT OF VIEW"), "the style sits under the overview");
+    // One read per sample (codex on turn 128), never the samples as one block a narrator's cap
+    // could refuse: a second sample is one more read, and the samples card as a whole has none.
+    const reads = (page: string) => (page.match(/Read aloud/g) ?? []).length;
+    const none = reads(overview(saltlight({ ...STYLE, samples: [] })));
+    const one = reads(overview(saltlight({ ...STYLE, samples: [STYLE.samples![0]!] })));
+    assert.ok(one > none, "the first sample brings its own read");
+    assert.equal(reads(html) - one, one - none, "and the second brings exactly one more of the same");
   });
 
   it("says nothing about a style that is not settled", () => {

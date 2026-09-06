@@ -29,6 +29,7 @@ import {
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
+  WorldChatSubjectSchema,
   type ModelEditorRequest,
   type ModelSceneEdit,
 } from "./editor-request.js";
@@ -232,6 +233,13 @@ export const WorldChatMessageSchema = z
     /** Conversation-private attachment ids, not world artifact ids. */
     attachmentIds: z.array(ChatAttachmentIdSchema),
     createdAt: IsoDateTimeSchema,
+    /**
+     * What was selected while the line was said, and whether it asked for a reply only (turn
+     * 128). Durable on the message so a retry after a provider failure runs under the same
+     * constraints as the line it retries, rather than losing the guard with the answer.
+     */
+    subject: WorldChatSubjectSchema.optional(),
+    replyOnly: z.boolean().optional(),
   })
   .strict();
 export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;

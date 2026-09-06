@@ -258,7 +258,13 @@ export function authoritativeProseSpeech(
         return spoken(found.proseStyle?.voice, "Voice", found.proseStyle?.version ?? 1, subjectId);
       }
       if (source.field === "samples") {
-        return spoken((found.proseStyle?.samples ?? []).join(" "), "Samples", found.proseStyle?.version ?? 1, subjectId);
+        const samples = found.proseStyle?.samples ?? [];
+        // One sample when one is named (codex on turn 128): read whole, six at their bound
+        // outrun a narrator's prompt cap; the Overview reads them one block at a time.
+        if (source.sample !== undefined) {
+          return spoken(samples[source.sample], `Sample ${source.sample + 1}`, found.proseStyle?.version ?? 1, `${subjectId}/${source.sample}`);
+        }
+        return spoken(samples.join(" "), "Samples", found.proseStyle?.version ?? 1, subjectId);
       }
       if (!story) throw new Error("Nothing has been settled about this production yet.");
       if (source.field === "acts") {

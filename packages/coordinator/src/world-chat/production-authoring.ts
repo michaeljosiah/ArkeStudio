@@ -66,27 +66,52 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
  * span replaced is the file's own bytes, wrapping included.
  */
 export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
-  const starts: number[] = [];
-  const ends: number[] = [];
-  let folded = "";
-  for (let i = 0; i < text.length; i++) {
-    if (/\s/.test(text[i]!)) {
-      if (folded.endsWith(" ")) {
-        ends[ends.length - 1] = i + 1;
-        continue;
+  const plain = foldedOccurrencesWith(text, find, false);
+  // The selection is what the editor showed and the quote is what the file holds (codex, round
+  // four): `**bold**` selected in part, or `__bold__` stored where the editor would write
+  // `**bold**`, differ only in emphasis markers. When the words do not match with whitespace
+  // folded alone, they are matched with the markers folded too, and the span replaced is still
+  // the file's own bytes.
+  return plain.length > 0 ? plain : foldedOccurrencesWith(text, find, true);
+}
+
+function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {
+  const marker = (c: string) => markers && /[*_`~]/.test(c);
+  const fold = (source: string) => {
+    const starts: number[] = [];
+    const ends: number[] = [];
+    let folded = "";
+    for (let i = 0; i < source.length; i++) {
+      const c = source[i]!;
+      if (marker(c)) continue;
+      if (/\s/.test(c)) {
+        if (folded.endsWith(" ")) {
+          ends[ends.length - 1] = i + 1;
+          continue;
+        }
+        folded += " ";
+      } else {
+        folded += c;
       }
-      folded += " ";
-    } else {
-      folded += text[i];
+      starts.push(i);
+      ends.push(i + 1);
     }
-    starts.push(i);
-    ends.push(i + 1);
-  }
-  const needle = find.replace(/\s+/g, " ").trim();
+    return { folded, starts, ends };
+  };
+  const haystack = fold(text);
+  const needle = fold(find).folded.trim();
   if (needle === "") return [];
   const hits: Array<{ start: number; end: number }> = [];
-  for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
-    hits.push({ start: starts[at]!, end: ends[at + needle.length - 1]! });
+  for (let at = haystack.folded.indexOf(needle); at >= 0; at = haystack.folded.indexOf(needle, at + needle.length)) {
+    let start = haystack.starts[at]!;
+    let end = haystack.ends[at + needle.length - 1]!;
+    // The markers that wrap the matched words go with them: a span that began after `__` and
+    // ended before it would leave half a mark standing on either side of the replacement.
+    if (markers) {
+      while (start > 0 && marker(text[start - 1]!)) start--;
+      while (end < text.length && marker(text[end]!)) end++;
+    }
+    hits.push({ start, end });
   }
   return hits;
 }

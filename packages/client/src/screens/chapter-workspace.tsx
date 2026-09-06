@@ -717,7 +717,12 @@ export function ChapterWorkspace({
                 </div>
                 <div className="fy-ch__draft-passage" aria-label="Arke's passage">
                   {paragraphSpans(stagedDraft.body ?? live).map((paragraph, i) => {
-                    const changed = paragraph.end > passageChange.start && paragraph.start < passageChange.start + passageChange.after.length;
+                    // Inclusive at both ends, and at least one character wide (codex on PR 899):
+                    // a deletion at a paragraph's first character, or of a whole paragraph, is a
+                    // zero-width span on a boundary, and the paragraph it touches is still marked.
+                    const from = passageChange.start;
+                    const to = from + Math.max(passageChange.after.length, 1);
+                    const changed = paragraph.end >= from && paragraph.start <= to;
                     return (
                       <p key={i} className={changed ? "fy-ch__passage" : undefined}>
                         {paragraph.text}

@@ -2045,22 +2045,29 @@ function OverviewStoryScreen() {
   /* The style the book is written in (turn 128): its cards sit under the overview's. */
   const style = production?.proseStyle ?? null;
   const samples = style?.samples ?? [];
-  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = (
-    [
-      ["logline", "Logline", story?.logline ?? ""],
-      ["spine", "Spine", story?.spine ?? ""],
-      ["acts", "Acts", actsSpoken],
-      ["treatment", "Treatment", production?.treatment ?? ""],
-      ["voice", "Voice", style?.voice ?? ""],
-      ["samples", "Samples", samples.join(" ")],
-    ] as const
-  )
-    .filter(([, , body]) => body.trim() !== "")
-    .map(([field, heading, body]) => ({
-      heading,
-      body,
-      source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
-    }));
+  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = [
+    ...(
+      [
+        ["logline", "Logline", story?.logline ?? ""],
+        ["spine", "Spine", story?.spine ?? ""],
+        ["acts", "Acts", actsSpoken],
+        ["treatment", "Treatment", production?.treatment ?? ""],
+        ["voice", "Voice", style?.voice ?? ""],
+      ] as const
+    )
+      .filter(([, , body]) => body.trim() !== "")
+      .map(([field, heading, body]) => ({
+        heading,
+        body,
+        source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
+      })),
+    // One block per sample (codex on turn 128), so no single read outruns a narrator's cap.
+    ...samples.map((sample, i) => ({
+      heading: `Sample ${i + 1}`,
+      body: sample,
+      source: { of: "story", productionId: prodId ?? "", field: "samples", sample: i } as ProseReadSource,
+    })),
+  ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
   return (
     <div className="fy-story" data-screen="story-overview">
@@ -2187,16 +2194,18 @@ function OverviewStoryScreen() {
                   {samples.length > 0 && (
                     <div className="fy-draftcard fy-texthost">
                       <div className="fy-eyebrow-sm">SAMPLES · {samples.length}</div>
+                      {/* One read per sample (codex on turn 128): six at their bound read as one
+                          block outrun a narrator's prompt cap, so each sample is its own listen. */}
                       {samples.map((sample, i) => (
-                        <div key={`${i}:${sample}`} className="fy-draftcard__logline" style={{ marginTop: 4 }}>
-                          “{sample}”
+                        <div key={`${i}:${sample}`} style={{ marginTop: 4 }}>
+                          <div className="fy-draftcard__logline">“{sample}”</div>
+                          <ReadAloud
+                            source={{ of: "story", productionId: prodId ?? "", field: "samples", sample: i }}
+                            title={`${overviewTitle} · sample ${i + 1}`}
+                            text={sample}
+                          />
                         </div>
                       ))}
-                      <ReadAloud
-                        source={{ of: "story", productionId: prodId ?? "", field: "samples" }}
-                        title={`${overviewTitle} · samples`}
-                        text={samples.join(" ")}
-                      />
                     </div>
                   )}
                 </>

@@ -369,7 +369,9 @@ export class WorldChatRunner {
       .reverse()
       .map(({ event }) => ("run" in event ? event.run : undefined))
       .find((run) => run?.turnId === turnId)?.model;
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, undefined, previousModel);
+    // The guard the line ran under runs again with it (codex on PR 899): the selected passage
+    // and the reply-only promise are on the message, not only on the send that first carried them.
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, original.subject, previousModel, original.replyOnly === true);
   }
 
   /**
@@ -407,6 +409,9 @@ export class WorldChatRunner {
       text,
       attachmentIds: [...attachmentIds] as WorldChatMessage["attachmentIds"],
       createdAt: at,
+      // Durable with the words (codex on PR 899): a retry runs under the same guard.
+      ...(subject !== undefined ? { subject } : {}),
+      ...(replyOnly ? { replyOnly: true } : {}),
     };
 
     /**

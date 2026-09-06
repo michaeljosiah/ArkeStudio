@@ -238,6 +238,9 @@ export function classify(path: string): Classified {
  */
 const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
 
+/** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
+export const PROSE_STYLE_SCHEMA_VERSION = 10;
+
 /**
  * Would writing this actually change what the world says?
  *
@@ -644,6 +647,10 @@ export class Committer {
     const landsStageRig = files.some(
       (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStageRig(f.newContent),
     );
+    // The style a book is written in (turn 128) is its own boundary, decided here at the funnel
+    // rather than by each caller: an accept, a direct write and an external edit adopted into the
+    // world all land the same bytes, and a build older than the style must refuse all three.
+    const landsProseStyle = files.some((f) => classify(f.path).track === "prose-style" && f.newContent != null);
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
@@ -660,6 +667,7 @@ export class Committer {
           return value?.mediaInfo != null && ["width","height","frameRate"].some(field=>field in value.mediaInfo!);
         } catch { return false; }
       }) ? 11 : 0,
+      landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

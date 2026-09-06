@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { newId, type ConversationId } from "@arke-studio/contracts";
@@ -118,6 +118,24 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     );
     assert.deepEqual(foldedOccurrences("a  b a b", "a b"), [{ start: 0, end: 4 }, { start: 5, end: 8 }], "each occurrence, in file offsets");
     assert.deepEqual(foldedOccurrences("a b", "   "), [], "nothing is not a passage");
+    // Emphasis markers fold too when the words do not match otherwise (codex, round four): the
+    // editor showed `bold`, or wrote `**bold**` where the file holds `__bold__`.
+    assert.deepEqual(foldedOccurrences("She was __not__ wrong.", "not wrong"), [{ start: 8, end: 21 }], "the file's own markers are inside the span");
+    assert.deepEqual(foldedOccurrences("She was __not__ wrong.", "**not** wrong"), [{ start: 8, end: 21 }]);
+    assert.deepEqual(foldedOccurrences("She was not wrong.", "not wrong"), [{ start: 8, end: 17 }], "plain words match plainly first");
+  });
+
+  it("a style written by hand into a world below its boundary is adopted and the boundary raised on open (codex, round five)", async () => {
+    const dir = await makeTempWorld();
+    const path = join(dir, "productions", PRODUCTION, "prose-style.json");
+    await writeFile(path, `${JSON.stringify({ version: 1, pov: "close third", voice: "Short declaratives." }, null, 2)}\n`, "utf8");
+    const store = await WorldStore.open(dir, { clock: NOW });
+    closeOnCleanup(() => store.close());
+    const bundle = store.getBundle();
+    assert.equal(bundle.meta.schemaVersion, 10, "opened, the world is fenced at the style's boundary");
+    const production = bundle.productions.find((p) => p.meta.id === PRODUCTION)!;
+    assert.equal(production.proseStyle?.pov, "close third", "and the record is the author's, adopted");
+    assert.ok((production.proseStyle?.version ?? 0) >= 1);
   });
 });
 

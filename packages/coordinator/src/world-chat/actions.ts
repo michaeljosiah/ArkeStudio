@@ -947,15 +947,25 @@ function canonicalChapterId(store: WorldStore, productionId: string, chapterId: 
  * words outside the selection is refused by name rather than staged. Whitespace is folded on both
  * sides, because the selection is rendered text and the quote is the file's.
  */
-function heldToPassage(action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
+function heldToPassage(store: WorldStore, action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
   if (subject?.kind !== "passage") return;
   if (action.kind !== "production-chapter" || action.change.operation !== "edit" || action.change.changes.passage === undefined) return;
   const passage = action.change.changes.passage;
-  if (action.change.chapterId !== subject.chapterId) {
-    throw new Error(`This ask was about a passage in chapter ${subject.chapterId}; the revision names ${action.change.chapterId}.`);
+  // Both spellings of a chapter resolve to its id before they are compared (codex, round four):
+  // the subject names the id, the edit may name the file stem, and both mean one chapter.
+  const asked = canonicalChapterId(store, action.productionId, subject.chapterId);
+  const named = canonicalChapterId(store, action.productionId, action.change.chapterId);
+  if (named !== asked) {
+    throw new Error(`This ask was about a passage in chapter ${asked}; the revision names ${named}.`);
+  }
+  // A paragraph the ask named must come back on the action, not only match when present: an
+  // action without one falls back to the whole chapter, where a twin of the selected words could
+  // be the one changed after the author typed over the selected copy.
+  if (subject.paragraph !== undefined && passage.paragraph === undefined) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision must name that paragraph.`);
   }
   if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
-    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${subject.chapterId}; the revision names paragraph ${passage.paragraph}.`);
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision names paragraph ${passage.paragraph}.`);
   }
   const fold = (text: string) => text.replace(/\s+/g, " ").trim();
   if (!fold(subject.text).includes(fold(passage.find))) {
@@ -1137,6 +1147,15 @@ export function prepareWorldChatActions(
   turn: WorldChatActionTurn,
   deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
+  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
+  // whatever the model returned and through whichever channel — candidates, bible edits, scene
+  // edits, editor requests or actions: `Hold this against the style` stages nothing.
+  if (
+    turn.replyOnly === true &&
+    (turn.actions.length > 0 || turn.candidates.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
+  ) {
+    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
   for (const candidate of turn.candidates) candidateById.set(candidate.id, candidate);
@@ -1190,17 +1209,12 @@ export function prepareWorldChatActions(
     });
   }
 
-  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
-  // whatever the model returned: `Hold this against the style` stages nothing.
-  if (turn.replyOnly === true && turn.actions.length > 0) {
-    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
-  }
   const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
   const plannedProductionIds = new Set<string>();
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
-    heldToPassage(action, turn.subject);
+    heldToPassage(store, action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
