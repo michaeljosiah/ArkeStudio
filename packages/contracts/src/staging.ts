@@ -1,4 +1,5 @@
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet } from "./scene.js";
+import { sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -156,6 +157,11 @@ export function stagingFov(lens: string | undefined, aspect: string): number {
   return (2 * Math.atan(usedHeight / (2 * millimetres)) * 180) / Math.PI;
 }
 
+/** Inverse of the active Super 35 gate, used when a lens-animation key inherits the shot lens. */
+export function stagingFocalForFov(fov: number, aspect: number): number {
+  return Math.min(SUPER_35_HEIGHT_MM,SUPER_35_WIDTH_MM/aspect)/(2*Math.tan(fov*Math.PI/360));
+}
+
 /** How far back a shot size stands, in metres, measured to the subject. */
 function distanceFor(size: string | undefined, camera: string | undefined): number {
   const words = `${size ?? ""} ${camera ?? ""}`.toLowerCase();
@@ -291,7 +297,11 @@ export function stageShot(
   const dur = Math.max(0.5, input.durationSec);
   const move = `${framing?.movement ?? ""} ${shot.camera ?? ""}`.toLowerCase();
   const keys: StagingKey[] =
-    /push|dolly in|move in|track in/.test(move)
+    /\bpan\b/.test(move)
+      ? [key(0, [0, height, distance], [-1.5, aim[1], 0], null), key(dur, [0, height, distance], [1.5, aim[1], 0], null)]
+      : /\btilt\b/.test(move)
+        ? [key(0, [0, height, distance], [0, 0.3, 0], null), key(dur, [0, height, distance], [0, 2.5, 0], null)]
+        : /push|dolly in|move in|track in/.test(move)
       ? [key(0, [0, height, distance], aim, subject), key(dur, [0, height, Math.max(1, distance * 0.55)], aim, subject)]
       : /pull|dolly out|move out|track out/.test(move)
         ? [key(0, [0, height, distance], aim, subject), key(dur, [0, height, distance * 1.6], aim, subject)]
@@ -301,11 +311,28 @@ export function stageShot(
               key(dur / 2, [0, height, distance], aim, subject),
               key(dur, [distance * 0.7, height, distance * 0.7], aim, subject),
             ]
-          : /crane|rise|boom|tilt/.test(move)
+          : /crane|rise|boom/.test(move)
             ? [key(0, [0, Math.max(0.6, height - 0.6), distance], aim, subject), key(dur, [0, height + 1.4, distance * 0.9], aim, subject)]
-            : /pan|truck|track|follow|lateral/.test(move)
+            : /truck|track|follow|lateral/.test(move)
               ? [key(0, [-distance * 0.35, height, distance], aim, subject), key(dur, [distance * 0.35, height, distance], aim, subject)]
               : [key(0, [0, height, distance], aim, subject), key(dur, [0, height, distance], aim, subject)];
+  if (/pan.*left|tilt.*down|truck.*left|crane.*down|boom.*down|lower|descend/.test(move)) {
+    const poses = keys.map(({ p, l }) => ({ p, l })).reverse();
+    keys.forEach((k, i) => Object.assign(k, poses[i]));
+  }
+  // Only an explicit follow/tracking instruction rides with a subject. Fixed and rotational
+  // moves retain their world position while the performer crosses the frame.
+  if (!/track|follow/.test(move)) {
+    const figure = cast[0];
+    for (const k of keys) {
+      if (figure) {
+        k.p = [k.p[0] + figure.x, k.p[1], k.p[2] + figure.z];
+        k.l = [k.l[0] + figure.x, k.l[1], k.l[2] + figure.z];
+      }
+      delete k.anchor;
+      delete k.track;
+    }
+  }
   if (/slow|gentle|soft|smooth/.test(move) && keys.length > 1) {
     keys[0] = { ...keys[0]!, easeOut: 0.25 };
     keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
@@ -336,6 +363,11 @@ export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly Stag
   const dy = Math.abs(last.p[1] - first.p[1]);
   const dz = Math.abs(last.p[2] - first.p[2]);
   if (dx < 0.15 && dy < 0.15 && dz < 0.15) {
+    const aimX = Math.max(...keys.map(k => k.l[0])) - Math.min(...keys.map(k => k.l[0]));
+    const aimY = Math.max(...keys.map(k => k.l[1])) - Math.min(...keys.map(k => k.l[1]));
+    const excursion = keys.some(k => Math.hypot(k.p[0] - first.p[0], k.p[1] - first.p[1], k.p[2] - first.p[2]) >= 0.15);
+    if (excursion) return withRig(sweep(keys) > 50 ? "orbit" : "out and back");
+    if (aimX > 0.05 || aimY > 0.05) return withRig(aimX > 0.05 && aimY > 0.05 ? "pan and tilt" : aimX > aimY ? "pan" : "tilt");
     if (keys.length > 2 && sweep(keys) > 50) return withRig("orbit");
     // The same offset from a figure who walks is a camera that walks with them: it holds its
     // frame and crosses the set, which is a tracking shot and not a static one.
@@ -348,15 +380,29 @@ export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly Stag
   return withRig("dolly");
 }
 
-/** Degrees the camera swings around its aim between the first and last key. */
+/** Total angular travel around the aim, including intermediate keys and full revolutions. */
 function sweep(keys: readonly StagingKey[]): number {
-  const first = keys[0]!;
-  const last = keys[keys.length - 1]!;
-  const a = Math.atan2(first.p[0] - first.l[0], first.p[2] - first.l[2]);
-  const b = Math.atan2(last.p[0] - last.l[0], last.p[2] - last.l[2]);
-  let degrees = (Math.abs(a - b) * 180) / Math.PI;
-  if (degrees > 180) degrees = 360 - degrees;
+  let degrees=0;
+  for(let i=1;i<keys.length;i++) {
+    const from=keys[i-1]!,to=keys[i]!;
+    const a=Math.atan2(from.p[0]-from.l[0],from.p[2]-from.l[2]);
+    const b=Math.atan2(to.p[0]-to.l[0],to.p[2]-to.l[2]);
+    degrees+=Math.abs(((b-a+3*Math.PI)%(2*Math.PI))-Math.PI)*180/Math.PI;
+  }
   return degrees;
+}
+
+/** Include moving parents and performers when naming the shot's actual camera movement. */
+export function stagingMotionWord(staging: ResolvedShotStaging, durationSec: number): string {
+  const world=staging.keys.map(key=>({...key,...sampleStageCamera(staging,key.t,durationSec),anchor:undefined}));
+  const first=staging.keys[0];
+  const rides=first?.anchor && staging.keys.every(key=>key.anchor===first.anchor&&key.p.every((v,i)=>Math.abs(v-first.p[i]!)<.01));
+  if(rides && world.some(key=>Math.hypot(...key.p.map((v,i)=>v-world[0]!.p[i]!))>.15)) {
+    const rig=staging.rig && staging.rig!=="sticks"?`${staging.rig.replace("-"," ")} `:"";
+    const rotation=stagingMoveWord(staging.keys);
+    return `${rig}tracking${rotation.includes("pan")||rotation.includes("tilt")?` with ${rotation}`:""}`;
+  }
+  return stagingMoveWord(world,staging.cast,staging.rig);
 }
 
 /**
@@ -385,18 +431,8 @@ export function stagingBeats(
   nameOf: (sheetId: string) => string,
   durationSec: number,
 ): string[] {
-  const keys = stagingRetimed(staging, durationSec).keys;
-  const facings = new Map<string, readonly [number, number]>();
-  for (const figure of staging.cast) {
-    if (figure.to === undefined) {
-      facings.set(figure.sheetId, [0, 1]);
-      continue;
-    }
-    const dx = figure.to[0] - figure.x;
-    const dz = figure.to[1] - figure.z;
-    const length = Math.hypot(dx, dz);
-    facings.set(figure.sheetId, length < 0.05 ? [0, 1] : [dx / length, dz / length]);
-  }
+  staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
+  const keys = staging.keys;
   const warnings = durationSec <= 0 ? [] : staging.cast.flatMap((figure) => {
     const speed = stageWalkSpeed(figure, durationSec);
     if (speed === null || speed <= MAX_STAGE_WALK_SPEED_MPS) return [];
@@ -405,24 +441,21 @@ export function stagingBeats(
   });
   const camera = keys.map((k) => {
     const subject = k.anchor ?? k.track ?? null;
-    // Measured from what the camera is actually on: an anchored key is already an offset from
-    // its figure; a key that only TRACKS one is in world space, so the figure is read where it
-    // stands at that key's time, not at the aim point the track has overridden.
-    const tracked = k.anchor === undefined && k.track !== undefined ? staging.cast.find((figure) => figure.sheetId === k.track) : undefined;
-    const standing = tracked === undefined ? null : figureAt(tracked, durationSec <= 0 ? 0 : k.t / durationSec);
-    const [tx, tz] = k.anchor !== undefined ? [0, 0] : standing ?? [k.l[0], k.l[2]];
-    const ox = k.p[0] - tx;
-    const oz = k.p[2] - tz;
-    const flat = Math.hypot(ox, oz).toFixed(1);
-    const height = k.p[1].toFixed(2);
-    const where = bearing(ox, oz, k.p[1] - k.l[1], facings.get(subject ?? "") ?? [0, 1]);
+    const pose = sampleStageCamera({...staging,keys},k.t,durationSec);
+    const target = subject ? stageTargetTransform(staging,subject,k.t,durationSec) : null;
+    const [tx,,tz] = target?.p ?? pose.l;
+    const ox = pose.p[0]-tx, oz=pose.p[2]-tz;
+    const flat = Math.hypot(ox,oz).toFixed(1);
+    const height = pose.p[1].toFixed(2);
+    const angle = (target?.rotation[1]??0)*Math.PI/180;
+    const where = bearing(ox,oz,pose.p[1]-pose.l[1],[Math.sin(angle),Math.cos(angle)]);
     const who = subject === null ? "the aim point" : nameOf(subject);
-    const aim = k.track === undefined ? "" : `, aimed at ${nameOf(k.track)}`;
+    const aim = k.track === undefined ? `, aim (${pose.l.map(v=>v.toFixed(2)).join(", ")})m in world space` : `, aimed at ${nameOf(k.track)}`;
     const ease = [
       k.easeIn === undefined ? "" : `ease in ${Math.round(k.easeIn * 100)}%`,
       k.easeOut === undefined ? "" : `ease out ${Math.round(k.easeOut * 100)}%`,
     ].filter(Boolean).join(", ");
-    return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}${ease === "" ? "" : `, ${ease}`}`;
+    return `${k.t.toFixed(1)}s — ${flat}m ${where} ${who}, ${height}m high${aim}${k.roll === undefined ? "" : `, roll ${k.roll}°`}${k.focalMm === undefined ? "" : `, lens ${k.focalMm}mm`}${ease === "" ? "" : `, ${ease}`}`;
   });
   return [...warnings, ...camera];
 }
@@ -452,10 +485,13 @@ function figureAt(figure: StagingFigure, u: number): [number, number] {
 export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotStaging {
   if (staging.keys.length === 0) return staging;
   const last = staging.keys.length - 1;
+  const oldDuration = staging.keys[last]!.t;
+  if (staging.objectMotions && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, objectMotions: staging.objectMotions.map(motion => ({ ...motion, keys: motion.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration })) })) };
+  if (staging.performances && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, performances: staging.performances.map(performance => ({ ...performance, keys: performance.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration })) })) };
   if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
   // Interior keys that still fit stay where they are; if any no longer does, the whole move is
   // scaled to the new length instead of clamped, so no two keys land on one moment.
-  const fits = staging.keys.every((key, index) => index === last || key.t < durationSec);
+  const fits = !staging.performances?.length && !staging.objectMotions?.length && staging.keys.every((key, index) => index === last || key.t < durationSec);
   const scale = staging.keys[last]!.t > 0 ? durationSec / staging.keys[last]!.t : 0;
   const scaled = staging.keys.map((key, index) =>
     index === last ? { ...key, t: round(durationSec) } : fits ? key : { ...key, t: round(key.t * scale) },
@@ -479,7 +515,8 @@ export function stagingPromptClause(
   nameOf: (sheetId: string) => string,
   durationSec: number,
 ): string {
-  const keys = stagingRetimed(staging, durationSec).keys;
+  staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
+  const keys = staging.keys;
   const walkers = staging.cast
     .filter((figure) => {
       const speed = stageWalkSpeed(figure, durationSec);
@@ -499,8 +536,71 @@ export function stagingPromptClause(
     ? []
     : [`Set massing — ${staging.sets.map((set) => `${set.name}: ${set.w.toFixed(2)}m wide, ${set.h.toFixed(2)}m high, ${set.d.toFixed(2)}m deep at x ${set.x.toFixed(2)}m, z ${set.z.toFixed(2)}m`).join("; ")}.`];
   return [
-    `Camera move, ${stagingMoveWord(keys, staging.cast, staging.rig)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
+    "Use the blockout for composition, action and camera motion. Replace greybox geometry with the approved character, location and style references.",
+    `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...sets,
+    ...(staging.performances ?? []).flatMap(performance => performance.keys.map(key => `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}`)),
+    ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
     ...stagingBeats(staging, nameOf, durationSec),
+    ...keys.slice(0,-1).map((key,index) => {
+      const at = (key.t + keys[index + 1]!.t) / 2;
+      const pose = sampleStageCamera({ ...staging, keys }, at, durationSec);
+      return `${at.toFixed(2)}s — camera world position (${pose.p.map(v => v.toFixed(2)).join(", ")})m; aim (${pose.l.map(v => v.toFixed(2)).join(", ")})m.`;
+    }),
   ].join("\n");
+}
+
+/** Shot-local action overrides a shared figure's legacy full-shot walk. Angles use degrees. */
+export function stageFigureAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number, motions?: readonly StageObjectMotion[]) {
+  const state = stageFigureLocalAt(figure, performances, at, durationSec);
+  if (!figure.parent) return state;
+  const transform = stageObjectAt(motions, figure.parent, at);
+  const [x,y,z] = stageLocalPoint([state.x,state.y,state.z], transform);
+  return { ...state, x,y,z, facing:state.facing+transform.rotation[1] };
+}
+function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:"stand"|"sit"|"lie"} {
+  const keys = performances?.find(p => p.sheetId === figure.sheetId)?.keys;
+  if (!keys?.length) {
+    const [x, z] = figureAt(figure, durationSec <= 0 ? 0 : at / durationSec);
+    return { x, z, y: figure.y ?? 0, facing: figure.facing ?? (figure.to ? Math.atan2(figure.to[0] - figure.x, figure.to[1] - figure.z) * 180 / Math.PI : 0), pose: figure.pose ?? "stand" };
+  }
+  let index = 0;
+  while (index < keys.length - 1 && keys[index + 1]!.t <= at) index++;
+  const a = keys[index]!;
+  const b = keys[Math.min(index + 1, keys.length - 1)]!;
+  const k = b.t === a.t ? 0 : Math.max(0, Math.min(1, (at - a.t) / (b.t - a.t)));
+  const facing = a.facing ?? figure.facing ?? 0;
+  const turn = ((b.facing ?? facing) - facing + 540) % 360 - 180;
+  return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k,
+    y: (a.y ?? figure.y ?? 0) + ((b.y ?? figure.y ?? 0) - (a.y ?? figure.y ?? 0)) * k,
+    facing: facing + turn * k, pose: a.pose ?? figure.pose ?? "stand" };
+}
+
+/** Write-boundary checks; permissive legacy reading must not admit new unusable camera data. */
+export function stageProblems(staging: ResolvedShotStaging, durationSec: number): string[] {
+  const problems: string[] = [];
+  const ids = new Set(staging.cast.map(f => f.sheetId));
+  const groups = new Set(staging.sets.flatMap(set=>set.group?[set.group]:[]));
+  const targets = new Set([...ids,...groups]);
+  if ([...groups].some(group=>ids.has(group))) problems.push("Object group names must differ from figure identities.");
+  if (ids.size !== staging.cast.length) problems.push("Each figure must have a unique sheet identity.");
+  if (staging.keys.length < 1 || staging.keys[0]?.t !== 0 || (staging.keys.length > 1 && staging.keys.at(-1)?.t !== durationSec)) problems.push("Camera keys must cover the shot from 0 to its duration.");
+  const ordered = (keys: readonly { t: number }[]) => keys.every((k, i) => Number.isFinite(k.t) && k.t <= durationSec && (i === 0 || k.t > keys[i - 1]!.t));
+  if (!ordered(staging.keys)) problems.push("Camera key times must be strictly increasing within the shot.");
+  for (const k of staging.keys) {
+    if (![...k.p, ...k.l].every(Number.isFinite)) problems.push("Camera coordinates must be finite.");
+    if ((k.anchor && !targets.has(k.anchor)) || (k.track && !targets.has(k.track))) problems.push("Camera anchor or track names a missing figure.");
+    const sampled = sampleStageCamera(staging, k.t, durationSec);
+    if (Math.hypot(...sampled.p.map((v,i)=>v-sampled.l[i]!)) < 0.01) problems.push("Camera aim must be distinct from its position.");
+  }
+  for (const set of staging.sets) if (![set.w, set.h, set.d].every(v => Number.isFinite(v) && v > 0)) problems.push("Set dimensions must be positive and finite.");
+  for (const figure of staging.cast) if (figure.parent && !groups.has(figure.parent)) problems.push("A figure names a missing parent object.");
+  for (const set of staging.sets) if (set.shape === "mesh" && (!set.vertices || !set.triangles || set.triangles.length % 3 !== 0 || set.triangles.some(index=>index >= set.vertices!.length))) problems.push("Mesh geometry needs valid vertices and triangle indices.");
+  for (const motion of staging.objectMotions ?? []) if (!groups.has(motion.group) || !ordered(motion.keys) || motion.keys[0]?.t !== 0) problems.push("Object motion must name a group and have ordered keys from time 0.");
+  if (new Set(staging.objectMotions?.map(m=>m.group)).size !== (staging.objectMotions?.length??0)) problems.push("An object can have only one motion track.");
+  if (new Set(staging.performances?.map(p=>p.sheetId)).size !== (staging.performances?.length??0)) problems.push("A figure can have only one performance track.");
+  for (const performance of staging.performances ?? []) {
+    if (!ids.has(performance.sheetId) || !ordered(performance.keys) || performance.keys[0]?.t !== 0) problems.push("Performance keys must name a figure and increase from time 0 within the shot.");
+  }
+  return [...new Set(problems)];
 }

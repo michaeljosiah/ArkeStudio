@@ -1,3 +1,4 @@
+import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -437,6 +438,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-take-review": ["takes"],
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
+  "production-stage-construct": ["scenes"],
   "audio-spine-command": ["spine"],
   "production-routing": ["routing", "scenes"],
   "production-routing-traversal": ["routing", "scenes"],
@@ -614,6 +616,7 @@ function productionActionTargets(
     ];
     case "production-take-review":
     case "production-take-trim": return [{ requirement: "takes", target: action.productionId }];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
@@ -757,6 +760,7 @@ function preparedWorldPayload(
     case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
+    case "production-stage-construct": return WorldChatProductionStageConstructActionSchema.parse({ kind: "world-chat-production-stage-construct", ...common });
     case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
     case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
@@ -1038,6 +1042,7 @@ function worldActionTargets(
       { kind: "take", id: action.takeId, label: action.takeId },
       { kind: "shot", id: action.shotId, label: action.shotId },
     ];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { kind: "scene", id: action.sceneId, label: action.sceneId },
       { kind: "shot", id: action.shotId, label: action.shotId },
@@ -2686,6 +2691,16 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-stage-construct": {
+      authority = { kind: "scene-store", id: intent.actionId };
+      const production = bundle.productions.find(p => p.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
+      if (!shot || !scene) throw new Error("That Stage shot is no longer available.");
+      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to three turns and five minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
+      authorityRevision = scene.version;
+      break;
+    }
     case "world-chat-production-stage-playblast": {
       authority = { kind: "scene-store", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
@@ -3549,6 +3564,7 @@ async function executeSharedResource(
       }, options);
       return { status: "completed", receipt: { kind: "take-trim", id: payload.action.shotId, summary: "The selected take's trim-in was updated." } };
     }
+    case "world-chat-production-stage-construct": return { status: "awaiting-host", detail: "Waiting for the Stage construction surface." };
     case "world-chat-production-stage-playblast": {
       return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
     }
@@ -4251,6 +4267,15 @@ export function worldChatActionAdapters(
             }
           : null;
       },
+      ...(actionKind === "world-chat-production-stage-construct" ? {
+        completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
+          const input = value as { kind?: string; shotId?: string; sceneId?: string; status?: string; detail?: string };
+          const prepared = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+          if (!prepared.success || input.kind !== "stage-constructor-result" || input.shotId !== prepared.data.action.shotId || input.sceneId !== prepared.data.action.sceneId) return { status: "failed", detail: "The Stage construction did not match the approved shot." };
+          await removePreparation(store, "world", action.actionId);
+          return input.status === "ready" ? { status: "completed", receipt: { kind: "stage-draft", id: action.actionId, summary: "Constructed and inspected an editable Stage draft. Keep applies it." } } : { status: "failed", detail: input.detail ?? "Stage construction stopped." };
+        },
+      } : {}),
       ...(actionKind === "world-chat-production-stage-playblast"
         ? {
             completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
@@ -4318,6 +4343,7 @@ export function worldChatActionAdapters(
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),
                 }, {
+                  ...(deps.mediaProbe ? { mediaProbe: deps.mediaProbe } : {}),
                   source: `world-chat:${action.conversationId}:${action.actionId}`,
                   requestId: action.actionId,
                   precondition: observationPrecondition(store, action),
@@ -4399,6 +4425,7 @@ export function worldChatActionAdapters(
     "world-chat-production-take-review",
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",
+    "world-chat-production-stage-construct",
     "world-chat-audio-spine-command",
     "world-chat-production-routing",
     "world-chat-production-routing-traversal",
@@ -4601,4 +4628,9 @@ async function saveProposalPoint(
   });
   if (staged.proposalIds.length !== 1) throw new Error("A conversation action must bind one proposal authority.");
   return staged.proposalIds[0]!;
+}
+
+export async function stageConstructionHandoff(store: WorldStore, action: ConversationActionCard) {
+  const parsed = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+  return parsed.success ? parsed.data.action : null;
 }

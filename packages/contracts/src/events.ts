@@ -1,3 +1,4 @@
+import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
 import { TableReadPlanSchema } from "./rehearsal.js";
@@ -113,6 +114,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("stage.construction"), at: z.string(), worldId: z.string(), requestId: z.string(), sceneId: z.string(), shotId: z.string(), baseVersion: z.number(), status: z.enum(["working", "inspect", "ready", "failed"]), detail: z.string(), round: z.number().int(), draft: StageConstructionDraftSchema.optional() }).strict(),
+
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),

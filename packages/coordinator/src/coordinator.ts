@@ -1,3 +1,5 @@
+import { stageConstructionHandoff } from "./world-chat/actions.js";
+import { StageConstructor } from "./productions/stage-construction.js";
 import { recordDialogueFeedback } from "./takes/feedback.js";
 import { proposeShotVisualFacts } from "./productions/visual-facts.js";
 import { KeyArtPromptReviews, keyArtReviewContext } from "./references/prompt-review.js";
@@ -253,7 +255,7 @@ import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
-import { filePlayblast } from "./productions/stage-playblast.js";
+import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
@@ -1356,6 +1358,7 @@ export class Coordinator {
 
   /** Session config builder with the user's agent settings folded in. */
   /** Session input plus whatever Settings currently says — read per call, never captured. */
+  private readonly stageConstructor = new StageConstructor();
   private readonly sessionInput: SessionInput;
 
   /**
@@ -1706,25 +1709,29 @@ export class Coordinator {
               return readCharacterAudioInputs(store, job);
             },
             readImageReferences: async (worldId, paths) => {
-              if (this.opts.provider.withWorldStore) {
-                return this.opts.provider.withWorldStore(worldId, (store) =>
-                  readContainedImageReferences(store.dir, paths),
-                );
-              }
-              const store = this.opts.provider.openStore?.();
-              if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
-              return readContainedImageReferences(store.dir, paths);
+              const read = async (store: WorldStore) => {
+                assertStageReferencesCurrent(store,paths);
+                const references=await readContainedImageReferences(store.dir,paths);
+                assertStageReferencesCurrent(store,paths);
+                return references;
+              };
+              if(this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(worldId,read);
+              const store=this.opts.provider.openStore?.();
+              if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
+              return read(store);
             },
             // The bench's clips (issue 852), read under the same containment as its pictures.
             readVideoReferences: async (worldId, paths) => {
-              if (this.opts.provider.withWorldStore) {
-                return this.opts.provider.withWorldStore(worldId, (store) =>
-                  readContainedVideoReferences(store.dir, paths),
-                );
-              }
-              const store = this.opts.provider.openStore?.();
-              if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
-              return readContainedVideoReferences(store.dir, paths);
+              const read = async (store: WorldStore) => {
+                assertStageReferencesCurrent(store,paths);
+                const references=await readContainedVideoReferences(store.dir,paths);
+                assertStageReferencesCurrent(store,paths);
+                return references;
+              };
+              if(this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(worldId,read);
+              const store=this.opts.provider.openStore?.();
+              if(!store||store.worldId!==worldId) throw new Error("the owning world is unavailable");
+              return read(store);
             },
             readVoiceReference: async (worldId, provider, model, voiceId) => {
               const prepare = async (store: WorldStore) => {
@@ -7891,6 +7898,38 @@ export class Coordinator {
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
         return;
       }
+      case "stage-construct-cancel": this.stageConstructor.cancel(msg.worldId, msg.requestId); return;
+      case "stage-inspection": this.stageConstructor.inspect(msg.worldId, msg.requestId, msg.round, msg.frames); return;
+      case "stage-construct": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        let approved = false;
+        const emit = (event: Extract<DomainEvent,{type:"stage.construction"}>) => {
+          this.emit(event);
+          if (approved && (event.status === "ready" || event.status === "failed") && msg.conversationId && msg.actionId) {
+            this.trackBackground(this.conversationActionLifecycle(store).completeHostAction({ conversationId: msg.conversationId, actionId: msg.actionId, payload: { kind: "stage-constructor-result", shotId: msg.shotId, sceneId: msg.sceneId, status: event.status, detail: event.detail } }).then(() => this.refreshConversationOutcome(store, msg.conversationId!)));
+          }
+        };
+        const fail = (detail: string) => emit({ type: "stage.construction", at: store.now(), worldId: msg.worldId, requestId: msg.requestId, sceneId: msg.sceneId, shotId: msg.shotId, baseVersion: msg.baseVersion, status: "failed", round: 0, detail });
+        if (msg.actionId || msg.conversationId) {
+          const { activeActions } = await discoverConversations(store.dir);
+          const action = activeActions.find(a => a.actionId === msg.actionId && a.conversationId === msg.conversationId && a.status === "awaiting-host" && a.actionKind === "world-chat-production-stage-construct");
+          const input = action ? await stageConstructionHandoff(store, action) : null;
+          if (!input || input.productionId !== msg.productionId || input.sceneId !== msg.sceneId || input.shotId !== msg.shotId || input.instruction !== msg.instruction || input.preserve !== msg.preserve) { fail("The approved construction request changed. Open its current action card."); return; }
+          approved = true;
+        }
+        const adapter = this.opts.adapter;
+        if (!adapter?.readiness().ready) { fail("The language model is unavailable. Configure a capable image-reading model in Settings."); return; }
+        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId });
+        const configured = selected.sessionModel ?? this.agentOverrides?.["stage-designer"]?.model;
+        if (selected.reason || !configured) { fail(selected.reason ?? "Choose a production language model or a Stage designer model in Settings first."); return; }
+        this.trackBackground(this.stageConstructor.run(store, msg, {
+          adapter, sessionInput: this.sessionInput, model: configured,
+          scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
+          emit, current: () => this.opts.provider.openStore?.() === store,
+        }).catch(error => fail(error instanceof Error ? error.message : String(error))));
+        return;
+      }
       case "stage-playblast": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -7917,7 +7956,7 @@ export class Coordinator {
           durationSec: msg.durationSec,
           aspect: msg.aspect,
           ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
-        }).catch((err: unknown) => ({
+        }, this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}).catch((err: unknown) => ({
           outcome: "refused" as const,
           reason: err instanceof Error ? err.message : "the playblast could not be filed",
         }));
@@ -14393,6 +14432,11 @@ export class Coordinator {
     const { summaries, activeActions } = await discoverConversations(store.dir);
     if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
+    const constructions = await Promise.all(activeActions.filter(action => action.actionKind === "world-chat-production-stage-construct" && action.status === "awaiting-host").map(async action => {
+      const input = await stageConstructionHandoff(store, action);
+      return input ? { worldId: action.worldId, conversationId: action.conversationId, actionId: action.actionId, productionId: input.productionId, sceneId: input.sceneId, shotId: input.shotId, instruction: input.instruction, preserve: input.preserve } : null;
+    }));
+    this.readModel.setStageConstructionRequests(constructions.filter((value): value is NonNullable<typeof value> => value !== null));
     this.readModel.setStagePlayblastRequests(activeActions.flatMap((action) => {
       if (action.actionKind !== "world-chat-production-stage-playblast" || action.status !== "awaiting-host" || !action.productionId) return [];
       const shotId = action.targets.find((target) => target.kind === "shot")?.id;
@@ -14660,6 +14704,7 @@ export class Coordinator {
   }
 
   async stop(): Promise<void> {
+    this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
     for (const controller of this.performanceGenerations.values()) controller.abort();

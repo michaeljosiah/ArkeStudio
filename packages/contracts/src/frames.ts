@@ -1,3 +1,4 @@
+import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
@@ -57,6 +58,10 @@ export type Frame = z.infer<typeof FrameSchema>;
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("stage-construct"), conversationId: z.string().optional(), actionId: z.string().optional(), worldId: z.string(), productionId: z.string(), sceneId: z.string(), shotId: z.string(), requestId: z.string().uuid(), instruction: z.string().max(4000), preserve: z.enum(["blocking", "camera", "none"]), baseVersion: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
+  z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
+
   z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */

@@ -319,6 +319,7 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
+  const stageRequest = state?.stageConstructionRequests?.find(request=>request.actionId===action.actionId&&request.conversationId===action.conversationId);
   const body = <ConversationActionBody action={action} supported={supported} />;
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
@@ -395,6 +396,7 @@ export function ConversationPermissionCard({
           ) : null}
         </div>
       )}
+      {action.status === "awaiting-host" && stageRequest ? <Button variant="primary" onClick={()=>void navigate(`/w/${action.worldId}/p/${stageRequest.productionId}/scenes/${stageRequest.sceneId}`)}>Open Stage to construct</Button>:null}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">

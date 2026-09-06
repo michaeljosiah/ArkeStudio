@@ -1768,7 +1768,7 @@ describe("World Chat authority adapters", () => {
 
   it("keeps an approved Stage action awaiting the renderer, then files its correlated playblast", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
-    const w = await setup(context);
+    const w = await setup(context, {mediaProbe:{durationSec:async()=>4,info:async()=>({durationSec:4,hasAudio:false,width:16,height:9,frameRate:30})}});
     const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     const scene = production.scenes.find((candidate) => candidate.id === context.sceneId)!;
     const sceneFile = production.sceneFiles[scene.id]!;
