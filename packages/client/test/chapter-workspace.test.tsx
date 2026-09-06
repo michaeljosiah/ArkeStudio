@@ -60,8 +60,8 @@ const CHAPTERS: ChapterSummary[] = [
     pov: "maren-kest",
     when: "Neap · third night",
     implies: [
-      { kind: "canon", what: "The bells can ring uncalled when the drowned city has a debt to collect." },
-      { kind: "character", what: "Odile keeps a second ledger the Council does not know about." },
+      { id: "if_bells", kind: "canon", what: "The bells can ring uncalled when the drowned city has a debt to collect.", state: "open" },
+      { id: "if_ledger", kind: "character", what: "Odile keeps a second ledger the Council does not know about.", state: "open" },
     ],
     draftedAgainst: 2,
   },
@@ -255,18 +255,22 @@ describe("the chapter, opened (turn 126)", () => {
     const propose = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Propose") as HTMLElement | undefined;
     assert.ok(propose, "each implied fact has a press");
     await act(async () => propose!.click());
-    assert.match(text(m), /proposed/, "the item is marked once pressed");
+    const stated = m.sent.find((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
+    assert.ok(stated, "the state is written on the item first");
+    assert.equal(stated.changes.implies?.[0]?.state, "proposed");
+    assert.equal(stated.changes.implies?.[0]?.id, "if_bells", "the id is kept through the write");
+    assert.equal(stated.changes.implies?.[1]?.state, "open", "the other fact is untouched");
     const said = m.sent.find((message) => JSON.stringify(message).includes("Propose as canon: The bells can ring uncalled"));
-    assert.ok(said, "the fact is said into the thread rather than written by this screen");
-    assert.equal(m.sent.some((message) => message.kind === "edit-chapter-plan"), false, "proposing writes nothing on the chapter");
+    assert.ok(said, "then the fact is said into the thread rather than written into the world by this screen");
 
-    const dismiss = q(m, "button.fy-ch__dismiss");
-    assert.ok(dismiss);
-    await act(async () => dismiss!.click());
-    const edited = m.sent.find((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
+    // Without a snapshot the items stay open here, so both still offer Dismiss; a proposed item would not.
+    const dismissers = Array.from(m.container.querySelectorAll("button.fy-ch__dismiss"));
+    assert.equal(dismissers.length, 2, "both facts are still open in this state, so both can be dismissed");
+    await act(async () => (dismissers[1] as HTMLElement).click());
+    const edited = m.sent.filter((message) => message.kind === "edit-chapter-plan").at(-1) as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
     assert.ok(edited, "dismissing is a plan edit");
     assert.equal(edited.changes.implies?.length, 1, "the dismissed fact is gone and the other stays");
-    assert.equal(edited.changes.implies?.[0]?.kind, "character");
+    assert.equal(edited.changes.implies?.[0]?.kind, "canon");
   });
 
   it("picks the newest draft for the file and reads its prose off the review projection", () => {

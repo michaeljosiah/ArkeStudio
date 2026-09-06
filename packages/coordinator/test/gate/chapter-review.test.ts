@@ -29,7 +29,7 @@ describe("chapter proposals are reviewable before the dormant draft flow convert
       synopsis: "The ledger opens.",
       pov: "maren-kest",
       when: "Neap · first night",
-      implies: [{ kind: "canon", what: "The bells can ring uncalled." }],
+      implies: [{ id: "if_0123456789", kind: "canon", what: "The bells can ring uncalled.", state: "proposed" }],
       draftedAgainst: 3,
     });
     chapter.setBody("The ledger opens under a moonless tide.");
@@ -53,7 +53,7 @@ describe("chapter proposals are reviewable before the dormant draft flow convert
     assert.equal(fields.get("Synopsis"), "The ledger opens.");
     assert.equal(fields.get("Point of view"), "maren-kest");
     assert.equal(fields.get("When"), "Neap · first night");
-    assert.equal(fields.get("Implies"), "canon: The bells can ring uncalled.");
+    assert.equal(fields.get("Implies"), "canon: The bells can ring uncalled. (proposed)");
     assert.equal(fields.get("Drafted against"), "overview v3");
   });
 

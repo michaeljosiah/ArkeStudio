@@ -247,7 +247,14 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(planned.pov, "maren-kest");
     assert.equal(planned.when, "Neap · first night");
     assert.equal(planned.implies?.length, 1);
+    assert.match(planned.implies?.[0]?.id ?? "", /^if_[0-9a-f]{10}$/, "an implied fact is given an id at the write");
+    assert.equal(planned.implies?.[0]?.state, "open");
     assert.equal(planned.version, before.version, "a plan edit cuts no version (SPEC-012 R-5)");
+    // Propose writes the state; the id and the words are kept through the edit.
+    await editChapterPlan(store, LEDGER, "01-neap", { implies: [{ ...planned.implies![0]!, state: "proposed" }] });
+    const proposedFact = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!.implies![0]!;
+    assert.equal(proposedFact.state, "proposed");
+    assert.equal(proposedFact.id, planned.implies![0]!.id);
     const after = await openChapter(store, LEDGER, "neap");
     assert.equal(after.body, before.body, "the prose is untouched");
 

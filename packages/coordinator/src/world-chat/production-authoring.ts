@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { withImpliedIds } from "../productions/ops.js";
 import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
@@ -331,7 +332,7 @@ export async function stageWorldChatProductionAuthoredAction(
         ...(change.synopsis !== undefined && change.synopsis !== "" ? { synopsis: change.synopsis } : {}),
         ...(change.pov !== undefined ? { pov: change.pov } : {}),
         ...(change.when !== undefined && change.when !== "" ? { when: change.when } : {}),
-        ...(change.implies !== undefined && change.implies.length > 0 ? { implies: change.implies } : {}),
+        ...(change.implies !== undefined && change.implies.length > 0 ? { implies: withImpliedIds(change.implies) } : {}),
         ...(body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
         created: store.now().slice(0, 10),
         updated: store.now().slice(0, 10),
@@ -359,7 +360,7 @@ export async function stageWorldChatProductionAuthoredAction(
       ...(changes.synopsis !== undefined ? { synopsis: changes.synopsis || undefined } : {}),
       ...(changes.pov !== undefined ? { pov: changes.pov ?? undefined } : {}),
       ...(changes.when !== undefined ? { when: changes.when || undefined } : {}),
-      ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? changes.implies : undefined } : {}),
+      ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? withImpliedIds(changes.implies) : undefined } : {}),
       ...(changes.body !== undefined
         ? { words: changes.body.trim() === "" ? 0 : changes.body.trim().split(/\s+/).length }
         : {}),

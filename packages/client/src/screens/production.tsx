@@ -2250,7 +2250,11 @@ export function ChapterTreeScreen() {
                   <span className="fy-row__marks">
                     {pov !== null && <span className="fy-mono">{pov}</span>}
                     {c.when !== undefined && <span className="fy-mono">{pov !== null ? "· " : ""}{c.when}</span>}
-                    {stale && <span className="fy-row__moved">overview moved</span>}
+                    {stale && (
+                      <span className="fy-row__moved">
+                        overview moved · v{c.draftedAgainst} → v{production?.story?.version}
+                      </span>
+                    )}
                   </span>
                 )}
               </span>

@@ -199,7 +199,7 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
     if (chapter.synopsis !== undefined) fields.set("Synopsis", chapter.synopsis);
     if (chapter.pov !== undefined) fields.set("Point of view", chapter.pov);
     if (chapter.when !== undefined) fields.set("When", chapter.when);
-    if (chapter.implies?.length) fields.set("Implies", chapter.implies.map((fact) => `${fact.kind}: ${fact.what}`).join("\n"));
+    if (chapter.implies?.length) fields.set("Implies", chapter.implies.map((fact) => `${fact.kind}: ${fact.what}${fact.state === "proposed" ? " (proposed)" : ""}`).join("\n"));
     if (chapter.draftedAgainst !== undefined) fields.set("Drafted against", `overview v${chapter.draftedAgainst}`);
     fields.set("Prose", doc.body.trim());
     return { label: chapter.title, kind: `chapter · v${chapter.version}`, fields };

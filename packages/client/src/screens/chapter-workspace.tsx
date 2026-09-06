@@ -520,7 +520,6 @@ export function ChapterWorkspace({
    */
   const plan = (changes: Parameters<typeof editChapterPlan>[3]) => editChapterPlan(worldId, prodId, chapter.file, changes);
   const [say, setSay] = useState<{ line: string; seq: number } | null>(null);
-  const [proposed, setProposed] = useState<readonly string[]>([]);
   const implies = chapter.implies ?? [];
   const stale = overviewMoved(chapter, production.story);
   const characters = world.sheets.filter(
@@ -691,37 +690,44 @@ export function ChapterWorkspace({
               ) : (
                 <ul className="fy-ch__implies">
                   {implies.map((fact, i) => {
-                    const key = `${fact.kind}:${fact.what}`;
+                    // The state lives on the item (codex on turn 127): a reload keeps what was
+                    // pressed, and a proposed fact offers no Dismiss — the card is where a
+                    // proposal is discarded.
+                    const key = fact.id ?? `${i}:${fact.kind}:${fact.what}`;
+                    const isProposed = fact.state === "proposed";
                     return (
                       <li key={key}>
                         <span className="fy-mono">{fact.kind}</span>
                         <span className="fy-ch__fact">{fact.what}</span>
-                        {proposed.includes(key) ? (
+                        {isProposed ? (
                           <span className="fy-mono">proposed</span>
                         ) : (
                           <Button
                             variant="ghost"
                             disabled={locked}
                             onClick={() => {
-                              setProposed((current) => [...current, key]);
+                              // Written first, said second: the state is the record, the line is the ask.
+                              plan({ implies: implies.map((other, j) => (j === i ? { ...other, state: "proposed" as const } : other)) });
                               setSay((current) => ({ line: `Propose as ${fact.kind}: ${fact.what}`, seq: (current?.seq ?? 0) + 1 }));
                             }}
                           >
                             Propose
                           </Button>
                         )}
-                        <button
-                          type="button"
-                          className="fy-ch__dismiss"
-                          aria-label="Dismiss"
-                          disabled={locked}
-                          onClick={() => {
-                            const rest = implies.filter((_, j) => j !== i);
-                            plan({ implies: rest.length === 0 ? null : rest });
-                          }}
-                        >
-                          ×
-                        </button>
+                        {!isProposed && (
+                          <button
+                            type="button"
+                            className="fy-ch__dismiss"
+                            aria-label="Dismiss"
+                            disabled={locked}
+                            onClick={() => {
+                              const rest = implies.filter((_, j) => j !== i);
+                              plan({ implies: rest.length === 0 ? null : rest });
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
                       </li>
                     );
                   })}

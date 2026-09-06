@@ -89,6 +89,7 @@ describe("the chapter tree renders resolved order", () => {
     assert.match(html, /Maren Kest/, "the point of view is shown by name, not by slug");
     assert.match(html, /Neap · second night/);
     assert.equal((html.match(/overview moved/g) ?? []).length, 1, "only the chapter drafted below the overview's version is marked");
+    assert.match(html, /overview moved · v2 → v3/, "the row says both versions, as the chip does");
     assert.match(html, /2 drafted/, "the meta counts drafted chapters");
   });
 

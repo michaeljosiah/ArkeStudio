@@ -451,13 +451,36 @@ export type StoryOverview = z.infer<typeof StoryOverviewSchema>;
  */
 export const ChapterImpliedKindSchema = z.enum(["canon", "character", "location", "faction"]);
 export type ChapterImpliedKind = z.infer<typeof ChapterImpliedKindSchema>;
+/**
+ * Each item carries an id and a state (codex on turn 127): a reload keeps what was pressed, two
+ * facts in the same words stay two items, and Propose cannot stage one twice. Both are read as
+ * optional, so a chapter written before they existed still scans; the coordinator mints an id
+ * for any item that arrives without one.
+ */
+export const ChapterImpliedStateSchema = z.enum(["open", "proposed"]);
 export const ChapterImpliesSchema = z.array(
-  z.object({ kind: ChapterImpliedKindSchema, what: z.string().min(1) }).strict(),
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      kind: ChapterImpliedKindSchema,
+      what: z.string().min(1),
+      state: ChapterImpliedStateSchema.optional(),
+    })
+    .strict(),
 );
 export type ChapterImplies = z.infer<typeof ChapterImpliesSchema>;
 /** What a writer may put on the chapter: at most 12 facts of at most 300 characters (turn 127). */
 export const ChapterImpliesWriteSchema = z
-  .array(z.object({ kind: ChapterImpliedKindSchema, what: z.string().trim().min(1).max(300) }).strict())
+  .array(
+    z
+      .object({
+        id: z.string().min(1).max(40).optional(),
+        kind: ChapterImpliedKindSchema,
+        what: z.string().trim().min(1).max(300),
+        state: ChapterImpliedStateSchema.optional(),
+      })
+      .strict(),
+  )
   .max(12);
 
 /**
