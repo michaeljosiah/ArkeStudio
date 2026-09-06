@@ -163,21 +163,21 @@ describe("taking a turn", () => {
     });
     await runner.send(store, conversationId, "Tighten this.", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" });
     let types = (await store.read()).events.map((e) => e.event.type);
-    assert.deepEqual(raised, [10], "the world is fenced at the boundary a build older than the constraints refuses by name");
+    assert.deepEqual(raised, [11], "the world is fenced at a boundary of the event's own, past the one the style's build supports (codex, round four)");
     assert.ok(types.includes("turn.constraints"));
     assert.ok(types.indexOf("turn.constraints") < types.indexOf("turn.started"), "the constraints land first, so a turn is never found without them");
 
     await runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true);
     types = (await store.read()).events.map((e) => e.event.type);
     assert.equal(types.filter((type) => type === "turn.constraints").length, 2, "a reply-only ask is a constraint too");
-    assert.deepEqual(raised, [10, 10], "asked each time; the store is the one that knows it is already there");
+    assert.deepEqual(raised, [11, 11], "asked each time; the store is the one that knows it is already there");
 
     // A subject that only colours the narration, as it always did, is no constraint: nothing is
     // written for it, and nothing is fenced.
     await runner.send(store, conversationId, "About this scene.", [], { kind: "scene", sceneId: "sc_1" } as never);
     types = (await store.read()).events.map((e) => e.event.type);
     assert.equal(types.filter((type) => type === "turn.constraints").length, 2);
-    assert.deepEqual(raised, [10, 10]);
+    assert.deepEqual(raised, [11, 11]);
   });
 
   it("keeps the user's message even when the turn fails", async () => {

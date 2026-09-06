@@ -244,9 +244,10 @@ export const PROSE_STYLE_SCHEMA_VERSION = 10;
  * A World Chat turn held to a passage or to a reply (turn 128) is recorded under a
  * `turn.constraints` event a build older than the constraints reads as corruption, so the
  * world is fenced here first and that build refuses it by name instead (codex on PR 903).
- * The same boundary as the style's: both shipped in the one turn.
+ * One past the style's, not the same (codex, round four): the build that shipped the style
+ * supports 10 and has no arm for the event, so a world it can open must not hold one.
  */
-export const TURN_CONSTRAINTS_SCHEMA_VERSION = 10;
+export const TURN_CONSTRAINTS_SCHEMA_VERSION = 11;
 
 /**
  * Would writing this actually change what the world says?

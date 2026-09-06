@@ -66,13 +66,18 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
  * span replaced is the file's own bytes, wrapping included.
  */
 export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
-  const plain = foldedOccurrencesWith(text, find, false);
   // The selection is what the editor showed and the quote is what the file holds (codex, round
   // four): `**bold**` selected in part, or `__bold__` stored where the editor would write
-  // `**bold**`, differ only in emphasis markers. When the words do not match with whitespace
-  // folded alone, they are matched with the markers folded too, and the span replaced is still
-  // the file's own bytes.
-  return plain.length > 0 ? plain : foldedOccurrencesWith(text, find, true);
+  // `**bold**`, differ only in emphasis markers. The words are matched plainly and with the
+  // markers folded, and the two sets are joined (codex on PR 903): a paragraph holding the words
+  // plain and again in emphasis has two occurrences whichever way the quote was spelled, and
+  // uniqueness must see both, or a revision lands on the wrong copy. A plain hit keeps its plain
+  // span; a marked hit that is the same words already found plainly is the same occurrence.
+  const hits = foldedOccurrencesWith(text, find, false);
+  for (const hit of foldedOccurrencesWith(text, find, true)) {
+    if (!hits.some((held) => hit.start < held.end && held.start < hit.end)) hits.push(hit);
+  }
+  return hits.sort((a, b) => a.start - b.start);
 }
 
 function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {

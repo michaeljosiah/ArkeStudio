@@ -128,6 +128,10 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.deepEqual(foldedOccurrences("call foo_bar now", "foobar"), [], "foo_bar is one word");
     assert.deepEqual(foldedOccurrences("call foo_bar now", "foo_bar"), [{ start: 5, end: 12 }]);
     assert.deepEqual(foldedOccurrences("She was _not_ wrong.", "not wrong"), [{ start: 8, end: 19 }], "a single underscore at a word's edge is emphasis");
+    // Plain and emphasised copies are two occurrences whichever way the quote was spelled (codex
+    // on PR 903, round four): uniqueness sees both, so a revision never lands on the wrong copy.
+    assert.deepEqual(foldedOccurrences("not wrong, then __not__ wrong", "not wrong"), [{ start: 0, end: 9 }, { start: 16, end: 29 }]);
+    assert.deepEqual(foldedOccurrences("not wrong, then __not__ wrong", "**not** wrong"), [{ start: 0, end: 9 }, { start: 16, end: 29 }]);
   });
 
   it("a style written by hand into a world below its boundary is adopted and the boundary raised on open (codex, round five)", async () => {
