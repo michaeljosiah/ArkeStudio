@@ -722,7 +722,10 @@ const ProductionChapterModelActionSchema = z
             })
             .strict()
             .refine((changes) => Object.keys(changes).length > 0, "a chapter edit must change at least one field")
-            .refine((changes) => changes.body === undefined || changes.passage === undefined, "a chapter edit carries a body or a passage, never both"),
+            .refine((changes) => changes.body === undefined || changes.passage === undefined, "a chapter edit carries a body or a passage, never both")
+            // A passage travels alone (codex, round four): the card says only the span is written,
+            // so a status or a synopsis riding beside it would be a change the card did not show.
+            .refine((changes) => changes.passage === undefined || Object.keys(changes).length === 1, "a passage travels alone: an edit that carries one carries nothing else"),
         })
         .strict(),
     ]),

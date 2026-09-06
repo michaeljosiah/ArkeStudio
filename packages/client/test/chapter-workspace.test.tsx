@@ -375,6 +375,15 @@ describe("the craft loop (turn 128)", () => {
       `the selection travels as a subject (${said?.subject === undefined ? "none sent" : "sent"})`,
     );
 
+    // The style check asks for a reply and nothing else, and the send says so.
+    const hold = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "Hold this against the style") as HTMLElement;
+    await act(async () => {
+      hold.click();
+    });
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string; replyOnly?: boolean }>;
+    assert.equal(sends.find((message) => message.text.endsWith("Tighten this"))?.replyOnly, undefined, "a revision may stage");
+    assert.equal(sends.find((message) => message.text.endsWith("Hold this against the style"))?.replyOnly, true, "a check may not");
+
     await keyup(area, 3, 3);
     assert.doesNotMatch(text(m), /Ask Arke · /, "the selection collapsed, the press goes");
     assert.doesNotMatch(text(m), /about this passage/);

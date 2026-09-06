@@ -955,9 +955,11 @@ export function ChapterWorkspace({
             // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
             // from; a chapter with prose is continued. While a passage is selected the prompts
             // are a revision's (turn 128), and the passage is the subject.
+            // Holding against the style is a reply and nothing else: the send says so, and the
+            // coordinator refuses any action the turn comes back with.
             prompts: passage !== null
-              ? ["Tighten this", "Hold this against the style"]
-              : [firstPrompt(live, chapter.synopsis), style !== null ? "Hold this against the style" : "What does this chapter draw on?"],
+              ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
+              : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: passage !== null

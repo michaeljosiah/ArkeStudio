@@ -293,6 +293,8 @@ export interface WorldChatActionTurn {
    * is held against it, so the action can only aim at the words the author pointed at.
    */
   readonly subject?: WorldChatSubject;
+  /** The line asked for a reply and nothing else (turn 128): an action it returns is refused. */
+  readonly replyOnly?: boolean;
   readonly at: string;
 }
 
@@ -498,7 +500,10 @@ function currentWorldObservation(
       const targetId = target ?? store.worldId;
       const [productionId, chapterId] = targetId.split(":");
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
-      if (chapterId) return { target: targetId, fence: chapterFence(production, chapterId) };
+      if (chapterId) {
+        const canonical = canonicalChapterId(store, productionId!, chapterId);
+        return { target: `${productionId}:${canonical}`, fence: chapterFence(production, canonical) };
+      }
       return { target: targetId, fence: chaptersFence(production) };
     }
     case "scenes": {
@@ -587,7 +592,7 @@ function productionActionTargets(
       // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
       // sends the model back to read it again rather than to guess.
       const quotedFrom = action.change.operation === "edit" && action.change.changes.passage !== undefined
-        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${action.change.chapterId}` }]
+        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.change.chapterId)}` }]
         : [];
       return [
         { requirement: "chapters", target: action.productionId },
@@ -921,6 +926,16 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
 }
 
 /**
+ * A chapter's canonical id from either spelling (codex on PR 899): `get_chapter` and the chapter
+ * edit both accept the frontmatter id or the file stem, and a receipt is matched by exact target,
+ * so both sides name the chapter the same way or a current read is refused as missing.
+ */
+function canonicalChapterId(store: WorldStore, productionId: string, chapterId: string): string {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  return production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)?.id ?? chapterId;
+}
+
+/**
  * A passage revision is held to the passage that was selected (turn 128, codex round three): the
  * selection, the chapter and the paragraph exist as a structured subject on the turn, not only
  * in the words said, so an action that comes back naming another chapter, another paragraph, or
@@ -1169,6 +1184,11 @@ export function prepareWorldChatActions(
     });
   }
 
+  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
+  // whatever the model returned: `Hold this against the style` stages nothing.
+  if (turn.replyOnly === true && turn.actions.length > 0) {
+    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
   const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
   const plannedProductionIds = new Set<string>();
   const plannedSeriesIds = new Set<string>();

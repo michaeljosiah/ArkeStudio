@@ -135,6 +135,7 @@ describe("the style the book is written in (turn 128)", () => {
     let production = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!;
     assert.deepEqual(production.proseStyle, { version: 1, pov: "close third", tense: "past", voice: "Short declaratives." });
     assert.equal(production.story?.version, 6, "the overview's version does not move with the style");
+    assert.equal(store.getBundle().meta.schemaVersion, 10, "the style is its own schema boundary, so a build older than it refuses the world by name");
 
     const second = await stage({ samples: ["Six, and the tide not yet called."], tense: null });
     assert.equal((await gate.accept(second.id)).status, "accepted");

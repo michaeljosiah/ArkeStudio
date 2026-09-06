@@ -651,7 +651,9 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
-        readTarget = target("chapters", `${productionId}:${chapterId}`);
+        // The receipt names the chapter by its id whichever spelling was asked for, so an edit
+        // that names it the other way still matches (codex on PR 899).
+        readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}`);
         rows = chapter ? [{ key: "metadata", value: chapter }, ...chunks(body ?? "")] : [];
         // Fenced on the summary's content hash rather than the body read here, so the action
         // check can re-observe the same fence from the bundle (codex on PR 899).

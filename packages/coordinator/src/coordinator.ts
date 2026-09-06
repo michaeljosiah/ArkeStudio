@@ -4636,6 +4636,7 @@ export class Coordinator {
           msg.attachmentIds,
           msg.subject,
           msg.modelId,
+          msg.replyOnly === true,
         );
         // Started after the turn it names, so the person's own turn has first claim on the
         // harness, and awaited last, so naming a row never delays the reply.

@@ -80,7 +80,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * scene files carrying `flow` and no `shots[]`.
  * Version 4 marks durable frame-run outcomes; version 5, typed Picture timelines; version 6,
  * scene-owned Stage blocking; version 7, Stage figure posture; version 8, camera-key easing;
- * version 9, deterministic camera rigs.
+ * version 9, deterministic camera rigs; version 10, the prose style a book is written in
+ * (`prose-style.json`, turn 128) — fenced so a build that cannot read it refuses the world rather
+ * than drafting without the style every draft is promised to hold to.
  * Worlds are born at 1 and raised lazily by the first write that needs the boundary, so a
  * world that never uses those features stays openable by older builds; a build older than the
  * boundary refuses a newer-schema world by name instead of silently dropping strict-parse
@@ -88,7 +90,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
  * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 9;
+export const SUPPORTED_SCHEMA_VERSION = 10;
 
 export class WorldOpenError extends Error {
   constructor(

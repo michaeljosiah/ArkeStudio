@@ -26,6 +26,7 @@ describe("the craft loop's actions (design turn 128, issue 896)", () => {
     assert.equal(edit({ passage: { find: "x".repeat(1_201), with: "y" } }).success, false, "at most 1,200 characters found");
     assert.equal(edit({ passage: { find: "x", with: "y".repeat(2_401) } }).success, false, "at most 2,400 put in its place");
     assert.equal(edit({ body: "Whole.", passage: { find: "x", with: "y" } }).success, false, "a body or a passage, never both");
+    assert.equal(edit({ status: "revised", passage: { find: "x", with: "y" } }).success, false, "a passage travels alone: nothing rides beside it");
   });
 
   it("the prose style action settles each field, clears with null, and refuses an empty change", () => {

@@ -521,6 +521,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       modelId: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
+      /**
+       * A line that asks for a reply and nothing else (turn 128): findings, not a proposal. The
+       * coordinator refuses any authored action the turn comes back with, so a quick ask that
+       * promises to stage nothing cannot be talked into staging something.
+       */
+      replyOnly: z.boolean().optional(),
     })
     .strict(),
   /**

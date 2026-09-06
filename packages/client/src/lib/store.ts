@@ -4040,6 +4040,8 @@ export function sendWorldChat(
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
   modelId?: string,
+  /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
+  replyOnly = false,
 ): void {
   send({
     kind: "world-chat-send",
@@ -4050,6 +4052,7 @@ export function sendWorldChat(
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
+    ...(replyOnly ? { replyOnly: true } : {}),
   });
 }
 

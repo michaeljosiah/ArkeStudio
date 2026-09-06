@@ -2140,4 +2140,12 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
     });
     assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, whole), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "a body is not held to a passage");
   });
+
+  it("a reply-only ask stages nothing, whatever the model returned (codex, round four)", async () => {
+    const w = await setup(context);
+    const asked = turn(w.conversationId, context, { actions: [revision("neap", "the 1820 volume", 2)], subject, replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, asked), /This ask was for a reply only; nothing is staged from it/);
+    const quiet = turn(w.conversationId, context, { actions: [], replyOnly: true });
+    assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, quiet), [], "a reply with no action is the promise kept");
+  });
 });
