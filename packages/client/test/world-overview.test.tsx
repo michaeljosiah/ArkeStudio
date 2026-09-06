@@ -476,6 +476,20 @@ function renderPicker(worlds: PickerWorld[]): string {
 }
 
 describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
+  it("keeps Create a world first with no worlds or a growing collection (#929)", () => {
+    for (const count of [0, 11]) {
+      const worlds = Array.from({ length: count }, (_, i) => ({ ...WORLD_ROW, worldId: `${WORLD_ROW.worldId}${i}`, name: `World ${i}` }));
+      const html = renderPicker(worlds);
+      assert.match(html, /class="fy-home-cards"><button[^>]*class="fy-worldcard fy-newworldcard"/);
+      assert.equal((html.match(/Create a world/g) ?? []).length, 1);
+      assert.doesNotMatch(html, /Name it\. We/);
+      if (count > 0) {
+        assert.ok(html.indexOf("Create a world") < html.indexOf("World 0"));
+        assert.match(html, /No key art yet\./);
+      }
+    }
+  });
+
   it("renders the logline box even for a world that has none", () => {
     const { logline: _dropped, ...noLogline } = WORLD_ROW;
     const html = renderPicker([noLogline as PickerWorld]);

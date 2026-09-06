@@ -1147,21 +1147,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 
 .fy-newworldcard {
-  width: 283px;
   height: var(--fy-worldcard-h);
-  border: 1.5px dashed var(--neutral-300);
-  border-radius: var(--radius-card);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  cursor: pointer;
-  background: transparent;
+  text-align: left;
   color: inherit;
-  transition: var(--transition-control);
 }
-.fy-newworldcard:hover { border-color: var(--neutral-500); background: var(--muted); }
+.fy-newworldcard .fy-worldcard__frame { width: 256px; height: 286px; }
+.fy-newworldcard .fy-worldcard__name { display: block; }
+.fy-newworldcard:focus-visible { outline: 2px solid var(--foreground); outline-offset: 4px; }
 
 /* ---- home hero spacing ---------------------------------------------------- */
 /* Home's own head is gone: the lockup and the two destinations it held now live in the one
