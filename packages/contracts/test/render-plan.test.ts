@@ -11,6 +11,7 @@ import {
   pictureAtSec,
   pictureEdges,
   migrateLegacyCut,
+  legacyArtifactScopeRefusal,
   seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
   type ExportPlan,
@@ -43,6 +44,20 @@ const artifacts: RenderArtifact[] = [
 ];
 
 describe("production-owned media in render plans and migration (#895)", () => {
+  it("does not resolve legacy media omitted from episode and song-clock delivery", () => {
+    const value = production({ episodes: [{ id: "ep_one", version: 1, order: 1, title: "One", scenes: ["sc_one"] }] });
+    value.cut.audio = [{ kind: "score", label: "Legacy score", entries: [{ artifactId: INSERT, offsetSec: 0 }] }];
+    const scope = { kind: "episode" as const, episodeId: "ep_one" };
+    const expected = buildRenderPlan({ production: { ...value, cut: { audio: [], overlays: [] } }, artifacts: [], timeline: { status: "absent" }, scope, preset: "review-cut" });
+    assert.ok(expected.ok);
+    for (const catalog of [[], artifacts.map(artifact => ({ ...artifact, production: "another-production" }))]) {
+      assert.deepEqual(buildRenderPlan({ production: value, artifacts: catalog, timeline: { status: "absent" }, scope, preset: "review-cut" }), expected);
+    }
+    value.spine = { schemaVersion: 1, revision: 1, trackArtifactId: BELLS, markers: [], anchors: {}, updatedAt: AT };
+    const catalog = artifacts.map(artifact => ({ ...artifact, production: artifact.id === BELLS ? value.meta.id : "another-production" }));
+    assert.equal(legacyArtifactScopeRefusal(value, catalog), null, "the legacy song clock does not read cut overlays");
+    assert.match(legacyArtifactScopeRefusal(value, catalog.map(artifact => ({ ...artifact, production: "another-production" })))!, /Master track.*belongs to another production/);
+  });
   for (const lane of ["base", "overlay", "audio"] as const) {
     it(`distinguishes missing and scoped media on ${lane}, while allowing own and world media`, () => {
       const value = production({ cut: { audio: [], overlays: [] } });

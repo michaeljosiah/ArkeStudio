@@ -380,11 +380,16 @@ export function legacyCutArtifactReferences(cut: CutFile): Array<{ label: string
 
 /** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
 export function legacyArtifactScopeRefusal(production: ProductionBundle,
-  artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline): string | null {
+  artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline,
+  scope: RenderScope = { kind: "production" }): string | null {
+  // Legacy episodes include only their scene cut, and the song clock includes only its master
+  // and anchored takes. Neither reads the legacy overlay/audio placements.
+  if (timeline?.status !== "ready" && scope.kind === "episode") return null;
   if (timeline?.status !== "ready" && production.spine) {
     const master = resolveProductionArtifact(artifacts, production.spine.trackArtifactId, production.meta.id);
     // The song clock already has its own missing/unmeasured-master diagnostics.
     if (!master.ok && master.code === "other-production") return `Master track cites ${master.reason}`;
+    return null;
   }
   if (timeline?.status === "ready" && timeline.timeline.migratedCut === true) return null;
   for (const reference of legacyCutArtifactReferences(production.cut)) {
@@ -406,7 +411,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
-  const legacyRefusal = legacyArtifactScopeRefusal(production, artifacts, timeline);
+  const legacyRefusal = legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
   if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.

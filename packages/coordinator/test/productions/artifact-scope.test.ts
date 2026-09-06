@@ -71,6 +71,16 @@ it("keeps an existing scoped clip removable but refuses detachment and delivery 
   });
   const after = productionOf(store); assert.ok(after.timeline?.status === "ready");
   assert.equal(after.timeline.timeline.tracks.flatMap(track => track.clips).length, 0);
+  for (const [kind, count] of [["undo", 1], ["undo", 0], ["redo", 1], ["redo", 0]] as const) {
+    const current = productionOf(store); assert.ok(current.timeline?.status === "ready");
+    await applyTimelineCommand(store, PRODUCTION, { kind, baseRevision: current.timeline.timeline.revision });
+    const restored = productionOf(store); assert.ok(restored.timeline?.status === "ready");
+    assert.equal(restored.timeline.timeline.tracks.flatMap(track => track.clips).length, count);
+    if (count === 1) {
+      const result = buildRenderPlan({ production: restored, timeline: restored.timeline, artifacts: store.getBundle().artifacts, scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(!result.ok); assert.match(result.reason, /belongs to another production/);
+    }
+  }
 });
 
 it("refuses legacy audio splits after an overlay's ownership changes (#895)", async t => {
