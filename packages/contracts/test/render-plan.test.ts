@@ -63,6 +63,21 @@ describe("production-owned media in render plans and migration (#895)", () => {
       assert.doesNotMatch(foreign.reason, /which this world does not have/);
       const missing = plan([]);
       assert.ok(!missing.ok); assert.match(missing.reason, /which this world does not have/);
+      // Muted/excluded media contributes nothing to delivery; disabling a bad reference is a
+      // valid recovery option, while re-enabling it restores the actionable refusal.
+      const track = timeline.tracks.find(candidate => candidate.id === trackId)!;
+      track.muted = true;
+      const muted = plan(artifacts);
+      assert.ok(muted.ok);
+      assert.deepEqual(plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" }))), muted);
+      assert.deepEqual(plan([]), muted);
+      track.muted = false;
+      assert.equal(plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" }))).ok, false);
+      if (lane === "audio") {
+        timeline.tracks.push({ ...track, id: "tr_solo", name: "Solo", order: 99, clips: [], solo: true });
+        const soloed = plan(artifacts); assert.ok(soloed.ok);
+        assert.deepEqual(plan(artifacts.map(artifact => ({ ...artifact, production: "another-production" }))), soloed);
+      }
     });
   }
 
@@ -79,6 +94,8 @@ describe("production-owned media in render plans and migration (#895)", () => {
     assert.match(migrated.dropped[0]!, /ov_.*belongs to another production/);
     assert.match(migrated.dropped[1]!, /Legacy score entry 1.*belongs to another production/);
     assert.equal(migrated.timeline.tracks.flatMap(track => track.clips).length, 0);
+    const missing = buildRenderPlan({ production: value, artifacts: [], timeline: { status: "absent" }, scope: { kind: "production" }, preset: "review-cut" });
+    assert.ok(!missing.ok); assert.match(missing.reason, /ov_.*which this world does not have/);
   });
 
   for (const entry of [{ artifactId: BELLS, offsetSec: 0 }, { source: { kind: "artifact" as const, artifactId: BELLS }, offsetSec: 0 }]) {
@@ -88,6 +105,8 @@ describe("production-owned media in render plans and migration (#895)", () => {
     for (const timeline of [{ status: "absent" as const }, { status: "ready" as const, timeline: seedEmptyPictureTimeline(value) }]) {
       const plan = buildRenderPlan({ production: value, artifacts: catalog, timeline, scope: { kind: "production" }, preset: "review-cut" });
       assert.ok(!plan.ok); assert.match(plan.reason, /Legacy score entry 1.*belongs to another production.*Import the file/);
+      const missing = buildRenderPlan({ production: value, artifacts: [], timeline, scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(!missing.ok); assert.match(missing.reason, /Legacy score entry 1.*which this world does not have/);
     }
     const refused = migrateLegacyCut(seedEmptyPictureTimeline(value), value, catalog);
     assert.match(refused.dropped[0]!, /Legacy score entry 1.*belongs to another production.*Import the file/);

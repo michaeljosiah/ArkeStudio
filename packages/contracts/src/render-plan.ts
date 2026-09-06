@@ -381,14 +381,15 @@ export function legacyCutArtifactReferences(cut: CutFile): Array<{ label: string
 /** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
 export function legacyArtifactScopeRefusal(production: ProductionBundle,
   artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline): string | null {
-  const references: Array<{ label: string; id: string }> = [];
-  if (timeline?.status !== "ready" && production.spine) references.push({ label: "Master track", id: production.spine.trackArtifactId });
-  if (timeline?.status !== "ready" || timeline.timeline.migratedCut !== true) {
-    references.push(...legacyCutArtifactReferences(production.cut));
+  if (timeline?.status !== "ready" && production.spine) {
+    const master = resolveProductionArtifact(artifacts, production.spine.trackArtifactId, production.meta.id);
+    // The song clock already has its own missing/unmeasured-master diagnostics.
+    if (!master.ok && master.code === "other-production") return `Master track cites ${master.reason}`;
   }
-  for (const reference of references) {
+  if (timeline?.status === "ready" && timeline.timeline.migratedCut === true) return null;
+  for (const reference of legacyCutArtifactReferences(production.cut)) {
     const resolved = resolveProductionArtifact(artifacts, reference.id, production.meta.id);
-    if (!resolved.ok && resolved.code === "other-production") return `${reference.label} cites ${resolved.reason}`;
+    if (!resolved.ok) return `${reference.label} cites ${resolved.reason}`;
   }
   return null;
 }
