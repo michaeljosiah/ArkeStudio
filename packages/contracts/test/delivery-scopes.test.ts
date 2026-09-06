@@ -281,7 +281,7 @@ describe("one timeline, three delivery scopes (#682)", () => {
     // The plate straddles the cut: its head is gone, the rest is there, held as a still.
     assert.deepEqual(two.overlays, [{ path: "artifacts/plate.png", startSec: 0, endSec: 1.48, still: true }]);
     // The bed started 1.52s before the episode: it enters 1.52s into its source.
-    assert.deepEqual(two.audio.map((clip) => [clip.startSec, clip.endSec, Math.round(clip.sourceInSec * 100) / 100]), [[0, 4.48, 1.52]]);
+    assert.deepEqual(two.audio.map((clip) => [clip.startSec, Math.round(clip.endSec * 100) / 100, Math.round(clip.sourceInSec * 100) / 100]), [[0, 4, 0], [0, 4.48, 1.52]]);
     assert.deepEqual(two.burnIn?.cues.map((cue) => [Math.round(cue.startSec * 100) / 100, Math.round(cue.endSec * 100) / 100]), [[0, 1.48]]);
     const graph = buildFfmpegArgs(two, "/w", "/out.mp4", "/f.ttf");
     assert.match(graph[graph.indexOf("-filter_complex") + 1]!, /concat=n=2:v=1:a=0/, "the two episode-two shots and nothing of episode one");

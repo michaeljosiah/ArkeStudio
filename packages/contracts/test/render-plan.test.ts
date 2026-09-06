@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  audioAtSec,
   buildExportPlan,
   buildFfmpegArgs,
   buildRenderPlan,
@@ -14,6 +15,7 @@ import {
   legacyArtifactScopeRefusal,
   seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
+  windowPlan,
   type ExportPlan,
   type ProductionBundle,
   type RenderArtifact,
@@ -212,6 +214,118 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
     ...over,
   };
 }
+
+describe("video sound defaults and export diagnostics (#908)", () => {
+  for (const lane of ["shot", "take", "upper", "audio"] as const) {
+    it(`stops ${lane} segment sound before the next shot in its parent file`, () => {
+      const p = production({ cut: { audio: [], overlays: [] } }), parent = p.takes[0]!;
+      const child = { ...parent, id: "tk_01J8E0000000000000000000S1", media: undefined,
+        segment: { passTakeId: parent.id, inSec: 1, outSec: 2 } };
+      p.takes.push(child);
+      p.selections.sh_1 = { acceptedTakeId: child.id, trimInSec: .2 };
+      p.takeMediaInfo[parent.id] = { sourceHash: `sha256:${"a".repeat(64)}`, probedAt: AT, mediaInfo: { durationSec: 5, hasAudio: true } };
+      const source = lane === "shot" ? seedStoryPictureTimeline(p).tracks[0]!.clips[0]!.source
+        : { kind: "take" as const, takeId: child.id, label: "Segment", offsetSec: .2 };
+      const trackId: "tr_test" | "tr_picture" = lane === "upper" || lane === "audio" ? "tr_test" : "tr_picture";
+      const timeline = applyTimelineCommands(seedEmptyPictureTimeline(p), [
+        ...(trackId === "tr_picture" ? [] : [{ kind: "add-track" as const, trackId, trackKind: lane === "audio" ? "audio" as const : "picture" as const, name: "Test" }]),
+        { kind: "place", trackId, clip: { id: "cl_segment", startFrame: 0, durationFrames: 50, sourceInFrames: 0, source } },
+      ]);
+      const result = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+        scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(result.ok);
+      assert.equal(result.plan.audio[0]!.sourceInSec, 1.2);
+      assert.equal(result.plan.audio[0]!.endSec, .8);
+      assert.equal(audioAtSec(result.plan, .7).length, 1);
+      assert.equal(audioAtSec(result.plan, .9).length, 0, "preview is silent after the segment");
+      const args = buildFfmpegArgs(result.plan, "/world", "/export.mp4", "/font.ttf");
+      assert.match(args[args.indexOf("-filter_complex") + 1]!, /atrim=duration=0.8/, "export stops at the same physical boundary");
+      if (lane !== "audio") {
+        delete p.takeMediaInfo[parent.id];
+        const unmeasured = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+          scope: { kind: "production" }, preset: "review-cut" });
+        assert.ok(unmeasured.ok);
+        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8 }]);
+        const scope = { kind: "episode" as const, episodeId: "ep_two" };
+        assert.deepEqual(windowPlan(unmeasured.plan, .4, 1.4, scope).unmeasuredAudio,
+          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4 }]);
+        assert.deepEqual(windowPlan(unmeasured.plan, .8, 2, scope).unmeasuredAudio, [],
+          "an episode containing only the silent remainder has no missing-sound notice");
+        timeline.tracks.find(track => track.id === trackId)!.clips[0]!.sourceInFrames = 25;
+        const exhausted = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+          scope: { kind: "production" }, preset: "review-cut" });
+        assert.ok(exhausted.ok);
+        assert.equal(exhausted.plan.unmeasuredAudio, undefined, "a trim past the segment has no possible sound to diagnose");
+      }
+    });
+  }
+
+  it("names unmeasured kept legacy videos until their placements are migrated", () => {
+    const p = production({ cut: { audio: [], overlays: [
+      { id: "ov_01J8G0000000000000000000B1", artifactId: INSERT, startSec: 1, endSec: 2, audio: "keep", lane: 0 },
+    ] } });
+    const timeline = seedEmptyPictureTimeline(p); delete timeline.migratedCut;
+    const catalog = [{ id: INSERT, file: "unmeasured.mp4", kind: "video" as const }];
+    const render = () => buildRenderPlan({ production: p, artifacts: catalog, timeline: { status: "ready" as const, timeline }, scope: { kind: "production" as const }, preset: "review-cut" as const });
+    let result = render(); assert.ok(result.ok);
+    assert.deepEqual(result.plan.unmeasuredAudio, [{ clipId: p.cut.overlays[0]!.id, label: "unmeasured.mp4", startSec: 1, endSec: 2 }]);
+    p.cut.overlays[0]!.audio = "only";
+    result = render(); assert.ok(result.ok);
+    assert.equal(result.plan.totalSec, 0, "unknown sound cannot establish playable duration");
+    assert.equal(result.plan.unmeasuredAudio?.[0]?.label, "unmeasured.mp4", "the omission's cause survives the empty plan");
+    p.cut.overlays[0]!.audio = "mute";
+    result = render(); assert.ok(result.ok); assert.equal(result.plan.unmeasuredAudio, undefined);
+    p.cut.overlays[0]!.audio = "keep"; timeline.migratedCut = true;
+    result = render(); assert.ok(result.ok); assert.equal(result.plan.unmeasuredAudio, undefined);
+  });
+  it("keeps a filed shot segment's measured parent sound without an explicit audio setting", () => {
+    const p = production({ cut: { audio: [], overlays: [] } });
+    const parent = p.takes[0]!;
+    const child = { ...parent, id: "tk_01J8E0000000000000000000S1", media: undefined,
+      segment: { passTakeId: parent.id, inSec: 1, outSec: 4 } };
+    p.takes.push(child);
+    p.selections.sh_1 = { acceptedTakeId: child.id, trimInSec: .213 };
+    p.takeMediaInfo[parent.id] = { sourceHash: `sha256:${"a".repeat(64)}`, probedAt: AT,
+      mediaInfo: { durationSec: 5, hasAudio: true } };
+    const timeline = seedStoryPictureTimeline(p);
+    assert.equal(timeline.tracks[0]!.clips[0]!.audio, undefined);
+    const render = (value = timeline) => {
+      const result = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline: value },
+        scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(result.ok); return result.plan;
+    };
+    const plan = render();
+    assert.equal(plan.audio.length, 1);
+    assert.equal(plan.audio[0]!.path, `productions/${p.meta.id}/takes/${parent.id}/clip.mp4`);
+    assert.equal(plan.audio[0]!.sourceInSec, 1.213);
+    assert.equal(plan.unmeasuredAudio, undefined, "the child needs no duplicate measurement");
+    assert.equal(render(applyTimelineCommands(timeline, [{ kind: "set-clip-audio", clipId: "cl_sh-1", audio: "mute" }])).audio.length, 0);
+    assert.equal(render(applyTimelineCommands(timeline, [{ kind: "set-track", trackId: "tr_picture", muted: true }])).audio.length, 0);
+    p.takeMediaInfo[parent.id]!.mediaInfo.hasAudio = false;
+    assert.equal(render().unmeasuredAudio, undefined, "known silent media is not unmeasured");
+    assert.equal(render().audio.length, 0);
+    delete p.takeMediaInfo[parent.id];
+    assert.deepEqual(render().unmeasuredAudio?.map(item => item.clipId), ["cl_sh-1"]);
+  });
+
+  it("reports unmeasured base and upper videos only within the delivered audible range", () => {
+    const p = production({ cut: { audio: [], overlays: [] } });
+    const timeline = applyTimelineCommands(seedEmptyPictureTimeline(p), [
+      { kind: "place", trackId: "tr_picture", clip: { id: "cl_base", startFrame: 0, durationFrames: 50, sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: INSERT, label: "Base" } } },
+      { kind: "add-track", trackId: "tr_upper", trackKind: "picture", name: "Upper" },
+      { kind: "place", trackId: "tr_upper", clip: { id: "cl_upper", startFrame: 75, durationFrames: 50, sourceInFrames: 0,
+        source: { kind: "take", takeId: TAKE, label: "Upper" } } },
+    ]);
+    const result = buildRenderPlan({ production: p, artifacts: [{ id: INSERT, kind: "video", file: "insert.mp4" }],
+      timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+    assert.ok(result.ok);
+    assert.deepEqual(result.plan.unmeasuredAudio?.map(item => item.clipId).sort(), ["cl_base", "cl_upper"]);
+    const window = windowPlan(result.plan, 3.5, 5, { kind: "episode", episodeId: "ep_two" });
+    assert.deepEqual(window.unmeasuredAudio, [{ clipId: "cl_upper", label: "Upper", startSec: 0, endSec: 1.5 }]);
+    assert.deepEqual(windowPlan(result.plan, 2, 3, { kind: "production" }).unmeasuredAudio, []);
+  });
+});
 
 interface GraphInput {
   path: string;

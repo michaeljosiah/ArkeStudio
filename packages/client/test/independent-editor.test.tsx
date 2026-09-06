@@ -10,7 +10,7 @@ import { CutScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
-Object.assign(dom.window, { matchMedia: (media: string) => ({ matches: false, media }) });
+Object.assign(dom.window, { innerWidth: 1024, innerHeight: 768, matchMedia: (media: string) => ({ matches: false, media }) });
 Object.assign(dom.HTMLElement.prototype, { focus() {} });
 Object.assign(Object.getPrototypeOf(dom.document.createElement("video")), { pause() {}, play: () => Promise.resolve() });
 Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement,
@@ -34,7 +34,7 @@ async function mount(state: ClientState) {
     <Routes><Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} /></Routes>
   </MemoryRouter>));
   const button = (text: string) => {
-    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
+    const found = [...container.querySelectorAll<HTMLButtonElement>("button"), ...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
   return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
@@ -169,6 +169,81 @@ it("shows the filename as an editable clip and detaches sound with a neutral rol
     assert.match(command.newClipId, /^cl_/);
   } finally { await screen.close(); }
 });
+
+for (const upper of [false, true]) {
+  it(`extracts a ${upper ? "upper" : "main"} video through its context menu into a new audio track`, async () => {
+    const state = stateWithVideo(true), p = state.world!.productions[0]!;
+    assert.ok(p.timeline?.status === "ready");
+    if (upper) {
+      const clip = p.timeline.timeline.tracks[0]!.clips[0]!;
+      p.timeline.timeline = applyTimelineCommands(applyTimelineCommands(p.timeline.timeline, [{ kind: "delete", clipId: clip.id }]), [
+        { kind: "add-track", trackId: "tr_upper", trackKind: "picture", name: "Upper" },
+        { kind: "place", trackId: "tr_upper", clip },
+      ]);
+    }
+    const screen = await mount(state);
+    try {
+      const picture = screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!;
+      const open = async (keyboard = false) => {
+        const event = new Event(keyboard ? "keydown" : "contextmenu", { bubbles: true, cancelable: true });
+        Object.assign(event, keyboard ? { key: "F10", shiftKey: true } : { clientX: 1010, clientY: 750 });
+        await act(async () => { picture.dispatchEvent(event); });
+      };
+      await open();
+      const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
+      assert.ok(menu);
+      assert.equal(menu.parentElement, document.body, "timeline scrolling cannot clip the menu");
+      assert.equal(screen.button("Extract audio to new track").disabled, false);
+      assert.ok(parseFloat(menu.style.left) <= 1016 && parseFloat(menu.style.top) <= 760);
+      await act(async () => { menu.dispatchEvent(new Event("scroll")); });
+      assert.ok(document.querySelector('[role="menu"]'), "scrolling the menu keeps it open");
+      await act(async () => { window.dispatchEvent(new Event("scroll")); });
+      assert.ok(document.querySelector('[role="menu"]'), "selection layout scrolling keeps it open");
+      await act(async () => { document.body.dispatchEvent(new Event("wheel", { bubbles: true })); });
+      assert.equal(document.querySelector('[role="menu"]'), null, "user scrolling outside dismisses");
+      await open();
+      await act(async () => {
+        const escape = new Event("keydown", { bubbles: true }); Object.assign(escape, { key: "Escape" });
+        window.dispatchEvent(escape);
+      });
+      assert.equal(document.querySelector('[role="menu"]'), null);
+      await open(true);
+      await act(async () => screen.button("Extract audio to new track").click());
+      const batch = screen.sent.find(message => message.kind === "timeline-command");
+      assert.ok(batch?.kind === "timeline-command");
+      assert.equal(batch.commands.length, 1);
+      const command = batch.commands[0]!;
+      assert.ok(command.kind === "detach-audio");
+      assert.match(command.newClipId, /^cl_/);
+      assert.deepEqual(command, { kind: "detach-audio", clipId: "cl_holiday", newClipId: command.newClipId, newTrack: true });
+      assert.equal(document.querySelector('[role="menu"]'), null);
+    } finally { await screen.close(); }
+  });
+}
+
+for (const unavailable of ["silent", "unmeasured", "muted"] as const) {
+  it(`explains why ${unavailable} video cannot be extracted from its context menu`, async () => {
+    const state = stateWithVideo(true), p = state.world!.productions[0]!;
+    if (unavailable === "silent") state.world!.artifacts[0]!.mediaInfo!.hasAudio = false;
+    if (unavailable === "unmeasured") delete state.world!.artifacts[0]!.mediaInfo;
+    if (unavailable === "muted" && p.timeline?.status === "ready") p.timeline.timeline.tracks[0]!.clips[0]!.audio = "mute";
+    const screen = await mount(state);
+    try {
+      const event = new Event("contextmenu", { bubbles: true }); Object.assign(event, { clientX: 100, clientY: 100 });
+      await act(async () => { screen.container.querySelector('[data-clip="cl_holiday"]')!.dispatchEvent(event); });
+      const extraction = screen.button("Extract audio to new track");
+      assert.equal(extraction.disabled, false, "the unavailable action remains focusable");
+      assert.equal(extraction.getAttribute("aria-disabled"), "true");
+      assert.ok(document.getElementById(extraction.getAttribute("aria-describedby")!)?.textContent);
+      await act(async () => extraction.click());
+      assert.equal(screen.sent.some(message => message.kind === "timeline-command"), false);
+      assert.match(document.querySelector('[role="menu"]')!.textContent!, unavailable === "silent" ? /no audio stream/ : unavailable === "unmeasured" ? /Measure/ : /already muted/);
+      await act(async () => { document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
+      assert.equal(document.querySelector('[role="menu"]'), null);
+      assert.equal(screen.sent.some(message => message.kind === "timeline-command"), false);
+    } finally { await screen.close(); }
+  });
+}
 
 it("places an overlay above a base Picture track with a custom saved id", async () => {
   const state = stateWithVideo(false), p = state.world!.productions[0]!;

@@ -52,6 +52,7 @@ import {
   type ProductionBundle,
   type ProductionTimeline,
   type ResolvedPictureCut,
+  type RenderPlan,
   type Scene,
   type TimelineClip,
   type TimelineChangeHistoryEntry,
@@ -5581,6 +5582,13 @@ function typingTarget(target: EventTarget | null): boolean {
  * the render plan decides what can be delivered, the same plan the preview draws. Sound options
  * are the timeline's mix, so choosing one is a timeline command, not a private export setting.
  */
+function exportAudioStatus(plan: RenderPlan): string | null {
+  if (plan.unmeasuredAudio?.length) return plan.audio.length === 0
+    ? "No sound — video audio not measured"
+    : "Some video sound is unavailable — measurement missing";
+  return plan.audio.length === 0 ? "No sound — no audible audio in this cut" : null;
+}
+
 function ExportSheet({
   open,
   onClose,
@@ -5636,7 +5644,9 @@ function ExportSheet({
    * record with nothing on it is, to the person, the same state as no record at all.
    */
   const nothingPlaced = plan?.ok === true && plan.plan.items.length === 0;
-  if (nothingPlaced && blockedBy === null) blockedBy = nothingOnTimeline;
+  if (nothingPlaced && blockedBy === null) blockedBy = plan?.ok && plan.plan.unmeasuredAudio?.length
+    ? "Video audio has not been measured. Import the source video to measure it before exporting."
+    : nothingOnTimeline;
   const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
   const gaps = cut?.gaps ?? 0;
   const covered = cut === null ? 0 : cut.covered;
@@ -5646,6 +5656,8 @@ function ExportSheet({
   const subtitleChoice =
     chosenSubtitleTrack !== null && subtitleMode !== "none" ? { trackId: chosenSubtitleTrack.id, mode: subtitleMode, sidecar: sidecarFormat } : undefined;
   const speechFirst = ready ? timelineState.timeline.mix.speechFirst : true;
+  const audioStatus = plan?.ok && blockedBy === null ? exportAudioStatus(plan.plan) : null;
+  const noAudio = plan?.ok === true && plan.plan.audio.length === 0;
   const mine = Object.entries(exportsState).filter(([, entry]) => entry.productionId === prodId);
   const revision = ready ? timelineState.timeline.revision : null;
   const episodic = production !== null && productionShape(production.meta).isEpisodic;
@@ -5717,8 +5729,12 @@ function ExportSheet({
         <div className="fy-exsheet__row">
           <span className="fy-exsheet__name">Audio</span>
           <span className="fy-exsheet__opts" role="group" aria-label="Audio">
-            {chip(speechFirst, "Stereo · ducked", () => onMix(true), !ready || commandsDisabled)}
-            {chip(!speechFirst, "Stereo · flat", () => onMix(false), !ready || commandsDisabled)}
+            {chip(speechFirst, "Stereo · ducked", () => onMix(true), !ready || commandsDisabled || noAudio)}
+            {chip(!speechFirst, "Stereo · flat", () => onMix(false), !ready || commandsDisabled || noAudio)}
+            {audioStatus && <span className="fy-exsheet__warn" role="status">{audioStatus}</span>}
+            {plan?.ok && !!plan.plan.unmeasuredAudio?.length && <span className="fy-clipmenu__note">
+              {plan.plan.unmeasuredAudio.map(item => item.label).join(", ")}
+            </span>}
           </span>
         </div>
         {blockedBy !== null && (
@@ -5736,11 +5752,19 @@ function ExportSheet({
             <span className="fy-exsheet__name">Episodes</span>
             {production.episodes.map((episode) => {
               const range = episodeTimelineRange(production, timelineState.timeline, episode.id);
-              const refused = range === null ? null : range.ok ? null : range.reason;
+              const episodePlan = range.ok ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState,
+                scope: { kind: "episode", episodeId: episode.id }, preset }) : null;
+              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : null;
+              const episodeAudio = episodePlan?.ok ? exportAudioStatus(episodePlan.plan) : null;
               return (
                 <div key={episode.id} className="fy-exsheet__episode">
                   <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
                   <span className="fy-exsheet__eptitle">{episode.release?.title ?? episode.title}</span>
+                  {episodeAudio && <span className="fy-exsheet__refused" role="status">
+                    {episodeAudio}
+                    {episodePlan?.ok && !!episodePlan.plan.unmeasuredAudio?.length &&
+                      <span className="fy-clipmenu__note">{episodePlan.plan.unmeasuredAudio.map(item => item.label).join(", ")}</span>}
+                  </span>}
                   {refused !== null ? (
                     <span className="fy-mono fy-exsheet__refused">{refused}</span>
                   ) : (
@@ -7017,6 +7041,8 @@ export function CutScreen() {
                   <>
                     {showScenes && <SceneBands views={views} totalFrames={totalFrames} />}
                     <PictureTrack
+                      production={production ?? undefined}
+                      artifacts={world?.artifacts ?? []}
                       onFileDrop={(files, frame) => importMedia(frame, files)}
                       timeline={shownTimeline}
                       views={views}
@@ -7048,6 +7074,8 @@ export function CutScreen() {
                           })}
                     />
                     <TypedTrackRows
+                      production={production ?? undefined}
+                      artifacts={world?.artifacts ?? []}
                       timeline={shownTimeline}
                       totalFrames={totalFrames}
                       frameRate={frameRate}
