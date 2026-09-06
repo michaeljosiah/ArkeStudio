@@ -916,8 +916,9 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     /*
      * One face, not a reference array (issue 863): the recipe binds a single `first_frame`, and
      * a row claiming more would have the client dropping every picture past the first.
-     * `startFrame` stays false — that is the keyframe lane, with its own routes and fields, and
-     * nothing here reads a frame from it yet.
+     * `startFrame` stays false for the same reason it is false on every fal video row: frame
+     * capability lives in the task modes, and `frameDispatchFor` is the one query every
+     * consumer asks.
      *
      * Worth knowing what a count of one buys elsewhere: every surface that budgets references
      * reads this number, so a scene pass now binds one character reference to H3 where it bound
@@ -928,6 +929,19 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
      * second recipe rather than a flag on this one.
      */
     accepts: { referenceImages: 1, startFrame: false, endFrame: false },
+    /*
+     * The same node, declared as the mode it already is (issue 845). With no mode the planner's
+     * boundary frame (issue 154) fell back to `generate` on this row, so an accepted still, a
+     * drawn keyframe or a chained whole-scene pass all reached the wire as cold text-to-video —
+     * the one thing the walkthrough that prompted the issue shows drifting. No `route`: unlike
+     * the fal rows, the image-to-video sibling is not a second endpoint but node 7 with
+     * `first_frame` bound, and the client already binds it whenever one picture arrives. Nothing
+     * locked: the scaler in front of the slot crops the still to the chosen bucket, so the frame
+     * decides neither aspect nor length. A second frame stays undeclared — `last_frame` is on the
+     * node but has never been run under the floor, and the map of what H3 offers is a record of
+     * what has been watched finish.
+     */
+    modes: { generate: { locked: [] }, "first-frame": { locked: [] } },
     limits: {
       maxPromptChars: 2000,
       // No switch, and sound regardless: H3 decodes an audio latent in the same pass and

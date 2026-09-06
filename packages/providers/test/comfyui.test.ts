@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
-import { characterSpeakingVideoRoutes, dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
+import {
+  characterSpeakingVideoRoutes,
+  dispatchDuration,
+  durationOptions,
+  estimateMicroUsd,
+  frameDispatchFor,
+  modelCapabilityCopy,
+} from "@arke-studio/contracts";
 import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
@@ -214,6 +221,27 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // untested, which is what keeps a fifteen-minute local run from becoming the quiet default.
     assert.equal(row.speechVideo, "untested");
     assert.notEqual(routes[0]?.id, row.id);
+  });
+
+  it("the h3 row answers the one frame query the planner asks, on its own endpoint (issue 845)", () => {
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
+    // Before the mode was declared this answered null and every boundary frame fell back to a
+    // cold text-to-video run — the accepted still, the drawn keyframe and the chained pass alike.
+    const one = frameDispatchFor(row, 1);
+    assert.ok(one !== null, "h3 takes a first frame");
+    assert.equal(one.mode, "first-frame");
+    // Not a sibling route: node 7 with `first_frame` bound is the image-to-video graph.
+    assert.equal(one.route, null);
+    assert.deepEqual(one.locked, []);
+    // `last_frame` is on the node but has never been run under the floor, so it is not offered.
+    assert.equal(frameDispatchFor(row, 2), null);
+    // The picker's copy reads the same authority, and the draft row still claims nothing.
+    assert.match(modelCapabilityCopy(row), /start frame/);
+    const draft = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-draft-video")!;
+    assert.equal(frameDispatchFor(draft, 1), null);
+    assert.doesNotMatch(modelCapabilityCopy(draft), /frame/);
+    // The mode adds no duration vocabulary of its own, so a framed shot offers h3's own lengths.
+    assert.deepEqual(durationOptions(row, { taskMode: "first-frame" }), [5, 10, 15]);
   });
 
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
@@ -571,6 +599,40 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["15"]!.inputs["height"], 864);
     assert.equal(posted.prompt["7"]!.inputs["width"], 480);
     assert.equal(posted.prompt["7"]!.inputs["height"], 864);
+  });
+
+  it("h3 video: the planner's framed bag binds the boundary still as the first frame (issue 845)", async () => {
+    // The exact bag the pass compiler emits for a first-frame route with no endpoint of its own
+    // (issue 154): the still rides as the one reference, and its identity rides beside it. The
+    // allow-list must let the identity through — refusing it would fail every framed shot on
+    // the row the moment the mode was declared.
+    const still = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 4, 4, 4, 4]);
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "still.png", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-still", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-h3-video",
+      capability: "video",
+      params: {
+        prompt: "kest turns from the window",
+        durationSec: 5,
+        aspect: "16:9",
+        references: ["artifacts/frame-shot-1.png"],
+        taskMode: "first-frame",
+        startFrame: "artifacts/frame-shot-1.png",
+        frameArtifact: { id: "artifact-1", hash: "sha256:abc" },
+        dispatchTiming: { slotSource: "shot-duration", slotDurationSec: 5, requestedDurationSec: 5, providerDurationMode: "requested", providerPaddingSec: 0 },
+        provenance: { sheets: [] },
+      },
+      imageReferences: [{ name: "reference-01.png", contentType: "image/png", data: still }],
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["14"]!.inputs["image"], "still.png");
+    assert.deepEqual(posted.prompt["7"]!.inputs["first_frame"], ["15", 0]);
+    assert.equal(posted.prompt["7"]!.inputs["length"], 124);
   });
 
   it("a recipe with one frame refuses two pictures, and one with none still refuses every picture", async () => {
