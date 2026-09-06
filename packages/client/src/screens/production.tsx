@@ -67,6 +67,7 @@ import {
   newAudioTrack,
   migrateLegacyCut,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
@@ -5417,8 +5418,10 @@ function ExportSheet({
   let cut: ReturnType<typeof resolvePictureTimeline> | null = null;
   let blockedBy: string | null = null;
   const nothingOnTimeline = "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
+  const legacyScopeRefusal = production ? legacyArtifactScopeRefusal(production, world?.artifacts ?? [], timelineState) : null;
   if (production === null) blockedBy = "No production here.";
   else if (timelineState.status === "invalid") blockedBy = `Timeline unavailable · ${timelineState.message}`;
+  else if (legacyScopeRefusal !== null) blockedBy = legacyScopeRefusal;
   else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : nothingOnTimeline;
   else {
     try {
@@ -5959,7 +5962,7 @@ export function CutScreen() {
    * editable so the clip can be removed, and Undo still works. Only an invalid or unresolvable
    * timeline record blocks editing.
    */
-  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : null;
+  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
   const timelineOwnsFilm = previewState.status === "ready";
   const canvasSec = spineCut
@@ -7075,6 +7078,7 @@ export function CutScreen() {
  */
 type ExportView =
   | { kind: "scene-order" }
+  | { kind: "unavailable"; reason: string }
   | { kind: "no-track" }
   | { kind: "unmeasured" }
   | { kind: "silent"; durationSec: number }
@@ -7082,13 +7086,15 @@ type ExportView =
 
 function exportViewFor(
   world:
-    | { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
+    | { artifacts: readonly { id: string; production?: string | null; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
     | null
     | undefined,
-  production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
+  production: ProductionBundle | null | undefined,
 ): ExportView {
   const spine = production?.spine;
   if (!production || !spine || !world) return { kind: "scene-order" };
+  const reason = legacyArtifactScopeRefusal(production, world.artifacts);
+  if (reason !== null) return { kind: "unavailable", reason };
   const track = world.artifacts.find((a) => a.id === spine.trackArtifactId);
   // A spine naming an artifact this world does not have is not the same as one nobody measured:
   // the coordinator has no path to probe, so no export can succeed and none should be offered.

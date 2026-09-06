@@ -424,6 +424,7 @@ export function refuseUnrenderablePlacements(
   artifacts: ReadonlyArray<{ id: string; kind: string; file: string; production?: string | null; mediaInfo?: { hasAudio: boolean; durationSec: number } }>,
 ): void {
   const kinds = new Map(timeline.tracks.map((track) => [track.id, track.kind] as const));
+  const sources = new Map(timeline.tracks.flatMap(track => track.clips.map(clip => [clip.id, clip.source] as const)));
   const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
   const refuse = (reason: string): never => {
     throw new TimelineCommandRefused(reason);
@@ -431,7 +432,16 @@ export function refuseUnrenderablePlacements(
   for (const command of commands) {
     if (command.kind === "add-track") kinds.set(command.trackId, command.trackKind);
     if (command.kind === "add-subtitle-track") kinds.set(command.trackId, "subtitle");
+    if (command.kind === "duplicate" || command.kind === "split") {
+      const source = sources.get(command.clipId);
+      if (source?.kind === "artifact") {
+        const resolved = resolveProductionArtifact(artifacts, source.artifactId, production.meta.id);
+        if (!resolved.ok) refuse(`${command.clipId} cites ${resolved.reason}`);
+      }
+      if (source) sources.set(command.newClipId, source);
+    }
     if (command.kind !== "place") continue;
+    sources.set(command.clip.id, command.clip.source);
     const kind = kinds.get(command.trackId);
     const audio = kind !== undefined && AUDIO_TRACK_KINDS.has(kind);
     const source = command.clip.source;

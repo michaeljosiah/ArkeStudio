@@ -80,6 +80,15 @@ describe("production-owned media in render plans and migration (#895)", () => {
     assert.match(migrated.dropped[1]!, /Legacy score entry 1.*belongs to another production/);
     assert.equal(migrated.timeline.tracks.flatMap(track => track.clips).length, 0);
   });
+
+  it("refuses a scoped legacy audio entry even with no overlay or saved timeline", () => {
+    const value = production({ cut: { overlays: [], audio: [{ kind: "score", label: "Legacy score", entries: [{ artifactId: BELLS, offsetSec: 0 }] }] } });
+    const catalog = artifacts.map(artifact => ({ ...artifact, production: "another-production" }));
+    for (const timeline of [{ status: "absent" as const }, { status: "ready" as const, timeline: seedEmptyPictureTimeline(value) }]) {
+      const plan = buildRenderPlan({ production: value, artifacts: catalog, timeline, scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(!plan.ok); assert.match(plan.reason, /Legacy score entry 1.*belongs to another production.*Import the file/);
+    }
+  });
 });
 
 function scene(id: string, order: number, shots: Array<{ id: string; durationSec?: number }>): Scene {

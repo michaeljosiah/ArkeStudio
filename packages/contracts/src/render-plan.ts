@@ -1,5 +1,5 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
-import { resolveProductionArtifact } from "./artifact-access.js";
+import { legacyArtifactScopeRefusal, resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
   buildExportPlan,
@@ -378,14 +378,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
-  if (timeline?.status !== "ready" || timeline.timeline.migratedCut !== true) {
-    // Legacy missing files retain their existing projection; scoped files cannot be delivered
-    // merely because the placement predates the typed timeline (SPEC-020 R-13, issue #895).
-    for (const overlay of production.cut.overlays) {
-      const resolved = resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id);
-      if (!resolved.ok && resolved.code === "other-production") return { ok: false, reason: `${overlay.id} cites ${resolved.reason}` };
-    }
-  }
+  const legacyRefusal = legacyArtifactScopeRefusal(production, artifacts, timeline);
+  if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
   if (production.spine !== null && (timeline === undefined || timeline.status === "absent")) {

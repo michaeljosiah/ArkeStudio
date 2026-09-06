@@ -58,6 +58,13 @@ it("keeps an existing scoped clip removable but refuses detachment and delivery 
     commands: [{ kind: "detach-audio", clipId: "cl_video", newClipId: "cl_sound" }],
   }), /belongs to another production/);
   assert.equal(await readFile(timelinePath(store), "utf8"), before);
+  for (const command of [{ kind: "duplicate" as const, clipId: "cl_video" as const, newClipId: "cl_copy" as const },
+    { kind: "split" as const, clipId: "cl_video" as const, newClipId: "cl_second" as const, atFrame: 24 }]) {
+    await assert.rejects(applyTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: p.timeline.timeline.revision,
+      sourceFingerprint: storyTimelineFingerprint(p), commands: [command],
+    }), /belongs to another production/);
+    assert.equal(await readFile(timelinePath(store), "utf8"), before);
+  }
   await applyTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: p.timeline.timeline.revision, sourceFingerprint: storyTimelineFingerprint(p),
     commands: [{ kind: "delete", clipId: "cl_video" }],
   });

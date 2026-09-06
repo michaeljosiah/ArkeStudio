@@ -52,6 +52,7 @@ import {
   ulid,
   CutFileSchema,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   playsWholeAudioSource,
   serializeTimedText,
   audibleTracks,
@@ -8568,6 +8569,11 @@ export class Coordinator {
                 else emitProgress(handle.id, "failed", 0, null, result.error);
               }),
             );
+            return;
+          }
+          const legacyScopeRefusal = legacyArtifactScopeRefusal(production, store.getBundle().artifacts, timeline);
+          if (legacyScopeRefusal !== null) {
+            emitProgress(attemptId, "failed", 0, null, legacyScopeRefusal);
             return;
           }
           const trackArtifact = spine
