@@ -418,6 +418,14 @@ function useSharedNewScene(worldId: string | undefined, prodId: string | undefin
   return useContext(NewSceneContext) ?? own;
 }
 
+/** The same for `New chapter`: a press followed by a rail link must still open what it made. */
+const NewChapterContext = createContext<ReturnType<typeof useNewChapter> | null>(null);
+
+function useSharedNewChapter(worldId: string | undefined, prodId: string | undefined) {
+  const own = useNewChapter(worldId, prodId);
+  return useContext(NewChapterContext) ?? own;
+}
+
 function decisionTone(decision: string | undefined): "ok" | "warn" | "sketch" {
   if (decision === "accepted") return "ok";
   if (decision === "rejected") return "sketch";
@@ -651,6 +659,7 @@ export function ProductionLayout() {
   const [railChoice, setRailChoice] = useRailCollapsed();
   const [episodeExpansion, setEpisodeExpansion] = useState<Record<string, boolean>>({});
   const newScene = useNewScene(worldId, prodId);
+  const newChapter = useNewChapter(worldId, prodId);
   // A chapter opened is a workspace as much as a scene opened is (turn 126), and folds by the
   // same default: the manuscript wants the width, and the width is the person's afterwards.
   const sceneDetailDefault =
@@ -1021,7 +1030,9 @@ export function ProductionLayout() {
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
           ) : (
             <NewSceneContext.Provider value={newScene}>
-              <Outlet />
+              <NewChapterContext.Provider value={newChapter}>
+                <Outlet />
+              </NewChapterContext.Provider>
             </NewSceneContext.Provider>
           )}
         </div>
@@ -2187,7 +2198,7 @@ export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
   const { production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const newChapter = useNewChapter(worldId, prodId);
+  const newChapter = useSharedNewChapter(worldId, prodId);
   const chapters = production?.chapters ?? [];
   const isStory = production ? productionShape(production.meta).hasChapters : false;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);

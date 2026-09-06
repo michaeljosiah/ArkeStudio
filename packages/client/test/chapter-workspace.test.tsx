@@ -173,6 +173,7 @@ async function answerOpen(m: Mounted, body = BODY): Promise<void> {
       body,
       version: 4,
       hash: HASH,
+      versions: [1, 2, 3],
     });
   });
 }

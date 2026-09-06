@@ -206,6 +206,9 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     const second = await createChapter(store, "inkbound", { title: "Untitled", order: 2 });
     assert.equal(first, "untitled");
     assert.equal(second, "untitled-2");
+    // The frontmatter id is reserved as well as the stem: the fixture's `01-neap.md` is `neap`,
+    // and a new `neap.md` would answer to two chapters by id (codex, PR 879).
+    assert.equal(await createChapter(store, LEDGER, { title: "Neap", order: 9 }), "neap-2");
     assert.deepEqual(
       (await chaptersOf(dir, "inkbound")).map((c) => ({ id: c.id, order: c.order })),
       [
@@ -219,6 +222,7 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     const { dir, store } = await open();
     const gate = new ProposalManager(store);
     const before = await openChapter(store, LEDGER, "neap");
+    assert.deepEqual(before.versions, [], "an imported v4 with no history offers nothing to put back");
     const doc = MarkdownFile.parse(await readFile(join(dir, NEAP_PATH), "utf8"));
     doc.setBody("Drafted anew, from the seventh bell.");
     const proposal = await gate.stage({
@@ -232,11 +236,13 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     const drafted = await openChapter(store, LEDGER, "neap");
     assert.equal(drafted.version, 5, "an accepted draft cuts a version (SPEC-012 R-5)");
     assert.match(drafted.body, /Drafted anew/);
+    assert.deepEqual(drafted.versions, [4], "the version the accept moved off is the one that can come back");
 
     const restored = await restoreChapter(store, LEDGER, "01-neap", 4);
     assert.equal(restored, 6, "restoring makes a new version; nothing between is lost");
     const back = await openChapter(store, LEDGER, "neap");
     assert.equal(back.version, 6);
     assert.equal(back.body.trim(), before.body.trim());
+    assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
   });
 });

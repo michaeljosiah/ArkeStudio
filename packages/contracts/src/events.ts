@@ -272,6 +272,12 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       body: z.string().optional(),
       version: z.number().int().min(1).optional(),
       hash: z.string().min(1).optional(),
+      /**
+       * The earlier versions a snapshot actually exists for, ascending. Derived from history on
+       * disk rather than counted down from the version number: an imported chapter can be v4
+       * with no v1–v3 to put back, and a Restore that always fails is worse than none.
+       */
+      versions: z.array(z.number().int().min(1)).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),

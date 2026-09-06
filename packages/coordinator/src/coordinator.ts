@@ -6817,7 +6817,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const answer = (
           result:
-            | { disposition: "opened"; body: string; version: number; hash: string }
+            | { disposition: "opened"; body: string; version: number; hash: string; versions: number[] }
             | { disposition: "failed"; reason: string },
         ) =>
           this.emit({
@@ -6835,7 +6835,7 @@ export class Coordinator {
         }
         try {
           const chapter = await openChapter(store, msg.productionId, msg.chapterId);
-          answer({ disposition: "opened", body: chapter.body, version: chapter.version, hash: chapter.hash });
+          answer({ disposition: "opened", body: chapter.body, version: chapter.version, hash: chapter.hash, versions: chapter.versions });
         } catch (err) {
           answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
         }

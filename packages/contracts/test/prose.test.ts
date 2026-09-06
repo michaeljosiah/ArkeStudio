@@ -37,14 +37,19 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.equal(countWords("Six, and the tide not yet called."), 7);
   });
 
-  it("the target band draws only when the target names a number of words", () => {
+  it("the target band draws only when the target says how many words", () => {
     assert.equal(targetWords("80,000 words"), 80_000);
     assert.equal(targetWords("about 90k"), 90_000);
-    assert.equal(targetWords("75000"), 75_000);
+    assert.equal(targetWords("80k words"), 80_000);
+    assert.equal(targetWords("one book, 75000 words, no more"), 75_000);
     assert.equal(targetWords("three acts, a short novel"), null);
     assert.equal(targetWords(undefined), null);
     assert.equal(targetWords(""), null);
-    // A figure too small to be a book's length is a chapter count or a number in a sentence.
+    // A bare figure or a page count says nothing about words, so nothing is drawn (codex, PR 879).
+    assert.equal(targetWords("75000"), null);
+    assert.equal(targetWords("300 pages"), null);
     assert.equal(targetWords("24 chapters"), null);
+    // A figure too small to be a book's length is a number in a sentence.
+    assert.equal(targetWords("12 words"), null);
   });
 });

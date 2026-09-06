@@ -92,14 +92,16 @@ export function countWords(body: string): number {
 /**
  * The number of words a target names, or null when it names none (turn 126: "the band draws
  * only when it parses to a number of words"). `targetLength` is a free string the overview
- * holds — "80,000 words", "about 90k", "three acts" — and the band is not drawn for the last.
+ * holds — "80,000 words", "about 90k", "300 pages", "three acts" — and only a figure that says
+ * it is words, or the `k` shorthand for thousands of them, draws the band: a bare number or a
+ * page count would put a wrong bar under the title with the confidence of a fact (codex, PR 879).
  */
 export function targetWords(targetLength: string | undefined): number | null {
   if (!targetLength) return null;
-  const match = /(\d[\d,]*(?:\.\d+)?)\s*(k)?/i.exec(targetLength);
+  const match = /(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/i.exec(targetLength);
   if (!match) return null;
   const figure = Number(match[1]!.replace(/,/g, ""));
   if (!Number.isFinite(figure) || figure <= 0) return null;
-  const words = match[2] ? figure * 1000 : figure;
+  const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
   return words >= 100 ? Math.round(words) : null;
 }

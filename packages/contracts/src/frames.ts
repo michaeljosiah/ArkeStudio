@@ -201,11 +201,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** Addresses, never words — the same rule one source at a time already follows. */
       /*
        * Twelve covered every page there was until a chapter became one (turn 126): its blocks
-       * are its paragraphs, and a chapter has dozens. The cap guards the wire, not the engine —
-       * a page is narrated one block at a time whatever its length — so it is the size of the
-       * longest page rather than the size of a safe burst.
+       * are its paragraphs, and a dialogue-heavy chapter has hundreds. The cap guards the wire,
+       * not the engine — a page is narrated one block at a time whatever its length — so it is
+       * sized by the frame: a source is an address of under a hundred bytes, and a thousand of
+       * them is a novella's worth of paragraphs in well under a hundred kilobytes. The screen
+       * caps what it sends at the same figure, so a longer chapter reads its first thousand
+       * rather than sending a frame the schema drops on the floor (codex, PR 879).
        */
-      sources: z.array(ProseReadSourceSchema).min(1).max(160),
+      sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),

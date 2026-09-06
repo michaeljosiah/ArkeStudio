@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useParams } from "react-router";
 import {
   chapterParagraphs,
@@ -26,6 +26,7 @@ import {
   subscribeChapterSaveResults,
   type ChapterOpenResult,
   type ChapterSaveResult,
+  useStore,
 } from "../lib/store.js";
 
 /**
@@ -54,7 +55,10 @@ const AUTOSAVE_MS = 1200;
 /** What an empty chapter says. */
 const PLACEHOLDER = "Start here. It saves as you go.";
 
-type OpenedRecord = { body: string; version: number; hash: string };
+type OpenedRecord = { body: string; version: number; hash: string; versions: number[] };
+
+/** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
+const PAGE_READ_BLOCK_CAP = 1000;
 
 export function ChapterScreen() {
   const { worldId, prodId, chapterId } = useParams();
@@ -116,24 +120,60 @@ export function ChapterWorkspace({
   const worldId = world.meta.worldId;
   const prodId = production.meta.id;
   const path = chapterPath(production, chapter);
+  const connection = useStore().connection;
 
   /*
    * What was read, and the request that read it.
    *
-   * Re-asked whenever the summary's version moves: an accepted draft cuts a version, and the
-   * editor must adopt it rather than keep showing the text it read before. A direct save keeps
-   * the version, so this does not refire on the editor's own saves — those come back through
+   * Re-asked whenever the summary's version moves — an accepted draft cuts a version, and the
+   * editor must adopt it rather than keep showing the text it read before — and again after a
+   * refused save, because a refusal means the file moved under the editor by a same-version
+   * write the summary cannot show (a direct save elsewhere, an edit outside the app), and the
+   * disk text is the text. A direct save of our own keeps the version and comes back through
    * `chapter.save-result` with the new hash instead.
    */
   const [record, setRecord] = useState<OpenedRecord | null>(null);
   const [openFailure, setOpenFailure] = useState<string | null>(null);
+  const [reopen, setReopen] = useState(0);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveRefusal, setSaveRefusal] = useState<string | null>(null);
+  const [readNow, setReadNow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The save in flight, by requestId; a newer draft waits in `queuedDraft` until it answers. */
+  const pendingSave = useRef<string | null>(null);
+  const queuedDraft = useRef<string | null>(null);
+  /** A draft the transport could not carry; resent the moment the connection is back. */
+  const unsentDraft = useRef<string | null>(null);
+  /** The text the pending save carried, so the answer can become the record without a re-read. */
+  const savedText = useRef<string | null>(null);
+  /** A read asked for while a save was pending; begun once the save lands (turn 126's fourth rule). */
+  const readAfterSave = useRef(false);
+  /*
+   * The latest record and draft, for callbacks that outlive the render that made them: the
+   * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
+   * not as it was when they were created — a queued callback holding an older hash is a save
+   * refused for a base this editor itself moved (codex, PR 879).
+   */
+  const recordRef = useRef<OpenedRecord | null>(null);
+  recordRef.current = record;
+  const draftRef = useRef<string | null>(null);
+  draftRef.current = draft;
+
   useEffect(() => {
+    // Nothing leaves the client while the transport is down; the connection coming back is a
+    // dependency so a chapter opened during an outage does not sit on "Opening…" for good.
+    if (connection !== "open") return;
+    // A draft written offline goes out first (below) rather than being replaced by the disk.
+    if (unsentDraft.current !== null) return;
     const requestId = openChapter(worldId, prodId, chapter.id);
     if (requestId === null) return;
     return subscribeChapterOpenResults((result: ChapterOpenResult) => {
       if (result.requestId !== requestId) return;
       if (result.disposition === "opened" && result.body !== undefined && result.version !== undefined && result.hash !== undefined) {
-        setRecord({ body: result.body, version: result.version, hash: result.hash });
+        const opened = { body: result.body, version: result.version, hash: result.hash, versions: result.versions ?? [] };
+        recordRef.current = opened;
+        setRecord(opened);
         setOpenFailure(null);
         // Someone else's edit is adopted, ours has already been saved: either way the text on
         // disk is the text (the Bible's three-writer rule).
@@ -142,31 +182,61 @@ export function ChapterWorkspace({
         setOpenFailure(result.reason ?? "The chapter could not be opened.");
       }
     });
-  }, [worldId, prodId, chapter.id, chapter.version]);
-
-  const [draft, setDraft] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveRefusal, setSaveRefusal] = useState<string | null>(null);
-  const [readNow, setReadNow] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSave = useRef<string | null>(null);
-  /** The text the pending save carried, so the answer can become the record without a re-read. */
-  const savedText = useRef<string | null>(null);
-  /** A read asked for while a save was pending; begun once the save lands (turn 126's fourth rule). */
-  const readAfterSave = useRef(false);
+  }, [worldId, prodId, chapter.id, chapter.version, reopen, connection]);
 
   const live = record?.body ?? "";
   const text = draft ?? live;
+
+  const flushSave = useCallback(
+    (value: string) => {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
+      const current = recordRef.current;
+      if (current === null) return;
+      // One save at a time: a second sent before the first answers would name a base the first
+      // is about to move, and be refused for it. The newer text waits for the answer instead.
+      if (pendingSave.current !== null) {
+        queuedDraft.current = value;
+        return;
+      }
+      savedText.current = value;
+      const requestId = saveChapter(worldId, prodId, chapter.file, value, current.hash);
+      if (requestId === null) {
+        // Nothing left the client. Said so, and kept for the reconnect, rather than reported
+        // saved because the timer fired.
+        unsentDraft.current = value;
+        setSaving(false);
+        setSaveRefusal("offline · kept to send");
+        return;
+      }
+      pendingSave.current = requestId;
+    },
+    [worldId, prodId, chapter.file],
+  );
 
   useEffect(() => {
     return subscribeChapterSaveResults((result: ChapterSaveResult) => {
       if (result.requestId !== pendingSave.current) return;
       pendingSave.current = null;
-      setSaving(false);
       if (result.disposition === "saved" && result.version !== undefined && result.hash !== undefined) {
         const savedBody = savedText.current;
-        setRecord((current) => ({ body: savedBody ?? current?.body ?? "", version: result.version!, hash: result.hash! }));
+        const saved = {
+          body: savedBody ?? recordRef.current?.body ?? "",
+          version: result.version,
+          hash: result.hash,
+          versions: recordRef.current?.versions ?? [],
+        };
+        recordRef.current = saved;
+        setRecord(saved);
         setSaveRefusal(null);
+        // Typed since the save left: the newer text goes out now, against the base just returned.
+        if (queuedDraft.current !== null) {
+          const next = queuedDraft.current;
+          queuedDraft.current = null;
+          flushSave(next);
+          return;
+        }
+        setSaving(false);
         // Dropped only when the editor still holds exactly what was saved; a keystroke since
         // then is a newer draft and stays.
         setDraft((current) => (current === savedBody ? null : current));
@@ -175,31 +245,52 @@ export function ChapterWorkspace({
           setReadNow(true);
         }
       } else {
+        // Refused: the file moved underneath the editor. The draft is not merged over it; the
+        // chapter is re-read and the disk text adopted, which is what the Bible does on the
+        // next snapshot, and the foot says why the words on screen went.
+        setSaving(false);
+        queuedDraft.current = null;
         readAfterSave.current = false;
-        setSaveRefusal(result.reason ?? "Not saved: the chapter moved.");
+        setSaveRefusal("the chapter moved · reloaded from disk");
+        setReopen((n) => n + 1);
       }
     });
-  }, []);
+  }, [flushSave]);
 
+  // A draft the transport could not carry goes out as soon as it can.
+  useEffect(() => {
+    if (connection !== "open" || unsentDraft.current === null) return;
+    const value = unsentDraft.current;
+    unsentDraft.current = null;
+    setSaving(true);
+    flushSave(value);
+  }, [connection, flushSave]);
+
+  /*
+   * Leaving within the pause flushes the pending save rather than cancelling it: the screen
+   * promises the chapter saves as you type, and the sentence before a rail press is the one
+   * most easily lost. The answer lands after the listener is gone, which is fine — the snapshot
+   * carries the count and the next open reads the file. A save already in flight cannot be
+   * joined: this names the base the editor holds, and if the in-flight save moves it the
+   * committer refuses the second, as it must (codex, PR 879).
+   */
   useEffect(
     () => () => {
-      if (timer.current) clearTimeout(timer.current);
+      if (timer.current === null) return;
+      clearTimeout(timer.current);
+      timer.current = null;
+      const value = draftRef.current;
+      const current = recordRef.current;
+      if (value !== null && current !== null && value !== current.body) {
+        saveChapter(worldId, prodId, chapter.file, value, current.hash);
+      }
     },
-    [],
+    [worldId, prodId, chapter.file],
   );
-
-  const flushSave = (value: string) => {
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    if (record === null) return;
-    savedText.current = value;
-    const requestId = saveChapter(worldId, prodId, chapter.file, value, record.hash);
-    pendingSave.current = requestId;
-    if (requestId === null) setSaving(false);
-  };
 
   const onChange = (value: string) => {
     richWrite.current = richMode ? value : null;
+    draftRef.current = value;
     setDraft(value);
     setSaving(true);
     setSaveRefusal(null);
@@ -227,7 +318,7 @@ export function ChapterWorkspace({
    * disagree about what the chapter says.
    */
   const paragraphs = useMemo(() => chapterParagraphs(live), [live]);
-  const blocks: (PageReadBlock & { source: ProseReadSource })[] = paragraphs.map((body, i) => ({
+  const blocks: (PageReadBlock & { source: ProseReadSource })[] = paragraphs.slice(0, PAGE_READ_BLOCK_CAP).map((body, i) => ({
     heading: `${i + 1} of ${paragraphs.length}`,
     body,
     source: { of: "chapter", productionId: prodId, chapterId: chapter.id, paragraph: i },
@@ -254,10 +345,9 @@ export function ChapterWorkspace({
   const words = record === null ? (chapter.words ?? 0) : countWords(text);
   const bookWords = production.chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production.story?.targetLength);
-  const history = useMemo(() => {
-    const current = record?.version ?? chapter.version;
-    return Array.from({ length: Math.max(0, current - 1) }, (_, i) => current - 1 - i).slice(0, 12);
-  }, [record?.version, chapter.version]);
+  // The versions a snapshot exists for, newest first — read off the open answer, never counted
+  // down from the number, so no Restore is offered that would silently fail.
+  const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
 
   const [dock, setDock] = useState(true);
   const draws = chapter.draws ?? { sheets: [], canon: [] };
@@ -402,7 +492,7 @@ export function ChapterWorkspace({
             <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">Earlier versions</h2>
               {history.length === 0 ? (
-                <p className="fy-bible__empty">v{record?.version ?? chapter.version} is the first.</p>
+                <p className="fy-bible__empty">No earlier version kept.</p>
               ) : (
                 <>
                   <ul className="fy-bible__versions">

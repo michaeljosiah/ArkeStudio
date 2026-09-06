@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   compilePasses,
@@ -646,7 +646,11 @@ export async function createChapter(
   // `New chapter` makes every chapter `Untitled` (turn 126), so the second press would have
   // collided with the first on the file the create refuses to overwrite. Unique against the
   // stems already on disk, the same way the chat action's create is.
-  const taken = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.map((c) => c.file) ?? [];
+  // Both the stem and the frontmatter id are reserved: a legacy chapter can carry an id that
+  // differs from its stem (`01-neap.md` is `neap`), and a new file whose stem equalled an old
+  // id would answer to two chapters at once — the route opens by id (codex, PR 879).
+  const existing = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters ?? [];
+  const taken = existing.flatMap((c) => [c.file, c.id]);
   const slug = uniqueSlug(slugify(input.title) || `chapter-${input.order}`, "chapter", taken);
   const doc = MarkdownFile.create(
     {
@@ -716,7 +720,7 @@ export async function openChapter(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string }> {
+): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; versions: number[] }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
@@ -725,11 +729,22 @@ export async function openChapter(
   const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (live === null) throw new Error("That chapter is no longer in this production.");
   const doc = MarkdownFile.parse(live);
-  const version = typeof doc.data["version"] === "number" ? (doc.data["version"] as number) : summary.version;
+  const version = Math.max(1, typeof doc.data["version"] === "number" ? (doc.data["version"] as number) : summary.version);
   // A chapter born by a press serialises with a bare newline for a body; the editor should open
   // on nothing rather than on one blank line it did not type.
   const body = doc.body.trim() === "" ? "" : doc.body;
-  return { file: summary.file, title: summary.title, order: summary.order, body, version: Math.max(1, version), hash: sha256(live) };
+  // The versions that can actually be put back: one snapshot per version on the chapter track
+  // (commit.ts), read off disk rather than counted down from the number, because an imported
+  // chapter is v4 with nothing under it and a Restore that always fails is worse than none.
+  const historyDir = toExtendedLength(join(store.dir, fromPortable(`.history/productions/${productionId}/chapters/${summary.file}`)));
+  const entries = await readdir(historyDir).catch(() => [] as string[]);
+  const versions = entries
+    .map((name) => /^v(\d+)\.md$/.exec(name))
+    .filter((match): match is RegExpExecArray => match !== null)
+    .map((match) => Number(match[1]))
+    .filter((candidate) => candidate >= 1 && candidate < version)
+    .sort((a, b) => a - b);
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), versions };
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */
