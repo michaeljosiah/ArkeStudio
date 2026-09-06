@@ -5117,7 +5117,7 @@ export function NewProductionScreen() {
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
                   ) : (
-                    <span className="fy-mono">no defaults</span>
+                    <span aria-hidden="true" style={{ color: "var(--muted-foreground)", fontSize: 24 }}>·</span>
                   )}
                 </div>
                 <div className="fy-radio__head">

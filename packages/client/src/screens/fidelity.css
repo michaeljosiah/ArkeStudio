@@ -7906,3 +7906,5 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swrow__fields label:first-child { flex: 1; min-width: 0; }
 .fy-swrow__fields input { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid var(--border); border-radius: 5px; padding: 5px 7px; background: var(--background); color: var(--foreground); font: 400 13px var(--font-sans); }
 .fy-swrow__fields input[type="number"] { width: 110px; }
+
+.fy-worldcard__empty { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 10px; background: var(--muted); color: var(--muted-foreground); font: 400 13px var(--font-sans); }

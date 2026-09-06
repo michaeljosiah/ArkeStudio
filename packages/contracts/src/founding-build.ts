@@ -24,11 +24,11 @@ export const FoundingBuildIdSchema = prefixedIdSchema("fb");
 // ---------------------------------------------------------------------------
 
 export const BUILD_STAGES = [
-  { id: "understanding", label: "Understanding your vision" },
-  { id: "shaping", label: "Shaping the world" },
-  { id: "creating", label: "Creating characters" },
-  { id: "forging", label: "Forging history and lore" },
-  { id: "finalizing", label: "Finalizing the details" },
+  { id: "understanding", label: "Blueprint ready" },
+  { id: "shaping", label: "World records" },
+  { id: "creating", label: "Main photos · establishing views" },
+  { id: "forging", label: "Character sheets · key art" },
+  { id: "finalizing", label: "Finishing" },
 ] as const;
 export type BuildStageId = (typeof BUILD_STAGES)[number]["id"];
 

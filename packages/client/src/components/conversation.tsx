@@ -825,6 +825,7 @@ export function ProductionConversation({
   /** An opening message waiting for the conversation it opened to arrive. */
   const [opening, setOpening] = useState<{
     text: string;
+    attach?: boolean;
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
@@ -916,10 +917,11 @@ export function ProductionConversation({
   useEffect(() => {
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
-    if (!opened || opened === opening.was) return;
-    sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
+    if (!opened || opened === opening.was || opened !== conversationId) return;
+    if (opening.attach) worldChatAttachFiles(worldId, opened);
+    else sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
     setOpening(null);
-  }, [opening, worldId, workspace?.conversationId]);
+  }, [opening, worldId, workspace?.conversationId, conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
   const progress = useWorldChatProgress(conversationId ?? undefined, loaded?.runStartedAt ?? null);
   const running = loaded?.runStatus === "running";
@@ -1000,8 +1002,8 @@ export function ProductionConversation({
   /*
    * Every composer carries attach (turn 41's binding; review 2026-08-22 found this one did
    * not). Same wiring as World Chat: chips from the workspace, upload through the picker.
-   * There is no held-attachment path here — a production thread exists before anything can be
-   * dropped on it, and the first message creates it if not.
+   * The first attachment opens the thread before invoking its private file picker, just as
+   * the world composer does. No assistant turn is needed to start collecting references.
    */
   const attachChips = (loaded?.attachments ?? []).map((a) => ({
     id: a.id,
@@ -1011,8 +1013,15 @@ export function ProductionConversation({
   }));
   const attachProps = {
     attachments: attachChips,
-    ...(worldId && conversationId
-      ? { onAttach: () => worldChatAttachFiles(worldId, conversationId) }
+    ...(worldId
+      ? { onAttach: () => {
+          if (opening || running) return;
+          if (conversationId) worldChatAttachFiles(worldId, conversationId);
+          else {
+            setOpening({ text: "", attach: true, was: workspace?.conversationId ?? null });
+            createWorldChat(worldId, "Production references", crypto.randomUUID(), context);
+          }
+        } }
       : {}),
     ...(worldId && conversationId
       ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }

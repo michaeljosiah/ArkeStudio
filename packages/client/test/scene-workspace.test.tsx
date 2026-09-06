@@ -3083,3 +3083,32 @@ describe("shot authoring and the season length (#931)", () => {
     assert.equal(all(mounted, '[data-testid="episode-length-note"]').length, 0);
   });
 });
+
+
+it("opens a private season attachment picker before the first message (#930)", async () => {
+  const { WorldChatWorkspaceSchema } = await import("@arke-studio/contracts");
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  state.world!.productions.find((p) => p.meta.id === "saltlight")!.meta.kind = "microdrama";
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest(capture(sent));
+  const mounted = await mountState(state, `/w/${FIXTURE_WORLD_ID}/p/saltlight/season`);
+  await click(q(mounted, '.fy-cx__attach')!);
+  const create = sent.find((message) => message.kind === "world-chat-create");
+  assert.ok(create?.kind === "world-chat-create");
+  assert.deepEqual(create.entryContext, { kind: "production", productionId: "saltlight" });
+  assert.equal(sent.some((message) => message.kind === "world-chat-attach-files"), false, "the picker waits for its conversation");
+  const id = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+  const next = structuredClone(state) as ClientState;
+  next.world!.conversations = [{ id, title: "Production references", status: "open", updatedAt: "2026-09-07T00:00:00Z", pointCount: 0, openProposalCount: 0, notCarried: [], entryContext: { kind: "production", productionId: "saltlight" } }];
+  next.worldChat = WorldChatWorkspaceSchema.parse({ conversationId: id, status: "open", messages: [], points: [] });
+  await act(async () => __setStateForTest(next));
+  assert.deepEqual(sent.find((message) => message.kind === "world-chat-attach-files"), { kind: "world-chat-attach-files", worldId: FIXTURE_WORLD_ID, conversationId: id });
+  assert.equal(sent.some((message) => message.kind === "world-chat-send"), false, "attaching starts no assistant turn");
+});
+
+it("reports the empty Cut's runtime in the production rail (#930)", async () => {
+  const mounted = await mount();
+  const link = all(mounted, '.fy-prodrail__item').find((item) => item.querySelector('.fy-prodrail__label')?.textContent === "Cut");
+  assert.ok(link);
+  assert.match(link.textContent ?? "", /Cut0s/);
+});

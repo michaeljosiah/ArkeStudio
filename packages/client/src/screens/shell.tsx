@@ -570,7 +570,8 @@ export function WorldPickerScreen() {
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
-                    <Portrait worldSlug={w.slug} path={w.keyArt ?? ""} label={`${w.name}: key art`} radius={10} />
+                    {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
+                      <div className="fy-worldcard__empty">No key art yet.</div>}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
@@ -729,16 +730,16 @@ function BuildReviewStep({
       >
         <div>
           <div style={{ font: "650 21px var(--font-sans)" }}>
-            {plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}
+            {formatMicroUsd(plan.estimateMicroUsd)} generation budget
           </div>
           <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
             {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
-            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""}
           </div>
         </div>
         <span style={{ flex: 1 }} />
         <span style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 260, textAlign: "right" }}>
-          Everything lands settled. Nothing waits for a decision.
+          Work that would exceed this estimate is skipped.
         </span>
       </div>
       {plan.notes.length > 0 && (

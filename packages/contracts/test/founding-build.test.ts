@@ -207,11 +207,11 @@ describe("the fold (SPEC-031 R-32, R-39, R-40, R-46)", () => {
     assert.deepEqual(
       BUILD_STAGES.map((stage) => stage.label),
       [
-        "Understanding your vision",
-        "Shaping the world",
-        "Creating characters",
-        "Forging history and lore",
-        "Finalizing the details",
+        "Blueprint ready",
+        "World records",
+        "Main photos · establishing views",
+        "Character sheets · key art",
+        "Finishing",
       ],
     );
   });
