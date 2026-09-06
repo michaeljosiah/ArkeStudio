@@ -5,7 +5,6 @@ import {
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
-  effectiveFraming,
   orderedShots,
   productionShape,
   promptFor,
@@ -810,6 +809,8 @@ function Row({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [scriptDraft, setScriptDraft] = useState(shot.description);
+  const [titleDraft, setTitleDraft] = useState(shot.title);
+  const [durationDraft, setDurationDraft] = useState(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [pendingHide, setPendingHide] = useState<{
@@ -1015,6 +1016,11 @@ function Row({
   useEffect(() => {
     if (confirmDelete && staged) closeMenu(false);
   }, [closeMenu, confirmDelete, staged]);
+
+  useEffect(() => {
+    setTitleDraft(shot.title);
+    setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+  }, [shot.title, shot.durationSec, refusalVersion]);
 
   const commitScript = (next = scriptDraft) => {
     if (disabled || next === shot.description) return;
@@ -1254,11 +1260,49 @@ function Row({
       </div>
       <div className="fy-swrow__body">
         <div className="fy-swrow__titleline">
-          <span className="fy-swrow__title">Shot {shot.number} · {effectiveFraming(scene, shot).size ?? shot.title}</span>
+          <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}>{CHIP[state]}<span aria-hidden="true" /></span>
           {shot.staging?.playblast === undefined ? null : (
             <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
           )}
+        </div>
+        <div className="fy-swrow__fields" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <label>
+            Title
+            <input
+              aria-label={`Title for shot ${shot.number}`}
+              value={titleDraft}
+              disabled={disabled}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") { event.currentTarget.value = shot.title; setTitleDraft(shot.title); event.currentTarget.blur(); }
+              }}
+              onBlur={(event) => {
+                const title = event.currentTarget.value.trim();
+                if (!title || title === shot.title || disabled || !onCommand({ kind: "edit-shot", shotId: shot.id, change: { title } })) setTitleDraft(shot.title);
+              }}
+            />
+          </label>
+          <label>
+            Duration · seconds
+            <input
+              aria-label={`Duration for shot ${shot.number}`}
+              type="number" min="0.01" step="any"
+              value={durationDraft}
+              disabled={disabled}
+              onChange={(event) => setDurationDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") { event.currentTarget.value = String(shot.durationSec ?? DEFAULT_SHOT_SEC); setDurationDraft(event.currentTarget.value); event.currentTarget.blur(); }
+              }}
+              onBlur={(event) => {
+                const durationSec = Number(event.currentTarget.value);
+                if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec === (shot.durationSec ?? DEFAULT_SHOT_SEC) || disabled ||
+                  !onCommand({ kind: "edit-shot", shotId: shot.id, change: { durationSec } })) setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+              }}
+            />
+          </label>
         </div>
         <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
         {coverage === "changed" || runScriptChanged ? (

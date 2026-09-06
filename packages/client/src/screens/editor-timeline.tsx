@@ -67,12 +67,9 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
     const mediaPath = artifact ? `artifacts/${artifact.file}` : entry?.media?.path;
     return {
       clip,
-      label:
-        mediaPath
-          ? clip.source.label
-          : clip.source.kind === "shot"
-            ? `shot ${clip.source.shotNumber} · no accepted take`
-            : clip.source.label,
+      label: clip.source.kind === "shot"
+        ? `${entry?.shot.title ?? clip.source.label}${mediaPath ? "" : " · no accepted take"}`
+        : clip.source.label,
       // Imported videos have no take-directory frame.png; show their label until a poster exists.
       poster: artifact?.kind === "video" ? null : mediaPath ? posterize(mediaPath) : null,
       gap: !mediaPath,

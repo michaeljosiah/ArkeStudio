@@ -623,7 +623,12 @@ export function ProductionLayout() {
   let cut: ReturnType<typeof deriveCut> | null = null;
   if (production) {
     try {
-      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, production.timeline, world?.artifacts ?? []);
+      const timeline = production.timeline ?? { status: "absent" as const };
+      cut = production.spine && timeline.status !== "ready"
+        ? deriveCut(production)
+        : resolvePictureTimeline(production, timeline.status === "absent"
+          ? { status: "ready", timeline: seedFirstPictureTimeline(production) }
+          : timeline, world?.artifacts ?? []);
     } catch {
       // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
       // the legacy runtime while those screens correctly block it.
@@ -4483,7 +4488,7 @@ function ArtifactPanel({
                   type="button"
                   className="fy-artrow__pick"
                   aria-pressed={selected}
-                  title={item.why ?? (item.lane !== null ? `Drag onto the timeline · lands on ${item.lane}` : undefined)}
+                  title={item.why ?? (item.lane !== null ? `Select for actions · drag onto ${item.lane} to place` : undefined)}
                   onClick={() => setPicked(selected ? null : item.key)}
                 >
                   <span className="fy-artrow__swatch">{item.thumb}</span>

@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import {
   applyTimelineCommands,
+  orderedShots,
   seedStoryPictureTimeline,
   storyTimelineFingerprint,
   type ClientMessage,
@@ -291,4 +292,19 @@ describe("semantic Picture editing (#679)", () => {
       await close(screen);
     }
   });
+});
+
+
+it("updates placed clip names when their shot is renamed, without rewriting the timeline (#931)", async () => {
+  const state = savedState();
+  const production = state.world!.productions[0]!;
+  const shot = production.scenes.flatMap(orderedShots).find((candidate) => candidate.id === "sh_13")!;
+  shot.title = "The end of the room";
+  const before = JSON.stringify(production.timeline);
+  const screen = await mountCut(state);
+  try {
+    assert.match(screen.container.querySelector('[data-clip="cl_sh-13"]')?.textContent ?? "", /The end of the room/);
+    assert.equal(JSON.stringify(production.timeline), before);
+    assert.equal(commandsSent(screen).length, 0);
+  } finally { await close(screen); }
 });

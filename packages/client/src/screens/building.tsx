@@ -13,9 +13,8 @@ import { stopFoundingBuild, useClientState } from "../lib/store.js";
  * Everything on it is the coordinator's fold, projected: five stages mapped one-to-one onto
  * the run's phases, a progress figure that is items terminal over items authorized — a real
  * fraction of known work, never an estimate of elapsed time — and a working line that names
- * the item in flight, not the stage. One line of ceremony at the head is the whole
- * allowance (R-43, design turn 104): the eyebrow survives; the mock's subhead and footer do
- * not. The accent is the system's — the fill and the active stage are the foreground token,
+ * the item in flight, not the stage. The header names the world; the stages name the work
+ * (issue 930). The accent is the system's — the fill and the active stage are the foreground token,
  * and the reference art's teal and gold stay in the reference art.
  */
 
@@ -78,10 +77,6 @@ export function BuildingScreen() {
         }}
       >
         <div style={{ textAlign: "center", display: "flex", flexDirection: "column", gap: 8 }}>
-          {/* The one ceremony line (R-43). */}
-          <span className="fy-eyebrow-sm" style={{ letterSpacing: "0.14em" }}>
-            CRAFTING YOUR UNIVERSE
-          </span>
           <h1 style={{ font: "650 30px/1.15 var(--font-sans)", letterSpacing: "-0.02em", margin: 0 }}>
             Building {build.worldName}
           </h1>

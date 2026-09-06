@@ -176,14 +176,14 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.ok(all(mounted, ".fy-swready").length === 1, "one line, beneath the list, not one per row");
   });
 
-  it("puts the state dot after its label and the shot size on the title line", async () => {
+  it("puts the state dot after its label and keeps the shot title when framing is set (#931)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = sceneOf(state);
     scene.shots[0]!.framing = { size: "wide" };
     const mounted = await mountState(state);
     const [first, second] = all(mounted, ".fy-swrow__title");
-    assert.equal(first?.textContent, "Shot 12 · wide", "a framed shot names its size (notes §7.1)");
-    assert.equal(second?.textContent, "Shot 13 · The lamps answer", "an unframed shot falls back to its title");
+    assert.equal(first?.textContent, `Shot 12 · ${scene.shots[0]!.title}`, "framing must not replace the authored title");
+    assert.equal(second?.textContent, "Shot 13 · The lamps answer", "every shot shows its title");
     const chip = q(mounted, ".fy-swchip")!;
     assert.equal(chip.lastElementChild?.tagName, "SPAN");
     assert.equal(chip.lastElementChild?.getAttribute("aria-hidden"), "true", "the dot follows the label");

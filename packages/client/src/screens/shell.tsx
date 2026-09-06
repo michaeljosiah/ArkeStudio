@@ -532,33 +532,11 @@ export function WorldPickerScreen() {
             </div>
           )}
         </div>
-        {worlds.length === 0 ? (
-          <div style={{ padding: "54px 88px" }}>
-            <EmptyState
-              title="No worlds yet"
-              hint={
-                sample?.available === true
-                  ? "Create one, install ours to pull apart, or drop an existing world folder into your ArkeStudio directory."
-                  : "Create one, or drop an existing world folder into your ArkeStudio directory."
-              }
-              action={
-                <span style={{ display: "inline-flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                  <Button onClick={() => navigate("/first-run")}>Start</Button>
-                  {sample?.available === true && (
-                    <Button
-                      variant="ghost"
-                      disabled={sample.installing}
-                      onClick={() => installSampleWorld()}
-                    >
-                      {sample.installing ? "Installing…" : "Install the sample world"}
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-          </div>
-        ) : (
-          <div className="fy-home-cards">
+        <div className="fy-home-cards">
+          <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
+            <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
+            <span className="fy-worldcard__name">Create a world</span>
+          </button>
             {worlds.map((w, i) => (
               <div
                 key={w.worldId}
@@ -571,7 +549,8 @@ export function WorldPickerScreen() {
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
-                    <Portrait worldSlug={w.slug} path={w.keyArt ?? ""} label={`${w.name}: key art`} radius={10} />
+                    {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
+                      <div className="fy-worldcard__empty">No key art yet.</div>}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
@@ -625,23 +604,12 @@ export function WorldPickerScreen() {
                 </div>
               </div>
             ))}
-            {/* The card is the target, not the control — the same shape the first-run cards
-                already use. It was a <button> holding another one, which is invalid HTML: the
-                inner control is unreachable in the accessibility tree, and React refuses to
-                hydrate it. The whole card still takes a click; what a keyboard and a screen
-                reader land on is the one thing here that names what it does. */}
-            <div className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
-              <span className="fy-newprodcard__ring" style={{ width: 46, height: 46 }}>
-                <Plus size={20} />
-              </span>
-              <span style={{ font: "600 17px var(--font-sans)" }}>New world</span>
-              <span style={{ font: "400 13px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center", maxWidth: 190 }}>
-                Name it. We'll hold the rest.
-              </span>
-              <span style={{ marginTop: 6 }}>
-                <Button>Create a world</Button>
-              </span>
-            </div>
+        </div>
+        {worlds.length === 0 && sample?.available === true && (
+          <div style={{ padding: "0 64px 24px" }}>
+            <Button variant="ghost" disabled={sample.installing} onClick={() => installSampleWorld()}>
+              {sample.installing ? "Installing…" : "Install the sample world"}
+            </Button>
           </div>
         )}
       </div>
@@ -696,7 +664,7 @@ function BuildCard({
         [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
       ]
     : [];
-  const estimate = plan === null ? null : plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`;
+  const estimate = plan === null ? null : `${formatMicroUsd(plan.estimateMicroUsd)} generation budget`;
   return (
     <article
       className="fy-actioncard"
@@ -724,9 +692,9 @@ function BuildCard({
           </p>
           <div className="fy-mono" style={{ fontSize: 10 }}>
             {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
-            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""}
           </div>
-          <p className="fy-actioncard__notice">Everything lands settled. Nothing waits for a decision.</p>
+          <p className="fy-actioncard__notice">Work that would exceed this estimate is skipped.</p>
           {plan.notes.map((note, index) => (
             <p key={index} className="fy-actioncard__notice">
               {note}

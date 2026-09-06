@@ -285,7 +285,7 @@ describe("production-scoped threads (issue 400)", () => {
           classification: "development.shot",
           target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_12" },
           title: "She holds the rail a beat longer",
-          draft: { durationSec: 6, intent: "Held, not slow — she is deciding whether to have heard it." },
+          draft: { title: "The held rail", durationSec: 6, intent: "Held, not slow — she is deciding whether to have heard it." },
         } as Partial<WorldChangeCandidate>),
       ]);
       await wrapUp({
@@ -309,6 +309,7 @@ describe("production-scoped threads (issue 400)", () => {
         after.bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!,
       ).find((s) => s.id === "sh_12")!;
       assert.equal(shot.durationSec, 6, "what was settled landed");
+      assert.equal(shot.title, "The held rail", "the shot name lands independently of the change label");
       assert.match(shot.intent ?? "", /Held, not slow/);
       assert.equal(shot.camera, live.camera, "and what nobody mentioned is untouched");
       assert.equal(shot.description, live.description);

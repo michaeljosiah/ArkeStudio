@@ -25,11 +25,11 @@ function build(overrides: Partial<FoundingBuildState> = {}): FoundingBuildState 
     worldName: "The Undersong",
     status: "running",
     stages: [
-      { id: "understanding", label: "Understanding your vision", state: "complete" },
-      { id: "shaping", label: "Shaping the world", state: "complete" },
-      { id: "creating", label: "Creating characters", state: "active" },
-      { id: "forging", label: "Forging history and lore", state: "pending" },
-      { id: "finalizing", label: "Finalizing the details", state: "pending" },
+      { id: "understanding", label: "Blueprint ready", state: "complete" },
+      { id: "shaping", label: "World records", state: "complete" },
+      { id: "creating", label: "Main photos · establishing views", state: "active" },
+      { id: "forging", label: "Character sheets · key art", state: "pending" },
+      { id: "finalizing", label: "Finishing", state: "pending" },
     ],
     progress: { terminal: 5, authorized: 12 },
     working: ["Nadia · main photo"],
@@ -62,11 +62,11 @@ describe("the building screen (SPEC-031 §1.8)", () => {
   it("shows five stages, the real fraction, the named item, and Stop", () => {
     const html = renderBuilding(build());
     for (const label of [
-      "Understanding your vision",
-      "Shaping the world",
-      "Creating characters",
-      "Forging history and lore",
-      "Finalizing the details",
+      "Blueprint ready",
+      "World records",
+      "Main photos · establishing views",
+      "Character sheets · key art",
+      "Finishing",
     ]) {
       assert.ok(html.includes(label), `the stage rail names ${label} (R-38)`);
     }
@@ -74,7 +74,7 @@ describe("the building screen (SPEC-031 §1.8)", () => {
     assert.ok(html.includes("Nadia · main photo"), "the working line names the item, not the stage (R-41)");
     assert.ok(html.includes("Stop"), "Stop is offered (R-42)");
     assert.ok(html.includes("what is made is kept"), "and says what stopping keeps (R-42)");
-    assert.ok(html.includes("CRAFTING YOUR UNIVERSE"), "the one ceremony line at the head (R-43)");
+    assert.ok(!html.includes("CRAFTING YOUR UNIVERSE"), "the build speaks in the same concrete voice as the studio (#930)");
     assert.ok(
       !html.includes("Our world builder") && !html.includes("Every great story"),
       "the mock's other two ceremony lines were cut (R-43, design turn 104)",

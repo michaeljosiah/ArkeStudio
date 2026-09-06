@@ -264,3 +264,22 @@ it("places an overlay above a base Picture track with a custom saved id", async 
     assert.equal(placed.tracks.find(track => track.id === "tr_overlay-1")!.clips.length, 1);
   } finally { await screen.close(); }
 });
+
+
+it("Library row clicks select without placing on both empty and populated timelines (#930)", async () => {
+  for (const placed of [false, true]) {
+    const state = stateWithVideo(placed), p = state.world!.productions[0]!;
+    const timeline = p.timeline?.status === "ready" ? p.timeline.timeline : seedEmptyPictureTimeline(p);
+    p.timeline = { status: "ready", timeline: placed ? timeline : applyTimelineCommands(timeline, [{ kind: "add-to-library", items: [{ kind: "artifact", artifactId: state.world!.artifacts[0]!.id }] }]) };
+    const screen = await mount(state);
+    try {
+      const row = screen.container.querySelector<HTMLButtonElement>('.fy-artrow__pick')!;
+      await act(async () => row.click());
+      assert.equal(row.getAttribute("aria-pressed"), "true");
+      assert.ok(screen.button("Append to timeline"));
+      await act(async () => row.click());
+      assert.equal(row.getAttribute("aria-pressed"), "false");
+      assert.equal(screen.sent.some((message) => message.kind === "timeline-command"), false);
+    } finally { await screen.close(); }
+  }
+});

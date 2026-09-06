@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
+  seasonFindings,
   orderedShots,
   legacySceneView,
   type ClientMessage,
@@ -188,6 +189,8 @@ export function SceneWorkspace({
   const stagedBoards =
     JSON.stringify(scene.boards) !== JSON.stringify(workingScene.boards) ||
     JSON.stringify(acceptedBoardPack) !== JSON.stringify(boardPack);
+  const episodeIds = new Set(production.episodes.filter((episode) => episode.scenes.includes(scene.id)).map((episode) => episode.id));
+  const lengthFindings = seasonFindings(production).filter((finding) => finding.kind === "cost-pattern" && episodeIds.has(finding.about));
   const totalSec = shots.reduce((sum, shot) => sum + (shot.durationSec ?? DEFAULT_SHOT_SEC), 0);
   const framed = shots.filter((shot) => shotHasFrame(production, artifacts, shot.id)).length;
   const focus = selectedShotId(subject);
@@ -511,6 +514,7 @@ export function SceneWorkspace({
               <span>{aspect}</span>
               <span className="fy-sw__metrics">{shots.length} shot{shots.length === 1 ? "" : "s"} · {seconds(totalSec)} · {framed} frame{framed === 1 ? "" : "s"} filed</span>
             </div>
+            {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>

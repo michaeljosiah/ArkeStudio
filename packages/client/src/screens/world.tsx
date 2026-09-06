@@ -4949,26 +4949,9 @@ const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number]
  * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
  * line makes it a setting. It reaches `season.ending` through the conversation instead.
  */
-/**
- * How many episodes a season can be promised (2026-08-23).
- *
- * This was 5 to 12, which is a short film cut into pieces rather than a vertical series. The
- * form runs 60 to 100 drops, and a season written to eight has a different spine from one
- * written to eighty: eight holds a reveal at four, eighty holds it at forty and spends the
- * difference on the audience knowing what the characters do not. A door that could not say
- * eighty made every season it opened the wrong shape, and the author found out at the point
- * where the shape is expensive to change.
- *
- * Twelve and under stay, because a sample cut to sell the run is a real thing to be making —
- * they are the exception in the list now rather than the whole of it.
- */
-export const EPISODE_COUNT_CHOICES = [8, 12, 20, 30, 40, 60, 80, 100];
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
 export const MICRODRAMA_DEFAULTS = {
-  // 60 rather than 7: the low end of what the form actually runs, so the season a person opens
-  // without touching this is a vertical series and not a short film in slices.
-  episodeCount: 60,
   episodeSecondsMin: 45,
   episodeSecondsMax: 75,
   hookWindowSec: 3,
@@ -4990,7 +4973,6 @@ export function NewProductionScreen() {
   // be the exact failure the grouping is meant to prevent.
   const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
   const [frameRate, setFrameRate] = useState<FrameRate>(24);
-  const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
   const [episodeLength, setEpisodeLength] = useState(
     `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
   );
@@ -5046,7 +5028,6 @@ export function NewProductionScreen() {
               seriesTitle: title.trim(),
               defaults: {
                 ...MICRODRAMA_DEFAULTS,
-                episodeCount,
                 ...(lengthRange
                   ? { episodeSecondsMin: lengthRange.min, episodeSecondsMax: lengthRange.max }
                   : {}),
@@ -5137,7 +5118,7 @@ export function NewProductionScreen() {
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
                   ) : (
-                    <span className="fy-mono">no defaults</span>
+                    <span aria-hidden="true" style={{ color: "var(--muted-foreground)", fontSize: 24 }}>·</span>
                   )}
                 </div>
                 <div className="fy-radio__head">
@@ -5198,17 +5179,6 @@ export function NewProductionScreen() {
               </DefaultSelect>
               {isMicrodrama && (
                 <>
-                  <DefaultSelect
-                    label="EPISODES"
-                    value={String(episodeCount)}
-                    onChange={(v) => setEpisodeCount(Number(v))}
-                  >
-                    {EPISODE_COUNT_CHOICES.map((n) => (
-                      <option key={n} value={String(n)}>
-                        {n}
-                      </option>
-                    ))}
-                  </DefaultSelect>
                   {/* The range a season is written to, and the reason a Microdrama is a
                       Microdrama. It reaches season.json, where the season shows it back. */}
                   <DefaultSelect label="LENGTH" value={episodeLength} onChange={setEpisodeLength}>
