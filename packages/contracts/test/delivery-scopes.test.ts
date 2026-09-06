@@ -8,7 +8,6 @@ import {
   buildRenderPlan,
   cueAtSec,
   episodeTimelineRange,
-  duckingEnvelope,
   pictureAtSec,
   PerformanceRecordSchema,
   DialogueTimingIntentSchema,
@@ -123,6 +122,31 @@ function ok<T extends { ok: boolean }>(result: T): Extract<T, { ok: true }> {
 }
 
 describe("one timeline, three delivery scopes (#682)", () => {
+  it("keeps speech ducking at episode edges without reading an excluded artifact (#895)", () => {
+    for (const [episodeId, voiceStartFrame, startSec, endSec] of [["ep_one", 89, 0, 3.52], ["ep_two", 60, 3.52, 9.52]] as const) {
+      const value = production(), timeline = seedStoryPictureTimeline(value);
+      timeline.migratedCut = true;
+      timeline.tracks.push({ id: "tr_voice", kind: "dialogue", name: "Voice", order: 1, muted: false, clips: [{
+        id: "cl_voice", startFrame: voiceStartFrame, durationFrames: 25, sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: BELLS, label: "Voice" },
+      }] }, { id: "tr_music", kind: "music", name: "Music", order: 2, muted: false, clips: [{
+        id: "cl_music", startFrame: 0, durationFrames: 238, sourceInFrames: 0,
+        source: { kind: "artifact", artifactId: SONG, label: "Music" },
+      }] });
+      const scope = { kind: "episode" as const, episodeId }, state = { status: "ready" as const, timeline };
+      const full = ok(buildRenderPlan({ production: value, artifacts, timeline: state, scope: { kind: "production" }, preset: "review-cut" }));
+      const expected = windowPlan(full.plan, startSec, endSec, scope);
+      for (const catalog of [artifacts, artifacts.filter(artifact => artifact.id !== BELLS),
+        artifacts.map(artifact => artifact.id === BELLS ? { ...artifact, production: "another-production" } : artifact)]) {
+        const result = ok(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" }));
+        assert.deepEqual(result.plan, expected);
+        assert.ok(!result.plan.audio.some(item => item.clipId === "cl_voice"));
+      }
+      const edge = episodeId === "ep_one" ? endSec - 0.01 : 0;
+      assert.ok(audioAtSec(expected, edge).find(item => item.clipId === "cl_music")!.effectiveGainDb < 0);
+    }
+  });
+
   it("retains mutual dialogue approval across an episode boundary without delivering the partner's excluded sound (#895)", () => {
     const value = production();
     const timeline = seedStoryPictureTimeline(value);
@@ -152,12 +176,7 @@ describe("one timeline, three delivery scopes (#682)", () => {
     const full = ok(buildRenderPlan({ ...input, scope: { kind: "production" } }));
     for (const [episodeId, startSec, endSec] of [["ep_one", 0, 3.52], ["ep_two", 3.52, 9.52]] as const) {
       const scope = { kind: "episode" as const, episodeId };
-      const actual = ok(buildRenderPlan({ ...input, scope })).plan, expected = windowPlan(full.plan, startSec, endSec, scope);
-      assert.deepEqual({ ...actual, speech: [] }, { ...expected, speech: [] });
-      // A shorter picture clock can bound the speech envelope at its end; audible gains agree.
-      for (const sec of [0, 0.25, endSec - startSec - 0.001]) {
-        assert.equal(duckingEnvelope(actual.speech, actual.mix, sec), duckingEnvelope(expected.speech, expected.mix, sec));
-      }
+      assert.deepEqual(ok(buildRenderPlan({ ...input, scope })).plan, windowPlan(full.plan, startSec, endSec, scope));
     }
     const first = ok(buildRenderPlan({ ...input, scope: { kind: "episode", episodeId: "ep_one" } }));
     assert.deepEqual(first.plan.audio.filter(item => item.role === "dialogue").map(item => item.clipId), ["cl_dialogue-1"]);

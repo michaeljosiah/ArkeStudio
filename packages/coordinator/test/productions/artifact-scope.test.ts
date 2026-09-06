@@ -136,6 +136,7 @@ it("checks every legacy bulk-save source format while allowing existing referenc
   await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio(entries.slice(1)), overlays: [{ ...overlay, id: "ov_01J8G0000000000000000000Z2" }] })), /belongs to another production/);
   await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio([{ ...entries[1]!, offsetSec: 2 }]), overlays: [overlay] })), /belongs to another production/);
   await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: [{ ...audio(entries.slice(1))[0]!, kind: "ambience" }], overlays: [overlay] })), /belongs to another production/);
+  await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: [{ ...audio(entries.slice(1))[0]!, label: "Another score" }], overlays: [overlay] })), /belongs to another production/);
   await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio(entries), overlays: [overlay] })), /belongs to another production/);
   await saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: [], overlays: [] }));
   assert.deepEqual(productionOf(store).cut, { audio: [], overlays: [] });

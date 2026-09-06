@@ -368,13 +368,13 @@ function audioFromTimeline(
   return { ok: true, audio, speech: mergeRegions(speech) };
 }
 
-/** Both persisted audio encodings name the same media at legacy read and write boundaries. */
+/** Legacy rows have no stable IDs: kind/label and normalized placement survive deletion's index shifts. */
 export function legacyCutArtifactReferences(cut: CutFile): Array<{ key: string; label: string; id: string }> {
   const references = cut.overlays.map(overlay => ({ key: `overlay:${overlay.id}:${overlay.artifactId}`, label: overlay.id, id: overlay.artifactId }));
   for (const track of cut.audio) for (const [index, entry] of track.entries.entries()) {
     const source = audioSourceOf(entry);
     if (source?.kind === "artifact") references.push({
-      key: `audio:${JSON.stringify({ trackKind: track.kind, source, shotId: entry.shotId ?? null, offsetSec: entry.offsetSec, timing: entry.timing ?? null })}`,
+      key: `audio:${JSON.stringify({ trackKind: track.kind, trackLabel: track.label, source, shotId: entry.shotId ?? null, offsetSec: entry.offsetSec, timing: entry.timing ?? null })}`,
       label: `${track.label} entry ${index + 1}`, id: source.artifactId,
     });
   }
@@ -434,23 +434,28 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       if (!range.ok) return { ok: false, reason: `episode export refused: ${range.reason}` };
       const startSec = framesToSeconds(range.startFrame, frameRate), endSec = framesToSeconds(range.endFrame, frameRate);
       const intersects = (clip: TimelineClip) => clip.startFrame < range.endFrame && clip.startFrame + clip.durationFrames > range.startFrame;
-      // Approval belongs to a pair, including a partner whose speech starts outside delivery.
-      // Keep that performance's timing context; windowPlan still excludes its off-window sound.
-      const overlapPartners = new Set(audibleTracks(timeline.timeline).flatMap(track => track.clips.flatMap(clip =>
-        intersects(clip) && clip.source.kind === "performance" && clip.source.timing.overflow.mode === "overlap"
-          ? [clip.source.timing.overflow.withShotId] : [])));
-      // Keep the original clock and track controls, but do not resolve unrelated media the requested
-      // window will discard. The original production still supplies dialogue slot authority.
+      const audible = new Set(audibleTracks(timeline.timeline).map(track => track.id));
+      const excludedSpeech: SpeechRegion[] = [];
+      // Remove only unavailable artifact references outside delivery. The surrounding timeline
+      // still supplies performance overlap validation and speech look-ahead/release context.
       const scopedTimeline = { ...timeline.timeline, tracks: timeline.timeline.tracks.map(track => ({ ...track,
-        clips: track.clips.filter(clip => intersects(clip) || (clip.source.kind === "performance" && overlapPartners.has(clip.source.shotId))),
+        clips: track.clips.filter(clip => {
+          if (intersects(clip) || clip.source.kind !== "artifact" || resolveProductionArtifact(artifacts, clip.source.artifactId, production.meta.id).ok) return true;
+          // A recorded Voice window controls ducking without reading the excluded file.
+          if (audible.has(track.id) && AUDIO_TRACK_KINDS.has(track.kind) && effectiveAudioRole(track, clip) === "dialogue") {
+            excludedSpeech.push({ startSec: framesToSeconds(clip.startFrame, frameRate), endSec: framesToSeconds(clip.startFrame + clip.durationFrames, frameRate) });
+          }
+          return false;
+        }),
       })) };
       const scopedProduction = { ...production, cut: { ...production.cut,
-        overlays: production.cut.overlays.filter(overlay => overlay.startSec < endSec && overlay.endSec > startSec),
+        overlays: production.cut.overlays.filter(overlay => (overlay.startSec < endSec && overlay.endSec > startSec) || resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id).ok),
         // Named legacy audio is migration input; legacy rendering only reads overlay sound.
         audio: [],
       } };
       const whole = buildRenderPlan({ ...input, production: scopedProduction, timeline: { status: "ready", timeline: scopedTimeline }, scope: { kind: "production" } });
       if (!whole.ok) return whole;
+      if (whole.plan.mix.speechFirst) whole.plan.speech = mergeRegions([...whole.plan.speech, ...excludedSpeech]);
       return { ok: true, plan: windowPlan(whole.plan, startSec, endSec, scope) };
     }
     // The legacy refusals — a spine with no episode authority among them — belong to the legacy
