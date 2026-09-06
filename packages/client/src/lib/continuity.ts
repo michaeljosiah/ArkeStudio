@@ -43,8 +43,10 @@ export function continuityRows(chapters: readonly ChapterSummary[], cast: readon
       // The record is keyed to the prose, and the summary carries the prose's own hash (R-39).
       const stale = chapter.bodyHash !== undefined && chapter.bodyHash !== record.hash;
       const overCap = record.omitted > 0;
-      // A column is a sheet; a placing matches it by its tag, never by the spelling of a name.
-      const spoken = (id: string) => record.placed.find((entry) => (entry.sheet ?? entry.character) === id);
+      // A column is a sheet; a placing matches it by its stored tag only, never by the spelling
+      // of a name (codex on PR 907): a sheet made after the record was read is matched by the
+      // next derivation, which the panel asks for, and never by a name that happens to equal it.
+      const spoken = (id: string) => record.placed.find((entry) => entry.sheet === id);
       const cells = cast.map((id): ContinuityCell | null => {
         const entry = spoken(id);
         if (entry?.where !== undefined) return { where: entry.where, warn: stale };

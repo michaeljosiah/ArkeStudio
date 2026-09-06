@@ -2283,6 +2283,11 @@ export function ChapterTreeScreen() {
    * remembers itself for the session.
    */
   const [view, setView] = useState<ChaptersView>(() => rememberedChaptersView(prodId));
+  // The screen stays mounted when only the production changes (codex on PR 907): the view is
+  // the production's own, so it is read again for the next one.
+  useEffect(() => {
+    setView(rememberedChaptersView(prodId));
+  }, [prodId]);
   const choose = (next: ChaptersView) => {
     setView(next);
     rememberChaptersView(prodId, next);

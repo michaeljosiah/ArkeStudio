@@ -131,7 +131,12 @@ export function makeAdapterContinuityDeriver(
       await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => reject(new Error("deriving took too long")), WALL_CLOCK_MS);
+        deadline = setTimeout(() => {
+          // The session is told as well (codex on PR 907, round four): the timer ends this
+          // wait, and a generation left running behind it would go on spending.
+          void adapter.interrupt?.(session.sessionId).catch(() => {});
+          reject(new Error("deriving took too long"));
+        }, WALL_CLOCK_MS);
       });
       try {
         await Promise.race([collected, timeout]);

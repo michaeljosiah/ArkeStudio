@@ -583,10 +583,12 @@ export const ChapterContinuityCharacterSchema = z
   // not a source for the table.
   .refine(
     (entry) =>
-      entry.present
-        ? entry.where === undefined || (entry.placed !== undefined && entry.placed.length > 0)
-        : entry.where === undefined && entry.placed !== undefined && entry.placed.length > 0,
-    { message: "a placing or a departure needs the span of the chapter behind it, and a departure has no place" },
+      entry.unsure
+        ? entry.present && entry.where === undefined && entry.placed === undefined
+        : entry.present
+          ? entry.where === undefined || (entry.placed !== undefined && entry.placed.length > 0)
+          : entry.where === undefined && entry.placed !== undefined && entry.placed.length > 0,
+    { message: "a placing or a departure needs the span of the chapter behind it; a departure has no place, and neither does an unsure entry" },
   );
 export const ChapterContinuitySchema = z
   .object({

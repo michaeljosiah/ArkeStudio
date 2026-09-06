@@ -133,6 +133,14 @@ describe("the continuity table (turn 129)", () => {
     );
     assert.deepEqual(unsure[1]!.cells[0], { unsure: true, warn: false }, "a dash where the chapter said they moved and could not prove where");
     assert.equal(unsure[2]!.cells[0], null, "and nothing carried past it");
+
+    // A name with no stored tag is never a column, even when it spells a sheet's id (codex on
+    // PR 907): the next derivation is what tags it.
+    const untagged = continuityRows(
+      [{ ...chapter(1, "h1", derived("h1", {})), continuity: { ...(derived("h1", {}) as Exclude<ChapterContinuityState, { unreadable: true }>), placed: [{ character: "maren-kest", present: true, where: "the-vigil" }] } }],
+      ["maren-kest"],
+    );
+    assert.equal(untagged[0]!.cells[0], null);
   });
 
   it("the panel's stamp says what the check proved and what it dropped or cut", () => {

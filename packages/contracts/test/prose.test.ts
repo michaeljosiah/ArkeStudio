@@ -138,6 +138,7 @@ describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
     assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, where: "the-vigil", placed: "she left", knows: [] }] }).success, false, "a departure has no place (codex on PR 907)");
     const unsure = { ...record, characters: [{ character: "x", present: true, unsure: true as const, knows: [] }] };
     assert.ok(ChapterContinuitySchema.safeParse(unsure).success, "a dropped claim leaves them unsure, with no place (round seven)");
+    assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: true, unsure: true, where: "the-vigil", placed: "there", knows: [] }] }).success, false, "unsure and placed at once is no record (codex on PR 907)");
     assert.deepEqual(summariseContinuity(unsure).placed, [{ character: "x", present: true, unsure: true }], "and the summary says so, for the table");
     assert.deepEqual(summariseContinuity(record), {
       version: 4,
