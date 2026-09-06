@@ -883,6 +883,71 @@ describe("scene detail owns the workspace", () => {
     assert.ok(q(mounted, ".fy-arke__log .fy-bubble--gate"), "the conversation remains the primary surface");
   });
 
+  /*
+   * A refusal that names two points and asks which comes first has to put the points on the
+   * screen (issue 909). They are put away by default for room, and the person who was told to
+   * pick one could not find where.
+   */
+  it("opens What it understood when a wrap-up is refused", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const conversationId = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    state.world!.conversations = [{
+      id: conversationId as never,
+      title: "Five shots",
+      status: "open",
+      updatedAt: "2026-09-06T12:00:00.000Z",
+      pointCount: 2,
+      openProposalCount: 0,
+      entryContext: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      notCarried: [],
+    }];
+    state.worldChat = {
+      conversationId,
+      status: "open",
+      initiative: "collaborate",
+      hasMore: false,
+      runStatus: null,
+      runStartedAt: null,
+      retrievalUnavailable: false,
+      attachments: [],
+      messages: [],
+      points: ["Lights out", "The count"].map((text, index) => ({
+        id: `cand_01J8F3K2QW9VZX4N7M0RTYB6H${index}` as never,
+        kind: "point",
+        subject: "Scene 4",
+        subjectKind: "new shot",
+        text,
+        settled: true,
+        revision: 1,
+      })),
+      seq: 3,
+    } as never;
+    const mounted = await mountState(state);
+    const isOpen = (): boolean => {
+      const details = q(mounted, ".fy-arke__points");
+      assert.ok(details, "the points are on the dock");
+      return details.hasAttribute("open") || (details as unknown as { open?: boolean }).open === true;
+    };
+    assert.equal(isOpen(), false, "put away by default (turn 92)");
+    await click(all(mounted, "button").find((button) => button.textContent?.startsWith("Wrap up") === true)!);
+    const attempt = sent.find(
+      (message): message is Extract<ClientMessage, { kind: "world-chat-wrap-up" }> => message.kind === "world-chat-wrap-up",
+    );
+    assert.ok(attempt, "the press left");
+    await apply({
+      at: "2026-09-06T12:00:01.000Z",
+      type: "world-chat.wrap-up-refused",
+      conversationId,
+      requestId: attempt.requestId,
+      reason: "materialise",
+      detail: "“Lights out” and “The count” change the same record and cannot be written together yet. Say which one you want first, and the other can follow.",
+    } as never);
+    assert.equal(isOpen(), true, "the refusal opens the points it names");
+    assert.match(q(mounted, ".fy-panel__refused")?.textContent ?? "", /Lights out/, "and says which two");
+  });
+
   it("keeps durable video plans and their Generation options with the scene owner", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

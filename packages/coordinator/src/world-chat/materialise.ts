@@ -80,8 +80,38 @@ export interface Materialised {
   /** Which fields this proposition actually changes, for the origin record. */
   fields: string[];
   reservedCanonIds: string[];
-  /** Sheet records projected by these targets, for composing same-file changes in one atomic group. */
-  projectedSheets?: Sheet[];
+  /**
+   * The bundle as it reads once these targets are written, for the next member of an atomic
+   * group to build on.
+   *
+   * Two changes to one file in one group compose only if the second is materialised against the
+   * first's result; otherwise each rewrites the file from the live record and the last one wins.
+   * A record without a projection is written whole from what is live, and a group holding two
+   * of them refuses. That refusal was a dead end for five shots written into one scene (issue
+   * #909): a shot has no file of its own, so the shots were five rewrites of the scene.
+   */
+  project?: (bundle: WorldBundle) => WorldBundle;
+}
+
+/** The bundle with these sheets replaced or added, as the scan would read them after the write. */
+function withSheets(bundle: WorldBundle, sheets: readonly Sheet[]): WorldBundle {
+  return {
+    ...bundle,
+    sheets: [...bundle.sheets.filter((current) => !sheets.some((sheet) => sheet.id === current.id)), ...sheets],
+  };
+}
+
+/** The bundle with one production changed, for the Development records below. */
+function withProduction(
+  bundle: WorldBundle,
+  productionId: string,
+  change: (production: WorldBundle["productions"][number]) => WorldBundle["productions"][number],
+): WorldBundle {
+  return {
+    ...bundle,
+    productions: bundle.productions.map((production) =>
+      production.meta.id === productionId ? change(production) : production),
+  };
 }
 
 export interface ChoiceMaterialised extends Materialised {
@@ -518,7 +548,7 @@ export function materialiseCandidate(
         targets: [{ path: `${folderFor(draft["type"] as Sheet["type"])}/${slug}.md`, content }],
         fields: ["name", ...Object.keys(sections)],
         reservedCanonIds: [],
-        projectedSheets: [projected],
+        project: (current) => withSheets(current, [projected]),
       };
     }
 
@@ -556,7 +586,7 @@ export function materialiseCandidate(
         targets: [{ path: `${folderFor(sheet.type)}/${sheet.id}.md`, content }],
         fields: Object.keys(draft),
         reservedCanonIds: [],
-        projectedSheets: [projected],
+        project: (current) => withSheets(current, [projected]),
       };
     }
 
@@ -631,7 +661,13 @@ export function materialiseCandidate(
       if (targets.length === 0) {
         throw new MaterialiseError(candidate.id, "this relationship change would edit no file");
       }
-      return { candidate, targets, fields: [...fields], reservedCanonIds: [], projectedSheets };
+      return {
+        candidate,
+        targets,
+        fields: [...fields],
+        reservedCanonIds: [],
+        project: (current) => withSheets(current, projectedSheets),
+      };
     }
 
     case "art-direction.change": {
@@ -688,24 +724,26 @@ export function materialiseCandidate(
     case "development.overview": {
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
-      const content = jsonContent(candidate.id, StoryOverviewSchema, requireAmendment(candidate, bundle).next);
+      const { record, content } = jsonRecord(candidate.id, StoryOverviewSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/story.json`, content }],
         fields: Object.keys(candidate.draft),
         reservedCanonIds: [],
+        project: (current) => withProduction(current, production.meta.id, (p) => ({ ...p, story: record })),
       };
     }
 
     case "development.season": {
       const production = bundle.productions.find((p) => p.meta.id === candidate.target.productionId);
       if (!production) throw new MaterialiseError(candidate.id, `production ${candidate.target.productionId} is not in this world`);
-      const content = jsonContent(candidate.id, SeasonSchema, requireAmendment(candidate, bundle).next);
+      const { record, content } = jsonRecord(candidate.id, SeasonSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/season.json`, content }],
         fields: Object.keys(candidate.draft),
         reservedCanonIds: [],
+        project: (current) => withProduction(current, production.meta.id, (p) => ({ ...p, season: record })),
       };
     }
 
@@ -738,12 +776,17 @@ export function materialiseCandidate(
         if (!live || stem === undefined) {
           throw new MaterialiseError(candidate.id, `episode ${episodeId} is not in ${production.meta.id}`);
         }
-        const content = jsonContent(candidate.id, EpisodeSchema, requireAmendment(candidate, bundle).next);
+        const { record, content } = jsonRecord(candidate.id, EpisodeSchema, requireAmendment(candidate, bundle).next);
         return {
           candidate,
           targets: [{ path: `productions/${production.meta.id}/episodes/${stem}.json`, content }],
           fields: Object.keys(candidate.draft),
           reservedCanonIds: [],
+          project: (current) =>
+            withProduction(current, production.meta.id, (p) => ({
+              ...p,
+              episodes: p.episodes.map((episode) => (episode.id === record.id ? record : episode)),
+            })),
         };
       }
       // Creation: identity is stable at birth — id and stem from the title's slug, deduplicated,
@@ -789,12 +832,13 @@ export function materialiseCandidate(
       if (!scene || stem === undefined) {
         throw new MaterialiseError(candidate.id, `scene ${candidate.target.sceneId} is not in ${production.meta.id}`);
       }
-      const content = jsonContent(candidate.id, GraphSceneSchema, requireAmendment(candidate, bundle).next);
+      const { record: written, content } = jsonRecord(candidate.id, GraphSceneSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
         fields: ["script"],
         reservedCanonIds: [],
+        project: (current) => withScene(current, production.meta.id, written),
       };
     }
 
@@ -857,12 +901,14 @@ export function materialiseCandidate(
           at: last === undefined ? { atStart: true } : { after: last.id },
         });
       }
-      const content = jsonContent(candidate.id, GraphSceneSchema, next);
+      const { record: written, content } = jsonRecord(candidate.id, GraphSceneSchema, next);
       return {
         candidate,
         targets: [{ path: `productions/${production.meta.id}/scenes/${stem}.json`, content }],
         fields: shotId === undefined ? ["flow"] : Object.keys(draft),
         reservedCanonIds: [],
+        // The next shot in the same wrap-up is inserted after this one, not beside it.
+        project: (current) => withScene(current, production.meta.id, written),
       };
     }
 
@@ -872,12 +918,16 @@ export function materialiseCandidate(
         // A Series is created with its first season, never from a conversation (SPEC-023 R-9).
         throw new MaterialiseError(candidate.id, `series ${candidate.target.seriesId} is not in this world`);
       }
-      const content = jsonContent(candidate.id, SeriesSchema, requireAmendment(candidate, bundle).next);
+      const { record, content } = jsonRecord(candidate.id, SeriesSchema, requireAmendment(candidate, bundle).next);
       return {
         candidate,
         targets: [{ path: `series/${live.id}.json`, content }],
         fields: Object.keys(candidate.draft),
         reservedCanonIds: [],
+        project: (current) => ({
+          ...current,
+          series: current.series.map((series) => (series.id === record.id ? record : series)),
+        }),
       };
     }
 
@@ -890,11 +940,29 @@ export function materialiseCandidate(
 
 /** A whole JSON record, schema-validated before any proposal directory exists. */
 function jsonContent(candidateId: string, schema: { parse: (v: unknown) => unknown }, value: unknown): string {
+  return jsonRecord(candidateId, schema, value).content;
+}
+
+/** The same, keeping the parsed record: what is projected must be what is written, defaults and all. */
+function jsonRecord<T>(
+  candidateId: string,
+  schema: { parse: (v: unknown) => T },
+  value: unknown,
+): { record: T; content: string } {
   try {
-    return `${JSON.stringify(schema.parse(value), null, 2)}\n`;
+    const record = schema.parse(value);
+    return { record, content: `${JSON.stringify(record, null, 2)}\n` };
   } catch (err) {
     throw new MaterialiseError(candidateId, err instanceof Error ? err.message.slice(0, 300) : "does not satisfy its schema");
   }
+}
+
+/** The bundle with one scene record replaced by the one a target writes. */
+function withScene(bundle: WorldBundle, productionId: string, scene: GraphScene): WorldBundle {
+  return withProduction(bundle, productionId, (production) => ({
+    ...production,
+    scenes: production.scenes.map((current) => (current.id === scene.id ? scene : current)),
+  }));
 }
 
 function folderFor(kind: Sheet["type"]): string {
