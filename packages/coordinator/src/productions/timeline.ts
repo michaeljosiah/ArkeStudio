@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AUDIO_TRACK_KINDS,
+  assembleSceneCommands,
   ProductionTimelineSchema,
   SelectionsSchema,
   TimelineOperationRefused,
@@ -158,6 +159,23 @@ function planTakeSwitches(
     if (!sameSelection(previous, after)) changes.push({ shotId, before: previous, after });
   }
   return { decisions, selections: current, changes };
+}
+
+/** Scene assembly plans against the same migrated track identities the write will persist. */
+export async function assembleTimelineScene(store: WorldStore, productionId: string, sceneId: string,
+  fence: { baseRevision: number | null; sourceFingerprint: string }): Promise<{ dropped: string[] }> {
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
+  if (!production) throw new TimelineCommandRefused("This production is no longer open");
+  if (production.spine !== null) throw new TimelineCommandRefused("this production is cut to a song; open it on the timeline and place its shots there");
+  const scene = production.scenes.find(candidate => candidate.id === sceneId);
+  if (!scene) throw new TimelineCommandRefused(`${sceneId} is not a scene of this production`);
+  const artifacts = store.getBundle().artifacts;
+  const seed = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
+  const timeline = migrateLegacyCut(seed, production, artifacts).timeline;
+  const assembly = assembleSceneCommands({ production, timeline, sceneId, artifacts });
+  if ("refused" in assembly) throw new TimelineCommandRefused(assembly.refused);
+  return applyTimelineCommand(store, productionId, { kind: "commands", commands: assembly.commands, ...fence,
+    label: `Arke assembled ${scene.title}`, notes: assembly.notes });
 }
 
 /**

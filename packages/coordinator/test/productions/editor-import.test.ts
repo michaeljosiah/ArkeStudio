@@ -11,7 +11,8 @@ import {
 import { createHash } from "node:crypto";
 import { acceptTake, setTrim } from "../../src/takes/review.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
-import { applyTimelineCommand } from "../../src/productions/timeline.js";
+import { fileArtifact } from "../../src/artifacts/filing.js";
+import { assembleTimelineScene, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -173,6 +174,32 @@ it("plans imports after legacy cut migration reserves its audio track ids", asyn
   assert.equal(timeline.migratedCut, true);
   assert.deepEqual(timeline.tracks.filter(track => track.id.startsWith("tr_audio-")).map(track => [track.id, track.name, track.clips.length]),
     [["tr_audio-0", "Existing score", 1], ["tr_audio-1", "Existing ambience", 1], ["tr_audio-2", "Audio 2", 1]]);
+});
+
+it("assembles a scene after migrating an older saved timeline's audio lanes", async t => {
+  const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
+  const p = () => store.getBundle().productions.find(production => production.meta.id === "saltlight")!;
+  const scene = p().scenes[0]!;
+  const source = join(dir, "scene-bed.wav"); await writeFile(source, "scene bed");
+  const filed = await fileArtifact(store, { sourcePath: source, links: [scene.id], production: null, mediaProbe: probe });
+  assert.ok(filed.outcome === "filed");
+  const timeline = seedEmptyPictureTimeline(p());
+  await store.commit({ kind: "test-legacy", source: "test", files: [
+    { path: "productions/saltlight/timeline.json", action: "create", baseHash: null, content: JSON.stringify(timeline) },
+    { path: "productions/saltlight/cut.json", action: "create", baseHash: null, content: JSON.stringify({ overlays: [], audio: [
+      { kind: "score", label: "Score", entries: [{ artifactId: filed.artifact.id }] },
+      { kind: "ambience", label: "Ambience", entries: [{ artifactId: filed.artifact.id }] },
+    ] }) },
+  ] });
+  await assembleTimelineScene(store, "saltlight", scene.id, { baseRevision: 0, sourceFingerprint: storyTimelineFingerprint(p()) });
+  const assembled = saved(p());
+  assert.equal(assembled.migratedCut, true);
+  assert.equal(assembled.tracks.find(track => track.id === "tr_audio-1")!.name, "Ambience");
+  assert.equal(assembled.tracks.find(track => track.id === "tr_audio-2")!.clips[0]!.role, "ambience");
+  assert.equal(assembled.tracks[0]!.clips.length, scene.shots.length);
+  await applyTimelineCommand(store, "saltlight", { kind: "undo", baseRevision: assembled.revision });
+  assert.equal(saved(p()).tracks.some(track => track.id === "tr_audio-2"), false);
+  assert.equal(saved(p()).tracks.find(track => track.id === "tr_audio-1")!.clips.length, 1, "undo retains the migrated legacy mix");
 });
 
 it("imports into a saved base Picture track with a custom identity", async t => {

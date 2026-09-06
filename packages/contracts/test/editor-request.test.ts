@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_MIX,
   EditorRequestSchema,
+  ModelEditorRequestSchema,
+  TimelineCommandSchema,
   ProductionTimelineSchema,
   WorldChatTurnResultSchema,
   applyTimelineCommands,
@@ -20,6 +22,13 @@ import {
  * the typed field is the only way a turn carries one, a preview is the digest a card states and
  * the ghost a timeline draws, and staleness is judged the way the coordinator judges it.
  */
+
+it("keeps live-source detachment in direct commands and out of model editor requests", () => {
+  const command = { kind: "detach-audio", clipId: "cl_picture", newClipId: "cl_sound" };
+  assert.equal(TimelineCommandSchema.safeParse(command).success, true);
+  assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Detach audio", commands: [command] }).success, false);
+  assert.equal(ModelEditorRequestSchema.safeParse({ summary: "Move sound", commands: [{ kind: "move-to-frame", clipId: "cl_sound", startFrame: 24 }] }).success, true);
+});
 
 const REQUEST = "req_01J8G0000000000000000000R1";
 const FINGERPRINT = `story-picture-v1:${"a".repeat(16)}`;

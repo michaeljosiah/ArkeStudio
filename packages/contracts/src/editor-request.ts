@@ -71,11 +71,17 @@ export const ModelSceneEditSchema = z.discriminatedUnion("kind", [
 ]);
 export type ModelSceneEdit = z.infer<typeof ModelSceneEditSchema>;
 
+// Live-source detachment is a direct editor action; request ghosts cannot resolve it.
+type PreviewableCommandOption = Exclude<(typeof TimelineCommandSchema.options)[number], { shape: { kind: z.ZodLiteral<"detach-audio"> } }>;
+const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandSchema.options.filter(
+  (option): option is PreviewableCommandOption => option.shape.kind.value !== "detach-audio",
+) as [PreviewableCommandOption, ...PreviewableCommandOption[]]);
+
 /** What the model returns: a summary in the person's terms and the exact commands (R-27, R-34). */
 export const ModelEditorRequestSchema = z
   .object({
     summary: z.string().min(1).max(EDITOR_REQUEST_BOUNDS.summary),
-    commands: z.array(TimelineCommandSchema).min(1).max(EDITOR_REQUEST_BOUNDS.commands),
+    commands: z.array(EditorRequestCommandSchema).min(1).max(EDITOR_REQUEST_BOUNDS.commands),
   })
   .strict();
 export type ModelEditorRequest = z.infer<typeof ModelEditorRequestSchema>;
@@ -91,7 +97,7 @@ export const EditorRequestSchema = z
     /** The revision the commands were prepared against; null when they would materialise the first assembly. */
     baseRevision: z.number().int().min(0).nullable(),
     sourceFingerprint: TimelineSourceFingerprintSchema,
-    commands: z.array(TimelineCommandSchema).min(1).max(EDITOR_REQUEST_BOUNDS.commands),
+    commands: z.array(EditorRequestCommandSchema).min(1).max(EDITOR_REQUEST_BOUNDS.commands),
     summary: z.string().min(1).max(EDITOR_REQUEST_BOUNDS.summary),
     createdAt: z.string().min(1),
     status: EditorRequestStatusSchema,

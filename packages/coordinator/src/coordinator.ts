@@ -54,10 +54,8 @@ import {
   buildRenderPlan,
   playsWholeAudioSource,
   serializeTimedText,
-  assembleSceneCommands,
   audibleTracks,
   orderedTrackClips,
-  seedFirstPictureTimeline,
   storyTimelineFingerprint,
   type TimelineCommand,
   productionFrameRate,
@@ -252,7 +250,7 @@ import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/p
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
-import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
@@ -8662,21 +8660,8 @@ export class Coordinator {
           this.transport.broadcastSnapshot();
         };
         try {
-          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-          if (!production) return;
-          if (production.spine !== null) throw new Error("this production is cut to a song; open it on the timeline and place its shots there");
-          const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
-          const scene = production.scenes.find((candidate) => candidate.id === msg.sceneId);
-          if (scene === undefined) throw new Error(`${msg.sceneId} is not a scene of this production`);
-          const assembly = assembleSceneCommands({ production, timeline, sceneId: msg.sceneId, artifacts: store.getBundle().artifacts });
-          if ("refused" in assembly) throw new Error(assembly.refused);
-          const { dropped } = await applyTimelineCommand(store, msg.productionId, {
-            kind: "commands",
-            commands: assembly.commands,
-            baseRevision: msg.baseRevision,
-            sourceFingerprint: msg.sourceFingerprint,
-            label: `Arke assembled ${scene.title}`,
-            notes: assembly.notes,
+          const { dropped } = await assembleTimelineScene(store, msg.productionId, msg.sceneId, {
+            baseRevision: msg.baseRevision, sourceFingerprint: msg.sourceFingerprint,
           });
           // The first write may fold cut.json; what it could not carry is named, as the command handler names it.
           for (const placement of dropped) {
