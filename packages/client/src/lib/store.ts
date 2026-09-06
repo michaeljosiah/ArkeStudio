@@ -3287,6 +3287,16 @@ export function restoreChapter(worldId: string, productionId: string, chapterFil
   send({ kind: "restore-chapter", worldId, productionId, chapterFile, version });
 }
 
+/** The plan on the chapter (turn 127): saved in place, no proposal, no version cut. `null` clears. */
+export function editChapterPlan(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  changes: Extract<ClientMessage, { kind: "edit-chapter-plan" }>["changes"],
+): void {
+  send({ kind: "edit-chapter-plan", worldId, productionId, chapterFile, changes });
+}
+
 export function draftChapter(
   worldId: string,
   productionId: string,
@@ -4036,6 +4046,8 @@ export function sendWorldChat(
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
   modelId?: string,
+  /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
+  replyOnly = false,
 ): void {
   send({
     kind: "world-chat-send",
@@ -4046,6 +4058,7 @@ export function sendWorldChat(
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
+    ...(replyOnly ? { replyOnly: true } : {}),
   });
 }
 

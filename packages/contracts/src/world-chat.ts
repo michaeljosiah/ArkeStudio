@@ -2406,6 +2406,12 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-prose-style": {
+    kind: "production-prose-style",
+    productionId: "saltlight",
+    changes: { pov: "close third", tense: "past", voice: "Short declaratives. Weather and stone before feeling." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-season": {
     kind: "production-season",
     productionId: "bell-watch-season-1",

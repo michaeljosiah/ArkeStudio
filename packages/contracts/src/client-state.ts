@@ -59,6 +59,7 @@ import {
   ChapterSummarySchema,
   EpisodeSchema,
   ProductionSchema,
+  ProseStyleSchema,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
@@ -141,6 +142,11 @@ export const ProductionBundleSchema = z
     performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    /**
+     * prose-style.json — the style the book is written in, or null when none (turn 128).
+     * Optional rather than defaulted so a bundle from before it existed still types as one.
+     */
+    proseStyle: ProseStyleSchema.nullable().optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */

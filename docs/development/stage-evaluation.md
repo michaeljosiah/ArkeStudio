@@ -48,7 +48,7 @@ the real provider client's request. This proves delivery without spending on gen
 explicitly authorized paid smoke test can separately evaluate whether generated motion follows
 the accepted reference. Compare the generated take and playable Stage reference in Bench.
 
-World schema 10 is a compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
+World schema 11 is a compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
 the normal committer to advance the world minimum reader version. No bulk migration is required;
 legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.

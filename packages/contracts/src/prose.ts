@@ -45,13 +45,15 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     .strict(),
   /**
    * The production overview: the pieces of `story.json` and the freeform treatment beside it.
-   * `acts` is a list rather than a paragraph, so it is read whole or not at all.
+   * `acts` is a list rather than a paragraph, so it is read whole or not at all. `voice` and
+   * `samples` are the style record's two readable pieces (turn 128), kept beside the overview
+   * because the Overview screen draws them there; point of view and tense are labels, not a listen.
    */
   z
     .object({
       of: z.literal("story"),
       productionId: SlugSchema,
-      field: z.enum(["logline", "spine", "acts", "treatment"]),
+      field: z.enum(["logline", "spine", "acts", "treatment", "voice", "samples"]),
     })
     .strict(),
   /** The season record's two authored answers (SPEC-023 R-10). */
@@ -104,4 +106,88 @@ export function targetWords(targetLength: string | undefined): number | null {
   if (!Number.isFinite(figure) || figure <= 0) return null;
   const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
   return words >= 100 ? Math.round(words) : null;
+}
+
+/**
+ * Whether the overview moved under a chapter (turn 127): the chapter has words and was drafted
+ * against an overview version below the current one. Stamped by the coordinator on an accepted
+ * draft; typing never restamps it, so a chapter with no stamp is never called stale.
+ */
+export function overviewMoved(
+  chapter: { words?: number | undefined; draftedAgainst?: number | undefined },
+  story: { version: number } | null | undefined,
+): boolean {
+  return (
+    (chapter.words ?? 0) > 0 &&
+    chapter.draftedAgainst !== undefined &&
+    story !== null &&
+    story !== undefined &&
+    chapter.draftedAgainst < story.version
+  );
+}
+
+/**
+ * Paragraphs with the offsets they occupy in the body (turn 128): what anchors a passage to the
+ * paragraph an ask named, and what marks the paragraph a changed span falls in. Splits as
+ * `chapterParagraphs` does — blank lines — but keeps the positions it would drop.
+ */
+export function paragraphSpans(body: string): Array<{ text: string; start: number; end: number }> {
+  const spans: Array<{ text: string; start: number; end: number }> = [];
+  const breaks = /\r?\n[ \t]*\r?\n/g;
+  let start = 0;
+  for (let match = breaks.exec(body); ; match = breaks.exec(body)) {
+    const end = match === null ? body.length : match.index;
+    const text = body.slice(start, end).trim();
+    if (text !== "") spans.push({ text, start, end });
+    if (match === null) break;
+    start = match.index + match[0].length;
+  }
+  return spans;
+}
+
+/** The one span two texts differ in, or null when they are the same text (turn 128). */
+export interface ChangedSpan {
+  /** The words the span held before. */
+  before: string;
+  /** The words that take their place. */
+  after: string;
+  /** Where the span starts, as a character offset into either text. */
+  start: number;
+}
+
+/**
+ * The passage a revision changed, drawn from the review's before and proposed rather than
+ * carried twice (turn 128): the common head and tail are trimmed, each pulled back to a word
+ * boundary so the span never begins or ends inside a word. One span whatever the edit did — a
+ * draft that recast three paragraphs reads as one long span from the first change to the last,
+ * which is what `passageOf` uses to tell a passage from a draft.
+ */
+export function changedSpan(before: string, after: string): ChangedSpan | null {
+  if (before === after) return null;
+  let head = 0;
+  const limit = Math.min(before.length, after.length);
+  while (head < limit && before[head] === after[head]) head++;
+  let tail = 0;
+  while (tail < limit - head && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+  // Back off to whitespace so a change inside a word shows the whole word on both sides.
+  while (head > 0 && !/\s/.test(before[head - 1]!)) head--;
+  while (tail > 0 && !/\s/.test(before[before.length - tail]!)) tail--;
+  return {
+    before: before.slice(head, before.length - tail),
+    after: after.slice(head, after.length - tail),
+    start: head,
+  };
+}
+
+/**
+ * Whether a staged draft is a passage — one span changed, the rest of the chapter untouched —
+ * rather than a draft of the chapter (turn 128). A passage is shorter than the body it sits in
+ * on both sides; a body drafted from nothing, or replaced whole, is a draft and is drawn as one.
+ */
+export function passageOf(before: string | null, after: string | null): ChangedSpan | null {
+  if (before === null || after === null || before.trim() === "" || after.trim() === "") return null;
+  const span = changedSpan(before, after);
+  if (span === null) return null;
+  const untouched = before.length - span.before.length;
+  return untouched > 0 && span.before.length < before.length && span.after.length < after.length ? span : null;
 }

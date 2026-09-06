@@ -784,12 +784,22 @@ export function ProductionConversation({
     /** Flips the subject between the shot and the whole scene; the title is a button when set. */
     onToggleSubject?: () => void;
     /** Quick asks above the composer, each said as it stands. */
-    prompts?: readonly string[];
+    /**
+     * Quick asks. A prompt that promises a reply and nothing else (turn 128: `Hold this against
+     * the style`) says so, and the send carries it, so the coordinator refuses any action the
+     * turn comes back with.
+     */
+    prompts?: readonly (string | { label: string; replyOnly?: boolean })[];
     /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
     subjectPrefix?: string;
+    /**
+     * A line over the prompts that says what the subject is right now — `about this passage ·
+     * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
+     */
+    subjectLine?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
     /**
@@ -830,6 +840,7 @@ export function ProductionConversation({
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
+    replyOnly?: boolean;
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
@@ -919,7 +930,7 @@ export function ProductionConversation({
     if (!opening || !worldId) return;
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was) return;
-    sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
+    sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
@@ -962,7 +973,7 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string) => {
+  const say = (text: string, replyOnly = false) => {
     if (!text || !worldId || !productionId) return;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
@@ -979,12 +990,13 @@ export function ProductionConversation({
         was: workspace?.conversationId ?? null,
         ...(subject !== undefined ? { subject } : {}),
         ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+        ...(replyOnly ? { replyOnly: true } : {}),
       });
       setLanguageModelId(undefined);
       createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
-    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId);
+    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId, replyOnly);
     setLanguageModelId(undefined);
   };
   const submit = () => {
@@ -1174,13 +1186,20 @@ export function ProductionConversation({
         ) : null}
         <div className="fy-arke__foot">
           {languageControl}
+          {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
-              {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(prompt)}>
-                  {prompt}
-                </button>
-              ))}
+              {dock.prompts.map((entry) => {
+                const prompt = typeof entry === "string" ? entry : entry.label;
+                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+                // A prompt is said with the subject before it, as a typed line is (turn 128):
+                // `Tighten this` said bare names nothing, and the thread never sees the selection.
+                return (
+                  <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly)}>
+                    {prompt}
+                  </button>
+                );
+              })}
             </div>
           )}
           <Composer

@@ -442,6 +442,70 @@ export const StoryOverviewSchema = z
 export type StoryOverview = z.infer<typeof StoryOverviewSchema>;
 
 /**
+ * The style the book is written in (design turn 128): `productions/<id>/prose-style.json`.
+ *
+ * Its own file rather than fields on the overview, because it has its own version: a chapter is
+ * stamped with the overview version it was drafted against and called stale when that moves, and
+ * settling a sample passage must not mark every chapter in the book as written against an older
+ * plan. Read by every draft and every revision through `get_story`; applied to prose by nothing.
+ * The read schema bounds nothing (a long voice never drops the production from the scan); the
+ * action below carries the sizes turn 128 fixes.
+ */
+export const ProseStyleSchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** `first`, `close third`, `omniscient`, or the author's own words. */
+    pov: z.string().optional(),
+    tense: z.string().optional(),
+    voice: z.string().optional(),
+    samples: z.array(z.string()).optional(),
+  })
+  .strict();
+export type ProseStyle = z.infer<typeof ProseStyleSchema>;
+
+/**
+ * A fact a chapter's prose implies about the world and the world does not yet hold (turn 127).
+ *
+ * Kept on the chapter until proposed or dismissed: SPEC-012 R-6 has such facts proposed
+ * separately from the prose that surfaced them, and a list with a press is how they are
+ * proposed. The read schema bounds nothing — a chapter never vanishes from the scan for a long
+ * sentence — while the write schema below is the size the screen and the action accept.
+ */
+export const ChapterImpliedKindSchema = z.enum(["canon", "character", "location", "faction"]);
+export type ChapterImpliedKind = z.infer<typeof ChapterImpliedKindSchema>;
+/**
+ * Each item carries an id and a state (codex on turn 127): a reload keeps what was pressed, two
+ * facts in the same words stay two items, and Propose cannot stage one twice. Both are read as
+ * optional, so a chapter written before they existed still scans; the coordinator mints an id
+ * for any item that arrives without one.
+ */
+export const ChapterImpliedStateSchema = z.enum(["open", "proposed"]);
+export const ChapterImpliesSchema = z.array(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      kind: ChapterImpliedKindSchema,
+      what: z.string().min(1),
+      state: ChapterImpliedStateSchema.optional(),
+    })
+    .strict(),
+);
+export type ChapterImplies = z.infer<typeof ChapterImpliesSchema>;
+/** What a writer may put on the chapter: at most 12 facts of at most 300 characters (turn 127). */
+export const ChapterImpliesWriteSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().min(1).max(40).optional(),
+        kind: ChapterImpliedKindSchema,
+        what: z.string().trim().min(1).max(300),
+        state: ChapterImpliedStateSchema.optional(),
+      })
+      .strict(),
+  )
+  .max(12);
+
+/**
  * A chapter's frontmatter as read off disk (§8.3; SPEC-012 R-4/D3). `order` is the one order
  * authority; `number` is the legacy shipped shape, read only when `order` is absent. Neither is
  * required — a chapter whose order cannot be resolved still parses and falls back to filename
@@ -465,6 +529,16 @@ export const ChapterFrontmatterSchema = z
       })
       .strict()
       .optional(),
+    /*
+     * The plan on the chapter (turn 127): what it is for, who sees it, when it is, what the
+     * draft implied, and which overview version the accepted draft was written against. Read
+     * unbounded, like every other field here.
+     */
+    synopsis: z.string().optional(),
+    pov: SlugSchema.optional(),
+    when: z.string().optional(),
+    implies: ChapterImpliesSchema.optional(),
+    draftedAgainst: z.number().int().min(1).optional(),
     created: z.string().optional(),
     updated: z.string().optional(),
   })
@@ -486,6 +560,12 @@ export const ChapterSummarySchema = z
     title: z.string().min(1),
     status: z.string().min(1),
     version: z.number().int().min(1),
+    /**
+     * The file's content hash from the scan (turn 128): what a read of one chapter is fenced
+     * on, so a receipt for `get_chapter` can be re-observed from the bundle without the body,
+     * and what says a direct save moved the chapter while its version stayed.
+     */
+    hash: z.string().optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({
@@ -494,6 +574,12 @@ export const ChapterSummarySchema = z
       })
       .strict()
       .optional(),
+    /** The plan (turn 127), so the door, the dashboard and Arke's `list_chapters` read one record. */
+    synopsis: z.string().optional(),
+    pov: SlugSchema.optional(),
+    when: z.string().optional(),
+    implies: ChapterImpliesSchema.optional(),
+    draftedAgainst: z.number().int().min(1).optional(),
   })
   .strict();
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;

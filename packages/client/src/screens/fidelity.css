@@ -6596,6 +6596,37 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__draw > .fy-mono { width: 64px; flex: none; color: var(--neutral-400); font-size: 10px; }
 .fy-ch__draw-name { font: 500 12px var(--font-sans); min-width: 0; overflow-wrap: anywhere; }
 .fy-row--inhand { background: var(--secondary); }
+/* The outline (turn 127): the plan under the title, and the mark for an overview that moved. */
+.fy-row__plan { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.fy-row__syn { font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-row__marks { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.fy-row__marks > .fy-mono { font-size: 10px; color: var(--neutral-400); }
+.fy-row__moved, .fy-ch__moved { padding: 2px 8px; border: 1px solid var(--warning); border-radius: 999px; color: var(--warning); font: 400 10px var(--font-mono); }
+.fy-sw__context > .fy-ch__moved { border-color: var(--warning); color: var(--warning); }
+.fy-ch__mark { display: inline-flex; align-items: center; gap: 5px; }
+.fy-ch__pick { border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; }
+.fy-ch__pick:disabled { cursor: default; }
+.fy-sw__context .fy-ch__when { min-width: 40px; margin: 0; padding: 0; font: 400 10px var(--font-mono); color: inherit; }
+.fy-ch__synopsis--locked { color: var(--muted-foreground); }
+.fy-ch__implies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fy-ch__implies > li { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.fy-ch__implies > li > .fy-mono { width: 64px; flex: none; color: var(--neutral-400); font-size: 10px; padding-top: 2px; }
+.fy-ch__fact { flex: 1; min-width: 0; font: 400 12px/1.45 var(--font-sans); overflow-wrap: anywhere; }
+.fy-ch__dismiss { border: 0; background: transparent; color: var(--neutral-400); cursor: pointer; font: 400 13px var(--font-sans); padding: 0 2px; line-height: 1; }
+.fy-ch__dismiss:disabled { cursor: default; }
+/*
+ * The craft loop (turn 128). The chip beside a selection is a press at the selection's own rect,
+ * so it sits where the eye already is; the passage a revision changed is marked with a rule at
+ * the left the way the draft is, and the rest of the chapter stands untouched around it.
+ */
+.fy-ch__manuscript { position: relative; }
+.fy-ch__ask { position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
+.fy-ch__ask:hover { background: var(--accent); }
+.fy-ch__passage { border-left: 2px solid var(--foreground); padding-left: 12px; }
+.fy-ch__style { font: 400 11.5px/1.55 var(--font-sans); color: var(--muted-foreground); margin: 0; }
+.fy-arke__subject { color: var(--neutral-400); padding: 0 2px; }
+.fy-story__stylehead { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.fy-story__stylehead > .fy-mono { color: var(--neutral-400); font-size: 10px; }
 @container (max-width: 900px) {
   .fy-ch__body { flex-direction: column; }
   .fy-ch__side { width: auto; }

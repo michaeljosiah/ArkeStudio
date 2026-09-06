@@ -176,6 +176,7 @@ import {
   setProductionModel,
   openChapter,
   restoreChapter,
+  editChapterPlan,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -4642,6 +4643,7 @@ export class Coordinator {
           msg.attachmentIds,
           msg.subject,
           msg.modelId,
+          msg.replyOnly === true,
         );
         // Started after the turn it names, so the person's own turn has first claim on the
         // harness, and awaited last, so naming a row never delays the reply.
@@ -6933,6 +6935,15 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "edit-chapter-plan": {
+        // The plan saves in place like the prose (turn 127): swallowed like every other direct
+        // save, world-checked like every other chapter write, and the snapshot says what landed.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await editChapterPlan(store, msg.productionId, msg.chapterFile, msg.changes).catch(() => {});
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "restore-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) return;
@@ -7226,7 +7237,8 @@ export class Coordinator {
                   purpose: "drafting",
                   instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
                     store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
-                  )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts at the end of the chapter under a "## Surfaced facts" heading for separate proposal.`,
+                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.proseStyle,
+                  )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts in the chapter's frontmatter under \`implies\`, each as a kind (canon, character, location or faction) and one sentence, for separate proposal (turn 127). Never put them in the prose.`,
                 },
                 worldQueryUrl,
               )

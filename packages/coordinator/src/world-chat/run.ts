@@ -342,8 +342,10 @@ export class WorldChatRunner {
     attachmentIds: readonly string[] = [],
     subject?: WorldChatSubject,
     modelId?: string,
+    /** A line that asks for a reply and nothing else (turn 128); any action it returns is refused. */
+    replyOnly = false,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId);
+    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly);
   }
 
   /**
@@ -382,6 +384,7 @@ export class WorldChatRunner {
     existingTurnId?: TurnId,
     subject?: WorldChatSubject,
     modelId?: string,
+    replyOnly = false,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
     if (!adapter || !adapter.readiness().ready) {
@@ -478,7 +481,7 @@ export class WorldChatRunner {
       budgetChars: budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -578,6 +581,8 @@ export class WorldChatRunner {
         bible.version,
         sceneBaseVersion,
         refusedTools,
+        subject,
+        replyOnly,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -618,6 +623,8 @@ export class WorldChatRunner {
           bible.version,
           sceneBaseVersion,
           refusedTools,
+          subject,
+          replyOnly,
         );
       }
 
@@ -752,6 +759,10 @@ export class WorldChatRunner {
     sceneBaseVersion: number | null,
     /** Tools the confinement refused while this turn ran, deduplicated by the caller (#506). */
     refusedTools: ReadonlySet<string> = new Set(),
+    /** What was selected while the line was said (turn 128); actions are held to it. */
+    subject?: WorldChatSubject,
+    /** The line asked for a reply and nothing else (turn 128); any action is refused. */
+    replyOnly = false,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -940,6 +951,8 @@ export class WorldChatRunner {
         editorRequests: requests,
         actions: outcome.turn.actions,
         receipts: this.deps.receiptsFor(runId),
+        ...(subject !== undefined ? { subject } : {}),
+        replyOnly,
         at,
       }) ?? [];
     } catch {
@@ -1133,6 +1146,12 @@ ${assembled.entryContext}`);
 }
 
 /** What the person has selected while they talk (SPEC-039 R-26), worded for the model. */
+/**
+ * A quick ask that promised a reply and nothing else (turn 128): said to the model, and enforced
+ * after it — an action the turn returns anyway is refused before staging.
+ */
+const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each quoting the passage it names. Propose no action this turn; anything you would change, say instead.";
+
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
   const named = subject.kind === "timeline-clip"
@@ -1147,6 +1166,8 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
             ? `the board containing shots ${subject.memberShotIds.join(", ")} in scene ${subject.sceneId}`
             : subject.kind === "edge"
               ? `the scene edge from ${subject.fromShotId ?? "the opening"} to ${subject.toShotId ?? "the ending"} in scene ${subject.sceneId}`
-              : `take ${subject.takeId}`;
+              : subject.kind === "passage"
+                ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
+                : `take ${subject.takeId}`;
   return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
 }

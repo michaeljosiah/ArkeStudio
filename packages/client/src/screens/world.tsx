@@ -731,6 +731,7 @@ const PROPOSAL_WHY: Record<string, string> = {
   "canon-settle": "a thread to settle",
   "chapter-draft": "drafted chapter",
   "story-overview": "story overview",
+  "prose-style": "prose style",
   "season-edit": "season change",
   "episode-edit": "episode change",
   "series-edit": "series change",

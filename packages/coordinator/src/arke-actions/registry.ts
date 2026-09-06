@@ -26,6 +26,7 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -368,6 +369,7 @@ const CLIENT_COMMAND_METADATA = {
   // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
   "open-chapter": readOnly(QUERY),
   "restore-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  "edit-chapter-plan": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "save-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "draft-chapter": humanOnly(RECURSIVE_AGENT),
@@ -754,6 +756,11 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     schema: WorldChatProductionOverviewActionSchema,
     ...action("production", "authored-diff", "proposal-manager", "authored-change", ["story"]),
   },
+  "world-chat-production-prose-style": {
+    kind: "world-chat-production-prose-style",
+    schema: WorldChatProductionProseStyleActionSchema,
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["story"]),
+  },
   "world-chat-production-season": {
     kind: "world-chat-production-season",
     schema: WorldChatProductionSeasonActionSchema,
@@ -767,7 +774,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-chapter": {
     kind: "world-chat-production-chapter",
     schema: WorldChatProductionChapterActionSchema,
-    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters"]),
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters", "story"]),
   },
   "world-chat-production-scene": {
     kind: "world-chat-production-scene",

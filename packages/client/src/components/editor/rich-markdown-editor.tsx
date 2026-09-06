@@ -52,6 +52,12 @@ interface RichMarkdownEditorProps {
    * is, the honest surface is one that cannot be typed into and says so.
    */
   readOnly?: boolean;
+  /**
+   * The words selected, as plain text, or null when the selection collapses (turn 128), with the
+   * top-level block the selection starts in counted from one — the paragraph, for prose. What
+   * the chapter workspace makes the dock's subject; nothing is done with it here.
+   */
+  onSelect?: (text: string | null, paragraph: number | null) => void;
 }
 
 export function RichMarkdownEditor({
@@ -60,7 +66,10 @@ export function RichMarkdownEditor({
   placeholder,
   ariaLabel,
   readOnly = false,
+  onSelect,
 }: RichMarkdownEditorProps) {
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
 
@@ -227,7 +236,27 @@ export function RichMarkdownEditor({
         commit();
       }, SERIALIZE_MS);
     },
-    onSelectionUpdate: ({ editor: instance }) => syncMenu(instance),
+    onSelectionUpdate: ({ editor: instance }) => {
+      syncMenu(instance);
+      const { from, to, empty, $from } = instance.state.selection;
+      if (empty) {
+        onSelectRef.current?.(null, null);
+        return;
+      }
+      // Serialised before it is reported (codex on PR 899): a selection made inside the 400ms
+      // debounce would otherwise name words the owner has not been handed yet.
+      flush();
+      /*
+       * The selected words as markdown, not as document positions or rendered text: what is said
+       * about them goes into a thread that never sees the editor and is quoted back against the
+       * file, so `**bold**` must be selected as `**bold**` or it is never found. The slice is
+       * serialised by the same manager that writes the file; plain text is the fallback for an
+       * editor mounted without one.
+       */
+      const slice = instance.state.doc.cut(from, to);
+      const markdown = instance.markdown?.serialize(slice.toJSON()).replace(/\n+$/, "");
+      onSelectRef.current?.(markdown || instance.state.doc.textBetween(from, to, "\n\n"), $from.index(0) + 1);
+    },
   });
   editorRef.current = editor;
 

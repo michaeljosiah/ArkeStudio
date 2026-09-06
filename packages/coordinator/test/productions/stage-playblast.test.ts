@@ -129,7 +129,7 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(pinned.rig, "dolly");
       assert.equal(pinned.seed, staged.shot.staging?.seed);
       assert.equal(pinned.rigIntensity, 1);
-      assert.equal(bundle().meta.schemaVersion, 10, "the deterministic rig is fenced even on private blocking");
+      assert.equal(bundle().meta.schemaVersion, 11, "the deterministic rig is fenced even on private blocking");
       assert.equal(after.scene.version, sceneVersion + 1, "the pin is a versioned scene write");
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
       assert.ok(artifact, "the pinned id resolves on the shelf");
@@ -282,9 +282,9 @@ it("delivers a fresh filed Stage clip through bench admission into the provider 
 it("fences expanded encoded metadata even when ordinary filing writes it without a Stage scene",async()=>{
   const {provider,bundle}=await harness();
   try {
-    assert.ok(bundle().meta.schemaVersion<10);
+    assert.ok(bundle().meta.schemaVersion<11);
     const outcome=await fileArtifact(provider.openStore()!,{sourcePath:await playblastFile(),mediaProbe:{durationSec:async()=>4,info:async()=>({durationSec:4,hasAudio:false,width:1280,height:720,frameRate:30})}});
     assert.equal(outcome.outcome,"filed");
-    assert.equal(bundle().meta.schemaVersion,10);
+    assert.equal(bundle().meta.schemaVersion,11);
   } finally {await provider.close();}
 });
