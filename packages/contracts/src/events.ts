@@ -5,7 +5,7 @@ import { TableReadPlanSchema } from "./rehearsal.js";
 import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
-import { ChapterContinuitySchema } from "./world.js";
+import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -289,6 +289,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       continuity: ChapterContinuitySchema.optional(),
       /** A record is there but cannot be read; the panel says so rather than offering a first run. */
       continuityUnreadable: z.literal(true).optional(),
+      /** The cast of lines beside the chapter (turn 130), for the same reason. */
+      voices: ChapterVoicesSchema.optional(),
+      voicesUnreadable: z.literal(true).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -915,6 +918,32 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       omitted: z.number().int().min(0),
       cut: z.number().int().min(0),
       record: ChapterContinuitySchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /** The cast of lines (turn 130): started, then finished with a named ending, as continuity's. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["cast", "stopped", "unavailable", "failed"]),
+      lines: z.number().int().min(0),
+      dropped: z.number().int().min(0),
+      omitted: z.number().int().min(0),
+      record: ChapterVoicesSchema.optional(),
       reason: z.string().optional(),
     })
     .strict(),

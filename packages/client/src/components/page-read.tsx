@@ -56,6 +56,8 @@ export function usePageRead(input: {
   start: (requestId?: string, confirmationToken?: string) => string;
   /** Tell the coordinator to stop making the page (codex, PR 879); absent, stopping is local. */
   cancel?: (requestId: string) => void;
+  /** What the player calls a block's voice (turn 130); absent, the narrator's label. */
+  voiceOf?: (index: number) => string;
 }): PageRead {
   const { pageId, title, narratorLabel, worldSlug, blocks, start } = input;
   // Read through a ref so a caller's inline arrow does not change `stop`'s identity every render
@@ -125,12 +127,12 @@ export function usePageRead(input: {
         id: run,
         url: mediaUrl(worldSlug, file),
         title: block ? `${title} · ${block.heading}` : title,
-        sub: `read aloud · ${narratorLabel} · ${i + 1} of ${blocks.length}`,
+        sub: `read aloud · ${input.voiceOf?.(i) ?? narratorLabel} · ${i + 1} of ${blocks.length}`,
         part: i,
       });
       queued.current = i + 1;
     }
-  }, [run, landed, result?.status, result?.file, worldSlug, title, narratorLabel, blocks.length]);
+  }, [run, landed, result?.status, result?.file, worldSlug, title, narratorLabel, blocks.length, input.voiceOf]);
 
   const token = result?.status === "confirmation-required" ? result.confirmationToken : undefined;
   return {
@@ -169,6 +171,14 @@ export function useProsePageRead(input: {
   /** What the dock calls the read; the block's own heading is added to it. */
   title: string;
   blocks: readonly (PageReadBlock & { source: ProseReadSource })[];
+  /**
+   * What the frame carries instead of one address per block (turn 130): a voiced chapter is
+   * named once and the coordinator expands it by the rule the blocks were declared with, so a
+   * cast of four hundred lines never overflows the frame. The blocks still label and count.
+   */
+  sources?: readonly ProseReadSource[];
+  /** What the player calls a block's voice: the speaker's name, or the narrator's. */
+  voiceOf?: (index: number) => string;
 }): PageRead {
   const { state } = useStore();
   const world = state?.world ?? null;
@@ -185,10 +195,11 @@ export function useProsePageRead(input: {
     narratorLabel,
     worldSlug: world?.meta.slug,
     blocks: input.blocks,
+    ...(input.voiceOf !== undefined ? { voiceOf: input.voiceOf } : {}),
     start: (requestId, confirmationToken) =>
       readProsePage(
         world?.meta.worldId ?? "",
-        input.blocks.map((block) => block.source),
+        input.sources ?? input.blocks.map((block) => block.source),
         requestId,
         confirmationToken,
       ),
@@ -207,6 +218,9 @@ export function PageReadControl({ read, label }: { read: PageRead; label: string
         <Button onClick={read.cost.confirm}>
           Confirm {read.cost.characters} characters · {read.cost.priced}
         </Button>
+        {/* What leaves the machine is said before it does (codex on turn 130): the words and the
+            voice go to the provider, and the text stays in Activity, as a table read's does. */}
+        <span className="fy-mono">the words and the voice go to the provider · the text stays in Activity</span>
         <Button variant="ghost" onClick={read.stop}>
           Cancel
         </Button>

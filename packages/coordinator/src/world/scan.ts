@@ -41,6 +41,9 @@ import {
   SheetSchema,
   RoutingSchema,
   ChapterContinuitySchema,
+  ChapterVoicesSchema,
+  summariseVoices,
+  type ChapterVoicesState,
   ProseStyleSchema,
   StoryOverviewSchema,
   summariseContinuity,
@@ -482,7 +485,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
-    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null }> = [];
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
       const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
         const doc = MarkdownFile.parse(raw);
@@ -506,14 +509,21 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
           return parsed.success ? summariseContinuity(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      chapterEntries.push({ file: stem, fm, bodyHash, continuity });
+      // The cast of lines beside the chapter (turn 130), the same way: its stamp on the summary.
+      const voices: ChapterVoicesState | null = await read(join(pdir, ".voices", `${stem}.json`))
+        .then((raw) => {
+          const parsed = ChapterVoicesSchema.safeParse(JSON.parse(raw));
+          return parsed.success ? summariseVoices(parsed.data) : { unreadable: true as const };
+        })
+        .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
+      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
       return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
     };
     chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
-    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity }, i) => ({
+    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity, voices }, i) => ({
       id: fm.id,
       file,
       order: i + 1,
@@ -525,6 +535,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ...(manifest[`productions/${id}/chapters/${file}.md`] !== undefined ? { hash: manifest[`productions/${id}/chapters/${file}.md`]! } : {}),
       bodyHash,
       ...(continuity !== null ? { continuity } : {}),
+      ...(voices !== null ? { voices } : {}),
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
       // The plan rides on the summary (turn 127): the door and Arke's list_chapters read it.

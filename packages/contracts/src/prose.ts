@@ -44,6 +44,22 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     })
     .strict(),
   /**
+   * One block of a chapter's voiced read (design turn 130): the chapter's paragraphs split at
+   * the cast lines, counted from 0 by `voicedBlocks` over the saved body and the record beside
+   * it. An address, as the chapter arm is; the coordinator resolves it off disk and reads it in
+   * the narrator's voice or the speaker's. Without `block`, the whole voiced page: a cast of four
+   * hundred lines splits into more blocks than a frame carries, so the screen names the chapter
+   * once and the coordinator expands it by the same rule (codex on turn 130).
+   */
+  z
+    .object({
+      of: z.literal("chapter-voiced"),
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      block: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
    * The production overview: the pieces of `story.json` and the freeform treatment beside it.
    * `acts` is a list rather than a paragraph, so it is read whole or not at all. `voice` and
    * `samples` are the style record's two readable pieces (turn 128), kept beside the overview
@@ -88,6 +104,100 @@ export function chapterParagraphs(body: string): string[] {
     .split(/\r?\n[ \t]*\r?\n/)
     .map((paragraph) => paragraph.trim())
     .filter((paragraph) => paragraph !== "");
+}
+
+/**
+ * Where a quote occurs in a paragraph, with whitespace folded on both sides (turn 130): the
+ * file wraps where the model would not, so a line is looked for as words, and the spans found
+ * are the paragraph's own bytes. Every occurrence, in order, so a cast can name the n-th.
+ */
+export function occurrencesOf(paragraph: string, quote: string): Array<{ start: number; end: number }> {
+  const fold = (source: string) => {
+    const starts: number[] = [];
+    const ends: number[] = [];
+    let folded = "";
+    for (let i = 0; i < source.length; i++) {
+      const c = source[i]!;
+      if (/\s/.test(c)) {
+        if (folded.endsWith(" ")) {
+          ends[ends.length - 1] = i + 1;
+          continue;
+        }
+        folded += " ";
+      } else {
+        folded += c;
+      }
+      starts.push(i);
+      ends.push(i + 1);
+    }
+    return { folded, starts, ends };
+  };
+  const haystack = fold(paragraph);
+  const needle = fold(quote).folded.trim();
+  if (needle === "") return [];
+  const hits: Array<{ start: number; end: number }> = [];
+  for (let at = haystack.folded.indexOf(needle); at >= 0; at = haystack.folded.indexOf(needle, at + needle.length)) {
+    hits.push({ start: haystack.starts[at]!, end: haystack.ends[at + needle.length - 1]! });
+  }
+  return hits;
+}
+
+/** One block of a voiced read: a run of narration, or a cast line with its speaker. */
+export interface VoicedBlock {
+  paragraph: number;
+  text: string;
+  /** The line's speaker as the chapter names them, and the sheet when the cast has one; absent for narration. */
+  speaker?: string;
+  sheet?: string;
+}
+
+/**
+ * A chapter's paragraphs split at its cast lines (turn 130, SPEC-012 R-46): narration, a line,
+ * narration, in order, each block addressed by its index. The same rule at both ends of a page
+ * read — the screen declares the blocks from the text it holds, the coordinator resolves an
+ * index against the saved body — so the two can never name different blocks. A line is a block
+ * only when its paragraph still holds its quote at the occurrence the record names, exactly
+ * there: a stale cast whose paragraph lost one of two identical lines reads the survivor as
+ * narration rather than in the wrong voice, and `ambiguous` counts what fell back.
+ */
+export function voicedBlocks(
+  body: string,
+  record: { lines: ReadonlyArray<{ speaker: string; sheet?: string; paragraph: number; occurrence: number; quote: string }> } | null,
+): { blocks: VoicedBlock[]; ambiguous: number } {
+  const paragraphs = chapterParagraphs(body);
+  const blocks: VoicedBlock[] = [];
+  let ambiguous = 0;
+  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  for (const [index, paragraph] of paragraphs.entries()) {
+    const spans: Array<{ start: number; end: number; speaker: string; sheet?: string }> = [];
+    const here = (record?.lines ?? []).filter((line) => line.paragraph === index);
+    for (const line of here) {
+      // The paragraph must hold these words exactly as many times as the cast says it does
+      // (codex on turn 130): with one of two identical lines deleted, the survivor is either
+      // speaker's, and presence at an occurrence would put it in the wrong voice. So neither is
+      // voiced, and both are counted.
+      const twins = here.filter((other) => fold(other.quote) === fold(line.quote)).length;
+      const hits = occurrencesOf(paragraph, line.quote);
+      const hit = hits.length === twins ? hits[line.occurrence] : undefined;
+      // Not there, not at that occurrence, or the same bytes already spoken for: narration.
+      if (hit === undefined || spans.some((span) => hit.start < span.end && span.start < hit.end)) {
+        ambiguous += 1;
+        continue;
+      }
+      spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}) });
+    }
+    spans.sort((a, b) => a.start - b.start);
+    let cursor = 0;
+    for (const span of spans) {
+      const before = paragraph.slice(cursor, span.start).trim();
+      if (before !== "") blocks.push({ paragraph: index, text: before });
+      blocks.push({ paragraph: index, text: paragraph.slice(span.start, span.end), speaker: span.speaker, ...(span.sheet !== undefined ? { sheet: span.sheet } : {}) });
+      cursor = span.end;
+    }
+    const after = paragraph.slice(cursor).trim();
+    if (after !== "") blocks.push({ paragraph: index, text: after });
+  }
+  return { blocks, ambiguous };
 }
 
 /** The count every surface shows for a chapter: whitespace-separated words of the body. */

@@ -6638,6 +6638,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__derive { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; cursor: pointer; font: 500 11px var(--font-sans); color: var(--foreground); letter-spacing: 0; text-transform: none; }
 .fy-ch__derive:disabled { cursor: default; color: var(--muted-foreground); }
 .fy-ch__deriving { display: inline-flex; align-items: baseline; gap: 8px; }
+/* The voiced read (turn 130): the Voices rows carry the voice and the count; the band over the
+   manuscript names the block being read. */
+.fy-ch__who-count { font-size: 9.5px; width: 46px; text-align: right; flex: none; }
+.fy-ch__who-where--warn { color: var(--warning); }
+.fy-ch__band-line { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .fy-ch__scope { margin: -3px 0 0; font-size: 10px; }
 .fy-ch__moved--line { display: flex; border-radius: 8px; padding: 5px 9px; }
 .fy-ch__who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

@@ -448,6 +448,9 @@ const CLIENT_COMMAND_METADATA = {
   // beside the chapter and never written into the world's authored files.
   "derive-continuity": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-continuity": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // The cast of lines (turn 130): the same discipline, turned on speech.
+  "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
   "resolve-extraction": action("world", "take-review", "proposal-manager", "authored-change", ["artifacts", "canon", "sheets"]),
   "check-updates": readOnly(QUERY),
   "download-update": globalOnly(GLOBAL_OPERATION),
