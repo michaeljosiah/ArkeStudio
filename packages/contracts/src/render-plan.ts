@@ -64,9 +64,13 @@ export interface RenderAudioItem extends ExportAudioClip {
 }
 
 /** A filed segment's remaining slot is silence, never the next shot in its parent file. */
-function segmentSound(item: RenderAudioItem, sourceOutSec?: number): RenderAudioItem[] {
-  const endSec = sourceOutSec === undefined ? item.endSec : Math.min(item.endSec, item.startSec + Math.max(0, sourceOutSec - item.sourceInSec));
+function segmentSoundWindow<T extends { startSec: number; endSec: number }>(item: T, sourceInSec: number, sourceOutSec?: number): T[] {
+  const endSec = sourceOutSec === undefined ? item.endSec : Math.min(item.endSec, item.startSec + Math.max(0, sourceOutSec - sourceInSec));
   return endSec > item.startSec ? [{ ...item, endSec }] : [];
+}
+
+function segmentSound(item: RenderAudioItem, sourceOutSec?: number): RenderAudioItem[] {
+  return segmentSoundWindow(item, item.sourceInSec, sourceOutSec);
 }
 
 function unmeasuredLegacySound(placements: CutFile["overlays"], artifacts: readonly RenderArtifact[], totalSec = Infinity): NonNullable<RenderPlan["unmeasuredAudio"]> {
@@ -285,7 +289,7 @@ function overlaysFromTimeline(
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
         if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
-          unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec });
+          unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec }, sourceInSec, resolved.outSec));
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
@@ -588,11 +592,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const segment = take?.segment;
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
       if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
+      const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, inSec, segment?.outSec));
       }
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
-      const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
       items.push({
         type: "clip",
         path,
@@ -623,7 +627,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
       const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
-        unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
+        unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec }, entry.media.inSec ?? 0, entry.media.outSec));
       }
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
         baseSound.push(...segmentSound({

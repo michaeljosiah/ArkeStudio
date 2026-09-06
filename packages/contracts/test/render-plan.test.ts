@@ -240,6 +240,23 @@ describe("video sound defaults and export diagnostics (#908)", () => {
       assert.equal(audioAtSec(result.plan, .9).length, 0, "preview is silent after the segment");
       const args = buildFfmpegArgs(result.plan, "/world", "/export.mp4", "/font.ttf");
       assert.match(args[args.indexOf("-filter_complex") + 1]!, /atrim=duration=0.8/, "export stops at the same physical boundary");
+      if (lane !== "audio") {
+        delete p.takeMediaInfo[parent.id];
+        const unmeasured = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+          scope: { kind: "production" }, preset: "review-cut" });
+        assert.ok(unmeasured.ok);
+        assert.deepEqual(unmeasured.plan.unmeasuredAudio, [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .8 }]);
+        const scope = { kind: "episode" as const, episodeId: "ep_two" };
+        assert.deepEqual(windowPlan(unmeasured.plan, .4, 1.4, scope).unmeasuredAudio,
+          [{ clipId: "cl_segment", label: source.label, startSec: 0, endSec: .4 }]);
+        assert.deepEqual(windowPlan(unmeasured.plan, .8, 2, scope).unmeasuredAudio, [],
+          "an episode containing only the silent remainder has no missing-sound notice");
+        timeline.tracks.find(track => track.id === trackId)!.clips[0]!.sourceInFrames = 25;
+        const exhausted = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+          scope: { kind: "production" }, preset: "review-cut" });
+        assert.ok(exhausted.ok);
+        assert.equal(exhausted.plan.unmeasuredAudio, undefined, "a trim past the segment has no possible sound to diagnose");
+      }
     });
   }
 
