@@ -3036,3 +3036,50 @@ describe("Flow is a canvas (the prototype's §11)", () => {
     }
   });
 });
+
+
+describe("shot authoring and the season length (#931)", () => {
+  it("sends title and duration edits through the scene command and rejects empty or nonpositive values", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
+    const title = row.querySelector('input[aria-label^="Title"]') as HTMLInputElement;
+    const duration = row.querySelector('input[type="number"]') as HTMLInputElement;
+    const blur = async (input: HTMLInputElement, value: string) => {
+      input.value = value;
+      await act(async () => input.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    };
+    await blur(title, " ");
+    await blur(duration, "0");
+    await blur(duration, "-1");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
+    await blur(title, "The end of the room");
+    assert.deepEqual((sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command,
+      { kind: "edit-shot", shotId: "sh_13", change: { title: "The end of the room" } });
+    const next = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = next.world!.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!;
+    scene.version++;
+    orderedShots(scene).find((s) => s.id === "sh_13")!.title = "The end of the room";
+    await act(async () => __setStateForTest(next));
+    await blur(duration, "9");
+    assert.deepEqual((sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command,
+      { kind: "edit-shot", shotId: "sh_13", change: { durationSec: 9 } });
+  });
+
+  it("shows one episode length note at authoring time and clears it when the shots fit", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
+    production.episodes = [{ id: "ep_length", version: 1, order: 1, title: "The vigil", scenes: ["sc_04"] }];
+    const scene = production.scenes.find((s) => s.id === "sc_04")!;
+    const total = orderedShots(scene).reduce((sum, s) => sum + (s.durationSec ?? 4), 0);
+    production.season = { version: 1, defaults: { episodeSecondsMin: total + 10, episodeSecondsMax: total + 20 } };
+    const mounted = await mountState(state);
+    assert.equal(all(mounted, '[data-testid="episode-length-note"]').length, 1);
+    assert.match(q(mounted, '[data-testid="episode-length-note"]')!.textContent ?? "", /The vigil plans/);
+    const next = structuredClone(state) as ClientState;
+    next.world!.productions.find((p) => p.meta.id === "saltlight")!.season!.defaults!.episodeSecondsMin = total;
+    await act(async () => __setStateForTest(next));
+    assert.equal(all(mounted, '[data-testid="episode-length-note"]').length, 0);
+  });
+});

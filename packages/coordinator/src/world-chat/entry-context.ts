@@ -176,7 +176,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
          * the workspace stopped being the conversation.
          */
         lines.push(
-          "A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
+          "A shot itself can be settled here: propose development.shot naming the shot to amend, or leaving the shot out to add one at the end. Carry a specified shot name in draft.title and its length in draft.durationSec (seconds), including when adding a shot; a candidate title labels the change and does not name the shot. Carry only the fields that change. A shot's id and its number are not yours to set, and reordering is the storyboard's drag, not a proposition.",
         );
       }
       const timeline = describeTimeline(production);
