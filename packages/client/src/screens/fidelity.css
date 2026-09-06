@@ -2227,6 +2227,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 11px 15px;
   font: 400 13px/1.55 var(--font-sans);
 }
+/*
+ * The author's bubble in dark mode (issue 911). --primary is the inverted button colour, so
+ * in .dark it is near-white — and the author's own words became the single brightest object
+ * on an otherwise black world door, beside a reply that had darkened correctly. Two steps up
+ * the ramp from the reply's surface keeps the two speakers apart without lighting either.
+ */
+.dark .fy-bubble--user { background: var(--neutral-700); color: var(--foreground); }
 .fy-bubble--gate {
   align-self: flex-start;
   max-width: 440px;
@@ -4572,6 +4579,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   background: var(--primary); color: var(--primary-foreground);
   border-radius: 14px 14px 4px 14px; padding: 11px 15px; line-height: 1.55;
 }
+/* Same surface, same reason as .dark .fy-bubble--user (issue 911): the two chats must agree. */
+.dark .fy-chat__turn--user .fy-chat__bubble { background: var(--neutral-700); color: var(--foreground); }
 .fy-chat__turn--studio .fy-chat__bubble {
   background: var(--secondary);
   border-radius: 14px 14px 14px 4px; padding: 12px 15px;
@@ -6277,6 +6286,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--studio .fy-chat__bubble { border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 9px 11px; box-shadow: var(--shadow-xs); }
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--user { max-width: 82%; }
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: var(--foreground); color: var(--background); border-radius: 10px; padding: 8px 11px; }
+/* --foreground inverts to near-white too; outranks the plain .dark rule above on specificity (issue 911). */
+.dark .fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: var(--neutral-700); color: var(--foreground); }
 .fy-arke__points { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
 .fy-arke__points > summary {
   cursor: pointer;
