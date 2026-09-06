@@ -262,7 +262,9 @@ describe("export audio status (#908)", () => {
       const p = state.world!.productions[0]!;
       p.meta.kind = "series";
       p.cut = { audio: [], overlays: [] };
-      p.scenes[0]!.shots = [p.scenes[0]!.shots[0]!];
+      const scene = p.scenes[0]!;
+      assert.ok("shots" in scene);
+      scene.shots = [scene.shots[0]!];
       p.episodes = [{ id: "ep_one", version: 1, order: 1, title: "One", scenes: [p.scenes[0]!.id] }];
       p.takeMediaInfo = sound === "unmeasured" ? {} : {
         [CLIP]: { sourceHash: HASH, probedAt: AT, mediaInfo: { durationSec: 4, hasAudio: sound === "audio" } },
