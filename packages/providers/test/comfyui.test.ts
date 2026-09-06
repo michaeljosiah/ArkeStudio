@@ -169,10 +169,11 @@ describe("the recipe catalogue projects into the manifest like any other model",
 
   it("the h3 row's lengths round-trip as numbers on the model's own 17k+5 grid", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
-    // Every length H3 offers, in order, each one run on the reference machine. The decode is
-    // where each comes closest to the floor: 933 MB free at 124 frames, 1,314 at 243, 758 at
-    // 362 — narrowest on the longest clip, which is the frame sequence growing, not the model.
-    assert.deepEqual(durationOptions(row), [5, 10, 15]);
+    // Every length H3 offers, in order, each one run on the reference machine: 5, 10 and 15 on
+    // 2026-08-28, then 4, 6, 7 and 8 on 2026-09-06 (issue 848) so a DEFAULT_SHOT_SEC shot no
+    // longer renders 124 frames for 96, and a 6 s shot no longer files as 10. 9 and 11–14 are
+    // unrun and snap up. The RAM low-water marks are on the map's comment; none was a floor.
+    assert.deepEqual(durationOptions(row), [4, 5, 6, 7, 8, 10, 15]);
     assert.equal(dispatchDuration(row, 20).kind, "over-cap");
     for (const seconds of durationOptions(row)) {
       const choice = dispatchDuration(row, seconds);
@@ -241,7 +242,7 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.equal(frameDispatchFor(draft, 1), null);
     assert.doesNotMatch(modelCapabilityCopy(draft), /frame/);
     // The mode adds no duration vocabulary of its own, so a framed shot offers h3's own lengths.
-    assert.deepEqual(durationOptions(row, { taskMode: "first-frame" }), [5, 10, 15]);
+    assert.deepEqual(durationOptions(row, { taskMode: "first-frame" }), [4, 5, 6, 7, 8, 10, 15]);
   });
 
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
@@ -682,7 +683,7 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
         capability: "video",
         params: { prompt: "x", duration: 3 },
       }),
-      /cannot be asked for 3s — it offers 5, 10, 15s/,
+      /cannot be asked for 3s — it offers 4, 5, 6, 7, 8, 10, 15s/,
     );
   });
 

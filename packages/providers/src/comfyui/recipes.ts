@@ -313,23 +313,41 @@ const DRAFT_VIDEO: ComfyUiRecipe = {
  * seconds, so this map is a record of what has been *run*, not of what H3 can do — a length
  * arrives here when somebody has watched it finish under the floor below, and not before.
  *
- * Measured on the reference machine (RTX 3080 10 GB, 31.9 GB system RAM, engine v0.33.1):
+ * Each second maps to the first grid point at or above it, so a clip runs a fraction long rather
+ * than short. Measured on the reference machine (RTX 3080 10 GB, 31.9 GB system RAM, engine
+ * v0.33.1), text-to-video at 864×480, 8 steps:
  *
- *   124 frames →  5.167 s   933 MB RAM to spare               —            ~25 min
- *   243 frames → 10.125 s  1,314 MB to spare, 9,565 MiB VRAM  —            ~17 min
- *   362 frames → 15.083 s    758 MB to spare, 9,613 MiB VRAM  —            ~20 min
+ *   107 frames →  4.458 s  1,542 MB RAM to spare, 9,677 MiB VRAM  —   9m56s   (2026-09-06)
+ *   124 frames →  5.167 s    933 MB to spare                       —  ~25 min  (2026-08-28)
+ *   158 frames →  6.583 s    788 MB to spare, 9,523 MiB VRAM       —  10m36s   (2026-09-06)
+ *   175 frames →  7.292 s    289 MB to spare, 9,512 MiB VRAM       —  10m27s   (2026-09-06)
+ *   192 frames →  8.000 s    586 MB to spare, 9,500 MiB VRAM       —  11m17s   (2026-09-06)
+ *   243 frames → 10.125 s  1,314 MB to spare, 9,565 MiB VRAM       —  ~17 min  (2026-08-28)
+ *   362 frames → 15.083 s    758 MB to spare, 9,613 MiB VRAM       —  ~20 min  (2026-08-28)
  *
- * Every length H3 offers has now been run here, so the map is complete rather than partial. The
- * decode is where each one comes closest to the floor — the sampling holds steady around 2 GB
- * free and the low-water mark lands at the end, on the frame sequence rather than the model.
+ * The 2026-09-06 runs (issue 848) each started cold — the engine asked to put its models down
+ * first, as the lane now does after a run — with 16.5 to 18.6 GB of system RAM free at dispatch
+ * and 8.2 to 8.4 GB of the card free, the rest held by other applications. Free RAM fell to the
+ * low-water mark whatever the dispatch figure was (15.0 to 18.0 GB spent): the weights are
+ * mapped, so the page cache fills what the machine has. That is why "to spare" says how close
+ * the machine came and not how much a run needs, and why no free-RAM floor follows from it yet
+ * (issue 846) — a run from a deliberately smaller free figure is the measurement that would.
  *
- * 758 MB is the narrowest of the three and it is on the longest clip, which is the shape to
- * expect: VRAM barely moves between 10s and 15s (9,565 → 9,613 MiB, both against a 10,240 MiB
- * card) because the transformer streams either way, while the decoded sequence grows with the
- * length. A card with less system RAM behind it is where this would give out first, not a
- * smaller card.
+ * VRAM barely moves with length (9,500 → 9,677 MiB against a 10,240 MiB card) because the
+ * transformer streams either way, while the decoded sequence grows with the length; the
+ * 2026-08-28 runs put the low-water mark in the decode, the 2026-09-06 runs anywhere from
+ * mid-sampling on. A card with less system RAM behind it is where this would give out first,
+ * not a smaller card. 9 s and 11–14 s are unrun and still snap up to the next length here.
  */
-export const H3_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124, "10": 243, "15": 362 };
+export const H3_FRAMES_BY_SECONDS: Record<string, number> = {
+  "4": 107,
+  "5": 124,
+  "6": 158,
+  "7": 175,
+  "8": 192,
+  "10": 243,
+  "15": 362,
+};
 
 /**
  * Local · H3 Video — MiniMax H3 FL2VA (open-sourced 2026-08-03) with Alibaba-lineage 8-step turbo
@@ -387,7 +405,7 @@ const H3_VIDEO: ComfyUiRecipe = {
   params: {
     prompt: { kind: "string", required: true, maxChars: 2000, bind: [["7", "prompt"]] },
     seed: { kind: "int", min: 0, max: 2 ** 31 - 1, bind: [["9", "seed"]] },
-    durationSec: { kind: "number-enum", values: [5, 10, 15], bind: [] },
+    durationSec: { kind: "number-enum", values: [4, 5, 6, 7, 8, 10, 15], bind: [] },
     aspect: { kind: "string-enum", values: ["16:9", "9:16"], bind: [] },
     length: { kind: "int", internal: true, required: true, min: 5, max: 362, bind: [["7", "length"]] },
     // The bucket reaches the scaler as well as the canvas, so the frame is cropped to the size
@@ -964,7 +982,7 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       maxDurationSec: 15,
       // Seconds → seconds, exactly as the wan row: the wire word is the number itself and the
       // client derives the 17k+5 frame count from it (h3FramesForSeconds).
-      durations: { "5": "5", "10": "10", "15": "15" },
+      durations: { "4": "4", "5": "5", "6": "6", "7": "7", "8": "8", "10": "10", "15": "15" },
       durationWire: "number",
       resolutions: ["480p"],
       aspects: Object.keys(H3_DIMENSIONS),
