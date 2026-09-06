@@ -340,7 +340,7 @@ export function PictureTrack({
                 event.preventDefault();
                 event.stopPropagation();
                 if (disabled) return;
-                event.currentTarget.focus();
+                event.currentTarget.focus({ preventScroll: true });
                 onSelect(clip.id);
                 setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
               }}

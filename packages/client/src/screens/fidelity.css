@@ -6175,8 +6175,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-ovclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
 .fy-clipmenu { position: fixed; z-index: 40; min-width: 216px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; }
 .fy-clipmenu__item { text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 9px; font: 400 12px var(--font-sans); color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
-.fy-clipmenu__item:hover:not(:disabled) { background: var(--accent); }
-.fy-clipmenu__item:disabled { color: var(--neutral-400); cursor: default; }
+.fy-clipmenu__item:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent); }
+.fy-clipmenu__item:disabled, .fy-clipmenu__item[aria-disabled="true"] { color: var(--neutral-400); cursor: default; }
 .fy-clipmenu__note { font: 400 9px var(--font-mono); color: var(--neutral-400); padding: 3px 9px 5px; }
 
 @media (max-width: 1199px) {

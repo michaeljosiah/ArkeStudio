@@ -63,6 +63,20 @@ export interface RenderAudioItem extends ExportAudioClip {
   clipId?: string;
 }
 
+/** A filed segment's remaining slot is silence, never the next shot in its parent file. */
+function segmentSound(item: RenderAudioItem, sourceOutSec?: number): RenderAudioItem[] {
+  const endSec = sourceOutSec === undefined ? item.endSec : Math.min(item.endSec, item.startSec + Math.max(0, sourceOutSec - item.sourceInSec));
+  return endSec > item.startSec ? [{ ...item, endSec }] : [];
+}
+
+function unmeasuredLegacySound(placements: CutFile["overlays"], artifacts: readonly RenderArtifact[], totalSec = Infinity): NonNullable<RenderPlan["unmeasuredAudio"]> {
+  return placements.flatMap(placement => {
+    const artifact = artifacts.find(candidate => candidate.id === placement.artifactId);
+    return placement.startSec < totalSec && placement.audio !== "mute" && artifact?.kind === "video" && artifact.mediaInfo === undefined
+      ? [{ clipId: placement.id, label: artifact.file, startSec: placement.startSec, endSec: Math.min(placement.endSec, totalSec) }] : [];
+  });
+}
+
 /** A measured source rounded to the timeline clock can be transcribed without a trim tool. */
 export function playsWholeAudioSource(item: Pick<RenderAudioItem, "sourceInSec" | "startSec" | "endSec">,
   sourceLengthSec: number | null, frameRate: FrameRate): boolean {
@@ -272,7 +286,7 @@ function overlaysFromTimeline(
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
-          sound.push({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id });
+          sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
         continue;
       }
@@ -326,6 +340,7 @@ function audioFromTimeline(
       let path: string;
       let segmentInSec = 0;
       let physicalInSec: number | undefined;
+      let sourceOutSec: number | undefined;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
         const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
@@ -342,6 +357,7 @@ function audioFromTimeline(
         if (resolved === null) return { ok: false, reason: `${clip.id} cites take ${takeId}, which has no media` };
         path = resolved.path;
         segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
+        sourceOutSec = resolved.outSec;
       } else if (clip.source.kind === "performance") {
         const source = clip.source;
         const performance = production.performances.find(p => p.id === source.performanceId);
@@ -360,7 +376,7 @@ function audioFromTimeline(
       } else {
         return { ok: false, reason: `${clip.id} is a shot on ${track.name}; shots are picture` };
       }
-      audio.push({
+      const sound = segmentSound({
         path,
         startSec,
         endSec,
@@ -368,8 +384,9 @@ function audioFromTimeline(
         role: effectiveAudioRole(track, clip),
         sourceInSec: physicalInSec ?? (segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate)),
         clipId: clip.id,
-      });
-      if (effectiveAudioRole(track, clip) === "dialogue") speech.push({ startSec, endSec });
+      }, sourceOutSec);
+      audio.push(...sound);
+      if (effectiveAudioRole(track, clip) === "dialogue") speech.push(...sound.map(item => ({ startSec: item.startSec, endSec: item.endSec })));
     }
   }
   const problems = dialogueTimingProblems(timings,slots,Math.max(0,...slots.map(s=>s.endSec)));
@@ -480,7 +497,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     const overlays = exportOverlays(production.cut.overlays, artifacts);
     const audio = exportAudioClips(production.cut.overlays, artifacts);
     const plan = buildExportPlan(deriveCut(production), preset, overlays, audio, frameRate);
-    return { ok: true, plan: withRender(plan, scope, null, DEFAULT_MIX) };
+    const unmeasuredAudio = unmeasuredLegacySound(production.cut.overlays, artifacts, plan.totalSec);
+    return { ok: true, plan: { ...withRender(plan, scope, null, DEFAULT_MIX), ...(unmeasuredAudio.length ? { unmeasuredAudio } : {}) } };
   }
 
   let cut;
@@ -581,7 +599,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         label: entry.label,
       });
       if (baseAudible && clip.audio !== "mute" && production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio === true) {
-        baseSound.push({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id });
+        baseSound.push(...segmentSound({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id }, segment?.outSec));
       }
       continue;
     }
@@ -605,7 +623,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec });
       }
       if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
-        baseSound.push({
+        baseSound.push(...segmentSound({
           path: entry.media.path,
           startSec,
           endSec: startSec + entry.durationSec,
@@ -613,7 +631,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
           role: "picture",
           sourceInSec: entry.media.inSec ?? 0,
           clipId: clip.id,
-        });
+        }, entry.media.outSec));
       }
       continue;
     }
@@ -630,6 +648,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
    */
   const pictureEnd = Math.max(cut.totalSec, ...overlays.map((overlay) => overlay.endSec), 0);
   const totalSec = pictureEnd > 0 ? pictureEnd : Math.max(...placedSound.map((clip) => clip.endSec), 0);
+  if (record.migratedCut !== true) unmeasuredAudio.push(...unmeasuredLegacySound(production.cut.overlays, artifacts, totalSec));
   const audio = placedSound
     .filter((clip) => clip.startSec < totalSec)
     .map((clip) => (clip.endSec > totalSec ? { ...clip, endSec: totalSec } : clip));

@@ -34,7 +34,7 @@ async function mount(state: ClientState) {
     <Routes><Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} /></Routes>
   </MemoryRouter>));
   const button = (text: string) => {
-    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
+    const found = [...container.querySelectorAll<HTMLButtonElement>("button"), ...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
   return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
@@ -190,17 +190,23 @@ for (const upper of [false, true]) {
         await act(async () => { picture.dispatchEvent(event); });
       };
       await open();
-      const menu = screen.container.querySelector<HTMLElement>('[role="menu"]')!;
+      const menu = document.querySelector<HTMLElement>('[role="menu"]')!;
       assert.ok(menu);
+      assert.equal(menu.parentElement, document.body, "timeline scrolling cannot clip the menu");
       assert.equal(screen.button("Extract audio to new track").disabled, false);
       assert.ok(parseFloat(menu.style.left) <= 1016 && parseFloat(menu.style.top) <= 760);
       await act(async () => { menu.dispatchEvent(new Event("scroll")); });
-      assert.ok(screen.container.querySelector('[role="menu"]'), "scrolling the menu keeps it open");
+      assert.ok(document.querySelector('[role="menu"]'), "scrolling the menu keeps it open");
+      await act(async () => { window.dispatchEvent(new Event("scroll")); });
+      assert.ok(document.querySelector('[role="menu"]'), "selection layout scrolling keeps it open");
+      await act(async () => { document.body.dispatchEvent(new Event("wheel", { bubbles: true })); });
+      assert.equal(document.querySelector('[role="menu"]'), null, "user scrolling outside dismisses");
+      await open();
       await act(async () => {
         const escape = new Event("keydown", { bubbles: true }); Object.assign(escape, { key: "Escape" });
         window.dispatchEvent(escape);
       });
-      assert.equal(screen.container.querySelector('[role="menu"]'), null);
+      assert.equal(document.querySelector('[role="menu"]'), null);
       await open(true);
       await act(async () => screen.button("Extract audio to new track").click());
       const batch = screen.sent.find(message => message.kind === "timeline-command");
@@ -210,7 +216,7 @@ for (const upper of [false, true]) {
       assert.ok(command.kind === "detach-audio");
       assert.match(command.newClipId, /^cl_/);
       assert.deepEqual(command, { kind: "detach-audio", clipId: "cl_holiday", newClipId: command.newClipId, newTrack: true });
-      assert.equal(screen.container.querySelector('[role="menu"]'), null);
+      assert.equal(document.querySelector('[role="menu"]'), null);
     } finally { await screen.close(); }
   });
 }
@@ -225,10 +231,15 @@ for (const unavailable of ["silent", "unmeasured", "muted"] as const) {
     try {
       const event = new Event("contextmenu", { bubbles: true }); Object.assign(event, { clientX: 100, clientY: 100 });
       await act(async () => { screen.container.querySelector('[data-clip="cl_holiday"]')!.dispatchEvent(event); });
-      assert.equal(screen.button("Extract audio to new track").disabled, true);
-      assert.match(screen.container.querySelector('[role="menu"]')!.textContent!, unavailable === "silent" ? /no audio stream/ : unavailable === "unmeasured" ? /Measure/ : /already muted/);
+      const extraction = screen.button("Extract audio to new track");
+      assert.equal(extraction.disabled, false, "the unavailable action remains focusable");
+      assert.equal(extraction.getAttribute("aria-disabled"), "true");
+      assert.ok(document.getElementById(extraction.getAttribute("aria-describedby")!)?.textContent);
+      await act(async () => extraction.click());
+      assert.equal(screen.sent.some(message => message.kind === "timeline-command"), false);
+      assert.match(document.querySelector('[role="menu"]')!.textContent!, unavailable === "silent" ? /no audio stream/ : unavailable === "unmeasured" ? /Measure/ : /already muted/);
       await act(async () => { document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })); });
-      assert.equal(screen.container.querySelector('[role="menu"]'), null);
+      assert.equal(document.querySelector('[role="menu"]'), null);
       assert.equal(screen.sent.some(message => message.kind === "timeline-command"), false);
     } finally { await screen.close(); }
   });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  audioAtSec,
   buildExportPlan,
   buildFfmpegArgs,
   buildRenderPlan,
@@ -215,6 +216,47 @@ function production(over: Partial<ProductionBundle> = {}): ProductionBundle {
 }
 
 describe("video sound defaults and export diagnostics (#908)", () => {
+  for (const lane of ["shot", "take", "upper", "audio"] as const) {
+    it(`stops ${lane} segment sound before the next shot in its parent file`, () => {
+      const p = production({ cut: { audio: [], overlays: [] } }), parent = p.takes[0]!;
+      const child = { ...parent, id: "tk_01J8E0000000000000000000S1", media: undefined,
+        segment: { passTakeId: parent.id, inSec: 1, outSec: 2 } };
+      p.takes.push(child);
+      p.selections.sh_1 = { acceptedTakeId: child.id, trimInSec: .2 };
+      p.takeMediaInfo[parent.id] = { sourceHash: `sha256:${"a".repeat(64)}`, probedAt: AT, mediaInfo: { durationSec: 5, hasAudio: true } };
+      const source = lane === "shot" ? seedStoryPictureTimeline(p).tracks[0]!.clips[0]!.source
+        : { kind: "take" as const, takeId: child.id, label: "Segment", offsetSec: .2 };
+      const trackId = lane === "upper" || lane === "audio" ? "tr_test" : "tr_picture";
+      const timeline = applyTimelineCommands(seedEmptyPictureTimeline(p), [
+        ...(trackId === "tr_picture" ? [] : [{ kind: "add-track" as const, trackId, trackKind: lane === "audio" ? "audio" as const : "picture" as const, name: "Test" }]),
+        { kind: "place", trackId, clip: { id: "cl_segment", startFrame: 0, durationFrames: 50, sourceInFrames: 0, source } },
+      ]);
+      const result = buildRenderPlan({ production: p, artifacts: [], timeline: { status: "ready", timeline },
+        scope: { kind: "production" }, preset: "review-cut" });
+      assert.ok(result.ok);
+      assert.equal(result.plan.audio[0]!.sourceInSec, 1.2);
+      assert.equal(result.plan.audio[0]!.endSec, .8);
+      assert.equal(audioAtSec(result.plan, .7).length, 1);
+      assert.equal(audioAtSec(result.plan, .9).length, 0, "preview is silent after the segment");
+      const args = buildFfmpegArgs(result.plan, "/world", "/export.mp4", "/font.ttf");
+      assert.match(args[args.indexOf("-filter_complex") + 1]!, /atrim=duration=0.8/, "export stops at the same physical boundary");
+    });
+  }
+
+  it("names unmeasured kept legacy videos until their placements are migrated", () => {
+    const p = production({ cut: { audio: [], overlays: [
+      { id: "ov_01J8G0000000000000000000B1", artifactId: INSERT, startSec: 1, endSec: 2, audio: "keep" },
+    ] } });
+    const timeline = seedEmptyPictureTimeline(p); timeline.migratedCut = false;
+    const catalog = [{ id: INSERT, file: "unmeasured.mp4", kind: "video" as const }];
+    const render = () => buildRenderPlan({ production: p, artifacts: catalog, timeline: { status: "ready" as const, timeline }, scope: { kind: "production" as const }, preset: "review-cut" as const });
+    let result = render(); assert.ok(result.ok);
+    assert.deepEqual(result.plan.unmeasuredAudio, [{ clipId: p.cut.overlays[0]!.id, label: "unmeasured.mp4", startSec: 1, endSec: 2 }]);
+    p.cut.overlays[0]!.audio = "mute";
+    result = render(); assert.ok(result.ok); assert.equal(result.plan.unmeasuredAudio, undefined);
+    p.cut.overlays[0]!.audio = "keep"; timeline.migratedCut = true;
+    result = render(); assert.ok(result.ok); assert.equal(result.plan.unmeasuredAudio, undefined);
+  });
   it("keeps a filed shot segment's measured parent sound without an explicit audio setting", () => {
     const p = production({ cut: { audio: [], overlays: [] } });
     const parent = p.takes[0]!;

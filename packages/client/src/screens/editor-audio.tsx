@@ -334,7 +334,7 @@ export function TypedTrackRows({
                       if (audio) return;
                       event.preventDefault(); event.stopPropagation();
                       if (disabled) return;
-                      event.currentTarget.focus(); onSelect(clip.id);
+                      event.currentTarget.focus({ preventScroll: true }); onSelect(clip.id);
                       setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
                     }}
                     onClick={(event) => {
