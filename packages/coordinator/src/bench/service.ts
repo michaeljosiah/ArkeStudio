@@ -739,7 +739,11 @@ export function planBenchDispatch(
       return { ok: false, reason: `${entry.token}: ${model.provider} cannot carry ${resolved.kind} references yet` };
     }
   }
-  const referencePaths = resolvedRefs.map(({ resolved }) => resolved.path);
+  // Pictures and clips travel in two lists (issue 852): the dispatcher reads each under its own
+  // checks and the client puts each in its own wire field, so a clip in the picture list would
+  // be refused at dispatch as a picture that is not one.
+  const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
+  const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
 
   const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
@@ -894,7 +898,8 @@ export function planBenchDispatch(
     params.kind === "video" && (params.durationSec ?? 0) > 0
       ? dispatchDuration(model, params.durationSec!, {
           taskMode,
-          withReferences: referencePaths.length > 0,
+          // A clip alone lands on the reference route too (issue 852), whose ceiling can be shorter.
+          withReferences: referencePaths.length > 0 || videoPaths.length > 0,
         })
       : params.kind === "video"
         ? { kind: "provider-default" as const }
@@ -982,7 +987,12 @@ export function planBenchDispatch(
       const requestedSec = params.durationSec ?? 0;
       // The route this job lands on is the one whose ceiling applies: task modes select their
       // sibling route directly, while ordinary references select the reference endpoint.
-      const withReferences = referencePaths.length > 0;
+      // A clip rides only on the reference route (issue 852): the frame routes declare no video
+      // field, so a keyframe lane and a clip together is refused here, where the tile can act.
+      if (frame !== null && videoPaths.length > 0) {
+        return { ok: false, reason: "a clip cannot ride beside a keyframe — the frame route takes no video" };
+      }
+      const withReferences = referencePaths.length > 0 || videoPaths.length > 0;
       const choice = videoDuration!;
       inputs.push({
         worldId: options.worldId,
@@ -1020,6 +1030,7 @@ export function planBenchDispatch(
                   ? { aspect: params.aspect }
                   : {}),
                 ...(referencePaths.length > 0 ? { references: referencePaths } : {}),
+                ...(videoPaths.length > 0 ? { videoReferences: videoPaths } : {}),
               }),
           // Only where the route publishes the choice. A preset carries the params it was saved
           // with, so a silent shot saved against seedance can be applied to a model that has no

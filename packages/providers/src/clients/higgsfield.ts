@@ -57,6 +57,8 @@ const INTERNAL_PARAMS = new Set([
   "dispatchTiming",
   "promptProvenance",
   "continuedFrom",
+  // Ours too (issue 852): the clips these paths name travelled as the video array above.
+  "videoReferences",
   "durationSec",
   "output",
 ]);

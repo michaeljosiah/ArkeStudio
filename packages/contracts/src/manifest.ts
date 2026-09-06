@@ -135,6 +135,13 @@ export const ModelLimitsSchema = z
      * wan say `reference_image_urls`. Data for the same reason `framesField` is.
      */
     referencesField: z.string().min(1).optional(),
+    /**
+     * What the reference route calls its video array, where it has one — `reference_video_urls`
+     * on H3 (issue 852). Its presence is what says the transport can carry motion at all:
+     * `maxReferenceVideoSec` is an allowance the route publishes, and a budget with nowhere to
+     * put the clip would accept a file and never send it, the failure the budget exists to stop.
+     */
+    referenceVideoField: z.string().min(1).optional(),
     resolutions: z.array(z.string()).optional(),
     /**
      * Normalised tier → the provider's own word for it. The tier is what a user chooses; the

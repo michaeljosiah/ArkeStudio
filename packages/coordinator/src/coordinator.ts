@@ -327,7 +327,7 @@ import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
 
 import { imageFormatOf, verifyArtifact } from "./queue/verify.js";
-import { readContainedImageReferences } from "./world/reference-files.js";
+import { readContainedImageReferences, readContainedVideoReferences } from "./world/reference-files.js";
 import { sampleWorldAvailable } from "./world/sample-world.js";
 import {
   characterLookRequests,
@@ -1675,6 +1675,17 @@ export class Coordinator {
               const store = this.opts.provider.openStore?.();
               if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
               return readContainedImageReferences(store.dir, paths);
+            },
+            // The bench's clips (issue 852), read under the same containment as its pictures.
+            readVideoReferences: async (worldId, paths) => {
+              if (this.opts.provider.withWorldStore) {
+                return this.opts.provider.withWorldStore(worldId, (store) =>
+                  readContainedVideoReferences(store.dir, paths),
+                );
+              }
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== worldId) throw new Error("the owning world is unavailable");
+              return readContainedVideoReferences(store.dir, paths);
             },
             readVoiceReference: async (worldId, provider, model, voiceId) => {
               const prepare = async (store: WorldStore) => {

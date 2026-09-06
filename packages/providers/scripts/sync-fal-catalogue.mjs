@@ -344,6 +344,10 @@ const CURATED = {
       maxReferenceVideoSec: 15,
       maxReferenceAudioSec: 15,
       referencesField: "reference_image_urls",
+      // The same route reads up to three clips, 2-15 s each, in this array (issue 852). Naming
+      // the field is what lets a clip ride at all: the budget refuses video on a row that
+      // publishes seconds but no field, because there would be nowhere to put the bytes.
+      referenceVideoField: "reference_video_urls",
       maxDurationSec: 15,
       // duration is an integer 5..15 on this route, not a string out of a list.
       durationWire: "number",

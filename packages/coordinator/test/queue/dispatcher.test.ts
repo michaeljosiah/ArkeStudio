@@ -52,6 +52,8 @@ async function makeHarness(
     onFinalizationFailure?: JobQueueOptions["onFinalizationFailure"];
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
+    readVideoSource?: JobQueueOptions["readVideoSource"];
+    readVideoReferences?: JobQueueOptions["readVideoReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -77,6 +79,8 @@ function build(
     onFinalizationFailure?: JobQueueOptions["onFinalizationFailure"];
     readImageReferences?: JobQueueOptions["readImageReferences"];
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
+    readVideoSource?: JobQueueOptions["readVideoSource"];
+    readVideoReferences?: JobQueueOptions["readVideoReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -119,6 +123,8 @@ function build(
     ...(opts.onFinalizationFailure ? { onFinalizationFailure: opts.onFinalizationFailure } : {}),
     ...(opts.readImageReferences ? { readImageReferences: opts.readImageReferences } : {}),
     ...(opts.readVoiceReference ? { readVoiceReference: opts.readVoiceReference } : {}),
+    ...(opts.readVideoSource ? { readVideoSource: opts.readVideoSource } : {}),
+    ...(opts.readVideoReferences ? { readVideoReferences: opts.readVideoReferences } : {}),
     ...(opts.admit ? { admit: opts.admit } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
@@ -660,6 +666,55 @@ describe("putting the engine's models down when the lane drains (issue 846)", ()
     assert.equal(foldedJob(h, first.id)?.status, "succeeded", foldedJob(h, first.id)?.error ?? undefined);
     assert.equal(foldedJob(h, second.id)?.status, "succeeded", foldedJob(h, second.id)?.error ?? undefined);
     assert.deepEqual(order, [first.id, second.id, "release:comfyui-draft-video"], "one ask, after the second job, not between them");
+    h.queue.dispose();
+  });
+});
+
+describe("the predecessor's clip takes the wire position its mode names (issue 852)", () => {
+  const clip = { contentType: "video/mp4" as const, data: Uint8Array.from([1, 2, 3, 4]) };
+  const run = async (params: Record<string, unknown>) => {
+    const fake = new FakeProvider({});
+    fake.artifacts = [{ name: "frame.png", contentType: "image/png", data: pngBytes() }];
+    const h = await makeHarness(
+      { fake },
+      {
+        readVideoSource: async () => clip,
+        readVideoReferences: async (_worldId, paths) => paths.map(() => clip),
+      },
+    );
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, params: { ...INPUT.params, ...params } });
+    await until(() => ["succeeded", "failed"].includes(foldedJob(h, job.id)?.status ?? ""), "the job to settle", FOLD_MS);
+    h.queue.dispose();
+    return { fake, status: foldedJob(h, job.id)?.status, error: foldedJob(h, job.id)?.error };
+  };
+
+  it("extends on an extend mode, and rides as the first motion reference without one", async () => {
+    // The same `continuedFrom`, two wire positions. `taskMode: "continue"` is what the compiler
+    // writes for an extend route and nothing else, so its absence beside the edge is the carry.
+    const extended = await run({ continuedFrom: "tk_01J8F0000000000000000000B2", taskMode: "continue" });
+    assert.equal(extended.status, "succeeded", extended.error ?? undefined);
+    assert.deepEqual(extended.fake.submittedVideoSource, clip);
+    assert.deepEqual(extended.fake.submittedVideoReferences, []);
+
+    const carried = await run({ continuedFrom: "tk_01J8F0000000000000000000B2" });
+    assert.equal(carried.status, "succeeded", carried.error ?? undefined);
+    assert.equal(carried.fake.submittedVideoSource, null);
+    assert.deepEqual(carried.fake.submittedVideoReferences, [clip]);
+  });
+
+  it("reads the bench's clips through their own seam, and refuses when one goes missing", async () => {
+    const attached = await run({ videoReferences: ["artifacts/a.mp4", "artifacts/b.mp4"] });
+    assert.equal(attached.status, "succeeded", attached.error ?? undefined);
+    assert.equal(attached.fake.submittedVideoReferences.length, 2);
+
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, { readVideoReferences: async () => [clip] });
+    await h.queue.start();
+    const job = await h.queue.enqueue({ ...INPUT, params: { ...INPUT.params, videoReferences: ["artifacts/a.mp4", "artifacts/b.mp4"] } });
+    await until(() => foldedJob(h, job.id)?.status === "failed", "a short set to be refused, not sent", FOLD_MS);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /not every video reference could be prepared/);
+    assert.equal(fake.submitCount, 0);
     h.queue.dispose();
   });
 });

@@ -208,7 +208,7 @@ describe("continuation dispatch (SPEC-019 T-31, issues 461 and 629)", () => {
     // Footage that was never delivered cannot be extended, however sound the graph is.
     const noMedia = take(TK_1);
     delete (noMedia as { media?: string }).media;
-    assert.match(await reasonFor({ takes: [noMedia] }), /no footage to extend/);
+    assert.match(await reasonFor({ takes: [noMedia] }), /no footage to continue from/);
   });
 
   it("displaces the references and says so, rather than thinning them in silence", async () => {
@@ -257,11 +257,82 @@ describe("continuation dispatch (SPEC-019 T-31, issues 461 and 629)", () => {
     assert.deepEqual(resolved.segment, { inSec: 6, outSec: 12 });
   });
 
+  /**
+   * The carry (issue 852): a row with no extend route whose reference route reads video. The
+   * predecessor's take rides as a motion reference beside the sheets, on the reference route,
+   * with the same edge on the job and the take — named as carried, never as extended.
+   */
+  const H3_LIKE: ManifestModel = {
+    ...VEO_LIKE,
+    id: "h3-like",
+    displayName: "H3-like",
+    accepts: { referenceImages: 9, startFrame: false, endFrame: false },
+    limits: {
+      maxDurationSec: 15,
+      durations: { "5": "5", "6": "6", "8": "8", "15": "15" },
+      durationWire: "number",
+      aspects: ["16:9", "9:16"],
+      referencesField: "reference_image_urls",
+      referenceVideoField: "reference_video_urls",
+      maxReferenceVideoSec: 15,
+    },
+    modes: { generate: { locked: [] } },
+  };
+
+  it("carries the predecessor as a motion reference where the row has no extend route (issue 852)", async () => {
+    const { plan, compile } = await planFor({
+      model: H3_LIKE,
+      shots: [shot(1, "an empty pier"), shot(2, "@maren-kest at the rail", true)],
+      takes: [take(TK_1, { params: { durationSec: 6 } } as Partial<Take>)],
+    });
+
+    const continuing = plan.shots[1]!;
+    assert.equal(continuing.continuation?.kind, "carry");
+    assert.equal(continuing.continuation?.takeId, TK_1);
+    assert.ok(continuing.bound.length > 0, "the sheets ride beside the clip rather than stepping aside");
+    assert.match(continuing.parts.preamble ?? "", /Image 1: /, "and are numbered as they always were");
+    assert.match(continuing.parts.preamble ?? "", /Video 1 is the footage immediately before this clip/);
+    const named = plan.warnings.continuedShots[0]!;
+    assert.equal(named.kind, "carry");
+    assert.ok(!named.setAside.includes("maren-kest"), "nothing stepped aside for a carry");
+    assert.equal(plan.warnings.continuationUnavailable.length, 0);
+
+    const pass = compile()[1]!;
+    assert.deepEqual(pass.route, { kind: "reference" }, "a reference dispatch that happens to carry a clip");
+    assert.equal(pass.params["continuedFrom"], TK_1, "the same edge arrival reads for either kind");
+    assert.equal(pass.params["taskMode"], undefined, "and no extend mode beside it — that absence is the carry");
+    assert.ok((pass.params["references"] as string[]).length > 0, "the sheet files still travel");
+    assert.equal(pass.continuation?.kind, "carry");
+    assert.equal(pass.dropped.some((entry) => /extend route/.test(entry.reason)), false);
+    assert.equal(pass.params["durationSec"], 6, "priced on the reference route's own menu");
+  });
+
+  it("budgets the carried clip in seconds, and refuses a length it cannot state (issue 852)", async () => {
+    const reasonFor = async (predecessor: Take) => {
+      const { plan } = await planFor({ model: H3_LIKE, takes: [predecessor] });
+      assert.equal(plan.shots[1]?.continuation, undefined);
+      return plan.warnings.continuationUnavailable[0]!.reason;
+    };
+    assert.match(await reasonFor(take(TK_1, { params: { durationSec: 20 } } as Partial<Take>)), /runs 20s — longer than the 15s/);
+    assert.match(await reasonFor(take(TK_1)), /no known length/);
+    // A segment is its range, so it needs no asked length of its own.
+    const segment = take(TK_1, { segment: { passTakeId: TK_PASS, inSec: 6, outSec: 12 } } as Partial<Take>);
+    delete (segment as { media?: string }).media;
+    const { plan } = await planFor({ model: H3_LIKE, takes: [segment, take(TK_PASS, { coversShots: ["sh_1", "sh_2"] } as Partial<Take>)] });
+    assert.equal(plan.shots[1]?.continuation?.kind, "carry");
+    // The one hop holds for a carry exactly as for an extension (R-52): the edge is the same field.
+    const chained = await planFor({ model: H3_LIKE, takes: [take(TK_1, { continuedFrom: TK_2, params: { durationSec: 6 } } as Partial<Take>)] });
+    assert.match(chained.plan.warnings.continuationUnavailable[0]!.reason, /stops at one hop/);
+    // A row with neither an extend route nor a video field still says so in the old words.
+    const neither = await planFor({ model: TEXT_ONLY, takes: [take(TK_1, { params: { durationSec: 6 } } as Partial<Take>)] });
+    assert.match(neither.plan.warnings.continuationUnavailable[0]!.reason, /has no continue route/);
+  });
+
   it("refuses a segment whose pass is gone rather than composing a path out of nothing", async () => {
     const orphan = take(TK_1, { segment: { passTakeId: TK_PASS, inSec: 6, outSec: 12 } } as Partial<Take>);
     delete (orphan as { media?: string }).media;
     const { plan } = await planFor({ takes: [orphan] });
-    assert.match(plan.warnings.continuationUnavailable[0]!.reason, /no footage to extend/);
+    assert.match(plan.warnings.continuationUnavailable[0]!.reason, /no footage to continue from/);
   });
 
   it("a continued shot is not also a shot missing its start frame", async () => {

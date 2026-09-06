@@ -78,6 +78,8 @@ export interface DispatchClient {
       audioInputs?: PreparedAudioInput[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
+      /** Clips riding as motion references (issue 852), resolved at submit like the footage above. */
+      videoReferences?: DispatchVideoSource[];
       idempotencyKey?: string;
       /** The recipe identity frozen at enqueue, so the client can refuse a moved catalogue (R-15). */
       recipe?: RecipeIdentity;
@@ -170,6 +172,12 @@ export interface JobQueueOptions {
    * of which belongs in a queue.
    */
   readVideoSource?: (job: Job) => Promise<DispatchVideoSource>;
+  /**
+   * Clips a job carries as motion references, by world-relative path (issue 852) — the bench's
+   * video tokens. A seam for the reason `readImageReferences` is: bytes are read at submit and
+   * never journalled, and containment is the world's to enforce.
+   */
+  readVideoReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchVideoSource[]>;
   /** A provider fault surfaced once, in provider terms (SPEC-008 R-4). */
   onProviderFault?: (provider: string, message: string) => void;
   /** Fired after a job reaches terminal state and its ledger entry landed (SPEC-010 tile flows). */
@@ -767,6 +775,7 @@ export class JobQueue {
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
     let videoSource: DispatchVideoSource | undefined;
+    let videoReferences: DispatchVideoSource[] | undefined;
     const referencePaths = job.params["references"];
     if (Array.isArray(referencePaths) && referencePaths.length > 0) {
       if (!referencePaths.every((path): path is string => typeof path === "string")) {
@@ -789,6 +798,35 @@ export class JobQueue {
       }
       if (imageReferences.length !== referencePaths.length || imageReferences.length > 16) {
         await this.terminalize(job, "failed", "not every image reference could be prepared safely");
+        return;
+      }
+    }
+    // Clips the bench attached as motion references (issue 852): the same shape as the image
+    // list above — world-relative paths journalled, bytes read here — and the same refusals,
+    // because a clip that went missing between planning and dispatch would quietly generate
+    // against a smaller set than was priced.
+    const videoPaths = job.params["videoReferences"];
+    if (Array.isArray(videoPaths) && videoPaths.length > 0) {
+      if (!videoPaths.every((path): path is string => typeof path === "string")) {
+        await this.terminalize(job, "failed", "video reference paths are invalid");
+        return;
+      }
+      if (!this.opts.readVideoReferences) {
+        await this.terminalize(job, "failed", "video reference transport is not configured");
+        return;
+      }
+      try {
+        videoReferences = await this.opts.readVideoReferences(job.worldId, videoPaths);
+      } catch (error) {
+        await this.terminalize(
+          job,
+          "failed",
+          error instanceof Error ? error.message : "video references could not be prepared",
+        );
+        return;
+      }
+      if (videoReferences.length !== videoPaths.length) {
+        await this.terminalize(job, "failed", "not every video reference could be prepared safely");
         return;
       }
     }
@@ -831,7 +869,13 @@ export class JobQueue {
         return;
       }
       try {
-        videoSource = await this.opts.readVideoSource(job);
+        const clip = await this.opts.readVideoSource(job);
+        // The same predecessor, two wire positions (issue 852): an extend route reads it as the
+        // footage being continued, and a row with no such route carries it as the first motion
+        // reference — `taskMode: "continue"` is what the compiler writes for the former and
+        // nothing else, so its absence beside `continuedFrom` is the carry.
+        if (job.params["taskMode"] === "continue") videoSource = clip;
+        else videoReferences = [clip, ...(videoReferences ?? [])];
       } catch (error) {
         await this.terminalize(
           job,
@@ -898,6 +942,7 @@ export class JobQueue {
           ...(audioInputs ? { audioInputs } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
+          ...(videoReferences ? { videoReferences } : {}),
           ...(client.declarations.supportsIdempotencyKey ? { idempotencyKey: job.idempotencyKey } : {}),
           // What this job IS, frozen before it was journalled (R-15). Carried unconditionally:
           // a client that does not use it ignores it, and one that does can refuse a graph that
