@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useParams, useNavigate } from "react-router";
 import {
   chapterParagraphs,
   countWords,
@@ -79,7 +79,24 @@ const PAGE_READ_BLOCK_CAP = 1000;
 export function ChapterScreen() {
   const { worldId, prodId, chapterId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
   const chapter = production?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+  // The bundle is here and does not hold it: a bookmark to a chapter since deleted, or a typo.
+  // Said, with the way back, rather than left on "Opening…" for a body that will never come.
+  if (world && production && !chapter) {
+    return (
+      <Screen id="chapter">
+        <EmptyState
+          title="No such chapter"
+          action={
+            <Button onClick={() => navigate(`/w/${encodeURIComponent(world.meta.worldId)}/p/${encodeURIComponent(production.meta.id)}/story/chapters`)}>
+              Chapters
+            </Button>
+          }
+        />
+      </Screen>
+    );
+  }
   if (world && production && chapter) {
     return (
       <ChapterWorkspace
@@ -175,6 +192,12 @@ export function ChapterWorkspace({
   recordRef.current = record;
   const draftRef = useRef<string | null>(null);
   draftRef.current = draft;
+  /*
+   * Which editor's words count. Adopting a record from disk replaces the editor's document, and
+   * the editor being replaced can flush its last serialisation on the way out; a change carrying
+   * an older epoch is that flush, and is dropped rather than written over the adopted text.
+   */
+  const epoch = useRef(0);
 
   useEffect(() => {
     // Nothing leaves the client while the transport is down; the connection coming back is a
@@ -192,16 +215,29 @@ export function ChapterWorkspace({
         setOpenFailure(null);
         // A draft the transport could not carry goes out now, against the base just read —
         // unless the record moved while it waited, in which case the disk text is the text and
-        // the foot says why the words on screen went.
+        // the foot says why the words on screen went. The hash is what says whether it moved:
+        // an edit outside the app keeps the version (codex, PR 879).
         const unsent = unsentDraft.current;
         unsentDraft.current = null;
-        if (unsent !== null && previous !== null && previous.version === opened.version) {
+        if (unsent !== null && previous !== null && previous.hash === opened.hash) {
           setSaving(true);
           setSaveRefusal(null);
           flushSave(unsent);
           return;
         }
         if (unsent !== null) setSaveRefusal("the chapter moved · reloaded from disk");
+        // Adopting cancels what the record being replaced still had going: a timer holding
+        // pre-adoption text would fire, read the adopted hash, and write the old words over the
+        // restored or accepted ones without cutting a version; a save in flight is answered for
+        // a record this screen no longer shows (codex, PR 879).
+        if (timer.current !== null) {
+          clearTimeout(timer.current);
+          timer.current = null;
+        }
+        queuedDraft.current = null;
+        pendingSave.current = null;
+        epoch.current += 1;
+        setSaving(false);
         // Someone else's edit is adopted, ours has already been saved: either way the text on
         // disk is the text (the Bible's three-writer rule).
         setDraft(null);
@@ -325,7 +361,9 @@ export function ChapterWorkspace({
     [worldId, prodId, chapter.file],
   );
 
-  const onChange = (value: string) => {
+  const onChangeAt = (at: number) => (value: string) => {
+    // A change from an editor already replaced by an adoption is its parting flush, not typing.
+    if (at !== epoch.current) return;
     richWrite.current = richMode ? value : null;
     draftRef.current = value;
     setDraft(value);
@@ -334,6 +372,7 @@ export function ChapterWorkspace({
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
   };
+  const onChange = onChangeAt(epoch.current);
 
   /* Which editor owns this chapter: the Bible's gate, for the Bible's reasons. */
   const [preferSource, setPreferSource] = useState(false);

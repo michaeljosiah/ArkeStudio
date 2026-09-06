@@ -127,7 +127,7 @@ function capture(sent: ClientMessage[]): ArkeBridge {
   } as unknown as ArkeBridge;
 }
 
-async function mount(state: ClientState): Promise<Mounted> {
+async function mount(state: ClientState, route = ROUTE): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest(capture(sent));
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -136,7 +136,7 @@ async function mount(state: ClientState): Promise<Mounted> {
   await act(async () => {
     __setStateForTest(state, { connection: "open" });
     root.render(
-      <MemoryRouter initialEntries={[ROUTE]}>
+      <MemoryRouter initialEntries={[route]}>
         <Routes>
           <Route path="/w/:worldId/p/:prodId/story/chapters/:chapterId" element={<ChapterScreen />} />
         </Routes>
@@ -211,6 +211,13 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /Locked while a draft waits · v4/);
     assert.match(text(m), /draft waiting/);
     assert.match(text(m), /Accept/, "the card holds Accept");
+  });
+
+  it("a chapter the bundle does not hold is said to be missing, with the way back (codex, PR 879)", async () => {
+    const m = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/no-such-chapter`);
+    assert.match(text(m), /No such chapter/);
+    assert.match(text(m), /Chapters/, "the way back is offered");
+    assert.equal(m.sent.some((message) => message.kind === "open-chapter"), false, "nothing is asked for a chapter that is not there");
   });
 
   it("picks the newest draft for the file and reads its prose off the review projection", () => {

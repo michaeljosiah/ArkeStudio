@@ -135,6 +135,30 @@ describe("the chapter through the coordinator (turn 126)", () => {
       assert.equal(reopened.hash, saved.hash);
     }));
 
+  it("a save or a restore for a world that is not open writes nothing here (codex, PR 879)", () =>
+    withHarness(async ({ events, send }) => {
+      await send({ kind: "open-chapter", requestId: requestId(1), worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap" });
+      const opened = last<Opened>(events, "chapter.open-result");
+      const elsewhere = "01J8F3K2QW9VZX4N7M0RTYB6HD";
+      await send({
+        kind: "save-chapter",
+        requestId: requestId(2),
+        worldId: elsewhere,
+        productionId: LEDGER,
+        chapterFile: "01-neap",
+        body: "Another world's words.",
+        baseHash: opened.hash!,
+      });
+      const refused = last<Saved>(events, "chapter.save-result");
+      assert.equal(refused.disposition, "refused");
+      assert.match(refused.reason ?? "", /not open/);
+      await send({ kind: "restore-chapter", worldId: elsewhere, productionId: LEDGER, chapterFile: "01-neap", version: 3 });
+      await send({ kind: "open-chapter", requestId: requestId(3), worldId: WORLD_ID, productionId: LEDGER, chapterId: "neap" });
+      const again = last<Opened>(events, "chapter.open-result");
+      assert.equal(again.hash, opened.hash, "the open world's chapter is untouched");
+      assert.equal(again.version, 4);
+    }));
+
   it("a chapter that is gone is refused by name rather than answered with the wrong one", () =>
     withHarness(async ({ events, send }) => {
       await send({ kind: "open-chapter", requestId: requestId(5), worldId: WORLD_ID, productionId: LEDGER, chapterId: "no-such" });
