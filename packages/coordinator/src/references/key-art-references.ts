@@ -163,12 +163,47 @@ export async function assembleKeyArt(
   };
 }
 
-/** The first stretch of the bible, sized for a prompt rather than a reader. */
-export function bibleExcerpt(text: string, max = 500): string {
-  const clean = text.replace(/^#.*$/gm, "").replace(/\s+/g, " ").trim();
+/**
+ * The bible flattened to prose. It is written to be read — headings, emphasis, lists — and an
+ * image model reads `**` as two asterisks: a real prompt carried them (issue 906).
+ */
+function plainProse(text: string): string {
+  return text
+    .replace(/^#.*$/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/^\s*>+\s?/gm, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*`]+/g, "")
+    .replace(/(^|\s)_+(?=\S)/g, "$1")
+    .replace(/(?<=\S)_+(?=[\s.,;:!?)]|$)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * The first stretch of the bible, sized for a prompt rather than a reader, and cut where a
+ * sentence ends. The budget used to be 500 characters against models that take sixty times
+ * that, and the cut fell back to a fixed position whenever the last sentence ended more than
+ * eighty characters back — which is exactly when a fixed cut lands mid-word (issue 906). Now
+ * the last sentence inside the budget wins wherever it is; only a stretch with no sentence
+ * end at all cuts at a word, and says so.
+ */
+export function bibleExcerpt(text: string, max = 1500): string {
+  const clean = plainProse(text);
   if (clean.length <= max) return clean;
-  const cut = clean.slice(0, max);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(". ") + 1, max - 80))}`.trim();
+  // One past the budget, so a sentence ending on the last character still shows its space.
+  const cut = clean.slice(0, max + 1);
+  const sentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (sentenceEnd > 0) return cut.slice(0, sentenceEnd + 1);
+  const wordEnd = cut.lastIndexOf(" ");
+  return `${(wordEnd > 0 ? cut.slice(0, wordEnd) : cut.slice(0, max)).trim()}…`;
+}
+
+/** One full stop at the end, whatever the text arrived with — `soundtrack..` shipped (issue 906). */
+function sentence(text: string): string {
+  const trimmed = text.trim().replace(/[.\s]+$/, "");
+  if (trimmed === "") return "";
+  return /[!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /**
@@ -187,12 +222,12 @@ export function keyArtComposition(input: {
 }): string {
   const excerpt = bibleExcerpt(input.bible);
   const lines = [
-    `Key art for "${input.meta.name}". ${input.direction.description}.`,
-    input.meta.logline?.trim() ?? "",
-    input.meta.tone?.trim() ? `Tone: ${input.meta.tone.trim()}.` : "",
-    input.meta.genre?.trim() ? `Genre: ${input.meta.genre.trim()}.` : "",
+    `Key art for "${input.meta.name}". ${sentence(input.direction.description)}`,
+    sentence(input.meta.logline ?? ""),
+    input.meta.tone?.trim() ? `Tone: ${sentence(input.meta.tone)}` : "",
+    input.meta.genre?.trim() ? `Genre: ${sentence(input.meta.genre)}` : "",
     excerpt !== "" ? `The story: ${excerpt}` : "",
-    `The image: ${keyArtBriefProse(input.brief)}.`,
+    `The image: ${sentence(keyArtBriefProse(input.brief))}`,
     input.cast.length > 0
       ? `In frame: ${input.cast.join(", ")} — preserve each supplied identity exactly.`
       : "",
