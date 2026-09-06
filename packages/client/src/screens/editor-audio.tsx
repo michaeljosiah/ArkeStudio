@@ -1,9 +1,12 @@
 import { useState } from "react";
+import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   AUDIO_TRACK_KINDS,
   effectiveAudioRole,
   placementAudioRole,
   type AudioRole,
+  type ArtifactSidecar,
+  type ProductionBundle,
   DEFAULT_MIX,
   basePictureTrack,
   formatFrames,
@@ -93,6 +96,8 @@ export function typedTracksOf(timeline: ProductionTimeline): TimelineTrack[] {
 }
 
 export function TypedTrackRows({
+  production,
+  artifacts,
   timeline,
   totalFrames,
   frameRate,
@@ -107,6 +112,8 @@ export function TypedTrackRows({
   mintClipId,
   tool = "select",
 }: {
+  production?: ProductionBundle;
+  artifacts?: readonly ArtifactSidecar[];
   timeline: ProductionTimeline;
   totalFrames: number;
   frameRate: FrameRate;
@@ -124,9 +131,11 @@ export function TypedTrackRows({
 }) {
   const [over, setOver] = useState<TimelineTrackId | null>(null);
   const [refused, setRefused] = useState<TimelineTrackId | null>(null);
+  const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
   const span = Math.max(totalFrames, 1);
   const anySolo = timeline.tracks.some((track) => track.solo === true);
   const tracks = typedTracksOf(timeline);
+  const menuClip = menu ? tracks.filter(track => track.kind === "picture").flatMap(track => track.clips).find(clip => clip.id === menu.clipId) : undefined;
   if (tracks.length === 0) return null;
 
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
@@ -202,6 +211,11 @@ export function TypedTrackRows({
 
   const onClipKeyDown = (clipId: TimelineClipId, clip: TimelineClip) => (event: React.KeyboardEvent) => {
     if (event.altKey || event.ctrlKey || event.metaKey || disabled) return;
+    if ((event.key === "ContextMenu" || (event.key === "F10" && event.shiftKey)) && tracks.some(track => track.kind === "picture" && track.clips.some(candidate => candidate.id === clipId))) {
+      const box = event.currentTarget.getBoundingClientRect();
+      onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
+      event.preventDefault(); event.stopPropagation(); return;
+    }
     if (event.key === "Delete" || event.key === "Backspace") {
       onCommands([{ kind: event.shiftKey ? "ripple-delete" : "delete", clipId }], event.shiftKey ? "Ripple delete clip" : "Delete clip");
     } else if (event.key === "d" || event.key === "D") {
@@ -316,6 +330,13 @@ export function TypedTrackRows({
                     aria-label={label}
                     title={label}
                     disabled={disabled}
+                    onContextMenu={event => {
+                      if (audio) return;
+                      event.preventDefault(); event.stopPropagation();
+                      if (disabled) return;
+                      event.currentTarget.focus(); onSelect(clip.id);
+                      setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
+                    }}
                     onClick={(event) => {
                       if (tool === "blade") {
                         blade(track, clip)(event);
@@ -338,6 +359,10 @@ export function TypedTrackRows({
           </div>
         );
       })}
+      {menu && menuClip && <ClipMenu at={menu} label={`Actions for ${clipLabel(menuClip)}`} onClose={() => setMenu(null)}>
+        <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
+          disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+      </ClipMenu>}
     </>
   );
 }

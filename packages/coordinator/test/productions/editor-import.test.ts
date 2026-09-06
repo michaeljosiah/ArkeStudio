@@ -47,8 +47,10 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
     kind: "commands", commands, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()),
   });
   await write([{ kind: "trim", clipId: picture.clips[0]!.id, edge: "start", deltaFrames: 12 }]);
-  await write([{ kind: "detach-audio", clipId: picture.clips[0]!.id, newClipId: "cl_detached" }]);
+  await write([{ kind: "add-track", trackId: "tr_reserved", trackKind: "audio", name: "Reserved", defaultRole: "music" }]);
+  await write([{ kind: "detach-audio", clipId: picture.clips[0]!.id, newClipId: "cl_detached", newTrack: true }]);
   timeline = saved(production());
+  assert.equal(timeline.tracks.find(track => track.id === "tr_reserved")!.clips.length, 0);
   const detached = timeline.tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_detached")!;
   assert.deepEqual([detached.startFrame, detached.sourceInFrames, detached.durationFrames, detached.role], [12, 12, 60, "unspecified"]);
   assert.equal(timeline.tracks[0]!.clips[0]!.audio, "mute");

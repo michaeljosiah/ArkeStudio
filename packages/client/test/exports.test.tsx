@@ -255,6 +255,38 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+describe("export audio status (#908)", () => {
+  for (const sound of ["audio", "silent", "unmeasured"] as const) {
+    it(`reports ${sound} video sound for the film and episode before export`, async () => {
+      const state = structuredClone(FIXTURE_STATE) as ClientState;
+      const p = state.world!.productions[0]!;
+      p.meta.kind = "series";
+      p.cut = { audio: [], overlays: [] };
+      p.scenes[0]!.shots = [p.scenes[0]!.shots[0]!];
+      p.episodes = [{ id: "ep_one", version: 1, order: 1, title: "One", scenes: [p.scenes[0]!.id] }];
+      p.takeMediaInfo = sound === "unmeasured" ? {} : {
+        [CLIP]: { sourceHash: HASH, probedAt: AT, mediaInfo: { durationSec: 4, hasAudio: sound === "audio" } },
+      };
+      p.timeline = { status: "ready", timeline: seedStoryPictureTimeline(p) };
+      const mounted = await mountSheet(state);
+      try {
+        const message = sound === "audio" ? null : sound === "silent"
+          ? "No sound — no audible audio in this cut" : "No sound — video audio not measured";
+        assert.deepEqual(warnings(mounted), message ? [message] : []);
+        const chips = [...sheet(mounted).querySelectorAll<HTMLButtonElement>('[aria-label="Audio"] button')];
+        assert.equal(chips.length, 2);
+        assert.ok(chips.every(chip => chip.disabled === (sound !== "audio")));
+        const episode = sheet(mounted).querySelector(".fy-exsheet__episode")!;
+        assert.ok(episode);
+        const status = episode.querySelector('[role="status"]');
+        if (message) assert.ok(status?.textContent?.includes(message)); else assert.equal(status, null);
+        if (sound === "unmeasured") assert.ok(status?.textContent?.includes(p.timeline.timeline.tracks[0]!.clips[0]!.source.label));
+        assert.equal(primary(mounted).disabled, false, "silence remains exportable");
+      } finally { await unmount(mounted); }
+    });
+  }
+});
+
 describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
   it("refuses a story with nothing saved, then exports its timeline with the gap as a slate at every resolution", async () => {
     const empty = await mountSheet(structuredClone(FIXTURE_STATE) as ClientState);
@@ -273,7 +305,7 @@ describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
     const mounted = await mountSheet(ClientStateSchema.parse(saved));
     try {
       assert.equal(meta(mounted), "10s · 1 of 2 shots · 1 gap");
-      assert.deepEqual(warnings(mounted), ["1 shot has no accepted take. Exporting now writes a black slate where it sits."]);
+      assert.deepEqual(warnings(mounted), ["No sound — video audio not measured", "1 shot has no accepted take. Exporting now writes a black slate where it sits."]);
       for (const label of RESOLUTIONS) {
         await chooseResolution(mounted, label);
         assert.deepEqual(action(mounted), { text: "Export with gaps", disabled: false }, `${label} exports the unfinished film`);

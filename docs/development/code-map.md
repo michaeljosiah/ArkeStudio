@@ -88,6 +88,11 @@ Follow client timeline UI and store commands into contracts `timeline.ts`/`frame
 
 Editor imports route `upload-artifacts` with a destination and timeline revision into coordinator `productions/editor-import.ts`. World filing owns the copied media; contracts `editor-media.ts` builds Library and placement commands. The coordinator resolves semantic detachment under its write gate through contracts `timeline.ts`. Its `assembleTimelineScene` service plans scene assembly after reserving migrated legacy tracks. Audio track identity is separate from optional clip roles and future-only defaults (SPEC-043). Start with coordinator `test/productions/editor-import.test.ts`, client `test/independent-editor.test.tsx` and the desktop `smoke-editor-import.mjs` file-page check.
 
+Client `screens/editor-clip-menu.tsx` shares the main/upper Picture context menu and new-track audio
+extraction. Contracts `render-plan.ts` keeps video sound by default, resolves filed segments through
+their measured parent media, and carries scoped missing-measurement notices into the export sheet
+(issue #908). Regressions live in contracts `test/render-plan.test.ts` and client `test/exports.test.tsx`.
+
 Inspect `TimelineCommandRefused` and existing migration/history handling when changing edits. A client drag preview is not a successful persisted edit. Start with coordinator `test/productions/timeline.test.ts`, `timeline-migration.test.ts` and client `test/timeline-editing-guards.test.tsx`, `plan-playback.test.ts`.
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).
