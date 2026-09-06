@@ -233,16 +233,25 @@ export const WorldChatMessageSchema = z
     /** Conversation-private attachment ids, not world artifact ids. */
     attachmentIds: z.array(ChatAttachmentIdSchema),
     createdAt: IsoDateTimeSchema,
-    /**
-     * What was selected while the line was said, and whether it asked for a reply only (turn
-     * 128). Durable on the message so a retry after a provider failure runs under the same
-     * constraints as the line it retries, rather than losing the guard with the answer.
-     */
+  })
+  .strict();
+export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;
+
+/**
+ * What a line was said under (turn 128): the passage selected while it was said, and whether it
+ * asked for a reply only. Its own event beside `turn.started` rather than fields on the message,
+ * because the message is strict and durable: a build older than the constraints skips a line it
+ * cannot read, and skipping this one loses the guard while keeping the words, where fields on the
+ * message would have lost the words themselves (codex on PR 903).
+ */
+export const WorldChatTurnConstraintsSchema = z
+  .object({
+    turnId: TurnIdSchema,
     subject: WorldChatSubjectSchema.optional(),
     replyOnly: z.boolean().optional(),
   })
   .strict();
-export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;
+export type WorldChatTurnConstraints = z.infer<typeof WorldChatTurnConstraintsSchema>;
 
 export const WorldChatRunStatusSchema = z.enum([
   "running",
@@ -1106,6 +1115,8 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("run.retry-started"), run: WorldChatRunSchema }).strict(),
+  /** Appended right after `turn.started` when the line was said under a passage or a reply-only promise (turn 128). */
+  z.object({ type: z.literal("turn.constraints"), constraints: WorldChatTurnConstraintsSchema }).strict(),
   z
     .object({
       type: z.literal("run.session-created"),

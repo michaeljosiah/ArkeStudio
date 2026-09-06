@@ -370,8 +370,13 @@ export class WorldChatRunner {
       .map(({ event }) => ("run" in event ? event.run : undefined))
       .find((run) => run?.turnId === turnId)?.model;
     // The guard the line ran under runs again with it (codex on PR 899): the selected passage
-    // and the reply-only promise are on the message, not only on the send that first carried them.
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, original.subject, previousModel, original.replyOnly === true);
+    // and the reply-only promise are in the log beside the line, not only on the send that
+    // first carried them.
+    const constraints = [...events]
+      .reverse()
+      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
+      .find((held) => held?.turnId === turnId);
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, previousModel, constraints?.replyOnly === true);
   }
 
   /**
@@ -409,9 +414,6 @@ export class WorldChatRunner {
       text,
       attachmentIds: [...attachmentIds] as WorldChatMessage["attachmentIds"],
       createdAt: at,
-      // Durable with the words (codex on PR 899): a retry runs under the same guard.
-      ...(subject !== undefined ? { subject } : {}),
-      ...(replyOnly ? { replyOnly: true } : {}),
     };
 
     /**
@@ -523,6 +525,14 @@ export class WorldChatRunner {
       existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
       { at },
     );
+    // What the line was said under goes in beside it, as its own line a build older than the
+    // constraints can skip without losing the words (codex on PR 903); a retry reads it back.
+    if (!existingTurnId && (subject !== undefined || replyOnly)) {
+      await store.append(
+        { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
+        { at },
+      );
+    }
     if (modelChoice.reason !== undefined) {
       const reason = `rejected: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);

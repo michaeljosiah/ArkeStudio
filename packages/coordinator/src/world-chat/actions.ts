@@ -1152,7 +1152,7 @@ export function prepareWorldChatActions(
   // edits, editor requests or actions: `Hold this against the style` stages nothing.
   if (
     turn.replyOnly === true &&
-    (turn.actions.length > 0 || turn.candidates.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
+    (turn.actions.length > 0 || turn.candidates.length > 0 || turn.groups.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
   ) {
     throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
   }

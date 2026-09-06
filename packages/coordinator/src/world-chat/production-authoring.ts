@@ -76,7 +76,9 @@ export function foldedOccurrences(text: string, find: string): Array<{ start: nu
 }
 
 function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {
-  const marker = (c: string) => markers && /[*_`~]/.test(c);
+  // Only the two spellings of emphasis fold (codex on PR 903): `*` and `_` say the same thing,
+  // while a backtick or a tilde changes what the words are, and a quote must not match across it.
+  const marker = (c: string) => markers && /[*_]/.test(c);
   const fold = (source: string) => {
     const starts: number[] = [];
     const ends: number[] = [];

@@ -2151,6 +2151,8 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
     // request or a candidate on a reply-only turn is refused the same way.
     const edited = turn(w.conversationId, context, { bibleEdits: [{ op: "append", text: "The bells answer a called tide." } as never], replyOnly: true });
     assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, edited), /This ask was for a reply only/);
+    const grouped = turn(w.conversationId, context, { groups: [{ id: "grp_1", status: "live", members: [] } as never], replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, grouped), /This ask was for a reply only/, "a group change is a change too");
   });
 
   it("the paragraph the ask named must come back, and either spelling of the chapter is the chapter (codex, round five)", async () => {

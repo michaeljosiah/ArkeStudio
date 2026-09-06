@@ -2044,7 +2044,8 @@ function OverviewStoryScreen() {
   const overviewTitle = production?.meta.title ?? "Overview";
   /* The style the book is written in (turn 128): its cards sit under the overview's. */
   const style = production?.proseStyle ?? null;
-  const samples = style?.samples ?? [];
+  // A blank sample in a hand-edited record is no listen and no card line (codex on PR 903).
+  const samples = (style?.samples ?? []).filter((sample) => sample.trim() !== "");
   const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = [
     ...(
       [

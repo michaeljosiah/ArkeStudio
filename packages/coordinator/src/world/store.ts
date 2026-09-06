@@ -568,7 +568,12 @@ export class WorldStore {
         });
         this.externalEdits = this.externalEdits.filter((e) => e.path !== portablePath);
         await this.rescan();
-        if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+        if (this.externalEdits.length === 0) {
+        await this.adoptBibleIfMoved();
+        // The style's boundary too (codex on PR 903): a world that opened with other external
+        // edits waiting skipped adoption, and the moment they clear is the moment it can happen.
+        await this.adoptProseStyleBoundary();
+      }
       } catch (err) {
         const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
         this.externalEdits = this.externalEdits.map((candidate) =>
@@ -590,7 +595,12 @@ export class WorldStore {
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.saveScanState();
-      if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+      if (this.externalEdits.length === 0) {
+        await this.adoptBibleIfMoved();
+        // The style's boundary too (codex on PR 903): a world that opened with other external
+        // edits waiting skipped adoption, and the moment they clear is the moment it can happen.
+        await this.adoptProseStyleBoundary();
+      }
     });
     return this.getBundle();
   }
