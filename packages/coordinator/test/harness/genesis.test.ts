@@ -382,6 +382,10 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
       assert.match(prompt, /answer what they actually asked/);
       assert.match(prompt, /costs and consequences/);
       assert.match(prompt, /never report file writes[\s\S]*internal filenames, sandbox\npaths/);
+      assert.match(prompt, /Never explain tool availability or name the harness/);
+      assert.match(prompt, /no canon check\nis expected/);
+      assert.match(prompt, /Segun is a new name I'm proposing/);
+      assert.match(prompt, /I haven't checked that name against the material you shared yet/);
       assert.match(prompt, /Resume this conversation even if the previous turn was a private request/);
     }
     assert.ok(adapter.prompts[2]!.endsWith(followUp), "the follow-up remains the author's own words");
