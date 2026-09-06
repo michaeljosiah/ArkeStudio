@@ -379,6 +379,11 @@ const jobReadyListeners = new Set<(job: Job) => void>();
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
 const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
+type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
+const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
+export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void {
+  stageConstructionListeners.add(listener); return () => { stageConstructionListeners.delete(listener); };
+}
 const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
 export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
   briefEnhancedListeners.add(listener);
@@ -1036,6 +1041,7 @@ function handleFrame(json: string): void {
     if (event.type === "production.interactive-export-result") {
       for (const listener of interactiveExportListeners) listener(event);
     }
+    if (event.type === "stage.construction") for (const listener of stageConstructionListeners) listener(event);
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
     }

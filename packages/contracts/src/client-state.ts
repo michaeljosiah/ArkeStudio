@@ -576,6 +576,16 @@ export const ClientStateSchema = z
       sceneId: z.string().min(1),
       shotId: z.string().min(1),
     }).strict()).optional(),
+    stageConstructionRequests: z.array(z.object({
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      actionId: z.string().min(1),
+      productionId: z.string().min(1),
+      sceneId: z.string().min(1),
+      shotId: z.string().min(1),
+      instruction: z.string(),
+      preserve: z.enum(["blocking", "camera", "none"]),
+    }).strict()).optional(),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),
     /**

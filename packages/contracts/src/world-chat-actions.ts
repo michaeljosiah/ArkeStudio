@@ -903,6 +903,10 @@ const ProductionTakeTrimModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+const ProductionStageConstructModelActionSchema = z.object({
+  kind: z.literal("production-stage-construct"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema,
+  instruction: z.string().max(4000), preserve: z.enum(["blocking", "camera", "none"]), checkReceiptIds: CompleteReadIdsSchema,
+}).strict();
 const ProductionStagePlayblastModelActionSchema = z
   .object({
     kind: z.literal("production-stage-playblast"),
@@ -1156,6 +1160,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionTakeReviewModelActionSchema,
   ProductionTakeTrimModelActionSchema,
   ProductionStagePlayblastModelActionSchema,
+  ProductionStageConstructModelActionSchema,
   AudioSpineModelActionSchema,
   ProductionRoutingModelActionSchema,
   ProductionTraversalModelActionSchema,
@@ -1250,6 +1255,7 @@ export const WorldChatProductionTakeImportActionSchema = preparedAction("world-c
 export const WorldChatProductionTakeGenerationActionSchema = preparedAction("world-chat-production-take-generation", ProductionTakeGenerationModelActionSchema);
 export const WorldChatProductionTakeReviewActionSchema = preparedAction("world-chat-production-take-review", ProductionTakeReviewModelActionSchema);
 export const WorldChatProductionTakeTrimActionSchema = preparedAction("world-chat-production-take-trim", ProductionTakeTrimModelActionSchema);
+export const WorldChatProductionStageConstructActionSchema = preparedAction("world-chat-production-stage-construct", ProductionStageConstructModelActionSchema);
 export const WorldChatProductionStagePlayblastActionSchema = preparedAction("world-chat-production-stage-playblast", ProductionStagePlayblastModelActionSchema);
 export const WorldChatAudioSpineActionSchema = preparedAction("world-chat-audio-spine-command", AudioSpineModelActionSchema);
 export const WorldChatProductionRoutingActionSchema = preparedAction("world-chat-production-routing", ProductionRoutingModelActionSchema);
@@ -1431,6 +1437,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionTakeReviewActionSchema,
   WorldChatProductionTakeTrimActionSchema,
   WorldChatProductionStagePlayblastActionSchema,
+  WorldChatProductionStageConstructActionSchema,
   WorldChatAudioSpineActionSchema,
   WorldChatProductionRoutingActionSchema,
   WorldChatProductionTraversalActionSchema,

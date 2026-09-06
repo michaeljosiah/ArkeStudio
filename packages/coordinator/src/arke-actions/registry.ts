@@ -1,3 +1,4 @@
+import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
 import {
   ClientMessageSchema,
   BenchGenerationModelActionSchema,
@@ -407,6 +408,9 @@ const CLIENT_COMMAND_METADATA = {
   "accept-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "scenes"]),
   "import-shot-frame": action("production", "host-action", "host", "host-file-access", ["shots", "takes"]),
   "clear-shot-frame": action("production", "command", "take-review", "authored-change", ["shots", "takes"]),
+  "stage-construct": humanOnly("Construction starts from the Stage review surface."),
+  "stage-inspection": humanOnly("Only the renderer supplies construction inspection frames."),
+  "stage-construct-cancel": humanOnly("The person can stop Stage construction."),
   "stage-playblast": action("production", "host-action", "scene-store", "host-file-access", ["scenes", "shots", "stage"], { preparation: ARTIFACT_SOURCE }),
   "conversation-action-stage-playblast-complete": humanOnly("Only the renderer may complete an approved Stage recording handoff."),
   "reject-take": action("production", "take-review", "take-review", "authored-change", ["takes", "shots", "sheets"]),
@@ -836,6 +840,10 @@ const WORLD_CHAT_ACTION_REGISTRY = {
     kind: "world-chat-production-take-trim",
     schema: WorldChatProductionTakeTrimActionSchema,
     ...action("production", "command", "take-review", "authored-change", ["takes"]),
+  },
+  "world-chat-production-stage-construct": {
+    kind: "world-chat-production-stage-construct", schema: WorldChatProductionStageConstructActionSchema,
+    ...action("production", "host-action", "scene-store", "authored-change", ["scenes"]),
   },
   "world-chat-production-stage-playblast": {
     kind: "world-chat-production-stage-playblast",

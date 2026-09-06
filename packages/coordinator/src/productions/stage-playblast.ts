@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { editShot, effectiveStageBlocking, orderedShots, ulid, type ArtifactSidecar, type ShotStaging } from "@arke-studio/contracts";
+import { DEFAULT_SHOT_SEC, resolvedShotStaging, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
+import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -42,7 +43,7 @@ const refused = (reason: string): PlayblastOutcome => ({ outcome: "refused", rea
 export async function filePlayblast(
   store: WorldStore,
   input: PlayblastFiling,
-  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition; mediaProbe?: MediaProbe } = {},
 ): Promise<PlayblastOutcome> {
   const stem = stemOrThrow(input.sceneFile);
   const path = `productions/${input.productionId}/scenes/${stem}.json`;
@@ -64,6 +65,19 @@ export async function filePlayblast(
     if (record.version !== input.baseVersion) {
       return refused(`the scene moved to v${record.version} while the playblast rendered — export it again`);
     }
+    const production = store.getBundle().productions.find(p => p.meta.id === input.productionId);
+    if (!production || input.durationSec !== (shot.durationSec ?? DEFAULT_SHOT_SEC) ||
+        input.aspect !== productionAspect(production.meta) || (input.lens ?? "") !== (effectiveFraming(record, shot).lens ?? "")) {
+      return refused("the shot timing, aspect or lens changed — export it again");
+    }
+    const measured = await options.mediaProbe?.info?.(input.sourcePath).catch(() => null);
+    const parsedMedia = MediaInfoSchema.safeParse(measured);
+    if (!parsedMedia.success || Math.abs(parsedMedia.data.durationSec - stageFrameCount(input.durationSec) / STAGE_FRAME_RATE) > 0.02) {
+      return refused("the playblast duration could not be verified — export it again");
+    }
+    const [wide, high] = input.aspect.split(":").map(Number);
+    if (!parsedMedia.data.width || !parsedMedia.data.height || parsedMedia.data.frameRate !== STAGE_FRAME_RATE ||
+        Math.abs(parsedMedia.data.width / parsedMedia.data.height - wide! / high!) > 0.003) return refused("the encoded playblast dimensions or frame rate do not match the shot");
     const [bytes, openingFrameBytes] = await Promise.all([
       readFile(input.sourcePath).catch(() => null),
       readFile(input.openingFrameSourcePath).catch(() => null),
@@ -75,7 +89,7 @@ export async function filePlayblast(
     if (bytes.byteLength === 0) return refused("the recording came back empty — export it again");
     const videoProblem = verifyArtifact({ name: "playblast.mp4", contentType: "video/mp4", data: bytes });
     if (videoProblem !== null) return refused(`the playblast is not a valid MP4: ${videoProblem}`);
-    if (imageFormatOf(openingFrameBytes)?.extension !== ".png") {
+    if (imageFormatOf(openingFrameBytes)?.extension !== ".png" || openingFrameBytes.length < 24 || openingFrameBytes.readUInt32BE(16) !== parsedMedia.data.width || openingFrameBytes.readUInt32BE(20) !== parsedMedia.data.height) {
       return refused("the opening frame is not a valid PNG — export it again");
     }
 
@@ -86,6 +100,7 @@ export async function filePlayblast(
     const artifact: ArtifactSidecar = {
       id,
       kind: "video",
+      mediaInfo: parsedMedia.data,
       file,
       hash: `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` as ArtifactSidecar["hash"],
       origin: { by: "system", producedBy: `stage:${input.shotId}` },
@@ -106,6 +121,7 @@ export async function filePlayblast(
     const staging: ShotStaging = {
       ...shot.staging,
       playblast: {
+        sourceFingerprint: stageSourceFingerprint(record, shot, input.aspect),
         artifactId: id,
         openingFrameArtifactId: openingFrameId,
         version: input.stagingVersion,
@@ -135,4 +151,32 @@ export async function filePlayblast(
     });
     return { outcome: "filed", artifacts: [artifact, openingFrameArtifact] };
   });
+}
+
+export function stageSourceFingerprint(scene: SceneRecord, shot: Shot, aspect: string): string {
+  if (!shot.staging) return "";
+  const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
+  return createHash("sha256").update(JSON.stringify({ staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect })).digest("hex");
+}
+
+/** Recheck Stage references at admission and when the queue reads their bytes. */
+export function stageArtifactProblem(bundle: WorldBundle, artifact: ArtifactSidecar): string | null {
+  if(artifact.origin.by !== "system" || !artifact.origin.producedBy.startsWith("stage:")) return null;
+  const shotId=artifact.origin.producedBy.slice(6);
+  const production=bundle.productions.find(p=>p.meta.id===artifact.production);
+  const scene=production?.scenes.find(s=>orderedShots(s).some(shot=>shot.id===shotId));
+  const shot=scene && orderedShots(scene).find(s=>s.id===shotId);
+  const pin=shot?.staging?.playblast;
+  if(!production||!scene||!shot?.staging||!pin||![pin.artifactId,pin.openingFrameArtifactId].includes(artifact.id)||
+    stagePlayblastIsStale(scene,shot.staging,{durationSec:shot.durationSec??DEFAULT_SHOT_SEC,aspect:productionAspect(production.meta),lens:effectiveFraming(scene,shot).lens})||
+    (pin.sourceFingerprint !== undefined && pin.sourceFingerprint !== stageSourceFingerprint(scene,shot,productionAspect(production.meta)))) return "The Stage reference is stale. Export the current blockout and rebuild this session.";
+  return null;
+}
+export function assertStageReferencesCurrent(store: WorldStore, paths: readonly string[]): void {
+  const bundle=store.getBundle();
+  for(const path of paths) {
+    const artifact=bundle.artifacts.find(a=>`artifacts/${a.file}`===path);
+    const problem=artifact ? stageArtifactProblem(bundle,artifact) : null;
+    if(problem) throw new Error(problem);
+  }
 }

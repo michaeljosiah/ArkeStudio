@@ -1,3 +1,4 @@
+import { stageSourceFingerprint } from "../productions/stage-playblast.js";
 import {
   DEFAULT_SHOT_SEC,
   admitReference,
@@ -229,8 +230,7 @@ async function voiceTokens(
 
 /**
  * The filed playblast as a reference tile: the artifact the Stage exported, named for what it
- * is. `when-supported`, because no route today maps a video reference — the tile stays visible
- * and says it is not riding, while the beats in the brief carry the move regardless.
+ * is. Only current output may ride; compatible routes carry the video alongside the beats.
  */
 function playblastToken(
   staging: ShotStaging,
@@ -246,13 +246,13 @@ function playblastToken(
   // The recording baked in a staging, a length, an aspect and a lens; any of them moving on
   // makes it a file of a shot that no longer exists this way, and the tile says so.
   const moved = stagePlayblastIsStale(scene, staging, shown);
-  const stale = moved ? " · stale" : "";
+  if (moved) return null;
   return {
     token: benchTokenFor("video", 1),
     kind: "video",
     source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
     label: `Staging · Playblast v${pinned.version}`,
-    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}${stale}`,
+    detail: `${staging.keys.length} keys · ${stagingMoveWord(staging.keys, resolved.cast, staging.rig)}`,
     ...(artifact.mediaInfo !== undefined ? { durationSec: artifact.mediaInfo.durationSec } : {}),
     ride: "when-supported",
     subjectRole: "reference",
@@ -308,6 +308,10 @@ export function subjectReferenceRouting(
   if (model === null) return { activeTokens: [], keyframeTokens: [] };
   const frames = references.filter((reference) => reference.subjectRole === "board-frame");
   const ordinary = references.filter((reference) => reference.subjectRole !== "board-frame");
+  // Stage motion is the primary structural reference on routes that can receive it.
+  const motion = ordinary.filter(reference=>reference.kind === "video");
+  const motionTokens = admittedTokens([...motion,...ordinary.filter(reference=>reference.kind!=="video"),...frames],model);
+  if(subject.kind === "shot" && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
   if (
     subject.kind === "shot" &&
     model.capability === "video" &&
@@ -436,7 +440,8 @@ export async function prepareBenchSubject(
       aspect,
       lens: effectiveFraming(scene, shot).lens,
     };
-    const openingFrame = staging === undefined
+    const fingerprintCurrent = !staging?.playblast?.sourceFingerprint || staging.playblast.sourceFingerprint === stageSourceFingerprint(scene,shot,aspect);
+    const openingFrame = staging === undefined || !fingerprintCurrent
       ? null
       : stageOpeningFrameToken(staging, scene, world, shown, references.length + 1);
     const selection = production.selections[shot.id];
@@ -459,7 +464,7 @@ export async function prepareBenchSubject(
     }
     // The clip is where the move matters: its exact opening view can ride every image-capable
     // route, the playblast rides where video is carried, and the beats ride in the words everywhere.
-    const playblast = staging === undefined
+    const playblast = staging === undefined || !fingerprintCurrent
       ? null
       : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);

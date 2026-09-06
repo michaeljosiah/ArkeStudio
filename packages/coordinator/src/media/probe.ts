@@ -104,7 +104,7 @@ export function ffprobeArgs(absolutePath: string): string[] {
     "-v",
     "error",
     "-show_entries",
-    "format=duration:stream=codec_type,channels,sample_rate",
+    "format=duration:stream=codec_type,channels,sample_rate,width,height,avg_frame_rate",
     "-of",
     "json",
     absolutePath,
@@ -113,6 +113,9 @@ export function ffprobeArgs(absolutePath: string): string[] {
 
 interface FfprobeStream {
   codec_type?: unknown;
+  width?: unknown;
+  height?: unknown;
+  avg_frame_rate?: unknown;
   channels?: unknown;
   sample_rate?: unknown;
 }
@@ -137,12 +140,19 @@ export function parseFfprobeJson(stdout: string): MediaInfo | null {
   if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
   const streams: FfprobeStream[] = Array.isArray(doc.streams) ? (doc.streams as FfprobeStream[]) : [];
+  const video = streams.find(stream => stream.codec_type === "video");
+  const width = Number(video?.width), height = Number(video?.height);
+  const rate = typeof video?.avg_frame_rate === "string" ? video.avg_frame_rate.split("/").map(Number) : [];
+  const frameRate = rate[1] ? rate[0]! / rate[1] : 0;
   const audio = streams.find((stream) => stream.codec_type === "audio");
   const channels = Number(audio?.channels);
   const sampleRate = Number(audio?.sample_rate);
   return {
     durationSec,
     hasAudio: audio !== undefined,
+    ...(Number.isInteger(width) && width > 0 ? { width } : {}),
+    ...(Number.isInteger(height) && height > 0 ? { height } : {}),
+    ...(Number.isFinite(frameRate) && frameRate > 0 ? { frameRate } : {}),
     ...(Number.isInteger(channels) && channels > 0 ? { audioChannels: channels } : {}),
     ...(Number.isInteger(sampleRate) && sampleRate > 0 ? { audioSampleRateHz: sampleRate } : {}),
   };

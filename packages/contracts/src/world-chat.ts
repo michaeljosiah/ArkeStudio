@@ -2539,6 +2539,7 @@ const exampleWorldActions = {
     trimInSec: 0.5,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-stage-construct": { kind: "production-stage-construct", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_001", instruction: "Construct this shot from its script and inspect the camera views.", preserve: "blocking", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-stage-playblast": {
     kind: "production-stage-playblast",
     productionId: "saltlight",

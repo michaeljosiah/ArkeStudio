@@ -436,9 +436,10 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     const before = await sceneOnDisk(store);
     const target = orderedShots(before)[1]!;
     const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    await applySceneCommand(store, { ...base, baseVersion: before.version, command: {kind:"edit-shot",shotId:target.id,change:{durationSec:4}} });
     await applySceneCommand(store, {
       ...base,
-      baseVersion: before.version,
+      baseVersion: (await sceneOnDisk(store)).version,
       command: {
         kind: "edit-stage",
         shotId: target.id,

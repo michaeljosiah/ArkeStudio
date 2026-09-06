@@ -17,6 +17,7 @@ import {
 import {
   carriesSceneFlow,
   carriesStageBlocking,
+  carriesStageConstruction,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -650,6 +651,15 @@ export class Committer {
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
+      // Extended probe metadata is also written by ordinary artifact filing/backfill.
+      files.some(file => {
+        if(!file.newContent || !file.path.endsWith(".json")) return false;
+        try {
+          const value=JSON.parse(file.newContent) as {mediaInfo?:Record<string,unknown>} | null;
+          return value?.mediaInfo != null && ["width","height","frameRate"].some(field=>field in value.mediaInfo!);
+        } catch { return false; }
+      }) ? 11 : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;
