@@ -131,9 +131,13 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     const voxa = plain(render("/settings/providers?component=tts-kokoro-82m"));
     assert.match(voxa, /Kokoro 82M · voice/);
     assert.doesNotMatch(voxa, /RECIPES/);
-    // Recipe weights carry no engine field; they resolve through their catalogue-derived id.
-    const weights = plain(render("/settings/providers?component=comfyui-weights-draft-video"));
-    assert.match(weights, /RECIPES/);
+    // Recipe weights carry no engine field; they resolve through their catalogue-derived id —
+    // and a component that provides a model IS that model, whose controls are on AI models now
+    // (SPEC-042 R-21). Providers forwards rather than opening a pane without the control. The
+    // forward is a <Navigate>, which needs a second pass renderToString does not make, so what
+    // this pass proves is that no provider pane was drawn in its place.
+    const weights = render("/settings/providers?component=comfyui-weights-draft-video");
+    assert.doesNotMatch(weights, /data-testid="provider-pane"/);
     // An explicit engine choice still outranks the component's owner.
     const explicit = plain(render("/settings/providers?provider=ollama&component=tts-kokoro-82m"));
     assert.match(explicit, /Gemma 4 · 12B/);
@@ -173,10 +177,10 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // the work that deletes it.
     const comfy = plain(render("/settings/providers?provider=comfyui"));
     assert.doesNotMatch(comfy, /COMPONENTS/);
-    // Nor a MODELS group beside its RECIPES: a recipe is ComfyUI's model, and the two lists
-    // partition rather than overlap — the recipe list takes what the engine has answered for,
-    // the model group only what it has not (SPEC-034 R-7, SPEC-033 R-6).
-    assert.doesNotMatch(comfy, /RECIPES[\s\S]*MODELS/);
+    // Nor a recipe list at all: a recipe is ComfyUI's model, and AI models draws it under the
+    // kind it makes (SPEC-042 R-3). The pane says how many, and where.
+    assert.doesNotMatch(comfy, /Draft video/);
+    assert.match(comfy, /RECIPES/);
   });
 
   it("controls the Arke-managed engine transfer from the engine row", () => {
@@ -277,7 +281,7 @@ describe("Engines: one row per engine, and the components under it (R-68, R-71)"
     // It hosts Kokoro and whisper.cpp — one engine, two providers — and before this it was only
     // ever visible as the contents of a group called Voice. `VOICE` was that group's word and no
     // other screen's, so the head derives from the providers it hosts instead.
-    assert.match(plain(render("/settings/providers?provider=voxa")), /Voxa\s+SPEECH-TO-TEXT, TEXT-TO-SPEECH/);
+    assert.match(plain(render("/settings/providers?provider=voxa")), /Voxa\s+Speech-to-Text, Text-to-Speech/);
   });
 
   it("does not state the authoring harness (R-5, R-72, matrix row 46)", () => {

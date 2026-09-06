@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
+import { useEffect } from "react";
 import {
-  ENGINE_PROVIDERS,
   FIT_LABEL,
   ROW_STATE_LABEL,
   activationFor,
@@ -11,7 +9,6 @@ import {
   setupClosure,
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
-  type EngineId,
   type Locality,
   type LocalModelRowState,
   type ManifestModel,
@@ -20,30 +17,24 @@ import {
   type SetupComponent,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
-import { ChevronDown, ChevronRight } from "../components/icons.js";
+import { ChevronDown, ChevronRight, Play, RefreshCw } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { detectRuntimes, setupInstall, setupRemove, setupRepair, useSetup, useStore } from "../lib/store.js";
+import { detectRuntimes, setupInstall, setupRemove, setupRepair, useStore } from "../lib/store.js";
 import { strandReason, usableModels } from "../components/dispatch-bar.js";
-import {
-  CAPABILITY_LABEL,
-  RuntimeSection,
-  RuntimeStatus,
-  sizeMb,
-  type RuntimeTone,
-} from "./settings-parts.js";
+import { ActionButton, RuntimeStatus, sizeMb, type RuntimeTone } from "./settings-parts.js";
 
 /**
- * The local half of Settings · Providers (SPEC-034 R-7). One engine's models, and the machine
- * they run on.
+ * A local model's row, and the facts it is drawn from (SPEC-034 §1.7, SPEC-042 R-16).
  *
- * This was the Local AI screen — a capability rail, and one capability's models under it. That
- * rail answered *what can I make here*, and Providers' own rail answers it now, with the engines
- * beside the services they are an alternative to. What is left is the narrower question a reader
- * has already asked by opening a pane: what does this engine host, and what of it is here.
+ * This was the Local AI screen, then one engine's model groups inside Providers. The rows live on
+ * AI models now, under the engine that hosts them and the kind they make (SPEC-042 R-12), and
+ * this file keeps what did not move: the derivation of a row's facts, the row itself for the
+ * kinds with no picture, and the machine's own row for the engine pane.
  *
- * No cloud provider reaches these rows, and that is by construction rather than by a filter
- * applied late: the models come from `ENGINE_PROVIDERS`, which claims only local providers and is
- * tested doing so.
+ * Nothing here derives a fact another surface owns. Locality and fit come from the gate,
+ * activation from the setup ledger, and whether a model can dispatch *now* is SPEC-028 R-35's
+ * answer consumed through `usableModels` — the same function the dispatch bar reads, so the two
+ * cannot disagree about one model.
  */
 
 /**
@@ -64,7 +55,7 @@ const STATE_TONE: Partial<Record<LocalModelRowState, RuntimeTone>> = {
   "needs-attention": "warn",
 };
 
-interface Entry {
+export interface Entry {
   model: ManifestModel;
   state: LocalModelRowState;
   /**
@@ -91,163 +82,108 @@ interface Entry {
 
 
 /**
- * One engine's models, grouped by the provider that owns them (SPEC-034 R-7).
+ * One provider's local models, as rows are drawn from them (SPEC-042 R-16).
  *
- * Replaces the Local AI screen's capability rail. The question that rail answered — *what can I
- * make here* — is now answered by Providers' own rail, where the engines sit beside the services;
- * this answers the narrower one a reader has already asked by opening a pane.
+ * `answered` is the set of ComfyUI recipe ids the engine has reported on: those carry the
+ * recipe's own readiness and controls (`recipeFacts`) and are left out here, so that one model
+ * is never drawn from two projections. With no engine resolved the set is empty and every
+ * manifest row still offers itself — the opposite of withholding, which R-28 forbids.
  *
- * Nothing here derives a fact another surface owns. Locality and fit come from the gate,
- * activation from the setup ledger, and whether a model can dispatch *now* is SPEC-028 R-35's
- * answer consumed through `usableModels` — the same function the dispatch bar reads, so the two
- * cannot disagree about one model.
+ * Drawn from the manifest rather than from the gate's output, because the gate has nothing to
+ * say until a probe returns and R-28 offers an unmeasured model rather than withholding it. The
+ * gate's row is joined on where it exists; locality falls back to the engine's own answer,
+ * which is where locality lives either way (SPEC-034 R-9).
  */
-export function EngineModelGroups({ engine }: { engine: EngineId }) {
-  const { state } = useStore();
-  const setup = useSetup();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState<string | null>(null);
+export function localEntries(
+  state: ReturnType<typeof useStore>["state"],
+  components: readonly SetupComponent[],
+  provider: ProviderId,
+  answered: ReadonlySet<string>,
+): Entry[] {
   const runtime = state?.app.runtime ?? null;
   const comfyui = state?.app.comfyui ?? null;
-
   const manifest = state?.app.manifest ?? null;
-  const components = setup?.components ?? [];
   const disabled = new Set(state?.app.models.disabled ?? []);
   const gatedById = new Map((runtime?.models ?? []).map((m) => [m.modelId, m]));
-  const providers = ENGINE_PROVIDERS[engine];
-  /**
-   * A ComfyUI recipe is a ComfyUI model, and its own pane lists the ones the engine has
-   * answered for — with the controls a recipe needs, which a model row has no place for:
-   * the pinned version, Re-verify, the node-class refusal. Drawing those again here would
-   * state one thing twice, which is the duplication SPEC-033 R-6 deletes rather than tidies.
-   *
-   * The ones it has *not* answered for still belong here. With no engine resolved the recipe
-   * list is empty, and dropping the manifest rows with it would withhold every model this
-   * machine could install — the opposite of R-28, and a fact Local AI used to state.
-   */
-  const answered = new Set((comfyui?.recipes ?? []).map((r) => r.recipeId));
-  // R-7's heading rule. Where an engine hosts one provider the rail item has already named it,
-  // and repeating it one line below is the redundancy R-19 removes from rows and headings alike.
-  const several = providers.length > 1;
-
-  /**
-   * Every model this engine hosts, whether or not the machine has been measured yet.
-   *
-   * Drawn from the manifest rather than from the gate's output, because the gate has nothing to
-   * say until a probe returns and R-28 offers an unmeasured model rather than withholding it.
-   * The gate's row is joined on where it exists; locality falls back to the engine's own answer,
-   * which is where locality lives either way (R-9).
-   */
-  const entriesFor = (provider: ProviderId): Entry[] => {
-    const models = (manifest?.models ?? []).filter((m) => m.provider === provider && !answered.has(m.id));
-    // Asked of each model's own capability, never the group's: a recipe drawn under one heading
-    // may dispatch as another, and asking the wrong one would strand a model that runs perfectly.
-    const usableIds = new Set(
-      [...new Set(models.map((m) => m.capability))].flatMap((c) => usableModels(state, c).map((m) => m.id)),
-    );
-    return models.map((model) => {
-      const gated = gatedById.get(model.id);
-      const locality =
-        gated?.locality ?? (model.provider === "comfyui" ? (comfyui?.engine.locality ?? "local") : "local");
-      const activation = activationFor(model.provider, model.id, {
-        components,
-        ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
-      });
-      const rowState = localModelRowState(gated?.fit, activation);
-      // A declared `unsupported` is a fact about this machine nobody can act on, so it recedes;
-      // a measured `insufficient` names a shortfall a smaller model or a bigger card answers,
-      // and receding hides something actionable (SPEC-033 D8, SPEC-034 R-23). The row state
-      // folds the two, so the verdict has to travel beside it.
-      const declined = gated?.fit === "unsupported";
-      const component = components.find(
-        (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
-      );
-      return {
-        model,
-        state: rowState,
-        locality,
-        declined,
-        reason: gated?.reason,
-        // One of the five outcomes prints (SPEC-034 R-20, R-21). `runs well` changes no
-        // decision; `unknown` is the machine row said once per model instead of once; and a
-        // refusal is already the row's headline, with its figures on the line beneath — the
-        // label between them says the same thing a third time and vaguer.
-        fitLabel: gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined,
-        sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
-        component,
-        closure: component === undefined ? undefined : setupClosure(components, component.id),
-        supporting:
-          component === undefined
-            ? []
-            : setupClosure(components, component.id)
-                .componentIds.filter((id) => id !== component.id)
-                .map((id) => components.find((c) => c.id === id)?.displayName ?? id),
-        recommended: runtime?.recommended[model.capability] === model.id,
-        // Installed and still unable to run is a different sentence from unsupported, and it is
-        // not this surface's to compose: R-30 forbids a second eligibility answer, so the row
-        // states the one the dispatch bar and enqueue admission already read.
-        //
-        // Never for a model served elsewhere. `strandReason` answers about *this* machine's
-        // engine, and a row another machine serves must not carry it (SPEC-034 R-10).
-        //
-        // Switched off is stated at any row state, not only when installed: being turned down is
-        // a decision and the other three are conditions, and R-32 forbids letting a decision
-        // read as an absence.
-        ineligible: disabled.has(model.id)
-          ? "turned off in Providers"
-          : locality === "local" && rowState === "installed" && !usableIds.has(model.id)
-            ? strandReason(state, model)
-            : undefined,
-      };
-    });
-  };
-
-  const groups = providers
-    .map((provider) => ({ provider, entries: entriesFor(provider) }))
-    .filter((g) => g.entries.length > 0);
-
-  return (
-    <>
-      {/* Three readable lines, once (SPEC-033 R-48). The capability rail put each half on a
-          different screen and had to draw `Conversational voice` under both; one pane draws the
-          pair and the line that needs it together. */}
-      {engine === "voxa" && (
-        <>
-          <RuntimeSection label="VOICE" />
-          <VoiceLines />
-        </>
-      )}
-      {groups.map(({ provider, entries }) => {
-        const installed = entries.filter((e) => e.locality === "local" && e.state === "installed").length;
-        // A provider serves one capability in every case the manifest has; where it ever serves
-        // two, the heading names the one its first model dispatches as rather than inventing a
-        // pairing the capability vocabulary has no word for.
-        const capability = entries[0]!.model.capability;
-        return (
-          <div key={provider}>
-            <RuntimeSection
-              label={
-                several
-                  ? `${CAPABILITY_LABEL[capability]} · ${PROVIDER_TABLE[provider].displayName}`.toUpperCase()
-                  : "MODELS"
-              }
-            >
-              <span className="fy-rt__count">{`${installed} OF ${entries.length} INSTALLED`}</span>
-            </RuntimeSection>
-            {entries.map((entry) => (
-              <ModelRow
-                key={entry.model.id}
-                entry={entry}
-                open={open === entry.model.id}
-                onToggle={() => setOpen(open === entry.model.id ? null : entry.model.id)}
-                onOpenDownloads={() => navigate("/settings/downloads")}
-              />
-            ))}
-          </div>
-        );
-      })}
-    </>
+  const models = (manifest?.models ?? []).filter((m) => m.provider === provider && !answered.has(m.id));
+  // Asked of each model's own capability, never the group's: a recipe drawn under one heading
+  // may dispatch as another, and asking the wrong one would strand a model that runs perfectly.
+  const usableIds = new Set(
+    [...new Set(models.map((m) => m.capability))].flatMap((c) => usableModels(state, c).map((m) => m.id)),
   );
+  return models.map((model) => {
+    const gated = gatedById.get(model.id);
+    const locality =
+      gated?.locality ?? (model.provider === "comfyui" ? (comfyui?.engine.locality ?? "local") : "local");
+    const activation = activationFor(model.provider, model.id, {
+      components,
+      ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
+    });
+    const rowState = localModelRowState(gated?.fit, activation);
+    // A declared `unsupported` is a fact about this machine nobody can act on, so it recedes;
+    // a measured `insufficient` names a shortfall a smaller model or a bigger card answers,
+    // and receding hides something actionable (SPEC-033 D8, SPEC-034 R-23). The row state
+    // folds the two, so the verdict has to travel beside it.
+    const declined = gated?.fit === "unsupported";
+    const component = components.find(
+      (c) => c.provides?.includes(model.id) === true || c.id === comfyUiWeightsComponentId(model.id),
+    );
+    return {
+      model,
+      state: rowState,
+      locality,
+      declined,
+      reason: gated?.reason,
+      // One of the five outcomes prints (SPEC-034 R-20, R-21). `runs well` changes no
+      // decision; `unknown` is the machine row said once per model instead of once; and a
+      // refusal is already the row's headline, with its figures on the line beneath — the
+      // label between them says the same thing a third time and vaguer.
+      fitLabel: gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined,
+      sizeMbytes: component?.sizeMb ?? model.requires?.diskMb,
+      component,
+      closure: component === undefined ? undefined : setupClosure(components, component.id),
+      supporting:
+        component === undefined
+          ? []
+          : setupClosure(components, component.id)
+              .componentIds.filter((id) => id !== component.id)
+              .map((id) => components.find((c) => c.id === id)?.displayName ?? id),
+      recommended: runtime?.recommended[model.capability] === model.id,
+      // Installed and still unable to run is a different sentence from unsupported, and it is
+      // not this surface's to compose: R-30 forbids a second eligibility answer, so the row
+      // states the one the dispatch bar and enqueue admission already read.
+      //
+      // Never for a model served elsewhere. `strandReason` answers about *this* machine's
+      // engine, and a row another machine serves must not carry it (SPEC-034 R-10).
+      //
+      // Switched off is stated at any row state, not only when installed: being turned down is
+      // a decision and the other three are conditions, and R-32 forbids letting a decision
+      // read as an absence.
+      ineligible: disabled.has(model.id)
+        ? "turned off in AI models"
+        : locality === "local" && rowState === "installed" && !usableIds.has(model.id)
+          ? strandReason(state, model)
+          : undefined,
+    };
+  });
+}
+
+/**
+ * The one line a row or a tile prints for a local model's state (SPEC-034 R-19, R-20): the
+ * state, a transfer's progress beside the size rather than instead of it, the one fit verdict
+ * that prints, and the size. Shared so the two containers cannot disagree about one model.
+ */
+export function entryStatusLine(entry: Entry): string {
+  const moving = entry.component !== undefined ? transferProgress(entry.component) : null;
+  const paused = entry.component?.state === "paused";
+  const parts = [
+    paused && entry.state === "downloading" ? "paused" : ROW_STATE_LABEL[entry.state],
+    paused && entry.state !== "downloading" ? "paused" : undefined,
+    moving?.active === true || paused ? `${moving?.percent ?? 0}%` : undefined,
+    entry.fitLabel,
+    entry.sizeMbytes && sizeMb(entry.sizeMbytes),
+  ];
+  return parts.filter((part, at) => Boolean(part) && parts.indexOf(part) === at).join(" · ");
 }
 
 /**
@@ -305,9 +241,9 @@ export function MachineRow() {
           )}
         </span>
       </div>
-      <button type="button" className="fy-set__link" onClick={() => detectRuntimes()}>
+      <ActionButton icon={<RefreshCw size={13} />} onClick={() => detectRuntimes()}>
         {runtime === null ? "Measure" : "Re-detect"}
-      </button>
+      </ActionButton>
     </div>
   );
 }
@@ -327,7 +263,7 @@ const VOICE_LINE = {
  * than under whichever one it was arbitrarily filed with. Both readings come off the same
  * `voiceRuntime` in the same render, so the two cannot disagree.
  */
-function VoiceLines() {
+export function VoiceLines() {
   const { state } = useStore();
   const voice = state?.app.voiceRuntime ?? null;
   const engineState = (which: "kokoro" | "whisper"): string => voice?.engineStatus[which]?.state ?? "unknown";
@@ -364,37 +300,34 @@ function VoiceLines() {
  * would be listing engines whether it meant to or not. It is in the detail, where somebody
  * troubleshooting will look for it.
  */
-function ModelRow({
+export function LocalModelRow({
   entry,
   open,
   onToggle,
   onOpenDownloads,
+  play,
 }: {
   entry: Entry;
   open: boolean;
   onToggle: () => void;
   onOpenDownloads: () => void;
+  /** A speaking sample is a voice's picture (SPEC-042 R-14); only where the app can make one. */
+  play?: () => void;
 }) {
   const { model, state } = entry;
   const elsewhere = entry.locality === "remote";
   // `unsupported` is both a headline state and a fit verdict, so a declared refusal would print
   // the word twice and say nothing the second time. What distinguishes the two verdicts under
   // that one label is the reason beneath, which R-27 puts there.
-  // A transfer's progress rides between the state and the size (R-19): the percentage alone
-  // does not say 62 percent of what, and the bar below is a shape rather than a figure.
-  const moving = entry.component !== undefined ? transferProgress(entry.component) : null;
-  const paused = entry.component?.state === "paused";
-  const parts = [
-    paused && state === "downloading" ? "paused" : ROW_STATE_LABEL[state],
-    paused && state !== "downloading" ? "paused" : undefined,
-    moving?.active === true || paused ? `${moving?.percent ?? 0}%` : undefined,
-    entry.fitLabel,
-    entry.sizeMbytes && sizeMb(entry.sizeMbytes),
-  ];
-  const line = parts.filter((part, at) => Boolean(part) && parts.indexOf(part) === at).join(" · ");
+  const line = entryStatusLine(entry);
   return (
     <div className={cx("fy-set__row", "fy-set__row--stack", !elsewhere && entry.declined && "fy-set__row--off")}>
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        {play !== undefined && (
+          <button type="button" className="fy-play" aria-label={`Play a sample of ${model.displayName}`} onClick={play}>
+            <Play size={10} />
+          </button>
+        )}
         <button
           type="button"
           className="fy-set__link"

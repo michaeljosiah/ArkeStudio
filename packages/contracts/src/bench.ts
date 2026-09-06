@@ -1295,7 +1295,7 @@ export function presetFault(
     return { ok: false, reason: `${model.displayName} is a ${model.capability} model, not ${preset.mode}` };
   }
   if (disabled.includes(preset.model)) {
-    return { ok: false, reason: `${model.displayName} is switched off in Providers` };
+    return { ok: false, reason: `${model.displayName} is switched off in AI models` };
   }
   if (unlocked !== undefined && !unlocked.includes(preset.provider) && PROVIDERS[model.provider]?.local !== true) {
     return { ok: false, reason: `no provider key unlocks ${model.displayName}` };

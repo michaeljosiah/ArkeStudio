@@ -2,6 +2,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import { useEffect, useRef } from "react";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
+import { SettingsModelsScreen } from "./screens/settings-models.js";
+import { SettingsProvidersScreen } from "./screens/settings-providers.js";
 import {
   ActivityScreen,
   FirstRunScreen,
@@ -12,7 +14,6 @@ import {
   SettingsLayout,
   SettingsHarnessScreen,
   SettingsNotificationsScreen,
-  SettingsProvidersScreen,
   SettingsSampleWorldScreen,
   SettingsSignInScreen,
   SettingsGeneralScreen,
@@ -189,6 +190,9 @@ export function App() {
           <Route path="/settings" element={<SettingsLayout />}>
             <Route index element={<Navigate to="providers" replace />} />
             <Route path="providers" element={<SettingsProvidersScreen />} />
+            {/* Every model, cloud and local, under the kind it makes (SPEC-042 R-1). Providers
+                keeps the credential; this is where the switch is. */}
+            <Route path="models" element={<SettingsModelsScreen />} />
             <Route path="sign-in" element={<SettingsSignInScreen />} />
             <Route path="appearance" element={<SettingsAppearanceScreen />} />
             <Route path="notifications" element={<SettingsNotificationsScreen />} />

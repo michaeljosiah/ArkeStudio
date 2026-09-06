@@ -1945,6 +1945,7 @@ Capability specs break out of this document in dependency order. Each becomes it
 | SPEC-034 | Providers holds both halves — the services you connect and the engines you run, one rail | 008, 021, 022, 028, 030, 032, 033 · amends 008, 028, 032, 033 |
 | SPEC-035 | Boards are derived — packing, continuity, and the two overrides | 008, 012, 019, 024, 029 · amends 029 |
 | SPEC-036 | The scene workspace — script to footage on one surface | 009, 012, 013, 019, 023, 024, 029, 035 · amends 012, 013, 019, 029 |
+| SPEC-042 | Providers holds the credential, AI models holds the models — grouped by what they make, then by who supplies them | 008, 021, 022, 028, 030, 032, 033, 034 · amends 032, 033, 034 |
 
 **Phase 1 — prove the loop.** 001 → 002 → 003 → 004 → 005 → 007. A world can be created, a
 sheet drafted by an agent, ripple-checked and accepted, with history and an index behind it.

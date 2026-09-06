@@ -2626,88 +2626,55 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
    off the edge on a narrow window. */
 .fy-scrim__center--flush { padding: 0; }
 /*
- * 80% of the window, both ways.
+ * A page, not a panel (SPEC-042 R-5).
  *
- * It was 982px wide and as tall as its content, which is what the canvas draws — and the canvas
- * draws one screen at 1360×850, not the window somebody actually runs. On a real display the
- * fixed width left the master-and-detail panes cramped while most of the screen sat empty behind
- * the scrim. A proportion follows the window; a pixel width only ever suits one.
- *
- * A column, so the body takes whatever the head leaves instead of every pane inside guessing a
- * viewport fraction of its own.
+ * It was 90% of the window over a blurred scrim, with a close of its own. At that size the modal
+ * framing bought nothing but a narrower pane — and a three-column surface (.fy-cols) is sized to
+ * a pane the panel could not give it. The rail sits flush left at the canvas's 200px; the pane
+ * takes the rest and hands its own scrolling to whatever it holds.
  */
-.fy-settings {
-  width: 90%;
-  height: 90%;
-  max-width: calc(100% - 32px);
-  max-height: calc(100% - 32px);
-  display: flex;
-  flex-direction: column;
-  background: var(--background);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-lg);
-  padding: 26px 30px;
-  animation: fy-fade-up 0.5s var(--ease-out) both;
-}
-.fy-settings__head { display: flex; align-items: flex-start; gap: 12px; }
-.fy-settings__title { font: 650 20px/1.2 var(--font-sans); letter-spacing: -0.02em; }
-.fy-settings__sub { font: 400 11px var(--font-mono); color: var(--neutral-400); margin-top: 5px; }
-.fy-settings__close {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--neutral-400);
-  cursor: pointer;
-  border: none;
-  background: transparent;
-  transition: var(--transition-control);
-}
-.fy-settings__close:hover { background: var(--accent); color: var(--foreground); }
-/* No height of its own: the panel is 80% of the window and the body is what is left of it after
-   the head. The min-height:0 is what lets the pane inside scroll rather than push the panel. */
-.fy-settings__body { display: flex; gap: 24px; margin-top: 18px; flex: 1; min-height: 0; }
-/* 177px = the canvas's 160px of tab plus its 16px gutter and 1px rule. A canvas width is a
-   content width — the canvas is content-box and this app is border-box — so padding and border
-   are added back before a number read off the design is used here. */
+.fy-settings { height: 100%; display: flex; }
 .fy-settings__rail {
-  width: 177px;
+  width: 200px;
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   border-right: 1px solid var(--border);
-  padding-right: 16px;
+  padding: 30px 18px 18px 30px;
 }
+.fy-settings__title { font: 600 21px/1.2 var(--font-sans); letter-spacing: -0.03em; margin: 0 0 20px; }
 .fy-settings__tab {
   display: flex;
   align-items: center;
-  padding: 8px 12px;
-  border-radius: 8px;
-  font: 400 12.5px var(--font-sans);
+  padding: 6px 0;
+  font: 400 13.5px var(--font-sans);
   color: var(--muted-foreground);
-  cursor: pointer;
   text-decoration: none;
   transition: var(--transition-control);
 }
-.fy-settings__tab:hover { background: var(--accent); color: var(--foreground); }
-.fy-settings__tab--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
-.fy-settings__version { font: 400 9.5px var(--font-mono); color: var(--neutral-400); padding: 0 12px 4px; }
-/* The gutter is the scrollbar's, not decoration: without it a status dot and a size sit under the
-   bar. `stable` reserves it on every tab, so switching to a pane that does not scroll does not
-   shift the content 14px sideways. */
-.fy-settings__pane {
+.fy-settings__tab:hover { color: var(--foreground); }
+/* A bar at the left edge, not a pill: the second column's current row is a pill, and two pills
+   two inches apart would read as one control in two places. */
+.fy-settings__tab--active {
+  color: var(--foreground);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--foreground);
+  padding-left: 12px;
+  margin-left: -12px;
+}
+.fy-settings__version { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-settings__pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.fy-settings__waiting { padding: 24px 34px 0; }
+/* A single pane keeps its own scroll and the gutter that keeps a status dot from under the bar
+   (`stable`, so switching tabs does not shift the content sideways). The three-column screens
+   are .fy-cols and take the space whole; their pane scrolls instead. */
+.fy-settings__pane > .fy-set {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
-  padding-right: 14px;
-  display: grid;
-  gap: var(--space-4);
-  align-content: start;
+  padding: 30px 34px 24px;
 }
 
 /*
@@ -7616,3 +7583,286 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-switchmenu__here { flex: none; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-switchmenu__rule { display: block; height: 1px; margin: 4px 6px; background: var(--border); }
 .fy-switchmenu__item--all { color: var(--muted-foreground); }
+
+/* ============================================================
+   Settings · three columns (SPEC-042 R-7): the rail, then what you are choosing among, then the
+   detail. Providers and AI models share every rule here, so switching between them moves nothing
+   but the words.
+   ============================================================ */
+.fy-cols { flex: 1; min-height: 0; display: flex; }
+.fy-cols__list {
+  width: 206px;
+  flex: none;
+  border-right: 1px solid var(--border);
+  padding: 30px 14px 18px 18px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* A mark beside every name wants the wider column. */
+[data-screen="settings-providers"] .fy-cols__list { width: 232px; padding-left: 16px; }
+/* The right padding is 20 where the left is 34: the stable scrollbar gutter (17px on Windows)
+   already reads as margin on that side, and at 34 the third tile of a row wrapped under the
+   first two at the canvas's own 1360. */
+.fy-cols__pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 30px 20px 24px 34px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* A half of the column, drawn as a level (R-10): the rule separates, the icon identifies, the
+   weight and colour lift it, and the rows under it indent past it. Never a larger size and never
+   capitals. */
+.fy-half {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 10px;
+  font: 500 12.5px var(--font-sans);
+  color: var(--foreground);
+}
+.fy-half svg { color: var(--muted-foreground); flex: none; }
+.fy-half:not(:first-child) { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+
+/* A kind, with its count. */
+.fy-kind {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px 7px 22px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: 400 13.5px var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-kind:hover { background: var(--accent); }
+.fy-kind.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-kind__name { flex: 1; }
+.fy-kind__n { font: 400 12px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* A source, with its mark, and a note only where something needs attention (R-9). */
+.fy-src {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px 7px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font: 400 13.5px var(--font-sans);
+  color: var(--muted-foreground);
+}
+.fy-src:hover { background: var(--accent); }
+.fy-src.is-current { background: var(--secondary); color: var(--foreground); font-weight: 500; }
+.fy-src__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-src__note { font: 400 12px var(--font-sans); color: var(--warning); white-space: nowrap; }
+
+/*
+ * A provider's mark (R-20), on one light plate in both themes. Half of the marks are a black glyph
+ * on transparency and would disappear against a dark pane, so the plate is the one surface here
+ * that deliberately does not follow the theme — the .dark rule below says so rather than leaving
+ * it to be read as an oversight.
+ */
+.fy-mark {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  border-radius: 6px;
+  background: var(--neutral-100);
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font: 600 11px var(--font-sans);
+  color: var(--neutral-700);
+}
+.fy-mark img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
+.fy-mark--lg { width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
+.dark .fy-mark { background: var(--neutral-100); border-color: var(--neutral-700); }
+
+/* The pane's head: the name, where it is, and the count. */
+.fy-pane { display: flex; flex-direction: column; min-height: 0; }
+.fy-pane__head { display: flex; align-items: center; gap: 14px; padding-bottom: 4px; }
+.fy-pane__name { font: 600 27px/1.1 var(--font-sans); letter-spacing: -0.035em; }
+.fy-pane__where,
+.fy-pane__count { font: 400 13px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+
+/* A fact about a source (R-18): what it is, what it is, and the buttons that act on it, right-
+   aligned so the values form a column. */
+.fy-facts { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 860px; }
+.fy-fact { display: flex; align-items: center; gap: 14px; min-height: 30px; font: 400 13.5px var(--font-sans); }
+.fy-fact__what { width: 140px; flex: none; color: var(--muted-foreground); }
+.fy-fact__is { flex: 1; min-width: 0; display: flex; align-items: center; font-variant-numeric: tabular-nums; }
+.fy-fact__mono { font: 400 12px var(--font-mono); color: var(--muted-foreground); }
+.fy-fact__does { display: flex; align-items: center; gap: 8px; flex: none; }
+.fy-fact__input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 6px 10px;
+  font: 400 12px var(--font-mono);
+  background: transparent;
+  color: var(--foreground);
+  outline: none;
+}
+.fy-fact__input:focus-visible { border-color: var(--ring); }
+.fy-fact__select {
+  font: 400 13px var(--font-sans);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 5px 10px;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/*
+ * An action that says its verb (R-18). Icon-only was drawn and reverted: it made the rows tidy and
+ * every action a guess. Destructive stays quiet at rest and takes the signal colour only under the
+ * pointer — the weight belongs on the confirm, not on a settings row nobody is touching.
+ */
+.fy-act {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--card);
+  color: var(--foreground);
+  font: 400 12.5px var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--transition-control);
+}
+.fy-act svg { color: var(--muted-foreground); flex: none; }
+.fy-act:hover { background: var(--accent); border-color: var(--muted-foreground); }
+.fy-act:hover svg { color: var(--foreground); }
+.fy-act:disabled { opacity: 0.45; cursor: default; }
+.fy-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fy-act--danger:hover { color: var(--warning); border-color: var(--warning); background: var(--card); }
+.fy-act--danger:hover svg { color: var(--warning); }
+
+/* The one line Providers says about models (R-3): a count, and the way there. */
+.fy-aside { margin: 28px 0 0; font: 400 13px var(--font-sans); color: var(--muted-foreground); }
+.fy-aside__link {
+  font: inherit;
+  color: var(--foreground);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* A supplier's section on AI models (R-12): its mark, its name, and on the right its count or its
+   remedy — stated once, at the heading, never on every tile. */
+.fy-by { margin-top: 28px; }
+.fy-by + .fy-by { margin-top: 34px; }
+.fy-by__head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+.fy-by__name { font: 500 14px var(--font-sans); letter-spacing: -0.01em; }
+.fy-by__state { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* The remedy is the label (R-4): naming the problem and opening the control that fixes it are one
+   press, here, on the model's own surface — never a route to the tab that owns the credential. */
+.fy-by__fix {
+  font: 400 12.5px var(--font-sans);
+  color: var(--warning);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fy-by__credential {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/*
+ * The tile (R-13), measured: 282 wide, a 16:9 picture at the 280 inside the border, three across
+ * in an 886 pane with a 20 gutter. The gutter is the point — a gapless sheet was a fine object and
+ * a poor list, and this screen is read one model at a time.
+ */
+.fy-tiles { display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch; }
+.fy-mtile {
+  width: 282px;
+  flex: none;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+/* The picture's band: the sample's poster where one is shipped, a plain plate where not (R-17). */
+.fy-mtile__pic { position: relative; width: 100%; aspect-ratio: 16 / 9; background: var(--muted); border-bottom: 1px solid var(--border); }
+.fy-mtile__pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* Off is a ghost of the picture (R-15): what is being declined stays visible. */
+.fy-mtile__pic--ghost img { opacity: 0.38; filter: grayscale(1); }
+/* A transfer, across the foot of the picture (R-16); its figure is in the body beside the control. */
+.fy-mtile__bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: color-mix(in srgb, var(--foreground) 20%, transparent); }
+.fy-mtile__bar > span { display: block; height: 3px; background: var(--foreground); }
+.fy-mtile__body { padding: 12px 14px 13px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.fy-mtile__row { display: flex; align-items: center; gap: 10px; }
+.fy-mtile__name {
+  font: 500 14px var(--font-sans);
+  letter-spacing: -0.01em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-mtile__meta { display: flex; align-items: baseline; gap: 10px; font: 400 12.5px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.fy-mtile__does { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.fy-mtile__does:empty { display: none; }
+.fy-mtile--out .fy-mtile__name { color: var(--muted-foreground); }
+
+/* Rows, for the kinds with nothing to show (R-14). */
+.fy-rows { border-top: 1px solid var(--border); }
+.fy-rows__name { font: 500 13.5px var(--font-sans); }
+.fy-rows__at { font: 400 12.5px var(--font-sans); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.fy-set__row--out .fy-rows__name { color: var(--muted-foreground); }
+/* A speaking sample is a voice's picture; the control is drawn only where the app can make one. */
+.fy-play {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0 0 0 1px;
+}
+.fy-play:hover { background: var(--accent); }
+
+/* An engine's head beside a service's (SPEC-042 R-7): the same size, the same sentence-case
+   words, once it carries a mark. The unmarked head keeps turn 75's shape for the Harness pane. */
+.fy-rt__head:has(.fy-mark) { gap: 14px; padding-bottom: 4px; }
+.fy-rt__head:has(.fy-mark) .fy-rt__title { font: 600 27px/1.1 var(--font-sans); letter-spacing: -0.035em; }
+.fy-rt__head:has(.fy-mark) .fy-rt__caps { font: 400 13px var(--font-sans); color: var(--muted-foreground); letter-spacing: 0; }

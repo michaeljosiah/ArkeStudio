@@ -2,17 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import {
   FIT_LABEL,
   ENGINE_LABEL,
-  comfyUiWeightsComponentId,
   transferProgress,
   type ComfyUiEngineStatus,
   type EngineId,
   type ComponentHealth,
+  type FitVerdict,
+  type RecipeReadiness,
   type SetupComponent,
   type VoiceRuntimeStatus,
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
+import { FileText, Folder, LinkMark, Pencil, Play, Power, RefreshCw, RotateCcw, Trash, Wrench } from "../components/icons.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import {
+  ActionButton,
   HealthDot,
   RuntimeHead,
   engineCapabilityWords,
@@ -46,7 +49,6 @@ import {
   useSetup,
   useStore,
   useVoiceRuntimeTest,
-  verifyComfyUiRecipe,
 } from "../lib/store.js";
 /**
  * The engine panes of Settings · Providers (SPEC-034 R-5). The machinery, deliberately and
@@ -195,8 +197,9 @@ export function VoxaDetail({
   return (
     <>
       <RuntimeHead
+        mark="voxa"
         title={ENGINE_LABEL.voxa}
-        caps={engineCapabilityWords("voxa").toUpperCase()}
+        caps={engineCapabilityWords("voxa")}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
@@ -211,18 +214,18 @@ export function VoxaDetail({
                 host already publishes exactly the safe half (SPEC-028 R-4). */}
             {voiceRuntime?.executableName ? ` · ${voiceRuntime.executableName}` : ""}
           </span>
-          <button type="button" className="fy-set__link" onClick={() => chooseVoxaExecutable()}>
+          <ActionButton icon={<Pencil size={13} />} onClick={() => chooseVoxaExecutable()}>
             Change
-          </button>
+          </ActionButton>
           {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
-            <button type="button" className="fy-set__link" onClick={() => useBundledVoxa()}>
+            <ActionButton icon={<RotateCcw size={13} />} onClick={() => useBundledVoxa()}>
               Use bundled
-            </button>
+            </ActionButton>
           )}
           {voiceRuntime?.configured && (
-            <button type="button" className="fy-set__link" onClick={() => clearVoxaExecutable()}>
+            <ActionButton icon={<Trash size={13} />} danger onClick={() => clearVoxaExecutable()}>
               Clear
-            </button>
+            </ActionButton>
           )}
         </div>
       </div>
@@ -254,21 +257,21 @@ export function VoxaDetail({
         );
       })}
       <div className="fy-rt__actions">
-        <Button onClick={() => testLocalVoice()} disabled={voiceTest?.status === "testing"}>
+        <ActionButton icon={<Play size={13} />} disabled={voiceTest?.status === "testing"} onClick={() => testLocalVoice()}>
           {voiceTest?.status === "testing" ? "Testing…" : "Test voice"}
-        </Button>
-        <button type="button" className="fy-set__link" onClick={() => restartVoxa()}>
+        </ActionButton>
+        <ActionButton icon={<Power size={13} />} onClick={() => restartVoxa()}>
           Restart
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => repairVoiceModels()}>
+        </ActionButton>
+        <ActionButton icon={<Wrench size={13} />} onClick={() => repairVoiceModels()}>
           Repair models
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => openModelFolder()}>
+        </ActionButton>
+        <ActionButton icon={<Folder size={13} />} onClick={() => openModelFolder()}>
           Open folder
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => openEngineLog("voxa")}>
+        </ActionButton>
+        <ActionButton icon={<FileText size={13} />} onClick={() => openEngineLog("voxa")}>
           Logs
-        </button>
+        </ActionButton>
         <span style={{ flex: 1 }} />
         <HealthDot label="Voxa local speech" health={health} />
       </div>
@@ -309,16 +312,103 @@ export function comfyUiTone(engine: ComfyUiEngineStatus | null): RuntimeTone {
   if (engine.state === "ready") return "ok";
   return engine.state === "starting" ? "idle" : "warn";
 }
+/** What a recipe's tile or row prints, derived once (SPEC-042 R-16). */
+export interface RecipeFacts {
+  /** A refusing fit verdict: the headline says so, the reason beneath says by how much. */
+  refused: boolean;
+  /** The weights are on disk, or there are none to fetch. */
+  settled: boolean;
+  /** Downloads' own projection of the transfer, never a second one (SPEC-033 R-82). */
+  pct: number;
+  moving: boolean;
+  paused: boolean;
+  /** While the weights are moving or stuck, that IS what this recipe is doing. */
+  speaksForRecipe: boolean;
+  tone: RuntimeTone | undefined;
+  /** The status line: the state, the progress, the verdict, joined the way a model row joins them. */
+  word: string;
+  /** The one clause the row owes, where it owes one, and whether it warns. */
+  reason: { text: string; warn: boolean } | undefined;
+  /** A declared refusal recedes; a measured shortfall does not (SPEC-034 R-23). */
+  dim: boolean;
+}
+
 /**
- * The ComfyUI engine and its recipes (SPEC-021 §2.2, §2.12, design turn 72). The engine row
- * states its source; detection offers are adopted, never typed; and a disabled recipe carries
- * its one measured clause.
+ * The recipe row's facts (SPEC-021 §2.12, SPEC-034 R-19..R-23), once, for whichever container
+ * draws them. A recipe's weights hang off the recipe (SPEC-028 T-25): the row that says "1 of 1
+ * model files missing" is the row with the Download for those exact files, and while they move
+ * the transfer is the recipe's own state — a running download is not a fault, and a failed one
+ * is not the recipe's own "disabled".
+ */
+export function recipeFacts(
+  recipe: RecipeReadiness,
+  weights: SetupComponent | undefined,
+  gated: { fit?: FitVerdict; reason?: string } | undefined,
+): RecipeFacts {
+  const refused = gated?.fit === "insufficient" || gated?.fit === "unsupported";
+  // One of the five outcomes prints, and it is the same one a model row prints (R-20, R-21).
+  const verdict = gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined;
+  const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
+  const pct = weights === undefined ? 0 : transferProgress(weights).percent;
+  const speaksForRecipe = !settled && weights.state !== "available" && weights.state !== "skipped";
+  const tone: RuntimeTone = speaksForRecipe
+    ? weights.state === "failed" || weights.state === "blocked"
+      ? "warn"
+      : "idle"
+    : recipe.state === "ready"
+      ? "ok"
+      : recipe.state === "disabled"
+        ? "warn"
+        : "idle";
+  const word = [
+    refused ? "unsupported" : undefined,
+    verdict,
+    refused
+      ? undefined
+      : speaksForRecipe
+        ? weights.state === "downloading"
+          ? `${pct}%`
+          : weights.state === "paused"
+            ? `paused · ${pct}%`
+            : weights.state
+        : recipe.state,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  // Kept visible, disabled, with the measured reason — never quietly absent (SPEC-021 R-10).
+  // A stalled weights fetch states its own cause instead: "1 of 1 model files missing" is
+  // true but says nothing about the disk that refused it.
+  const reason =
+    speaksForRecipe && weights.detail !== undefined
+      ? { text: weights.detail, warn: weights.state === "failed" }
+      : refused && gated?.reason !== undefined
+        ? { text: gated.reason, warn: true }
+        : recipe.reason !== undefined
+          ? { text: recipe.reason, warn: recipe.state === "disabled" }
+          : undefined;
+  return {
+    refused,
+    settled,
+    pct,
+    moving: weights?.state === "downloading",
+    paused: weights?.state === "paused",
+    speaksForRecipe,
+    // A dot only where it warns (SPEC-034 R-22): a refusal, or a transfer that failed.
+    tone: refused ? "warn" : tone === "warn" ? "warn" : undefined,
+    word,
+    reason,
+    dim: recipe.state === "disabled" || gated?.fit === "unsupported",
+  };
+}
+
+/**
+ * The ComfyUI engine (SPEC-021 §2.2, design turn 72): where it is, how it is reached, and what
+ * it is told. The engine row states its source; detection offers are adopted, never typed.
  *
- * A recipe's weights hang off the recipe (SPEC-028 T-25). They are catalogue components like
- * any other and stayed under Components for that reason, which left the row that says "1 of 1
- * model files missing" two panes away from the Download for those exact files. The action now
- * sits on the row that states the lack; Components keeps them until they arrive, as it does for
- * everything else spoken for elsewhere.
+ * Its recipes are not here. A recipe is a ComfyUI model, and AI models draws it under the kind
+ * it makes (SPEC-042 R-3, R-12), with the controls a recipe needs — the weights' Download on the
+ * row that states the lack (SPEC-028 T-25), Re-verify, the node-class refusal — read from
+ * `recipeFacts` above. This pane says how many, and where they are.
  */
 export function ComfyUiDetail() {
   const { state } = useStore();
@@ -351,8 +441,9 @@ export function ComfyUiDetail() {
   return (
     <div data-testid="comfyui-engine">
       <RuntimeHead
+        mark="comfyui"
         title="ComfyUI"
-        caps={engineCapabilityWords("comfyui").toUpperCase()}
+        caps={engineCapabilityWords("comfyui")}
         tone={comfyUiTone(engine)}
         state={engine?.state ?? "unknown"}
       />
@@ -364,13 +455,13 @@ export function ComfyUiDetail() {
             {engine?.version ? ` · v${engine.version}` : ""}
             {engine?.location ? ` · ${engine.location}` : ""}
           </span>
-          <button type="button" className="fy-set__link" onClick={() => chooseComfyUiPath()}>
+          <ActionButton icon={<Pencil size={13} />} onClick={() => chooseComfyUiPath()}>
             Change
-          </button>
+          </ActionButton>
           {engine !== null && engine.source !== "absent" && engine.source !== "managed" && (
-            <button type="button" className="fy-set__link" onClick={() => clearComfyUiEngine()}>
+            <ActionButton icon={<Trash size={13} />} danger onClick={() => clearComfyUiEngine()}>
               Clear
-            </button>
+            </ActionButton>
           )}
         </div>
       </div>
@@ -446,9 +537,8 @@ export function ComfyUiDetail() {
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
           />
-          <button
-            type="button"
-            className="fy-set__link"
+          <ActionButton
+            icon={<LinkMark size={13} />}
             disabled={urlDraft.trim().length === 0}
             onClick={() => {
               setComfyUiUrl(urlDraft.trim());
@@ -456,20 +546,22 @@ export function ComfyUiDetail() {
             }}
           >
             Use this URL
-          </button>
+          </ActionButton>
         </div>
       </div>
       {/* No path here: the mapped folder is a setting the coordinator does not publish on the
           engine status, and a location this pane cannot read is one it must not draw. The two
           actions are the whole of what it can offer until modelsDir reaches the wire. */}
       <RuntimeSection label="MODELS FOLDER">
-        <button type="button" className="fy-set__link" onClick={() => chooseComfyUiModelsDir()}>
+        <ActionButton icon={<Folder size={13} />} onClick={() => chooseComfyUiModelsDir()}>
           Map a folder
-        </button>
-        <button type="button" className="fy-set__link" onClick={() => clearComfyUiModelsDir()}>
+        </ActionButton>
+        <ActionButton icon={<RotateCcw size={13} />} onClick={() => clearComfyUiModelsDir()}>
           Use the engine's own
-        </button>
+        </ActionButton>
       </RuntimeSection>
+      {/* How many, and nothing more (SPEC-042 R-3): the recipes themselves are on AI models,
+          under the kind each one makes. */}
       <RuntimeSection label="RECIPES">
         <span className="fy-rt__count">
           {comfyui === null
@@ -479,146 +571,27 @@ export function ComfyUiDetail() {
               : `${ready} OF ${recipes.length} READY`}
         </span>
       </RuntimeSection>
-      {recipes.map((recipe) => {
-        const weights = setup?.components.find((c) => c.id === comfyUiWeightsComponentId(recipe.recipeId));
-        const gated = (state?.app.runtime?.models ?? []).find((m) => m.modelId === recipe.recipeId);
-        const refused = gated?.fit === "insufficient" || gated?.fit === "unsupported";
-        // One of the five outcomes prints, and it is the same one a model row prints (R-20,
-        // R-21). A refusal is the headline with its figures on the line beneath; `runs well` and
-        // `unknown` change no decision.
-        const verdict = gated?.fit === "runs-slowly" ? FIT_LABEL["runs-slowly"] : undefined;
-        const recommended = state?.app.runtime?.recommended[recipe.capability] === recipe.recipeId;
-        const settled = weights === undefined || weights.state === "ready" || weights.state === "present";
-        // The shared projection, not a second derivation: Downloads owns progress, and a row
-        // that computes its own figure is how two surfaces come to disagree about one transfer
-        // with nothing left to arbitrate between them (R-82, D15).
-        const pct = weights === undefined ? 0 : transferProgress(weights).percent;
-        // While the weights are moving or stuck, that IS what this recipe is doing, and the dot
-        // has to agree with the word beside it: a running download is not a fault, and a failed
-        // one is not the recipe's own "disabled".
-        const speaksForRecipe =
-          !settled && weights.state !== "available" && weights.state !== "skipped";
-        const tone: RuntimeTone = speaksForRecipe
-          ? weights.state === "failed" || weights.state === "blocked"
-            ? "warn"
-            : "idle"
-          : recipe.state === "ready"
-            ? "ok"
-            : recipe.state === "disabled"
-              ? "warn"
-              : "idle";
-        return (
-          <div
-            key={recipe.recipeId}
-            className={cx(
-              "fy-set__row--stack",
-              "fy-set__row",
-              // A declared refusal recedes; a measured shortfall does not, because a smaller
-              // model or a bigger card answers it (SPEC-033 D8, SPEC-034 R-23).
-              (recipe.state === "disabled" || gated?.fit === "unsupported") && "fy-set__row--off",
-            )}
-            data-testid="comfyui-recipe"
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{recipe.displayName}</div>
-                <div className="fy-set__caps fy-set__caps--tokens">
-                  {recipe.capability} · v{recipe.recipeVersion}
-                </div>
-                {recipe.untested !== undefined && <div className="fy-set__caps">{recipe.untested}</div>}
-              </div>
-              {weights?.state === "available" && (
-                <Button onClick={() => setupRetry(weights.id)}>Download · {sizeMb(weights.sizeMb)}</Button>
-              )}
-              {weights !== undefined && <SetupTransferControl component={weights} />}
-              {(weights?.state === "failed" || weights?.state === "blocked" || weights?.state === "skipped") &&
-                weights.repairRequired !== true && (
-                  <button type="button" className="fy-set__link" onClick={() => setupRetry(weights.id)}>
-                    Retry
-                  </button>
-                )}
-              {/* For the file that is on disk, intact, and not the bytes the recipe pins — the
-                  one case Retry cannot answer, because presence is completion to it. */}
-              {(settled || weights?.repairRequired === true) && weights !== undefined && (
-                <button type="button" className="fy-set__link" onClick={() => setupRepair(weights.id)}>
-                  Repair
-                </button>
-              )}
-              <button type="button" className="fy-set__link" onClick={() => verifyComfyUiRecipe(recipe.recipeId)}>
-                Re-verify
-              </button>
-              {recommended && <span className="fy-prov__unverified">recommended</span>}
-              {/* A dot only where it warns (R-22): a refusal, or a transfer that failed. `ready`
-                  says what a green dot would have said, and grey stood for the rest. */}
-              <RuntimeStatus tone={refused ? "warn" : tone === "warn" ? "warn" : undefined}>
-                {[
-                  refused ? "unsupported" : undefined,
-                  verdict,
-                  refused
-                    ? undefined
-                    : speaksForRecipe
-                      ? weights.state === "downloading"
-                        ? `${pct}%`
-                        : weights.state === "paused"
-                          ? `paused · ${pct}%`
-                          : weights.state
-                      : recipe.state,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </RuntimeStatus>
-            </div>
-            {/* Paused bytes remain visible because they are retained for the resume. */}
-            {(weights?.state === "downloading" || weights?.state === "paused") && (
-              <div className="fy-set__bar">
-                <div className="fy-set__barfill" style={{ width: `${pct}%` }} />
-              </div>
-            )}
-            {/* Kept visible, disabled, with the measured reason — never quietly absent (R-10).
-                A stalled weights fetch states its own cause instead: "1 of 1 model files
-                missing" is true but says nothing about the disk that refused it. */}
-            {speaksForRecipe && weights.detail !== undefined ? (
-              <div className="fy-set__why">
-                <span className={cx("fy-set__dot", weights.state === "failed" && "fy-set__dot--warn")} />
-                <span>{weights.detail}</span>
-              </div>
-            ) : refused && gated?.reason !== undefined ? (
-              <div className="fy-set__why">
-                <span className="fy-set__dot fy-set__dot--warn" />
-                <span>{gated.reason}</span>
-              </div>
-            ) : (
-              recipe.reason && (
-                <div className="fy-set__why">
-                  <span className={cx("fy-set__dot", recipe.state === "disabled" && "fy-set__dot--warn")} />
-                  <span>{recipe.reason}</span>
-                </div>
-              )
-            )}
-          </div>
-        );
-      })}
       <div className="fy-rt__actions">
         {(engine?.source === "managed" || engine?.source === "user-path") && (
-          <button type="button" className="fy-set__link" onClick={() => restartComfyUi()}>
+          <ActionButton icon={<Power size={13} />} onClick={() => restartComfyUi()}>
             Restart
-          </button>
+          </ActionButton>
         )}
         {/* Logs only where Arke spawned the process (SPEC-033 R-70). A URL engine's log belongs
             to whoever runs it, and a control that opened nothing would be the lie R-70 forbids. */}
         {(engine?.source === "managed" || engine?.source === "user-path") && (
-          <button type="button" className="fy-set__link" onClick={() => openEngineLog("comfyui")}>
+          <ActionButton icon={<FileText size={13} />} onClick={() => openEngineLog("comfyui")}>
             Logs
-          </button>
+          </ActionButton>
         )}
         {engine?.source === "user-url" && <span className="fy-set__caps">Logs · kept by whoever runs it</span>}
-        <button type="button" className="fy-set__link" onClick={() => refreshComfyUi()}>
+        <ActionButton icon={<RefreshCw size={13} />} onClick={() => refreshComfyUi()}>
           {engine === null || engine.source === "absent"
             ? "Re-detect"
             : engine.source === "user-url"
               ? "Check now"
               : "Refresh"}
-        </button>
+        </ActionButton>
       </div>
       {/*
        * No COMPONENTS band here, and deliberately.
@@ -664,8 +637,9 @@ export function OllamaDetail({ components }: { components: readonly SetupCompone
   return (
     <>
       <RuntimeHead
+        mark="ollama"
         title={ENGINE_LABEL.ollama}
-        caps={engineCapabilityWords("ollama").toUpperCase()}
+        caps={engineCapabilityWords("ollama")}
         tone={processTone(provider?.validation)}
         state={answered ? "answering" : (provider?.validation ?? "not asked")}
       />

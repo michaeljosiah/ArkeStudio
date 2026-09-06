@@ -307,7 +307,7 @@ export function gateLocalRuntimes(
 export interface EligibilityInputs {
   /** Provider connection state, for the capabilities a credential actually unlocks. */
   readonly providers: readonly ProviderStatus[];
-  /** Model ids somebody switched off in Providers. */
+  /** Model ids somebody switched off in AI models. */
   readonly disabled: readonly string[];
   /** ComfyUI's own recipe answers, keyed by recipe id — which is the model id. */
   readonly recipes: readonly RecipeReadiness[];

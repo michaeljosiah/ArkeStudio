@@ -217,7 +217,7 @@ export function resolveModel(
  * the user to the wrong screen — the same distinction Who does what makes.
  */
 export function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
-  if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in Providers";
+  if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in AI models";
   // A stranded local recipe carries its readiness reason — the measured one, never key advice
   // for a provider that takes no key (SPEC-021 R-10).
   if (model.provider === "comfyui") {

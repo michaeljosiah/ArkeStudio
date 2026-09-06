@@ -3304,7 +3304,7 @@ export function VoiceLineDialogScreen() {
     (voiceReadiness?.state === "unknown" && clientState?.app.comfyui?.engine.locality === "local")
       ? (voiceReadiness.reason ?? "The assigned voice recipe is not ready.")
       : voiceModel !== undefined && (clientState?.app.models.disabled ?? []).includes(voiceModel.id)
-        ? `${voiceModel.displayName} is turned off in Providers.`
+        ? `${voiceModel.displayName} is turned off in AI models.`
       : voiceModel === undefined && speaker?.voice
         ? "The assigned voice model is no longer available."
         : null;

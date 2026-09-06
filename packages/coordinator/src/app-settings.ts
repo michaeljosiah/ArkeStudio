@@ -124,7 +124,7 @@ export class AppSettingsFile {
     }
     return this.mutate<{ ok: true } | { ok: false; reason: string }>((current) => {
       if (current.models.disabled.includes(modelId)) {
-        return { value: { ok: false, reason: `${model.displayName} is switched off in Providers` } };
+        return { value: { ok: false, reason: `${model.displayName} is switched off in AI models` } };
       }
       return {
         settings: { ...current, routing: { ...current.routing, [capability]: modelId } },
@@ -293,7 +293,7 @@ export class AppSettingsFile {
 }
 
 /**
- * Defaults that cannot run — the model left the manifest, or it is switched off in Providers.
+ * Defaults that cannot run — the model left the manifest, or it is switched off in AI models.
  * Both are stated rather than repaired: a default that cannot run is shown as a fault, never
  * swapped for something else on the user's behalf (§2.7).
  */
@@ -312,7 +312,7 @@ export function routingFaults(settings: AppSettings, manifest: ModelManifest): R
       faults.push({
         capability,
         modelId,
-        reason: `${model.displayName} is routed here but switched off in Providers — pick another model, or turn it back on`,
+        reason: `${model.displayName} is routed here but switched off in AI models — pick another model, or turn it back on`,
       });
     }
   }

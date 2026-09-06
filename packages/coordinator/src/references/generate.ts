@@ -448,7 +448,7 @@ export function missingTileAngles(
 /**
  * The image model for one piece of kit work. A requested id overrides the routed default for
  * this generation and nothing else; it is refused rather than quietly ignored when it is not an
- * image model or has been switched off in Providers, because falling back silently would spend
+ * image model or has been switched off in AI models, because falling back silently would spend
  * money on a model the user did not choose.
  */
 export function imageModelFor(
@@ -464,7 +464,7 @@ export function imageModelFor(
   }
   // With no explicit choice the routed default answers — but only if it is still switched on.
   // Callers that never pass an id (world key art, establish looks, a missing tile) went straight
-  // to routing, so a model switched off in Providers still took paid work. Refused rather than
+  // to routing, so a model switched off in AI models still took paid work. Refused rather than
   // replaced: picking a substitute would spend money on a model nobody chose, and the fault is
   // already shown in Who does what with the two repairs named.
   const routed = modelForCapability(manifest, settings?.routing, "image");

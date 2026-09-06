@@ -199,7 +199,7 @@ describe("which models this studio offers (SPEC-008 §2.7)", () => {
     const faults = routingFaults(loaded, manifest);
     assert.equal(faults.length, 1);
     assert.equal(faults[0]!.capability, "video");
-    assert.match(faults[0]!.reason, /switched off in Providers/);
+    assert.match(faults[0]!.reason, /switched off in AI models/);
   });
 
   it("refuses to route to a model that is switched off", async () => {
@@ -207,7 +207,7 @@ describe("which models this studio offers (SPEC-008 §2.7)", () => {
     const settings = new AppSettingsFile(join(dir, "settings.json"));
     await settings.setModelEnabled("seedance-2.0", false);
     const refused = await settings.setRoutingDefault("video", "seedance-2.0", manifest, true);
-    assert.ok(!refused.ok && /switched off in Providers/.test(refused.reason));
+    assert.ok(!refused.ok && /switched off in AI models/.test(refused.reason));
     assert.equal((await settings.load()).routing["video"], undefined);
   });
 });

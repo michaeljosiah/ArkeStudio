@@ -10176,7 +10176,7 @@ export class Coordinator {
           return;
         }
         if (this.readModel.getState().app.models.disabled.includes(model.id)) {
-          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in Providers.`);
+          this.rejectEnqueue(msg.requestId, msg.kind, `${model.displayName} is turned off in AI models.`);
           return;
         }
         const source = voiceSourceFor(bundle.clonedVoices, voice.provider, model.id, voice.voiceId);
