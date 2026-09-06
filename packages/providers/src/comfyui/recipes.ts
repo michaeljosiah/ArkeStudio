@@ -1058,7 +1058,11 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
     // but nobody has yet watched H3 say a written line, so the speaking-sample picker offers it
     // marked untested rather than withholding it (issue 858).
     speechVideo: "untested",
-    pricing: { kind: "unmetered" },
+    // Free is the price; this is the cost (issue 868). The four cold 480p runs of 2026-09-06
+    // (H3_FRAMES_BY_SECONDS) took 9m56s to 11m17s for 4 to 8 seconds of picture, so the row
+    // states the middle of them beside its price rather than "minutes" against a cloud row's
+    // seconds.
+    pricing: { kind: "unmetered", typicalRunSec: 636 },
     requires: {
       vramMb: H3_VIDEO.hardware.minVramMb,
       // The authored runs-well boundary (SPEC-033 R-35): between the 10 GB minimum and this,
@@ -1098,7 +1102,8 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       aspects: Object.keys(H3_768_DIMENSIONS),
     },
     speechVideo: "untested",
-    pricing: { kind: "unmetered" },
+    // The 768p run of 2026-09-06: 12m48s for five seconds (H3_768_FRAMES_BY_SECONDS).
+    pricing: { kind: "unmetered", typicalRunSec: 768 },
     requires: {
       vramMb: H3_VIDEO_768.hardware.minVramMb,
       recommendedVramMb: H3_VIDEO_768.hardware.recommendedVramMb,

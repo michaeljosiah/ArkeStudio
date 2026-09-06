@@ -174,6 +174,8 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // longer renders 124 frames for 96, and a 6 s shot no longer files as 10. 9 and 11–14 are
     // unrun and snap up. The RAM low-water marks are on the map's comment; none was a floor.
     assert.deepEqual(durationOptions(row), [4, 5, 6, 7, 8, 10, 15]);
+    // The middle of those runs, stated beside the free price in the speaking-sample picker (issue 868).
+    assert.equal(row.pricing.kind === "unmetered" ? row.pricing.typicalRunSec : null, 636);
     assert.equal(dispatchDuration(row, 20).kind, "over-cap");
     for (const seconds of durationOptions(row)) {
       const choice = dispatchDuration(row, seconds);
@@ -583,6 +585,8 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video-768")!;
     assert.deepEqual(durationOptions(row), [5]);
     assert.deepEqual(row.limits.resolutions, ["768p"]);
+    // Free is the price; the measured run is the cost, stated beside it (issue 868).
+    assert.equal(row.pricing.kind === "unmetered" ? row.pricing.typicalRunSec : null, 768);
     assert.equal(frameDispatchFor(row, 1), null);
     assert.equal(row.accepts.referenceImages, 0);
   });

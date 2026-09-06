@@ -68,7 +68,18 @@ export const PricingSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Local runtimes: recorded at zero and labelled unmetered (R-18). */
-  z.object({ kind: z.literal("unmetered") }).strict(),
+  z
+    .object({
+      kind: z.literal("unmetered"),
+      /**
+       * What one run took on the reference machine, in seconds, where the recipe recorded it
+       * (issue 868). Free is the price; this is the cost, and a picker showing "free" against
+       * "$3.78" with nothing beside it is how a person picks the free one once. Absent says
+       * nothing was measured, never "quick".
+       */
+      typicalRunSec: z.number().int().min(1).optional(),
+    })
+    .strict(),
 ]);
 export type Pricing = z.infer<typeof PricingSchema>;
 

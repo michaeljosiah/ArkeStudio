@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
-import { characterSpeakingVideoRoutes, estimateMicroUsd, ulid, type ClientMessage, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, estimateMicroUsd, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
@@ -8,6 +8,21 @@ import { playClip } from "../lib/audio.js";
 import { Button } from "./ui.js";
 
 const ReviewOperationId = z.string().uuid();
+
+/**
+ * What a route costs, said the same way for every row (issue 868): a cloud route its price for
+ * this length, a local one "free" and the run it measured — because "free" against "$3.78" with
+ * nothing beside it is how a person picks the free one once. Exported so the label can be read
+ * back in a test rather than re-spelled there.
+ */
+export function costLabel(model: ManifestModel, durationSec: number): string {
+  if (model.pricing.kind !== "unmetered") {
+    const estimate = estimateMicroUsd(model, { durationSec, resolution: model.limits.resolutions?.[0] ?? "720p" });
+    return `$${(estimate / 1_000_000).toFixed(2)}`;
+  }
+  const run = model.pricing.typicalRunSec;
+  return run === undefined ? "free · minutes, not seconds" : `free · about ${Math.max(1, Math.round(run / 60))} min`;
+}
 
 /** Design 114: sample audio and TTS assignment have separate authorities and separate actions. */
 export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
@@ -75,7 +90,7 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
       </label>
       <p>The character speaks these words in a clean, isolated voice. Later scenes use their own dialogue.</p>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        <label>Model <select value={model?.id ?? ""} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.speechVideo === "verified" ? "" : " · untested"}</option>)}</select></label>
+        <label>Model <select value={model?.id ?? ""} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.speechVideo === "verified" ? "" : " · untested"} · {costLabel(m, length)}</option>)}</select></label>
         <label>Duration <select value={length} onChange={e => setDurationSec(Number(e.target.value))}>{durations.map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
       </div>
       {photo && <img alt={`${sheet.name} · accepted character imagery`} src={mediaUrl(world.meta.slug, `references/${sheet.id}/${photo}`)} style={{ width: 100, maxHeight: 140, objectFit: "contain" }} />}
@@ -83,14 +98,15 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
       {models.length === 0 && <p>No route here can carry a photo and make sound.</p>}
       {/* The trade a local route makes, said where the price would be (issue 863). It is the free
           option for someone willing to wait, not the default — so it is stated rather than left
-          to be discovered by a $0.00 button that takes a quarter of an hour. */}
-      {model?.pricing.kind === "unmetered" && <p>Runs on this machine · free · minutes, not seconds.</p>}
+          to be discovered by a $0.00 button that takes a quarter of an hour. The figure is the
+          row's measured run where it recorded one (issue 868), and "minutes" where it did not. */}
+      {model?.pricing.kind === "unmetered" && <p>Runs on this machine · {costLabel(model, length)}</p>}
       {model && model.speechVideo !== "verified" && <p>Untested for speech. It may not lip-sync or speak clearly.</p>}
       <p>Uses the accepted character photo. Creates a video candidate with speech; audition before assigning.</p>
       <Button disabled={busy || !model || !script.trim() || !world.referenceKits.some(k => k.sheetId === sheet.id && (k.mainPhoto || k.anchor))}
         onClick={() => { if (!model) return; setBusy(true); generation.current = generateCharacterVoiceSample({ worldId: world.meta.worldId,
           sheetId: sheet.id, modelId: model.id, script, durationSec: length, confirmedMicroUsd: estimate });
-          if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>Generate speaking video · ${(estimate / 1_000_000).toFixed(2)}</Button>
+          if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>Generate speaking video · {model ? costLabel(model, length) : "$0.00"}</Button>
     </details>
     <div style={{ marginTop: 16 }}>
       <label>Audio or video source <select aria-label="Voice sample source" style={{ maxWidth: "100%" }} value={sourceId} onChange={e => { setSourceId(e.target.value); setReview(null); }}>
