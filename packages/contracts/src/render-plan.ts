@@ -9,6 +9,7 @@ import {
   episodeExportRefusals,
   exportAudioClips,
   exportOverlays,
+  type CutFile,
   type ExportAudioClip,
   type ExportItem,
   type ExportOverlay,
@@ -367,17 +368,23 @@ function audioFromTimeline(
   return { ok: true, audio, speech: mergeRegions(speech) };
 }
 
+/** Both persisted audio encodings name the same media at legacy read and write boundaries. */
+export function legacyCutArtifactReferences(cut: CutFile): Array<{ label: string; id: string }> {
+  const references = cut.overlays.map(overlay => ({ label: overlay.id, id: overlay.artifactId }));
+  for (const track of cut.audio) for (const [index, entry] of track.entries.entries()) {
+    const source = audioSourceOf(entry);
+    if (source?.kind === "artifact") references.push({ label: `${track.label} entry ${index + 1}`, id: source.artifactId });
+  }
+  return references;
+}
+
 /** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
 export function legacyArtifactScopeRefusal(production: ProductionBundle,
   artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline): string | null {
   const references: Array<{ label: string; id: string }> = [];
   if (timeline?.status !== "ready" && production.spine) references.push({ label: "Master track", id: production.spine.trackArtifactId });
   if (timeline?.status !== "ready" || timeline.timeline.migratedCut !== true) {
-    for (const overlay of production.cut.overlays) references.push({ label: overlay.id, id: overlay.artifactId });
-    for (const track of production.cut.audio) for (const [index, entry] of track.entries.entries()) {
-      const source = audioSourceOf(entry);
-      if (source?.kind === "artifact") references.push({ label: `${track.label} entry ${index + 1}`, id: source.artifactId });
-    }
+    references.push(...legacyCutArtifactReferences(production.cut));
   }
   for (const reference of references) {
     const resolved = resolveProductionArtifact(artifacts, reference.id, production.meta.id);

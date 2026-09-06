@@ -6,7 +6,8 @@ import { buildRenderPlan, spineTimelineFingerprint, storyTimelineFingerprint, ty
 import { fileArtifact, setOwner } from "../../src/artifacts/filing.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
-import { placeOverlay, removeOverlay, splitOverlayAudio } from "../../src/takes/review.js";
+import { placeOverlay, removeOverlay, saveAudioTracks, splitOverlayAudio } from "../../src/takes/review.js";
+import { stageEditorRequests } from "../../src/productions/editor-requests.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -99,6 +100,32 @@ it("refuses a foreign master before creating its first timeline (#895)", async t
     sourceFingerprint: spineTimelineFingerprint(p, p.spine, 3), commands: [],
   }), /Master track cites artifact .*belongs to another production.*Import the file/);
   await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
+  for (const dryRun of [true, false]) await assert.rejects(stageEditorRequests(store, {
+    conversationId: "cv_01J8G0000000000000000000C1", entryContext: { kind: "production", productionId: PRODUCTION }, now: store.now(), dryRun,
+    requests: [{ summary: "Add a sound lane", commands: [{ kind: "add-track", trackId: "tr_new", trackKind: "audio", name: "Audio" }] }],
+  }), /Master track cites artifact .*belongs to another production.*Import the file/);
+  await assert.rejects(readFile(join(store.dir, "productions", PRODUCTION, "editor-requests.json"), "utf8"), { code: "ENOENT" });
+});
+
+it("checks every legacy bulk-save source format while allowing existing references to be removed (#895)", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const artifact = store.getBundle().artifacts.find(a => a.kind === "audio")!;
+  const entries = [{ artifactId: artifact.id, offsetSec: 0 }, { source: { kind: "artifact", artifactId: artifact.id }, offsetSec: 1 }];
+  const overlay = { id: "ov_01J8G0000000000000000000Z1", artifactId: artifact.id, startSec: 0, endSec: 1, lane: 0, audio: "only" };
+  const audio = (values: typeof entries) => [{ kind: "score", label: "Score", entries: values }];
+  const cutPath = join(store.dir, "productions", PRODUCTION, "cut.json"), before = await readFile(cutPath, "utf8").catch(() => null);
+  await setOwner(store, artifact, "another-production");
+  for (const cut of [...entries.map(entry => ({ audio: audio([entry]), overlays: [] })), { audio: [], overlays: [overlay] }]) {
+    await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify(cut)), /belongs to another production.*Import the file/);
+    assert.equal(await readFile(cutPath, "utf8").catch(() => null), before);
+  }
+  await setOwner(store, store.getBundle().artifacts.find(candidate => candidate.id === artifact.id)!, null);
+  await saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio(entries), overlays: [overlay] }));
+  await setOwner(store, artifact, "another-production");
+  await saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio(entries.slice(1)), overlays: [overlay] }));
+  await assert.rejects(saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: audio(entries), overlays: [overlay] })), /belongs to another production/);
+  await saveAudioTracks(store, PRODUCTION, JSON.stringify({ audio: [], overlays: [] }));
+  assert.deepEqual(productionOf(store).cut, { audio: [], overlays: [] });
 });
 
 it("the suggested import recovery makes a scoped file available and places it (#895)", async t => {

@@ -17,6 +17,7 @@ import {
   type ShotSelection,
   orderedShots,
   resolveProductionArtifact,
+  legacyCutArtifactReferences,
 } from "@arke-studio/contracts";
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -477,7 +478,19 @@ export async function removeOverlay(store: WorldStore, productionId: string, ove
 
 export async function saveAudioTracks(store: WorldStore, productionId: string, cutJson: string): Promise<void> {
   const path = `productions/${productionId}/cut.json`;
-  const existing = await readOr(store, path, "");
+  const existing = await readOr(store, path, "{}");
+  const previous = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(existing.raw)));
+  const next = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(cutJson)));
+  // Existing unavailable references may be retained while others are removed. A bulk save
+  // must not add another copy; counting sources also permits deletion that shifts entry indices.
+  const remaining = new Map<string, number>();
+  for (const reference of previous) remaining.set(reference.id, (remaining.get(reference.id) ?? 0) + 1);
+  const added = next.filter(reference => {
+    const count = remaining.get(reference.id) ?? 0;
+    if (count === 0) return true;
+    remaining.set(reference.id, count - 1);
+    return false;
+  });
   await store.commit({
     kind: "cut-audio",
     source: "form",
@@ -489,5 +502,11 @@ export async function saveAudioTracks(store: WorldStore, productionId: string, c
         baseHash: existing.existed ? sha256(existing.raw) : null,
       },
     ],
+  }, undefined, () => {
+    for (const reference of added) {
+      const resolved = resolveProductionArtifact(store.getBundle().artifacts, reference.id, productionId);
+      if (!resolved.ok) return `${reference.label} cites ${resolved.reason}`;
+    }
+    return null;
   });
 }
