@@ -11,6 +11,7 @@ export * from "./staging.js";
 export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";
+export * from "./artifact-access.js";
 export * from "./reference.js";
 export * from "./prop.js";
 export * from "./prose.js";

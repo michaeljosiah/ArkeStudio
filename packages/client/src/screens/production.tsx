@@ -67,6 +67,8 @@ import {
   newAudioTrack,
   migrateLegacyCut,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
+  resolveProductionArtifact,
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
@@ -3911,13 +3913,15 @@ function ArtifactPanel({
   const artifactItems: LibraryItem[] = artifacts.filter((artifact) => inLibrary.has(`artifact:${artifact.id}`)).map((artifact) => {
     const lane = laneOf(artifact);
     const name = artifact.file.split("/").pop() ?? artifact.file;
+    const access = resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "");
+    const why = access.ok ? null : access.reason;
     return {
       key: `artifact:${artifact.id}`,
       name,
-      sub: lane === null ? `${artifact.kind} · no picture or sound to place` : artifact.kind,
-      subTone: "muted",
+      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : artifact.kind),
+      subTone: why === null ? "muted" : "destructive",
       thumb:
-        artifact.kind === "image" || artifact.kind === "board" ? (
+        why !== null ? <Film size={12} /> : artifact.kind === "image" || artifact.kind === "board" ? (
           <Portrait worldSlug={slug} path={artifact.file} label="" radius={4} />
         ) : artifact.kind === "audio" ? (
           <Wave seed={artifact.file} width={34} height={12} />
@@ -3927,17 +3931,23 @@ function ArtifactPanel({
           <Scroll size={12} />
         ),
       lane,
-      why: lane === null ? `a ${artifact.kind} has no picture or sound to place` : null,
+      why: why ?? (lane === null ? `a ${artifact.kind} has no picture or sound to place` : null),
       used: usedArtifactIds.has(artifact.id),
       uses: usesOf((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifact.id),
-      add: onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
-      overlay: onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
-      drag: lane === null ? null : artifact.id,
+      add: why === null && onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
+      overlay: why === null && onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
+      drag: why !== null || lane === null ? null : artifact.id,
       search: `${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`,
       kind: "artifact",
       scenes: [...artifact.links],
     };
   });
+  for (const item of library) {
+    if (item.kind !== "artifact" || artifacts.some(artifact => artifact.id === item.artifactId)) continue;
+    artifactItems.push({ key: libraryItemKey(item), name: item.artifactId, sub: "Missing media", subTone: "destructive", thumb: <Film size={12} />,
+      lane: null, why: "This world does not have the media. Remove it from the Library or import the file.", used: usedArtifactIds.has(item.artifactId),
+      uses: usesOf(clip => clip.source.kind === "artifact" && clip.source.artifactId === item.artifactId), add: null, drag: null, search: item.artifactId, kind: "artifact", scenes: [] });
+  }
   // Every spoken line in the story (the Audio screen's dialogue rows): read or not, with the way
   // to read it, and a place on Dialogue once it is. Under `All` only the lines of shots in the
   // Library show; the audio filter shows them all, as the Audio address did.
@@ -5484,8 +5494,10 @@ function ExportSheet({
   let cut: ReturnType<typeof resolvePictureTimeline> | null = null;
   let blockedBy: string | null = null;
   const nothingOnTimeline = "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
+  const legacyScopeRefusal = production ? legacyArtifactScopeRefusal(production, world?.artifacts ?? [], timelineState) : null;
   if (production === null) blockedBy = "No production here.";
   else if (timelineState.status === "invalid") blockedBy = `Timeline unavailable · ${timelineState.message}`;
+  else if (legacyScopeRefusal !== null) blockedBy = legacyScopeRefusal;
   else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : nothingOnTimeline;
   else {
     try {
@@ -5709,7 +5721,10 @@ function AddToLibraryDialog({
   const scenes = production?.scenes ?? [];
   const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
   const shots = scene ? orderedShots(scene) : [];
-  const placeable = pickableArtifacts(artifacts).filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
+  const pickable = new Set(pickableArtifacts(artifactsFor(artifacts, production?.meta.id ?? "")).map(artifact => artifact.id));
+  const placeable = artifacts.filter(artifact => present.has(`artifact:${artifact.id}`) ||
+    (pickable.has(artifact.id) && resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "").ok && ["audio", "video", "image", "board"].includes(artifact.kind)));
+  const missing = library.filter((item): item is Extract<TimelineLibraryItem, { kind: "artifact" }> => item.kind === "artifact" && !artifacts.some(artifact => artifact.id === item.artifactId));
   const toggle = (key: string) =>
     (present.has(key) ? setDropped : setChosen)((current) => {
       const next = new Set(current);
@@ -5745,7 +5760,7 @@ function AddToLibraryDialog({
         <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
         <span className="fy-libpick__name">{name}</span>
         <span className={cx("fy-mono fy-libpick__meta", tone === "destructive" && "fy-libpick__meta--destructive")}>
-          {already ? (dropped.has(key) ? "leaves the library" : "in the library") : meta}
+          {already ? (dropped.has(key) ? "leaves the library" : tone === "destructive" ? `${meta} · in the library` : "in the library") : meta}
         </span>
       </label>
     );
@@ -5793,10 +5808,14 @@ function AddToLibraryDialog({
         <div className="fy-libpick__col">
           <div className="fy-libpick__colhead">Artifacts</div>
           <div className="fy-libpick__list">
-            {placeable.length === 0 ? (
+            {placeable.length === 0 && missing.length === 0 ? (
               <div className="fy-libpick__empty">Nothing filed that can be placed. Upload from the Library.</div>
             ) : (
-              placeable.map((artifact) => row(`artifact:${artifact.id}`, artifact.file.split("/").pop() ?? artifact.file, artifact.kind))
+              <>{placeable.map((artifact) => {
+                const access = resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "");
+                return row(`artifact:${artifact.id}`, artifact.file.split("/").pop() ?? artifact.file, access.ok ? artifact.kind : "another production", access.ok ? "muted" : "destructive");
+              })}
+              {missing.map(item => row(libraryItemKey(item), item.artifactId, "missing media", "destructive"))}</>
             )}
           </div>
         </div>
@@ -6009,7 +6028,7 @@ export function CutScreen() {
     production && (!production.spine || timelineState.status === "ready") && timelineError === null
       ? buildRenderPlan({
           production,
-          artifacts,
+          artifacts: world?.artifacts ?? [],
           timeline: previewState,
           scope: { kind: "production" },
           preset: "review-cut",
@@ -6026,7 +6045,7 @@ export function CutScreen() {
    * editable so the clip can be removed, and Undo still works. Only an invalid or unresolvable
    * timeline record blocks editing.
    */
-  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : null;
+  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
   const timelineOwnsFilm = previewState.status === "ready";
   const canvasSec = spineCut
@@ -6075,7 +6094,7 @@ export function CutScreen() {
     }
   }
   // Allocation must reserve the same legacy ids the first coordinator write migrates.
-  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, artifacts).timeline : null;
+  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, world?.artifacts ?? []).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
@@ -6594,7 +6613,7 @@ export function CutScreen() {
       onDrop={event => { if (event.dataTransfer.files?.length) { event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files)); } }}>
       <ArtifactPanel
         worldId={worldId}
-        artifacts={artifacts}
+        artifacts={world?.artifacts ?? []}
         slug={slug}
         production={production}
         timeline={editableTimeline}
@@ -7010,7 +7029,7 @@ export function CutScreen() {
         <AddToLibraryDialog
           open={pickerOpen}
           production={production ?? null}
-          artifacts={artifacts}
+          artifacts={world?.artifacts ?? []}
           library={libraryItems}
           onClose={() => setPickerOpen(false)}
           onAdd={(added, removed) => {
@@ -7061,7 +7080,7 @@ export function CutScreen() {
               production={production}
               cut={cut}
               spineCut={spineCut}
-              artifacts={artifacts}
+              artifacts={world?.artifacts ?? []}
               selection={activeSelection}
               selectedClip={selectedAny?.clip ?? null}
               selectedTrack={selectedAny?.track ?? null}
@@ -7142,6 +7161,7 @@ export function CutScreen() {
  */
 type ExportView =
   | { kind: "scene-order" }
+  | { kind: "unavailable"; reason: string }
   | { kind: "no-track" }
   | { kind: "unmeasured" }
   | { kind: "silent"; durationSec: number }
@@ -7149,13 +7169,15 @@ type ExportView =
 
 function exportViewFor(
   world:
-    | { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
+    | { artifacts: readonly { id: string; production?: string | null; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
     | null
     | undefined,
-  production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
+  production: ProductionBundle | null | undefined,
 ): ExportView {
   const spine = production?.spine;
   if (!production || !spine || !world) return { kind: "scene-order" };
+  const reason = legacyArtifactScopeRefusal(production, world.artifacts);
+  if (reason !== null) return { kind: "unavailable", reason };
   const track = world.artifacts.find((a) => a.id === spine.trackArtifactId);
   // A spine naming an artifact this world does not have is not the same as one nobody measured:
   // the coordinator has no path to probe, so no export can succeed and none should be offered.

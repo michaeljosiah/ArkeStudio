@@ -1,12 +1,15 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
+  audioSourceOf,
   buildExportPlan,
   deriveCut,
   deriveEpisodeCut,
   episodeExportRefusals,
   exportAudioClips,
   exportOverlays,
+  type CutFile,
   type ExportAudioClip,
   type ExportItem,
   type ExportOverlay,
@@ -117,11 +120,13 @@ export interface RenderArtifact {
   id: string;
   file: string;
   kind: string;
+  production?: string | null;
   mediaInfo?: { hasAudio: boolean; durationSec?: number };
 }
 
 export interface RenderPlanInput {
   production: ProductionBundle;
+  /** The whole world's catalog; this planner checks ownership before using a referenced file. */
   artifacts: readonly RenderArtifact[];
   timeline: TimelineState | undefined;
   scope: RenderScope;
@@ -269,8 +274,9 @@ function overlaysFromTimeline(
         return { ok: false, reason: `${clip.id} on ${track.name} is a shot; shots live on the base Picture track` };
       }
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const still = STILL_KINDS.has(artifact.kind);
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture` };
@@ -313,8 +319,9 @@ function audioFromTimeline(
       let physicalInSec: number | undefined;
       if (clip.source.kind === "artifact") {
         const artifactId = clip.source.artifactId;
-        const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-        if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+        const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+        if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+        const artifact = resolved.artifact;
         const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
         if (!carries) return { ok: false, reason: `${clip.id} cites ${artifact.file}, which is not known to carry sound` };
         path = `artifacts/${artifact.file}`;
@@ -361,6 +368,40 @@ function audioFromTimeline(
   return { ok: true, audio, speech: mergeRegions(speech) };
 }
 
+/** Legacy rows have no stable IDs: kind/label and normalized placement survive deletion's index shifts. */
+export function legacyCutArtifactReferences(cut: CutFile): Array<{ key: string; label: string; id: string }> {
+  const references = cut.overlays.map(overlay => ({ key: `overlay:${overlay.id}:${overlay.artifactId}`, label: overlay.id, id: overlay.artifactId }));
+  for (const track of cut.audio) for (const [index, entry] of track.entries.entries()) {
+    const source = audioSourceOf(entry);
+    if (source?.kind === "artifact") references.push({
+      key: `audio:${JSON.stringify({ trackKind: track.kind, trackLabel: track.label, source, shotId: entry.shotId ?? null, offsetSec: entry.offsetSec, timing: entry.timing ?? null })}`,
+      label: `${track.label} entry ${index + 1}`, id: source.artifactId,
+    });
+  }
+  return references;
+}
+
+/** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
+export function legacyArtifactScopeRefusal(production: ProductionBundle,
+  artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline,
+  scope: RenderScope = { kind: "production" }): string | null {
+  // Legacy episodes include only their scene cut, and the song clock includes only its master
+  // and anchored takes. Neither reads the legacy overlay/audio placements.
+  if (timeline?.status !== "ready" && scope.kind === "episode") return null;
+  if (timeline?.status !== "ready" && production.spine) {
+    const master = resolveProductionArtifact(artifacts, production.spine.trackArtifactId, production.meta.id);
+    // The song clock already has its own missing/unmeasured-master diagnostics.
+    if (!master.ok && master.code === "other-production") return `Master track cites ${master.reason}`;
+    return null;
+  }
+  if (timeline?.status === "ready" && timeline.timeline.migratedCut === true) return null;
+  for (const reference of legacyCutArtifactReferences(production.cut)) {
+    const resolved = resolveProductionArtifact(artifacts, reference.id, production.meta.id);
+    if (!resolved.ok) return `${reference.label} cites ${resolved.reason}`;
+  }
+  return null;
+}
+
 /**
  * Turn a timeline revision and a delivery scope into the plan both executors consume (R-1, R-4).
  *
@@ -373,6 +414,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
+  const legacyRefusal = scope.kind === "episode" ? null : legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
+  if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
   if (production.spine !== null && (timeline === undefined || timeline.status === "absent")) {
@@ -389,9 +432,31 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
        */
       const range = episodeTimelineRange(production, timeline.timeline, scope.episodeId);
       if (!range.ok) return { ok: false, reason: `episode export refused: ${range.reason}` };
-      const whole = buildRenderPlan({ ...input, scope: { kind: "production" } });
+      const startSec = framesToSeconds(range.startFrame, frameRate), endSec = framesToSeconds(range.endFrame, frameRate);
+      const intersects = (clip: TimelineClip) => clip.startFrame < range.endFrame && clip.startFrame + clip.durationFrames > range.startFrame;
+      const audible = new Set(audibleTracks(timeline.timeline).map(track => track.id));
+      const excludedSpeech: SpeechRegion[] = [];
+      // Remove only unavailable artifact references outside delivery. The surrounding timeline
+      // still supplies performance overlap validation and speech look-ahead/release context.
+      const scopedTimeline = { ...timeline.timeline, tracks: timeline.timeline.tracks.map(track => ({ ...track,
+        clips: track.clips.filter(clip => {
+          if (intersects(clip) || clip.source.kind !== "artifact" || resolveProductionArtifact(artifacts, clip.source.artifactId, production.meta.id).ok) return true;
+          // A recorded Voice window controls ducking without reading the excluded file.
+          if (audible.has(track.id) && AUDIO_TRACK_KINDS.has(track.kind) && effectiveAudioRole(track, clip) === "dialogue") {
+            excludedSpeech.push({ startSec: framesToSeconds(clip.startFrame, frameRate), endSec: framesToSeconds(clip.startFrame + clip.durationFrames, frameRate) });
+          }
+          return false;
+        }),
+      })) };
+      const scopedProduction = { ...production, cut: { ...production.cut,
+        overlays: production.cut.overlays.filter(overlay => (overlay.startSec < endSec && overlay.endSec > startSec) || resolveProductionArtifact(artifacts, overlay.artifactId, production.meta.id).ok),
+        // Named legacy audio is migration input; legacy rendering only reads overlay sound.
+        audio: [],
+      } };
+      const whole = buildRenderPlan({ ...input, production: scopedProduction, timeline: { status: "ready", timeline: scopedTimeline }, scope: { kind: "production" } });
       if (!whole.ok) return whole;
-      return { ok: true, plan: windowPlan(whole.plan, framesToSeconds(range.startFrame, frameRate), framesToSeconds(range.endFrame, frameRate), scope) };
+      if (whole.plan.mix.speechFirst) whole.plan.speech = mergeRegions([...whole.plan.speech, ...excludedSpeech]);
+      return { ok: true, plan: windowPlan(whole.plan, startSec, endSec, scope) };
     }
     // The legacy refusals — a spine with no episode authority among them — belong to the legacy
     // cut alone; a saved timeline has its own episode range above (round six).
@@ -451,8 +516,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     const clip: TimelineClip | undefined = base?.clips.find((candidate) => candidate.id === entry.clipId);
     if (clip !== undefined && clip.source.kind === "artifact") {
       const artifactId = clip.source.artifactId;
-      const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-      if (artifact === undefined) return { ok: false, reason: `${clip.id} cites artifact ${artifactId}, which this world does not have` };
+      const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
+      if (!resolved.ok) return { ok: false, reason: `${clip.id} cites ${resolved.reason}` };
+      const artifact = resolved.artifact;
       const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });

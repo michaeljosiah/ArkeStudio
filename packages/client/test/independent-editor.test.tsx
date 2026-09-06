@@ -34,10 +34,54 @@ async function mount(state: ClientState) {
     <Routes><Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} /></Routes>
   </MemoryRouter>));
   const button = (text: string) => {
-    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text);
+    const found = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
   return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
+}
+it("distinguishes unavailable ownership from missing media and keeps the clip removable (#895)", async () => {
+  const state = stateWithVideo(true);
+  state.world!.artifacts[0]!.production = "another-production";
+  const screen = await mount(state);
+  try {
+    assert.match(screen.container.textContent!, /cl_holiday cites artifact .*belongs to another production/);
+    assert.match(screen.container.textContent!, /Import the file into this production or remove this reference/);
+    assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
+    assert.match(screen.container.querySelector("[data-library-item^='artifact:']")!.textContent!, /belongs to another production/);
+    await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!.click());
+    assert.equal(screen.button("Detach audio").disabled, true);
+    assert.match(screen.container.querySelector(".fy-cutinspect__note")!.textContent!, /belongs to another production.*Import the file/);
+    assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
+    assert.equal(screen.button("Delete").disabled, false);
+    await act(async () => screen.button("Delete").click());
+    const batch = screen.sent.find(message => message.kind === "timeline-command");
+    assert.ok(batch?.kind === "timeline-command");
+    assert.deepEqual(batch.commands, [{ kind: "delete", clipId: "cl_holiday" }]);
+  } finally { await screen.close(); }
+});
+for (const unavailable of ["foreign", "missing"] as const) {
+  it(`keeps ${unavailable} Library membership visible and removable without offering new foreign media (#895)`, async () => {
+    const state = stateWithVideo(true), artifact = state.world!.artifacts[0]!;
+    artifact.production = "another-production";
+    state.world!.artifacts = [...(unavailable === "missing" ? [] : [artifact]), { ...artifact, id: "ar_01J8G0000000000000000000ZZ", file: "private.mp4" }];
+    const screen = await mount(state);
+    try {
+      const item = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${artifact.id}"]`)!;
+      assert.ok(item); assert.equal(item.getAttribute("draggable"), "false");
+      await act(async () => item.querySelector<HTMLButtonElement>("button")!.click());
+      assert.doesNotMatch(item.textContent!, /Append to timeline|Overlay at playhead/);
+      await act(async () => screen.button("Add").click());
+      const rows = [...screen.container.querySelectorAll<HTMLLabelElement>(".fy-libpick__row")];
+      assert.equal(rows.some(row => row.textContent?.includes("private.mp4")), false);
+      const box = rows.find(row => row.textContent?.includes(unavailable === "missing" ? artifact.id : artifact.file))!.querySelector<HTMLInputElement>("input")!;
+      assert.equal(box.checked, true);
+      await act(async () => box.click());
+      await act(async () => screen.button("Update the library").click());
+      const command = screen.sent.find(message => message.kind === "timeline-command");
+      assert.ok(command?.kind === "timeline-command");
+      assert.deepEqual(command.commands, [{ kind: "remove-from-library", items: [{ kind: "artifact", artifactId: artifact.id }] }]);
+    } finally { await screen.close(); }
+  });
 }
 it("imports onto the main timeline without scenes or predefined audio lanes", async () => {
   const screen = await mount(stateWithVideo(false));

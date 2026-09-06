@@ -7,6 +7,7 @@ import {
   CanonEntrySchema,
   deriveArtDirectionDescription,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   productionFrameRate,
   productionShape,
   SceneRecordSchema,
@@ -2897,6 +2898,7 @@ async function sharedResourceProjection(
             ...(payload.action.subtitles ? { subtitles: payload.action.subtitles } : {}),
           });
       if (projected?.ok === false) approvalBlockedReason = projected.reason;
+      if (projected === null) approvalBlockedReason ??= legacyArtifactScopeRefusal(production, bundle.artifacts, timeline, payload.action.scope) ?? undefined;
       if (!deps.startProductionExport) approvalBlockedReason ??= "Local video export is unavailable in this host.";
       const sidecar = payload.action.subtitles && (payload.action.subtitles.mode === "sidecar" || payload.action.subtitles.mode === "burn-in+sidecar")
         ? payload.action.subtitles.sidecar ?? "srt"

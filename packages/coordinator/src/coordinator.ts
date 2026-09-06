@@ -54,6 +54,7 @@ import {
   ulid,
   CutFileSchema,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   playsWholeAudioSource,
   serializeTimedText,
   audibleTracks,
@@ -8611,6 +8612,19 @@ export class Coordinator {
             );
             return;
           }
+          if (msg.episodeId !== undefined) {
+            const refusal = episodeExportRefusals(production, msg.episodeId);
+            if (refusal) {
+              emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
+              return;
+            }
+          }
+          const legacyScopeRefusal = legacyArtifactScopeRefusal(production, store.getBundle().artifacts, timeline,
+            msg.episodeId === undefined ? { kind: "production" } : { kind: "episode", episodeId: msg.episodeId });
+          if (legacyScopeRefusal !== null) {
+            emitProgress(attemptId, "failed", 0, null, legacyScopeRefusal);
+            return;
+          }
           const trackArtifact = spine
             ? store.getBundle().artifacts.find((a) => a.id === spine.trackArtifactId)
             : undefined;
@@ -8677,11 +8691,6 @@ export class Coordinator {
            * treats them, so one episode's gaps never misreport another's.
            */
           if (msg.episodeId !== undefined) {
-            const refusal = episodeExportRefusals(production, msg.episodeId);
-            if (refusal) {
-              emitProgress(attemptId, "failed", 0, null, `episode export refused: ${refusal.detail}`);
-              return;
-            }
             const episode = production.episodes.find((e) => e.id === msg.episodeId)!;
             const plan = buildExportPlan(
               deriveEpisodeCut(production, msg.episodeId),

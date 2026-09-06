@@ -347,6 +347,19 @@ describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
 });
 
 describe("the song clock on the export sheet", () => {
+  it("refuses a master owned by another production before materializing the song (#895)", async () => {
+    const state = spineState("audio");
+    state.world!.artifacts.find(artifact => artifact.id === TRACK)!.production = "another-production";
+    const cut = renderCut(state);
+    assert.match(cut.textContent!, /Preview and export unavailable.*belongs to another production/);
+    assert.equal(cut.querySelector("audio"), null, "the foreign master is not offered for playback");
+    const mounted = await mountSheet(state);
+    try {
+      assert.match(warnings(mounted).join(" "), /Master track cites artifact .*belongs to another production.*Import the file/);
+      assert.equal(action(mounted).disabled, true);
+      assert.equal(openOnTimeline(mounted), undefined);
+    } finally { await unmount(mounted); }
+  });
   it("refuses a song that is not on the timeline yet, and offers the way there only for a master it can cut against", async () => {
     for (const trackState of ["missing", "unmeasured", "silent", "audio"] as const) {
       const mounted = await mountSheet(spineState(trackState));
