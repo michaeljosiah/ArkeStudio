@@ -970,10 +970,14 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       leftOut: z.number().int().min(0).optional(),
       /** Every level the document uses, with its count and whether chapters were found at it: the sheet's segment. */
       levels: z
-        .array(z.object({ level: z.enum(["title", "subtitle", "heading1", "heading2"]), label: z.string().min(1), count: z.number().int().min(0), chosen: z.boolean() }).strict())
+        .array(z.object({ level: z.enum(["title", "subtitle", "heading1", "heading2", "document"]), label: z.string().min(1), count: z.number().int().min(0), chosen: z.boolean() }).strict())
         .optional(),
       /** Footnote and endnote references, not carried and said so. */
       notes: z.number().int().min(0).optional(),
+      /** Hyperlinks, their labels kept and their targets not, said so. */
+      links: z.number().int().min(0).optional(),
+      /** The picker was closed without a file: no action, and the sheet closes. */
+      cancelled: z.literal(true).optional(),
       /** The highest order there is: the chapters would follow it. */
       after: z.number().int().min(0).optional(),
       reason: z.string().optional(),

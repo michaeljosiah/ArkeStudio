@@ -211,14 +211,15 @@ interface StoreState {
   manuscripts: Record<
     string,
     {
-      state: "reading" | "read" | "refused" | "importing" | "imported" | "failed";
+      state: "reading" | "read" | "refused" | "importing" | "imported" | "failed" | "cancelled";
       fileName?: string;
       words?: number;
       chapters?: Array<{ title: string; words: number }>;
       headingLevel?: string;
       leftOut?: number;
-      levels?: Array<{ level: "title" | "subtitle" | "heading1" | "heading2"; label: string; count: number; chosen: boolean }>;
+      levels?: Array<{ level: "title" | "subtitle" | "heading1" | "heading2" | "document"; label: string; count: number; chosen: boolean }>;
       notes?: number;
+      links?: number;
       after?: number;
       created?: number;
       reason?: string;
@@ -1284,7 +1285,9 @@ function handleFrame(json: string): void {
       manuscripts = {
         ...manuscripts,
         [event.requestId]:
-          event.reason !== undefined
+          event.cancelled === true
+            ? { state: "cancelled" }
+            : event.reason !== undefined
             ? { state: "refused", ...(event.fileName !== undefined ? { fileName: event.fileName } : {}), reason: event.reason }
             : {
                 state: "read",
@@ -1295,6 +1298,7 @@ function handleFrame(json: string): void {
                 leftOut: event.leftOut ?? 0,
                 levels: event.levels ?? [],
                 notes: event.notes ?? 0,
+                links: event.links ?? 0,
                 after: event.after ?? 0,
               },
       };
@@ -1545,6 +1549,7 @@ function handleFrame(json: string): void {
       exportsState = {
         ...exportsState,
         [event.exportId]: {
+          worldId: event.worldId,
           productionId: event.productionId,
           ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
           status: event.status,
@@ -3879,6 +3884,8 @@ export function exportWorld(worldId: string): void {
 }
 
 export interface ExportState {
+  /** The world the export belongs to (codex on PR 924): a production slug recurs across worlds. */
+  worldId?: string;
   productionId: string;
   /** Set when the export is one episode's deliverable (issue 396). */
   episodeId?: string;
@@ -3961,7 +3968,7 @@ export function importManuscript(worldId: string, productionId: string, requestI
 }
 
 /** The same file again at the level the person chose; the rows are read again, nothing is written. */
-export function rereadManuscript(worldId: string, productionId: string, requestId: string, headingLevel: "title" | "subtitle" | "heading1" | "heading2"): void {
+export function rereadManuscript(worldId: string, productionId: string, requestId: string, headingLevel: "title" | "subtitle" | "heading1" | "heading2" | "document"): void {
   const held = current.manuscripts[requestId];
   if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "reading" } } });
   send({ kind: "reread-manuscript", worldId, productionId, requestId, headingLevel });

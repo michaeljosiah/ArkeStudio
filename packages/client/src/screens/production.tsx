@@ -49,7 +49,7 @@ import {
   lookHoldingScope,
   type CharacterLook,
   type FrameRate,
-  LanguageTagSchema,
+  MANUSCRIPT_LANGUAGE,
   type ChapterSummary,
   type ProductionBundle,
   type ProductionTimeline,
@@ -2306,7 +2306,14 @@ export function ChapterTreeScreen() {
   const manuscripts = useManuscripts();
   const importState = importRequest === null ? undefined : manuscripts[importRequest];
   useEffect(() => {
-    if (importState?.state !== "imported" || importRequest === null) return;
+    if (importRequest === null) return;
+    // The picker closed without a file is no action (codex on PR 924): the sheet closes.
+    if (importState?.state === "cancelled") {
+      setImportRequest(null);
+      setSheet(null);
+      return;
+    }
+    if (importState?.state !== "imported") return;
     setImported({ fileName: importState.fileName ?? "", created: importState.created ?? 0, after: importState.after ?? 0 });
     setImportRequest(null);
     setSheet(null);
@@ -2566,13 +2573,13 @@ function ManuscriptExportSheet({
   const [language, setLanguage] = useState("en");
   // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
   // reader may refuse, so the press waits until the field is one.
-  const languageOk = format !== "epub" || LanguageTagSchema.safeParse(language.trim()).success;
+  const languageOk = format !== "epub" || MANUSCRIPT_LANGUAGE.test(language.trim());
   const exportsState = useExports();
   const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
   const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const leftOut = chapters.length - withProse.length;
   const delivered = Object.entries(exportsState)
-    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId)
+    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId && (entry.worldId === undefined || entry.worldId === worldId))
     .slice(-4);
   // Only a host can open a folder (R-51): a browser session lists the file and has no folder to open.
   const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
@@ -2588,10 +2595,10 @@ function ManuscriptExportSheet({
             EPUB
           </button>
         </nav>
-        <div className="fy-mono fy-exsheet__status">
+        <div className="fy-ms__line">
           {withProse.length} chapter{withProse.length === 1 ? "" : "s"} with prose, in order{leftOut > 0 ? ` · ${leftOut} planned left out` : ""}
         </div>
-        <div className="fy-mono fy-exsheet__status">
+        <div className="fy-ms__line">
           title page · chapter titles as headings · *emphasis* kept · *** as a scene break
           {format === "epub" ? " · language " : ""}
           {format === "epub" && (
@@ -2599,12 +2606,12 @@ function ManuscriptExportSheet({
           )}
         </div>
         {delivered.length > 0 && (
-          <div className="fy-exsheet__delivered">
-            <span className="fy-exsheet__name">Delivered</span>
+          <div className="fy-ms__delivered">
+            <span className="fy-ms__label">Delivered</span>
             {delivered.map(([id, entry]) => (
-              <div key={id} className="fy-exsheet__export" data-testid="manuscript-delivery">
-                <span className="fy-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
-                <span className="fy-mono fy-exsheet__status">
+              <div key={id} className="fy-ms__row" data-testid="manuscript-delivery">
+                <span className="fy-ms__row-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
+                <span className="fy-ms__row-meta">
                   {entry.status}
                   {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
                   {entry.error ? ` · ${entry.error}` : ""}
@@ -2626,8 +2633,8 @@ function ManuscriptExportSheet({
         {/* Said from the summaries, and the press stays live (codex on PR 916): a chapter written
             outside the app carries no count until it is next saved, so the export reads the
             chapters themselves and refuses in these words only when there is truly nothing. */}
-        {withProse.length === 0 && <div className="fy-mono fy-exsheet__status">nothing to export · no chapter has prose yet</div>}
-        {!languageOk && <div className="fy-mono fy-exsheet__status">language · not a BCP 47 tag</div>}
+        {withProse.length === 0 && <div className="fy-ms__line fy-ms__line--warn">nothing to export · no chapter has prose yet</div>}
+        {!languageOk && <div className="fy-ms__line fy-ms__line--warn">language · not a BCP 47 tag</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -2676,15 +2683,16 @@ function ManuscriptImportSheet({
   return (
     <EditorDialog open={open} title="Import manuscript" subtitle={subtitle} onClose={onClose} width={430} labelledBy="manuscript-import-title">
       <div className="fy-exsheet" data-testid="manuscript-import">
-        {state?.state === "refused" && <div className="fy-mono fy-exsheet__status">could not read · {state.reason}</div>}
-        {state?.state === "failed" && <div className="fy-mono fy-exsheet__status">could not import · {state.reason}</div>}
+        {state?.state === "refused" && <div className="fy-ms__line fy-ms__line--warn">could not read · {state.reason}</div>}
+        {state?.state === "failed" && <div className="fy-ms__line fy-ms__line--warn">could not import · {state.reason}</div>}
         {(state?.state === "read" || state?.state === "importing") && (
           <>
-            <div className="fy-mono fy-exsheet__status">
+            <div className="fy-ms__line">
               {found.length} chapter{found.length === 1 ? "" : "s"}
               {state.headingLevel !== undefined ? ` · ${state.headingLevel} as chapter titles` : " · no headings · the file name is the title"}
               {(state.leftOut ?? 0) > 0 ? ` · ${state.leftOut} heading${state.leftOut === 1 ? "" : "s"} above left out` : ""}
-              {(state.notes ?? 0) > 0 ? ` · ${state.notes} footnote${state.notes === 1 ? "" : "s"} not carried` : ""} · after chapter {after} · nothing existing changes
+              {(state.notes ?? 0) > 0 ? ` · ${state.notes} footnote${state.notes === 1 ? "" : "s"} not carried` : ""}
+              {(state.links ?? 0) > 0 ? ` · ${state.links} link${state.links === 1 ? "" : "s"} kept as words` : ""} · after chapter {after} · nothing existing changes
             </div>
             {(state.levels?.length ?? 0) > 1 && (
               <nav className="fy-seg" aria-label="Chapter level" data-testid="manuscript-levels">
@@ -2696,20 +2704,20 @@ function ManuscriptImportSheet({
                     disabled={state.state === "importing"}
                     onClick={() => worldId && prodId && requestId !== null && !entry.chosen && rereadManuscript(worldId, prodId, requestId, entry.level)}
                   >
-                    {entry.label} · {entry.count}
+                    {entry.level === "document" ? entry.label : `${entry.label} · ${entry.count}`}
                   </button>
                 ))}
               </nav>
             )}
-            <div className="fy-exsheet__delivered">
+            <div className="fy-ms__delivered">
               {shown.map((chapter, index) => (
-                <div key={index} className="fy-exsheet__export" data-testid="manuscript-row">
-                  <span className="fy-mono">{String(after + index + 1).padStart(2, "0")}</span>
-                  <span className="fy-exsheet__name">{chapter.title}</span>
-                  <span className="fy-mono fy-exsheet__status">{chapter.words.toLocaleString()} words</span>
+                <div key={index} className="fy-ms__row" data-testid="manuscript-row">
+                  <span className="fy-ms__row-meta">{String(after + index + 1).padStart(2, "0")}</span>
+                  <span className="fy-ms__row-name">{chapter.title}</span>
+                  <span className="fy-ms__row-meta">{chapter.words.toLocaleString()} words</span>
                 </div>
               ))}
-              {found.length > shown.length && <div className="fy-mono fy-exsheet__status">and {found.length - shown.length} more</div>}
+              {found.length > shown.length && <div className="fy-ms__line">and {found.length - shown.length} more</div>}
             </div>
           </>
         )}

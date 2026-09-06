@@ -16,12 +16,13 @@ describe("the manuscript a production exports (R-49)", () => {
       chapters: [
         { title: "Neap", body: "Maren counted the *bells* the way her mother had\ntaught her.\n\n***\n\nSix, and the **tide** not called." },
         { title: "Her own hand", body: "" },
+        { title: "Only breaks", body: "***\n\n* * *" },
         { title: "The same ink", body: "Odile's hand and the correction's are one hand." },
       ],
     });
     assert.equal(doc.title, "The ledger of nights");
     assert.equal(doc.subtitle, "The Undersong");
-    assert.equal(doc.leftOut, 1);
+    assert.equal(doc.leftOut, 2, "a chapter with no words, and one of only scene breaks (codex on PR 924)");
     assert.deepEqual(doc.chapters.map((chapter) => chapter.title), ["Neap", "The same ink"]);
     assert.deepEqual(doc.chapters[0]!.blocks, [
       { kind: "paragraph", runs: [{ text: "Maren counted the " }, { text: "bells", italic: true }, { text: " the way her mother had taught her." }] },
@@ -42,6 +43,7 @@ describe("the manuscript a production exports (R-49)", () => {
     assert.equal(runsToMarkdown([{ text: "Maren said " }, { text: "no", italic: true }, { text: "." }]), "Maren said *no*.");
     assert.equal(runsToMarkdown([{ text: " spaced ", bold: true }]), " **spaced** ", "the edges' spaces stay outside the marks");
     assert.equal(runsToMarkdown([{ text: "a *star* and an under_score" }]), "a \\*star\\* and an under\\_score");
+    assert.deepEqual(paragraphRuns(runsToMarkdown([{ text: "both", bold: true, italic: true }, { text: " ways" }])), [{ text: "both", bold: true, italic: true }, { text: " ways" }], "bold and italic together round-trip (codex on PR 924)");
     assert.deepEqual(paragraphRuns(runsToMarkdown([{ text: "a *star*" }, { text: "loud", bold: true }])), [{ text: "a *star*" }, { text: "loud", bold: true }], "and reads back as it was");
   });
 });
@@ -90,6 +92,12 @@ describe("the chapters an import finds (R-50)", () => {
     assert.equal(plain.headingLevel, null);
     assert.deepEqual(plain.chapters.map((chapter) => chapter.title), ["Draft 3"]);
     assert.equal(plain.chapters[0]!.body, "Just words.\n\nMore words.\n\n***\n\nAfter.", "one break where the page break and the stars stood together");
+    const libre = manuscriptChapters({ paragraphs: [heading("Heading_20_1", "Neap"), para("A."), heading("Heading_20_1", "Slack water"), para("B.")] }, "libre.docx");
+    assert.ok(libre.ok);
+    assert.deepEqual(libre.chapters.map((chapter) => chapter.title), ["Neap", "Slack water"], "LibreOffice's spelling of Heading 1 (codex on PR 924)");
+    const subtitles = manuscriptChapters({ paragraphs: [heading("Subtitle", "One"), para("A."), heading("Subtitle", "Two"), para("B.")] }, "subs.docx");
+    assert.ok(subtitles.ok);
+    assert.deepEqual(subtitles.chapters.map((chapter) => chapter.title), ["subs"], "a subtitle is never guessed as the chapter level");
     const one = manuscriptChapters({ paragraphs: [heading("Title", "The book"), heading("Heading1", "Only chapter"), para("Words.")] }, "one.docx");
     assert.ok(one.ok);
     assert.deepEqual(one.chapters.map((chapter) => chapter.title), ["Only chapter"]);
@@ -107,9 +115,17 @@ describe("the chapters an import finds (R-50)", () => {
   });
 
   it("escapes the stars and underscores a Word file holds as characters, and refuses by the count", () => {
-    const words = manuscriptChapters({ paragraphs: [para("*required*, and a_b")] }, "w.docx");
+    const words = manuscriptChapters({ paragraphs: [para("*required*, and a_b"), para("~~gone~~"), para("==="), para("2. not a list")] }, "w.docx");
     assert.ok(words.ok);
-    assert.equal(words.chapters[0]!.body, "\\*required\\*, and a\\_b");
+    assert.equal(words.chapters[0]!.body, "\\*required\\*, and a\\_b\n\n\\~\\~gone\\~\\~\n\n\\===\n\n2\\. not a list");
+    // An empty heading starts nothing; the whole document is a choice of its own (codex on PR 916).
+    const blanks = manuscriptChapters({ paragraphs: [heading("Heading1", ""), heading("Heading1", "  "), para("Only words.")] }, "blank.docx");
+    assert.ok(blanks.ok);
+    assert.deepEqual(blanks.chapters.map((chapter) => chapter.title), ["blank"]);
+    const scenes = manuscriptChapters({ paragraphs: [heading("Heading1", "Scene one"), para("A."), heading("Heading1", "Scene two"), para("B.")] }, "scenes.docx", "document");
+    assert.ok(scenes.ok);
+    assert.deepEqual(scenes.chapters.map((chapter) => [chapter.title, chapter.body]), [["scenes", "Scene one\n\nA.\n\nScene two\n\nB."]]);
+    assert.ok(scenes.levels.some((entry) => entry.level === "document" && entry.chosen));
     const many = manuscriptChapters({ paragraphs: Array.from({ length: MANUSCRIPT_CAPS.chapters + 1 }, (_, i) => [heading("Heading1", `Chapter ${i}`), para("Words.")]).flat() }, "many.docx");
     assert.equal(many.ok, false);
     assert.match((many as { reason: string }).reason, /past the 200/);

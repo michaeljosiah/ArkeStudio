@@ -48,10 +48,19 @@ export interface StructuredDocument {
   paragraphs: StructuredParagraph[];
   /** Footnote and endnote references the body carries: their text lives in parts the read leaves alone, so they are counted and said (R-50). */
   notes?: number;
+  /** Hyperlinks the body carries: the label stays, the target lives in a part the read leaves alone, so they are counted and said. */
+  links?: number;
 }
 
-/** The heading levels a document may start chapters at, as the sheet's segment names them. */
-export type ChapterLevel = "title" | "subtitle" | "heading1" | "heading2";
+/** The heading levels a document may start chapters at, as the sheet's segment names them — or the whole document as one chapter. */
+export type ChapterLevel = "title" | "subtitle" | "heading1" | "heading2" | "document";
+
+/**
+ * A BCP 47 tag's shape (codex on PR 916): a language, then at most a script, a region and
+ * variants, each once and in order. `en`, `en-GB`, `pt-BR`, `sr-Latn-RS` pass; `English` and
+ * `en-US-US` do not.
+ */
+export const MANUSCRIPT_LANGUAGE = /^[A-Za-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|\d{3}))?(?:-(?:[A-Za-z0-9]{5,8}|\d[A-Za-z0-9]{3}))*$/;
 
 /** A document past either is refused by the count (R-50). */
 export const MANUSCRIPT_CAPS = { chapters: 200, characters: 1_000_000 } as const;
@@ -69,6 +78,8 @@ export type ManuscriptRead =
       levels: Array<{ level: ChapterLevel; label: string; count: number; chosen: boolean }>;
       /** Footnote and endnote references, not carried and said so. */
       notes: number;
+      /** Hyperlinks, their labels kept and their targets not, said so. */
+      links: number;
       chapters: Array<{ title: string; body: string; words: number }>;
     }
   | { ok: false; fileName: string; reason: string };
@@ -88,12 +99,15 @@ export function manuscriptDocument(input: {
   const chapters: ManuscriptChapter[] = [];
   let leftOut = 0;
   for (const chapter of input.chapters) {
-    const words = countWords(chapter.body);
+    // Counted from the paragraphs, not the bytes (codex on PR 924): a chapter of only scene
+    // breaks holds stars, and stars are not words.
+    const blocks = chapterBlocks(chapter.body);
+    const words = countWords(blocks.map((block) => (block.kind === "paragraph" ? block.runs.map((run) => run.text).join("") : "")).join("\n\n"));
     if (words === 0) {
       leftOut += 1;
       continue;
     }
-    chapters.push({ title: chapter.title, blocks: chapterBlocks(chapter.body), words });
+    chapters.push({ title: chapter.title, blocks, words });
   }
   return { title: input.title, subtitle: input.worldName, chapters, leftOut, words: chapters.reduce((sum, chapter) => sum + chapter.words, 0) };
 }
@@ -138,7 +152,7 @@ export function paragraphRuns(paragraph: string): ManuscriptRun[] {
       continue;
     }
     flush();
-    runs.push({ text: unescaped(span.text), ...(span.bold ? { bold: true as const } : { italic: true as const }) });
+    runs.push({ text: unescaped(span.text), ...(span.bold ? { bold: true as const } : {}), ...(span.italic ? { italic: true as const } : {}) });
     i = span.end;
   }
   flush();
@@ -147,11 +161,13 @@ export function paragraphRuns(paragraph: string): ManuscriptRun[] {
 
 // Every mark Markdown could read in a Word file's own words (codex on PR 916): emphasis, code,
 // a link's brackets, and at a line's start a heading, a quote or a list item.
-const ESCAPABLE = /^[*_\\`[\]#>+\-.)]$/;
-const unescaped = (text: string) => text.replace(/\\([*_\\`[\]#>+\-.)])/g, "$1");
+const ESCAPABLE = /^[*_~\\`[\]#>+\-.)=]$/;
+const unescaped = (text: string) => text.replace(/\\([*_~\\`[\]#>+\-.)=])/g, "$1");
 
-function emphasisAt(text: string, at: number): { text: string; end: number; bold: boolean } | null {
-  for (const marker of ["**", "__", "*", "_"]) {
+function emphasisAt(text: string, at: number): { text: string; end: number; bold: boolean; italic: boolean } | null {
+  // Three stars are both at once, as the writer emits them (codex on PR 924), tried first so
+  // two of them are not read as strong around a stray star.
+  for (const marker of ["***", "**", "__", "*", "_"]) {
     if (!text.startsWith(marker, at)) continue;
     const underscore = marker[0] === "_";
     const before = at === 0 ? "" : text[at - 1]!;
@@ -168,7 +184,7 @@ function emphasisAt(text: string, at: number): { text: string; end: number; bold
       close = text.indexOf(marker, close + 1);
     }
     if (close === -1) continue;
-    return { text: text.slice(open, close), end: close + marker.length, bold: marker.length === 2 };
+    return { text: text.slice(open, close), end: close + marker.length, bold: marker.length >= 2, italic: marker.length !== 2 };
   }
   return null;
 }
@@ -179,7 +195,13 @@ function emphasisAt(text: string, at: number): { text: string; end: number; bold
  * a line's start.
  */
 const escaped = (text: string) =>
-  text.replace(/([*_\\`[\]])/g, "\\$1").replace(/^(\s*)(#|>|[-+](?=\s)|\d+[.)](?=\s))/gm, "$1\\$2");
+  text
+    .replace(/([*_~\\`[\]])/g, "\\$1")
+    .replace(/^(\s*)(#|>|[-+](?=\s))/gm, "$1\\$2")
+    // A number's list mark is its period or bracket: the backslash goes before that, where Markdown reads it.
+    .replace(/^(\s*)(\d+)([.)])(?=\s)/gm, "$1$2\\$3")
+    // A line of only equals or dashes underlines the line above as a heading; its first mark escaped, it is a line.
+    .replace(/^(\s*)([=-])(?=[=-]*\s*$)/gm, "$1\\$2");
 
 /** Runs back as the Markdown the chapter file keeps: `*` and `**`, the edges' spaces outside the marks. */
 export function runsToMarkdown(runs: readonly ManuscriptRun[]): string {
@@ -209,7 +231,7 @@ function merged(runs: readonly ManuscriptRun[]): ManuscriptRun[] {
   return out;
 }
 
-const CHAPTER_LEVELS: ReadonlyArray<{ id: ChapterLevel; label: string }> = [
+const CHAPTER_LEVELS: ReadonlyArray<{ id: Exclude<ChapterLevel, "document">; label: string }> = [
   { id: "title", label: "Title" },
   // A subtitle stands under the book's name and above its chapters; it is never one.
   { id: "subtitle", label: "Subtitle" },
@@ -217,9 +239,9 @@ const CHAPTER_LEVELS: ReadonlyArray<{ id: ChapterLevel; label: string }> = [
   { id: "heading2", label: "Heading 2" },
 ];
 
-/** A style id as Word, Google Docs and LibreOffice each spell it, folded to one name. */
+/** A style id as Word, Google Docs and LibreOffice each spell it, folded to one name: LibreOffice writes a space as `_20_` (codex on PR 924). */
 function styleKey(style: string | undefined): string {
-  return (style ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return (style ?? "").toLowerCase().replace(/_20_/g, "").replace(/[^a-z0-9]/g, "");
 }
 
 const runsText = (runs: readonly ManuscriptRun[]) => runs.map((run) => run.text).join("");
@@ -233,15 +255,22 @@ const runsText = (runs: readonly ManuscriptRun[]) => runs.map((run) => run.text)
  */
 export function manuscriptChapters(document: StructuredDocument, fileName: string, chosen?: ChapterLevel): ManuscriptRead {
   const stem = fileName.replace(/\.[^.]+$/, "").trim() || "Untitled";
-  const uses = (id: string) => document.paragraphs.filter((paragraph) => styleKey(paragraph.style) === id).length;
+  // A heading with no words in it starts nothing and counts for nothing (codex on PR 916): an
+  // empty styled paragraph is layout, and a chapter cannot be titled by it.
+  const isHeading = (paragraph: StructuredParagraph, id: string) => styleKey(paragraph.style) === id && runsText(paragraph.runs).trim() !== "";
+  const uses = (id: string) => document.paragraphs.filter((paragraph) => isHeading(paragraph, id)).length;
   // The chapter level is the deepest level two or more paragraphs carry (codex on PR 916): one
   // Title over Heading 1 chapters names the book, and Heading 1 parts over Heading 2 chapters
   // name parts; neither is a chapter. When no level is used twice, the deepest heading there is
   // titles the one chapter. A manuscript whose scene heads repeat under its chapters breaks the
   // rule, so the sheet names every level used and the person may choose another.
-  const deepest = (used: (id: string) => boolean) => [...CHAPTER_LEVELS].reverse().find((candidate) => used(candidate.id)) ?? null;
+  // A subtitle stands under the book's name and is never guessed as a chapter level (codex on
+  // PR 924); the person may still choose it from the segment.
+  const deepest = (used: (id: string) => boolean) =>
+    [...CHAPTER_LEVELS].reverse().find((candidate) => candidate.id !== "subtitle" && used(candidate.id)) ?? null;
   const guessed = deepest((id) => uses(id) >= 2) ?? deepest((id) => uses(id) === 1);
-  const level = chosen !== undefined && uses(chosen) > 0 ? CHAPTER_LEVELS.find((candidate) => candidate.id === chosen)! : guessed;
+  const whole = chosen === "document";
+  const level = whole ? null : chosen !== undefined && uses(chosen) > 0 ? CHAPTER_LEVELS.find((candidate) => candidate.id === chosen)! : guessed;
   const above: string[] = level === null ? [] : CHAPTER_LEVELS.slice(0, CHAPTER_LEVELS.indexOf(level)).map((candidate) => candidate.id);
   const chapters: Array<{ title: string; body: string; words: number }> = [];
   let title: string | null = null;
@@ -251,6 +280,8 @@ export function manuscriptChapters(document: StructuredDocument, fileName: strin
   let fromAbove = false;
   let blocks: string[] = [];
   let leftOut = 0;
+  // Every heading's text counts toward the cap too (codex on PR 924), the ones left out as well.
+  let headingChars = 0;
   const close = () => {
     const body = blocks.join("\n\n").replace(/^(\*\*\*\n\n)+/, "").replace(/(\n\n\*\*\*)+$/, "");
     const words = countWords(body);
@@ -261,15 +292,18 @@ export function manuscriptChapters(document: StructuredDocument, fileName: strin
     fromAbove = false;
   };
   for (const paragraph of document.paragraphs) {
-    if (above.includes(styleKey(paragraph.style))) {
+    const key = styleKey(paragraph.style);
+    if (above.includes(key) && isHeading(paragraph, key)) {
       close();
-      title = runsText(paragraph.runs).trim() || "Untitled";
+      title = runsText(paragraph.runs).trim();
+      headingChars += title.length;
       fromAbove = true;
       continue;
     }
-    if (level !== null && styleKey(paragraph.style) === level.id) {
+    if (level !== null && isHeading(paragraph, level.id)) {
       close();
-      title = runsText(paragraph.runs).trim() || "Untitled";
+      title = runsText(paragraph.runs).trim();
+      headingChars += title.length;
       continue;
     }
     // Judged on the words as the file holds them, before a star becomes an escaped star.
@@ -285,7 +319,7 @@ export function manuscriptChapters(document: StructuredDocument, fileName: strin
     if (paragraph.pageBreak) blocks.push("***");
   }
   close();
-  const characters = chapters.reduce((sum, chapter) => sum + chapter.body.length, 0);
+  const characters = headingChars + chapters.reduce((sum, chapter) => sum + chapter.body.length, 0);
   const words = chapters.reduce((sum, chapter) => sum + chapter.words, 0);
   if (words === 0) return { ok: false, fileName, reason: `${fileName} has no text in it to read.` };
   if (chapters.length > MANUSCRIPT_CAPS.chapters) {
@@ -294,11 +328,14 @@ export function manuscriptChapters(document: StructuredDocument, fileName: strin
   if (characters > MANUSCRIPT_CAPS.characters) {
     return { ok: false, fileName, reason: `${fileName} is ${characters.toLocaleString()} characters, past the ${MANUSCRIPT_CAPS.characters.toLocaleString()} an import takes.` };
   }
-  const levels = CHAPTER_LEVELS.filter((candidate) => uses(candidate.id) > 0).map((candidate) => ({
-    level: candidate.id,
+  const present = CHAPTER_LEVELS.filter((candidate) => uses(candidate.id) > 0).map((candidate) => ({
+    level: candidate.id as ChapterLevel,
     label: candidate.label,
     count: uses(candidate.id),
     chosen: candidate.id === level?.id,
   }));
-  return { ok: true, fileName, words, headingLevel: level?.label ?? null, leftOut, levels, notes: document.notes ?? 0, chapters };
+  // The whole document as one chapter is always a choice (codex on PR 916): a file of scenes
+  // under repeated headings may be one chapter, and no level present says so.
+  const levels = present.length > 0 ? [...present, { level: "document" as ChapterLevel, label: "Whole document", count: 1, chosen: level === null }] : [];
+  return { ok: true, fileName, words, headingLevel: level?.label ?? null, leftOut, levels, notes: document.notes ?? 0, links: document.links ?? 0, chapters };
 }

@@ -150,6 +150,7 @@ import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
+  highestChapterRank,
   compileBoard,
   composeDispatches,
   createChapter,
@@ -241,7 +242,7 @@ import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
 import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
-import { manuscriptChapters, type StructuredDocument } from "@arke-studio/contracts";
+import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { materialiseForContinuation } from "./productions/continuation.js";
@@ -1405,13 +1406,15 @@ export class Coordinator {
   }
 
   /** What the import sheet is told of a read (turn 131): the counts, the levels, and where the chapters would go. */
-  private manuscriptReadAnswer(
+  private async manuscriptReadAnswer(
     store: WorldStore,
     productionId: string,
     read: Extract<ReturnType<typeof readManuscript>["read"], { ok: true }>,
-  ): Record<string, unknown> {
+  ): Promise<Record<string, unknown>> {
     const production = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
-    const after = Math.max(0, ...(production?.chapters ?? []).map((chapter) => chapter.order));
+    // The rank the import will write after (codex on PR 924): the persisted one, which a legacy
+    // production ranked 10, 20 keeps sparse while the bundle shows it dense.
+    const after = await highestChapterRank(store, productionId, (production?.chapters ?? []).map((chapter) => chapter.file));
     return {
       fileName: read.fileName,
       words: read.words,
@@ -1420,6 +1423,7 @@ export class Coordinator {
       leftOut: read.leftOut,
       levels: read.levels,
       notes: read.notes,
+      links: read.links,
       after,
     };
   }
@@ -10770,6 +10774,11 @@ export class Coordinator {
             productionId: msg.productionId,
             ...extra,
           } as DomainEvent);
+        const production = store.getBundle().productions.find((entry) => entry.meta.id === msg.productionId);
+        if (!production || !productionShape(production.meta).hasChapters) {
+          answer({ reason: "that production has no chapters to add to" });
+          return;
+        }
         const pick = this.opts.pickFiles;
         if (!pick) {
           answer({ reason: "this needs the desktop app — a browser session cannot open the file picker" });
@@ -10777,8 +10786,12 @@ export class Coordinator {
         }
         const paths = await pick({ accept: ["docx"] }).catch(() => [] as readonly string[]);
         const sourcePath = paths[0];
-        // Closing the picker is an answer: nothing is said and nothing happens.
-        if (sourcePath === undefined) return;
+        // Closing the picker is an answer (codex on PR 924): nothing happens, and the sheet is
+        // told so rather than left reading.
+        if (sourcePath === undefined) {
+          answer({ cancelled: true });
+          return;
+        }
         const fileName = basename(sourcePath);
         let bytes: Uint8Array;
         try {
@@ -10793,7 +10806,7 @@ export class Coordinator {
           return;
         }
         this.manuscriptReads.set(`${msg.worldId}/${msg.productionId}/${msg.requestId}`, { fileName, document, read });
-        answer(this.manuscriptReadAnswer(store, msg.productionId, read));
+        answer(await this.manuscriptReadAnswer(store, msg.productionId, read));
         return;
       }
       case "reread-manuscript": {
@@ -10822,7 +10835,7 @@ export class Coordinator {
           return;
         }
         this.manuscriptReads.set(key, { ...held, read });
-        answer(this.manuscriptReadAnswer(store, msg.productionId, read));
+        answer(await this.manuscriptReadAnswer(store, msg.productionId, read));
         return;
       }
       case "import-manuscript": {

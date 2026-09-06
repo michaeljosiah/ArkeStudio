@@ -101,7 +101,7 @@ describe("the manuscript out (R-49)", () => {
     const all = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters.length;
     assert.equal(doc.chapters.length + doc.leftOut, all, "every chapter is in, or counted out");
     const made = await exportManuscript(store, PRODUCTION, "docx", { exportId: "ms_01J8F3K2QW", language: "en", now: NOW });
-    assert.match(made.output, /^exports\/the-ledger-of-nights-20260906120000-01j8f3\.docx$/);
+    assert.match(made.output, /^exports\/the-ledger-of-nights-20260906120000-f3k2qw\.docx$/, "the id's random tail, not its clock");
     const info = await stat(join(dir, ...made.output.split("/")));
     assert.ok(info.size > 0);
     const back = readManuscript(new Uint8Array(await readFile(join(dir, ...made.output.split("/")))), "back.docx").read;
@@ -175,7 +175,7 @@ describe("the manuscript in (R-50)", () => {
       assert.equal(read.fileName, "Draft 3.docx");
       assert.deepEqual(read.chapters, [{ title: "A called tide", words: 1 }]);
       assert.equal(read.headingLevel, "Heading 1");
-      assert.equal(read.leftOut, 2, "the title and subtitle lines stand above the chapters");
+      assert.equal(read.leftOut, 1, "the title line stands above the chapters; the empty subtitle counts for nothing");
       assert.ok((read.after ?? 0) > 0);
       const chaptersDir = join(worldDir, "productions", PRODUCTION, "chapters");
       const beforeCount = (await import("node:fs/promises").then((fs) => fs.readdir(chaptersDir))).length;

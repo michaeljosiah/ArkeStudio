@@ -1,9 +1,10 @@
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   countWords,
   manuscriptChapters,
   manuscriptDocument,
+  productionShape,
   type ChapterLevel,
   type ManuscriptDocument,
   type ManuscriptRead,
@@ -269,6 +270,7 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
   let reading = false;
   let readAt = 0;
   let notes = 0;
+  let links = 0;
   const say = (text: string) => {
     if (paragraph === null || text === "") return;
     paragraph.runs.push({ text, ...(italic ? { italic: true as const } : {}), ...(bold ? { bold: true as const } : {}) });
@@ -332,11 +334,23 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
         // The note's text lives in another part the read leaves alone: counted, and said.
         if (!closing) notes += 1;
         break;
+      case "hyperlink":
+        // The label is words in the body; the target lives in the relationships part: counted, and said.
+        if (!closing && !selfClosing) links += 1;
+        break;
       case "br":
       case "cr":
         if (closing) break;
         if (attribute(attrs, "w:type") === "page") {
-          if (paragraph !== null) paragraph.pageBreak = true;
+          // The break keeps its place (codex on PR 924): words after it in the same paragraph
+          // are a paragraph of their own, so the scene break falls between them, not after both.
+          if (paragraph !== null) {
+            paragraph.pageBreak = true;
+            if (paragraph.runs.some((run) => run.text.trim() !== "")) {
+              paragraphs.push(paragraph);
+              paragraph = { runs: [] };
+            }
+          }
         } else {
           say("\n");
         }
@@ -348,7 +362,7 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
   if (paragraph !== null) paragraphs.push(paragraph);
   const said = paragraphs.some((entry) => entry.runs.some((run) => run.text.trim() !== ""));
   if (!said) return { ok: false, reason: "no-text" };
-  return { ok: true, document: { paragraphs, notes } };
+  return { ok: true, document: { paragraphs, notes, links } };
 }
 
 /** A manuscript out of a file's bytes, or the reason there is none — the extractor's own sentence. */
@@ -405,7 +419,9 @@ export async function exportManuscript(
       : writeEpub(doc, { identifier: `urn:arke:${store.worldId}:${productionId}`, language: opts.language, modified: opts.now() });
   if (opts.signal?.aborted) throw new Error("cancelled");
   const stamp = opts.now().replace(/[-:TZ.]/g, "").slice(0, 14);
-  const name = `${productionId}-${stamp}-${opts.exportId.replace(/^ms_/, "").slice(0, 6).toLowerCase()}.${format}`;
+  // The id's last six characters are its random ones (codex on PR 924); its first six are the
+  // clock, which the stamp already says, and two exports in one second would share them.
+  const name = `${productionId}-${stamp}-${opts.exportId.replace(/^ms_/, "").slice(-6).toLowerCase()}.${format}`;
   const stageDir = join(store.dir, ".cache", "exports");
   const stage = join(stageDir, `${opts.exportId}.${format}`);
   const finalDir = join(store.dir, "exports");
@@ -440,7 +456,11 @@ export async function importManuscript(
   const bundle = store.getBundle();
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (!production) throw new Error("That production is not in this world.");
+  if (!productionShape(production.meta).hasChapters) throw new Error("That production has no chapters to add to.");
   const existing = production.chapters;
+  // Every file in the chapters folder reserves its stem (codex on PR 924), not only the chapters
+  // the scanner could read: a malformed or newer file there would otherwise be written over.
+  const onDisk = await readdir(toExtendedLength(join(store.dir, "productions", productionId, "chapters"))).catch(() => [] as string[]);
   const claimed = new RegExp(`^productions/${productionId}/chapters/([^/]+)\\.md$`);
   const staged = bundle.proposals.flatMap((entry) =>
     entry.proposal.targets.flatMap((target) => {
@@ -448,7 +468,7 @@ export async function importManuscript(
       return match ? [match[1]!] : [];
     }),
   );
-  const taken = [...existing.flatMap((chapter) => [chapter.file, chapter.id]), ...staged];
+  const taken = [...existing.flatMap((chapter) => [chapter.file, chapter.id]), ...staged, ...onDisk.filter((name) => name.endsWith(".md")).map((name) => name.slice(0, -3))];
   const after = await highestChapterRank(store, productionId, existing.map((chapter) => chapter.file));
   const day = now().slice(0, 10);
   const created: string[] = [];

@@ -174,13 +174,15 @@ describe("a manuscript in (turn 131)", () => {
         chapters: [{ title: "The keeping of the ledger", words: 2140 }, { title: "A called tide", words: 2660 }],
         headingLevel: "Heading 1",
         leftOut: 1,
-        levels: [{ level: "title", label: "Title", count: 1, chosen: false }, { level: "heading1", label: "Heading 1", count: 2, chosen: true }],
+        levels: [{ level: "title", label: "Title", count: 1, chosen: false }, { level: "heading1", label: "Heading 1", count: 2, chosen: true }, { level: "document", label: "Whole document", count: 1, chosen: false }],
         notes: 3,
+        links: 1,
         after: 2,
       });
     });
     assert.match(text(m), /Draft 3\.docx · 4,800 words · read, nothing written yet/);
-    assert.match(text(m), /2 chapters · Heading 1 as chapter titles · 1 heading above left out · 3 footnotes not carried · after chapter 2 · nothing existing changes/);
+    assert.match(text(m), /2 chapters · Heading 1 as chapter titles · 1 heading above left out · 3 footnotes not carried · 1 link kept as words · after chapter 2 · nothing existing changes/);
+    assert.ok(button(m, /^Whole document$/), "the whole document is always a choice (codex on PR 916)");
     const rows = [...m.container.querySelectorAll('[data-testid="manuscript-row"]')].map((row) => row.textContent);
     assert.deepEqual(rows, ["03The keeping of the ledger2,140 words", "04A called tide2,660 words"]);
     // Another level is one press away, and reads the held document again.
