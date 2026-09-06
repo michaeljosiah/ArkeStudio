@@ -1344,6 +1344,13 @@ export class Coordinator {
     }
     const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
     if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+    // Stop can land while the batch is still being journalled, when there is nothing yet to
+    // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
+    if (this.stoppedReads.has(requestId)) {
+      this.stoppedReads.delete(requestId);
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
   }
 
