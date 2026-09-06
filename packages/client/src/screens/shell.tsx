@@ -4,6 +4,7 @@ import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
+import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
@@ -1157,7 +1158,8 @@ export function NewWorldScreen() {
                 )}
                 {turns.map((turn, i) => (
                   <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
-                    {turn.text}
+                    {/* The author's words are shown exactly as typed; only Arke writes markdown (issue 911). */}
+                    {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
                 {/* The turn in flight, verb by verb — the same working surface world chat has.
@@ -1321,12 +1323,18 @@ export function NewWorldScreen() {
             </div>
           )}
           <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
+            {/*
+              Semantic tokens only (issue 911). Painted from the neutral ramp this was the
+              brightest thing on the world door in dark mode — .dark leaves --neutral-* alone,
+              so a ramp surface stays white on a near-black page. Same dashed-and-unfilled
+              language as the pending frames, which paint from the same two tokens.
+            */}
             <div
               style={{
                 height: 118,
                 borderRadius: 8,
-                border: "1.5px dashed var(--neutral-300)",
-                background: "var(--neutral-50)",
+                border: "1.5px dashed var(--border)",
+                background: "var(--muted)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
