@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createPerformanceSpool } from "../src/performance-spool.js";
@@ -33,4 +33,37 @@ it("opaque performance spools validate bytes, allow one claim and forget prior-p
   assert.equal(await spool.claim(result.spoolId), null);
   assert.equal(await createPerformanceSpool(root).claim(result.spoolId), null);
   await assert.rejects(readFile(claimed.absolutePath));
+});
+
+/*
+ * The app root is not always spelled the way the filesystem spells it back.
+ *
+ * The spool refused itself whenever `realpath` of its directory differed from the path it was
+ * built from — which is every Windows temp directory reached through its 8.3 alias, and every
+ * profile behind folder redirection. Staging then failed with "could not stage this recording"
+ * for a spool that was in exactly the right place. What has to be refused is a spool directory
+ * that redirects writes somewhere else, and that is asked here of both directories the spool
+ * makes rather than of a string comparison the filesystem never promised.
+ */
+it("stages through an app root reached by a link, and still refuses a redirected spool", async t => {
+  const base = await mkdtemp(join(tmpdir(), "arke-spool-alias-"));
+  t.after(() => rm(base, { recursive: true, force: true }));
+  const real = join(base, "real"), alias = join(base, "alias");
+  await mkdir(real);
+  await symlink(real, alias, "junction");
+  const viaLink = await createPerformanceSpool(alias).stage({
+    contentType: "audio/webm;codecs=opus",
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+  assert.equal(viaLink.ok, true);
+
+  const redirected = join(base, "redirected"), elsewhere = join(base, "elsewhere");
+  await mkdir(join(redirected));
+  await mkdir(elsewhere);
+  await symlink(elsewhere, join(redirected, ".spool"), "junction");
+  const away = await createPerformanceSpool(redirected).stage({
+    contentType: "audio/webm;codecs=opus",
+    bytes: new Uint8Array([1, 2, 3]),
+  });
+  assert.equal(away.ok, false);
 });

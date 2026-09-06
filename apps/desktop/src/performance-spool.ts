@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, lstat, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, lstat, readdir, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 
 const LIMIT = 128 * 1024 * 1024;
@@ -7,7 +7,8 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 /** Process-owned opaque claims: neither renderer paths nor a prior process's ids are accepted. */
 export function createPerformanceSpool(appRoot: string) {
-  const root = resolve(appRoot, ".spool", "performance");
+  const spoolDir = resolve(appRoot, ".spool");
+  const root = resolve(spoolDir, "performance");
   const entries = new Map<string, { absolutePath: string; contentType: string; sizeBytes: number; claimed: boolean }>();
   const remove = async (id: string) => {
     if (!UUID.test(id)) return;
@@ -19,7 +20,20 @@ export function createPerformanceSpool(appRoot: string) {
   };
   const ready = (async () => {
     await mkdir(root, { recursive: true });
-    if ((await lstat(root)).isSymbolicLink() || resolve(await realpath(root)).toLowerCase() !== root.toLowerCase()) throw new Error("Unsafe performance spool.");
+    /*
+     * Neither directory the spool makes may lead somewhere else.
+     *
+     * This compared `realpath(root)` against the string `root` was built from, which refuses
+     * every app root the filesystem spells back differently than the caller spelled it — a
+     * Windows temp directory reached through its 8.3 alias, a profile behind folder
+     * redirection — and the spool then declined recordings that were in exactly the right
+     * place. What has to be refused is a spool directory that redirects writes out of the app
+     * root, so that is asked of the two directories this creates rather than of a string
+     * equality the filesystem never promised.
+     */
+    for (const dir of [spoolDir, root]) {
+      if ((await lstat(dir)).isSymbolicLink()) throw new Error("Unsafe performance spool.");
+    }
     for (const entry of await readdir(root, { withFileTypes: true })) {
       if (entry.isDirectory() && UUID.test(entry.name)) await remove(entry.name);
     }
