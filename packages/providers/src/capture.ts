@@ -482,6 +482,12 @@ export function captureProviderClient(
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
     ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
+    ...(client.release
+      ? {
+          release: (model: string, context?: ProviderCallContext) =>
+            run("release", { ...context, model }, () => client.release!(model, context)),
+        }
+      : {}),
     ...(client.lookupByKey
       ? {
           lookupByKey: (key: string, idempotencyKey: string, context?: ProviderCallContext) =>

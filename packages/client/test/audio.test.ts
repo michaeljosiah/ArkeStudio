@@ -2,8 +2,11 @@ import { loadPlaylist, playPlaylistLine, playlistSnapshot, nextPlaylistLine, set
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  clearQueue,
   dismissPlayback,
   emitForTest,
+  enqueueClip,
+  jumpQueue,
   playbackSnapshot,
   playClip,
   seekTo,
@@ -144,6 +147,40 @@ describe("table-read playlist uses the existing single element", () => {
     await playPlaylistLine(); emitForTest("error"); nextPlaylistLine(); await Promise.resolve();
     assert.match(playlistSnapshot()!.notice, /Skipped.*could not be decoded/);
     clearPlaylist(); assert.equal(playbackSnapshot().status, "idle"); assert.equal(playlistSnapshot(), null);
+    setAudioFactoryForTest(null);
+  });
+});
+
+describe("a page read walks its blocks", () => {
+  it("names each block as it plays it, and steps between the ones that exist", async () => {
+    const { element } = fakeAudio();
+    setAudioFactoryForTest(() => element as never);
+    clearQueue();
+    const block = (part: number, heading: string) => ({
+      id: "page",
+      url: `/${heading}.wav`,
+      title: `Maren Kest · ${heading}`,
+      sub: `read aloud · George · ${part + 1} of 3`,
+      part,
+    });
+    await enqueueClip(block(0, "Essence"));
+    assert.equal(playbackSnapshot().clip?.title, "Maren Kest · Essence");
+    // The third block lands before the second — a page read on a cloud voice is several jobs
+    // and they finish in whatever order they finish.
+    await enqueueClip(block(2, "Relationships"));
+    emitForTest("ended");
+    await Promise.resolve();
+    assert.equal(element.src, "/Essence.wav", "a gap waits rather than skipping the block in it");
+    await enqueueClip(block(1, "Appearance"));
+    assert.equal(element.src, "/Appearance.wav");
+    assert.equal(playbackSnapshot().clip?.sub, "read aloud · George · 2 of 3");
+
+    jumpQueue(0);
+    await Promise.resolve();
+    assert.equal(element.src, "/Essence.wav");
+    jumpQueue(9);
+    await Promise.resolve();
+    assert.equal(element.src, "/Essence.wav", "a block that was never made is not somewhere to skip to");
     setAudioFactoryForTest(null);
   });
 });

@@ -240,7 +240,9 @@ describe("the Cut on the song clock (80a)", () => {
       assert.match(html, /saved timeline/, "the header names the saved record (2026-09-02)");
       assert.doesNotMatch(html, /fy-cutseg--black/, "black belongs to the song clock");
       // The scene keeps its grouping in the band; the lane carries the unit of work.
-      assert.match(html, /fy-scenes__band/, "scenes band the ruler");
+      assert.doesNotMatch(html, /fy-scenes__band/, "scene labels start hidden");
+      await act(async () => [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Scene labels")!.click());
+      assert.ok(screen.container.querySelector(".fy-scenes__band"), "scene context remains available on request");
       assert.match(html, /fy-cutseg--pick/, "and shots, not scenes, are the cells");
       /*
        * The story clock's strip authored a trim on the unsaved assembly. The editor opens empty
@@ -313,7 +315,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     assert.match(html, /draggable="true"/, "rows are drag sources");
     assert.match(html, /drag onto a lane to place/);
     // Upload is live now: the host opens the picker and the renderer never sees the bytes.
-    assert.match(html, /Upload/);
+    assert.match(html, /Import to Library/);
     assert.doesNotMatch(html, /Filing arrives with/, "no longer a promise of a later screen");
   });
 
@@ -322,7 +324,8 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     // there cannot be dropped on, so the typed tracks take the drop instead.
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.doesNotMatch(html, /fy-ovlane/);
-    assert.match(html, /data-track="music"/, "a typed lane stands where the legacy lane was");
+    assert.doesNotMatch(html, /data-track="(?:music|dialogue|ambience)"/, "empty role lanes are absent");
+    assert.match(html, /Add audio track/);
   });
 
   it("draws a lane for the highest one a clip actually uses", () => {
@@ -486,7 +489,7 @@ describe("the unified editor shell (#685)", () => {
     const named = [...editor.querySelectorAll(".fy-track__label")]
       .map((node) => node.textContent?.trim())
       .filter((label) => ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"].includes(label ?? ""));
-    assert.deepEqual(named, ["Subtitles", "Picture", "Dialogue", "Ambience", "Music"]);
+    assert.deepEqual(named, ["Subtitles", "Picture"]);
 
     // Design turn 122: Inspector and Arke stack rather than tabbing, so both are present at
     // once and neither can be reached by taking the other away.
@@ -585,6 +588,22 @@ describe("the cut footer of a production with no story (504)", () => {
  * button, 28.000s in the rendered file — and a `0s` cut in the rail one panel to the left.
  */
 describe("the rail and the switcher on a production with no story (508)", () => {
+  it("uses saved audio and upper Picture clips as the media-only runtime", () => {
+    for (const kind of ["audio", "picture"] as const) {
+      const state = mediaOnlyState(), p = state.world!.productions[0]!;
+      p.cut = { overlays: [], audio: [] };
+      const artifact = { ...state.world!.artifacts[0]!, kind: kind === "audio" ? "audio" as const : "video" as const, mediaInfo: { durationSec: 4, hasAudio: true } };
+      state.world!.artifacts = [artifact];
+      p.timeline = { status: "ready", timeline: applyTimelineCommands(seedEmptyPictureTimeline(p), [
+        { kind: "add-track", trackId: "tr_imported", trackKind: kind, name: "Imported" },
+        { kind: "place", trackId: "tr_imported", clip: { id: "cl_media", startFrame: 0, durationFrames: 4 * (p.meta.frameRate ?? 24), sourceInFrames: 0,
+          source: { kind: "artifact", artifactId: artifact.id, label: artifact.file } } },
+      ]) };
+      const html = renderCut(state);
+      assert.match(html, /fy-prodrail__count">4s/);
+      assert.match(html, /fy-prodrail__switchsub">video · 4s cut/);
+    }
+  });
   it("states the length of what was placed, the way the header does", () => {
     const html = renderCut(mediaOnlyState());
     // Clips at 0→4 and 12→16: the film ends where the furthest one ends, not where the canvas does.

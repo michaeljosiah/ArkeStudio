@@ -123,6 +123,14 @@ export const ModelLimitsSchema = z
      */
     soundChoice: z.boolean().optional(),
     /**
+     * The route always generates sound, and publishes no switch for it (issue 863). The other
+     * half of what `soundChoice`'s absence deliberately does not say: H3 emits stereo audio in
+     * the same pass as the picture, and declaring `soundChoice` for it would be the control that
+     * lies. A surface asking "will there be sound" reads both; a surface offering a switch reads
+     * only `soundChoice`.
+     */
+    alwaysSound: z.boolean().optional(),
+    /**
      * What the reference route calls its image array. Seedance says `image_urls`; minimax and
      * wan say `reference_image_urls`. Data for the same reason `framesField` is.
      */

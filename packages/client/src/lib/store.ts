@@ -20,6 +20,7 @@ import {
   voiceJobFormat,
   voiceJobReadIdentity,
   voiceTargetKey,
+  type ProseReadSource,
   type ProviderCallRecord,
   ProviderIdSchema,
   type ProviderId,
@@ -2788,7 +2789,7 @@ export function requestVoicePreview(
 export function readSheetSection(
   worldId: string,
   sheetId: string,
-  sectionHeading: "Essence" | "Appearance",
+  sectionHeading: string,
   requestId = queueRequest("read-sheet-section"),
   confirmationToken?: string,
 ): string {
@@ -2797,6 +2798,31 @@ export function readSheetSection(
     worldId,
     sheetId,
     sectionHeading,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
+ * The whole sheet, read in order (issue 859).
+ *
+ * The ordered list travels in one frame rather than one frame per block: handlers run
+ * concurrently, so a loop of sends would put several local syntheses on the one small
+ * on-device model at once — and the page's cost could only be stated a block at a time.
+ */
+export function readSheetPage(
+  worldId: string,
+  sheetId: string,
+  sections: readonly string[],
+  requestId = queueRequest("read-sheet-page"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-sheet-page",
+    worldId,
+    sheetId,
+    sections: [...sections],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
   });
@@ -2817,6 +2843,51 @@ export function readBibleSection(
     kind: "read-bible-section",
     worldId,
     sectionHeading,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
+ * The same for the world's other authored prose — a canon entry, a scene, a shot's script, the
+ * production overview, the season, the Series, one of Arke's replies (issue 857).
+ *
+ * One sender rather than seven, because the source is a named address and the frame carries it
+ * whole; every screen's call is the same two lines the bible's was.
+ */
+export function readProse(
+  worldId: string,
+  source: ProseReadSource,
+  requestId = queueRequest("read-prose"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-prose",
+    worldId,
+    source,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
+ * The same prose, read as a page (issue 859) — the screen's ordered list in one frame.
+ *
+ * One frame rather than one per block: handlers run concurrently, so a loop of sends would start
+ * several local syntheses at once, and the page's price could only be stated a block at a time.
+ */
+export function readProsePage(
+  worldId: string,
+  sources: readonly ProseReadSource[],
+  requestId = queueRequest("read-prose-page"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-prose-page",
+    worldId,
+    sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
   });
@@ -3423,6 +3494,23 @@ export function moveTimelineHistory(
 /** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
 export function uploadArtifacts(worldId: string): void {
   send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
+}
+
+export function importEditorMedia(
+  worldId: string, editor: NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>,
+  files?: readonly File[],
+): { requestId: string | null; reason?: string } {
+  if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
+  if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
+  const requestId = queueRequest("upload-artifacts");
+  const submitted = files
+    ? bridge!.importDroppedMedia!({ worldId, requestId, editor }, files).submitted
+    : send({ kind: "upload-artifacts", worldId, requestId, editor });
+  if (!submitted) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The files could not be imported. Check the connection and use Import media." };
+  }
+  return { requestId };
 }
 
 /**

@@ -158,7 +158,7 @@ export type CutFile = z.infer<typeof CutFileSchema>;
 export interface CutEntry {
   sceneNumber: number;
   shot: Shot;
-  /** Null → a gap: remaining work made visible, not an error (R-15). */
+  /** Accepted/generated take identity. Imported timeline artifacts have media without a take. */
   takeId: string | null;
   take: Take | null;
   /** World-relative media path plus the segment range when the take is a pass segment. */
@@ -458,7 +458,7 @@ export interface ExportAudioClip {
   endSec: number;
   gainDb: number;
   /** What the sound is for; only Music and Ambience are lowered under speech (SPEC-038 R-14). */
-  role?: "dialogue" | "ambience" | "music" | "picture";
+  role?: "dialogue" | "ambience" | "music" | "picture" | "unspecified";
   /** Seconds into the source where the window starts; absent reads as the top of the file. */
   sourceInSec?: number;
 }

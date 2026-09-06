@@ -8,6 +8,7 @@ import { until } from "../wait.js";
 import { JobQueue } from "../../src/queue/dispatcher.js";
 import {
   authoritativeBibleSpeech,
+  authoritativeProseSpeech,
   authoritativeSheetSpeech,
   concatWav,
   normalizeSpeechText,
@@ -650,22 +651,161 @@ describe("authoritative sheet speech", () => {
     assert.deepEqual(authoritativeSheetSpeech(SHEET, "Essence"), { text: "Tide-caller" });
   });
 
-  it("reads Appearance too, and rejects unknown headings and empty text", () => {
-    const withAppearance = {
+  it("reads any section the sheet actually has, and refuses one it does not", () => {
+    // Widened from the Essence/Appearance pair (issue 857): that was a record of which two
+    // blocks had a speaker drawn beside them, not a rule about what is readable, and it left a
+    // location sheet and a faction sheet with no readable block at all.
+    const fuller = {
       ...SHEET,
-      sections: [...SHEET.sections, { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." }],
+      sections: [
+        ...SHEET.sections,
+        { heading: "Appearance", body: "Salt-crusted braids, pale grey eyes." },
+        { heading: "Relationships", body: "Owes the harbourmaster." },
+      ],
     } as Sheet;
-    assert.deepEqual(authoritativeSheetSpeech(withAppearance, "Appearance"), {
+    assert.deepEqual(authoritativeSheetSpeech(fuller, "Appearance"), {
       text: "Salt-crusted braids, pale grey eyes.",
     });
-    assert.throws(() => authoritativeSheetSpeech(SHEET, "Relationships"), /not available/);
+    assert.deepEqual(authoritativeSheetSpeech(fuller, "Relationships"), { text: "Owes the harbourmaster." });
+    assert.throws(() => authoritativeSheetSpeech(SHEET, "Relationships"), /no longer on this sheet/);
     assert.throws(() => authoritativeSheetSpeech({ ...SHEET, sections: [{ heading: "Essence", body: "  " }] } as Sheet, "Essence"), /Nothing to read/);
+  });
+
+  it("reads a location's sections, which the character-only rule refused outright", () => {
+    const location = {
+      ...SHEET,
+      type: "location",
+      sections: [{ heading: "Look", body: "Black basalt, wet at every hour." }],
+    } as unknown as Sheet;
+    assert.deepEqual(authoritativeSheetSpeech(location, "Look"), { text: "Black basalt, wet at every hour." });
   });
 
   it("reads a character who has no voice of their own", () => {
     // The behaviour this replaced refused here, which meant most of a cast could not be read.
     const voiceless = { ...SHEET, voice: undefined } as unknown as Sheet;
     assert.deepEqual(authoritativeSheetSpeech(voiceless, "Essence"), { text: "Tide-caller" });
+  });
+});
+
+describe("authoritative prose speech (issue 857)", () => {
+  /**
+   * The rest of the world's authored prose, addressed rather than sent. What matters here is the
+   * same thing that matters for the sheet and the bible: the words come off the record, and a
+   * source that no longer resolves refuses by name rather than reading something else.
+   */
+  const BUNDLE = {
+    meta: { canonRevision: 12 },
+    canon: [{ id: "CANON-004", title: "The tides", body: "  The tide is the world's clock.  " }],
+    series: [{ id: "the-undersong", version: 3, title: "The Undersong", engine: "A town, once a season." }],
+    productions: [
+      {
+        meta: { id: "season-one", title: "Season One" },
+        story: { version: 7, logline: "A diver hears her drowned sister sing.", spine: "" },
+        season: { version: 2, question: "Who is singing?" },
+        treatment: "Long-form prose about the season.",
+        scenes: [
+          {
+            id: "sc_0001",
+            number: 1,
+            version: 4,
+            title: "The harbour",
+            shots: [{ id: "sh_0002", number: 2, title: "Wide", description: "She surfaces alone." }],
+          },
+        ],
+      },
+    ],
+  } as unknown as WorldBundle;
+
+  it("reads each kind of record off the bundle, normalized", () => {
+    assert.deepEqual(authoritativeProseSpeech(BUNDLE, { of: "canon", canonId: "CANON-004" }), {
+      text: "The tide is the world's clock.",
+      heading: "CANON-004 · The tides",
+      version: 12,
+      subjectId: "CANON-004",
+    });
+    assert.equal(
+      authoritativeProseSpeech(BUNDLE, {
+        of: "shot",
+        productionId: "season-one",
+        sceneId: "sc_0001",
+        shotId: "sh_0002",
+      }).text,
+      "She surfaces alone.",
+    );
+    assert.equal(
+      authoritativeProseSpeech(BUNDLE, { of: "story", productionId: "season-one", field: "treatment" }).text,
+      "Long-form prose about the season.",
+    );
+    assert.equal(
+      authoritativeProseSpeech(BUNDLE, { of: "season", productionId: "season-one", field: "question" }).text,
+      "Who is singing?",
+    );
+    assert.equal(
+      authoritativeProseSpeech(BUNDLE, { of: "series", seriesId: "the-undersong" }).text,
+      "A town, once a season.",
+    );
+  });
+
+  it("refuses a source that has moved, and an empty one, by name", () => {
+    // A screen can be open on an entry somebody has just retired, and the honest answer is that
+    // it is gone — never the nearest other paragraph.
+    assert.throws(
+      () => authoritativeProseSpeech(BUNDLE, { of: "canon", canonId: "CANON-999" }),
+      /no longer in this world/,
+    );
+    assert.throws(
+      () =>
+        authoritativeProseSpeech(BUNDLE, {
+          of: "shot",
+          productionId: "season-one",
+          sceneId: "sc_0001",
+          shotId: "sh_0009",
+        }),
+      /no longer in this scene/,
+    );
+    assert.throws(
+      () => authoritativeProseSpeech(BUNDLE, { of: "story", productionId: "season-one", field: "spine" }),
+      /Nothing to read/,
+    );
+    assert.throws(
+      () => authoritativeProseSpeech(BUNDLE, { of: "season", productionId: "season-one", field: "ending" }),
+      /Nothing to read/,
+    );
+  });
+
+  it("finds a shot in a graph scene whose flow is broken", () => {
+    // `orderedShots` throws on an invalid flow, and a scene like that still opens read-only —
+    // its shots are still prose somebody may want read. Finding one by id needs no order.
+    const graph = {
+      ...BUNDLE,
+      productions: [
+        {
+          ...(BUNDLE.productions[0] as Record<string, unknown>),
+          scenes: [
+            {
+              id: "sc_0001",
+              number: 1,
+              version: 4,
+              title: "The harbour",
+              flow: {
+                nodes: [{ id: "nd_shot", kind: "shot", shot: { id: "sh_0002", number: 2, description: "Broken." } }],
+                edges: [],
+                storyboardGroups: [],
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as WorldBundle;
+    assert.equal(
+      authoritativeProseSpeech(graph, {
+        of: "shot",
+        productionId: "season-one",
+        sceneId: "sc_0001",
+        shotId: "sh_0002",
+      }).text,
+      "Broken.",
+    );
   });
 });
 

@@ -381,6 +381,14 @@ export function jobOrigin(job: Job): JobOrigin | null {
   if (job.target.kind === "voice-preview" && job.params["purpose"] === "bible-section") {
     return { path: `/w/${job.worldId}/bible`, label: "Bible", where: "the bible" };
   }
+  /*
+   * A prose read (issue 857) starts from wherever that prose is shown — a canon entry, a scene
+   * workspace, a season overview, a conversation — and the job alone does not say which. Named
+   * before the reference origins below rather than after, because those read the target id's
+   * first segment as a sheet slug: without this a canon entry's read would offer a character
+   * voice screen for `CANON-004`, which is the dead end that rule exists to avoid.
+   */
+  if (job.target.kind === "voice-preview" && job.params["purpose"] === "prose") return null;
   const reference = REFERENCE_ORIGINS[job.target.kind];
   if (reference) {
     // Every reference target id is the sheet's slug followed by whatever distinguishes this

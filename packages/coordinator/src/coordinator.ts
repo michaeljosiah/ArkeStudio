@@ -52,11 +52,10 @@ import {
   ulid,
   CutFileSchema,
   buildRenderPlan,
+  playsWholeAudioSource,
   serializeTimedText,
-  assembleSceneCommands,
   audibleTracks,
   orderedTrackClips,
-  seedFirstPictureTimeline,
   storyTimelineFingerprint,
   type TimelineCommand,
   productionFrameRate,
@@ -87,7 +86,9 @@ import {
   type FrameRunQuote,
   type FrameRunState,
   voiceJobFormat,
+  type ProseReadSource,
   voiceJobReadIdentity,
+  voiceJobPart,
   voiceJobIsCandidatePreview,
   CLONED_VOICE_MODEL,
   type LedgerEntry,
@@ -251,7 +252,9 @@ import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/p
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { filePlayblast } from "./productions/stage-playblast.js";
-import { applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { importEditorMedia } from "./productions/editor-import.js";
+import { AUDIO_TRACK_KINDS, effectiveAudioRole } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest, stageEditorRequests } from "./productions/editor-requests.js";
 import { applySceneEdits, sceneVersionFor } from "./productions/scene-edits.js";
 import {
@@ -294,6 +297,7 @@ import {
 import {
   normalizeSpeechText,
   authoritativeBibleSpeech,
+  authoritativeProseSpeech,
   authoritativeSheetSpeech,
   cachedVoiceAudioLooksRight,
   previewCacheFile,
@@ -775,6 +779,7 @@ export interface CoordinatorOptions {
    * Absent → attaching says so instead of doing nothing.
    */
   pickFiles?: (input: { accept: readonly string[] }) => Promise<readonly string[]>;
+  confirmLargeMediaImport?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
   /** Choosing an artifact import folder; like pickFiles, the host path never reaches the renderer. */
   pickFolder?: () => Promise<string | null>;
   /** SPEC-009: dispatch clients (submit/poll/fetch/cancel + declarations), per provider. */
@@ -1063,6 +1068,28 @@ export class Coordinator {
    * meant two copies of a confirmation-token path that decides whether money is spent, and the
    * second copy would have drifted.
    */
+  /**
+   * The words behind one prose address (issue 857), for a single read and for a page of them.
+   *
+   * Every arm but one is a pure function of the bundle. A conversation is an event log rather
+   * than part of it, so `reply` loads: the window is the default one the screen was drawn from,
+   * and a reply that has paged out of it refuses rather than reading a different message,
+   * because the id is the only thing that says which reply was asked for.
+   */
+  private async resolveProse(
+    store: WorldStore,
+    source: ProseReadSource,
+  ): Promise<{ text: string; heading: string; version: number; subjectId: string }> {
+    if (source.of !== "reply") return authoritativeProseSpeech(store.getBundle(), source);
+    const loaded = await new WorldChatService(store.dir).load(source.conversationId);
+    const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
+    if (!message) throw new Error("That reply is no longer in this conversation.");
+    if (message.role !== "studio") throw new Error("Only Arke's replies are read aloud.");
+    const text = normalizeSpeechText(message.text);
+    if (!text) throw new Error("Nothing to read yet.");
+    return { text, heading: "Arke", version: 1, subjectId: source.messageId };
+  }
+
   private async narrateSection(input: {
     store: WorldStore;
     /** The frame that asked, for the enqueue record. */
@@ -1071,10 +1098,15 @@ export class Coordinator {
     requestId: string;
     /** Approval for this paid read only; never a remote voice-upload destination approval. */
     confirmationToken?: string;
-    /** Already resolved and normalised by the caller — this method never reads a document. */
-    text: string;
-    purpose: "sheet-section" | "bible-section";
-    sectionHeading: string;
+    /**
+     * The passage, already resolved and normalised by the caller — this method never reads a
+     * document. More than one block is a page read (issue 859): they are narrated in the order
+     * the screen declared and each block is one part, so the position the client already keeps
+     * is a position in the page rather than in a synthesis it cannot see. One block is the
+     * per-block read, unchanged in every respect.
+     */
+    blocks: readonly { heading: string; text: string; subjectId?: string }[];
+    purpose: "sheet-section" | "sheet-page" | "bible-section" | "prose";
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
     /** Present only when the subject is a sheet; the bible belongs to no one in the world. */
@@ -1082,14 +1114,16 @@ export class Coordinator {
     fail: (error: string, characters?: number) => void;
   }): Promise<void> {
     if (!this.voiceService) return;
-    const { store, worldId, requestId, text, purpose, sectionHeading, subject, fail } = input;
-    const identity = {
+    const { store, worldId, requestId, blocks, purpose, subject, fail } = input;
+    const page = blocks.length > 1;
+    const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
+    const identity = (heading: string | null) => ({
       worldId,
       ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
       sheetVersion: subject.version,
       purpose,
-      sectionHeading,
-    };
+      ...(heading === null ? {} : { sectionHeading: heading }),
+    });
     // Who narrates is the app's preference, not the character's. Reading prose ABOUT
     // somebody in their own voice was the old behaviour, and it refused entirely for the
     // many characters who have no voice assigned.
@@ -1101,7 +1135,45 @@ export class Coordinator {
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const speaking = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
     if (speaking.provider === "kokoro" && speaking.model === "kokoro-82m") {
+      const ready = (
+        block: { heading: string; text: string },
+        file: string,
+        cached: boolean,
+        piece?: { part: number; parts: number },
+      ) =>
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.audio",
+          requestId,
+          ...identity(block.heading),
+          provider: "kokoro",
+          model: speaking.model,
+          voiceId: speaking.voiceId,
+          format: "wav",
+          status: "ready",
+          file,
+          cached,
+          characterCount: block.text.length,
+          estimatedMicroUsd: 0,
+          ...piece,
+        } as DomainEvent);
       try {
+        if (page) {
+          /*
+           * A page is narrated a block at a time, in the declared order, each block a part.
+           *
+           * The parts of a single-block read are synthesis chunks — an implementation detail
+           * nobody could navigate by. The parts of a page are the blocks themselves, which is
+           * what makes "third of five" and skipping to the next block mean anything. Sequential
+           * because the local engine is one small model on this machine, and several syntheses
+           * at once is the other way to fell it.
+           */
+          for (const [index, block] of blocks.entries()) {
+            const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text);
+            ready(block, result.file, result.cached, { part: index, parts: blocks.length });
+          }
+          return;
+        }
         /*
          * Emit each piece as it lands rather than one clip at the end (2026-08-24).
          *
@@ -1109,50 +1181,19 @@ export class Coordinator {
          * ten-minute wait if the first word has to arrive with the last. The client queues these
          * and starts on the first, which is the same total render with none of the silence.
          */
+        const block = blocks[0]!;
         let streamed = 0;
-        const result = await this.voiceService.localSpeech(store, speaking.voiceId, text, (piece) => {
+        const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text, (piece) => {
           // A single-piece read stays exactly what it was: one event, no part numbers.
           if (piece.total < 2) return;
           streamed += 1;
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId,
-            ...identity,
-            provider: "kokoro",
-            model: speaking.model,
-            voiceId: speaking.voiceId,
-            format: "wav",
-            status: "ready",
-            file: piece.file,
-            cached: false,
-            characterCount: text.length,
-            estimatedMicroUsd: 0,
-            part: piece.index,
-            parts: piece.total,
-          } as DomainEvent);
+          ready(block, piece.file, false, { part: piece.index, parts: piece.total });
         });
         // The joined clip, for a cache hit next time and for anything that wants one file. A
         // streamed read has already been heard, so this closes it rather than announcing it.
-        if (streamed === 0) {
-          this.emit({
-            at: new Date().toISOString(),
-            type: "voice.audio",
-            requestId,
-            ...identity,
-            provider: "kokoro",
-            model: speaking.model,
-            voiceId: speaking.voiceId,
-            format: "wav",
-            status: "ready",
-            file: result.file,
-            cached: result.cached,
-            characterCount: text.length,
-            estimatedMicroUsd: 0,
-          } as DomainEvent);
-        }
+        if (streamed === 0) ready(block, result.file, result.cached);
       } catch (error) {
-        fail(error instanceof Error ? error.message : "Local voice failed.", text.length);
+        fail(error instanceof Error ? error.message : "Local voice failed.", characters);
       }
       return;
     }
@@ -1163,71 +1204,96 @@ export class Coordinator {
         candidate.capability === "voice-tts",
     );
     if (!model) {
-      fail(`${speaking.provider} voice is unavailable.`, text.length);
+      fail(`${speaking.provider} voice is unavailable.`, characters);
       return;
     }
     const format = voiceFormatForModel(model);
-    const file = speechCacheFile({
-      provider: model.provider,
-      model: model.id,
-      voiceId: speaking.voiceId,
-      text,
-      format,
-    });
-    try {
-      const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(file)))));
-      if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
+    const files = blocks.map((block) =>
+      speechCacheFile({
+        provider: model.provider,
+        model: model.id,
+        voiceId: speaking.voiceId,
+        text: block.text,
+        format,
+      }),
+    );
+    const cachedReady = (block: { heading: string; text: string }, index: number) =>
       this.emit({
         at: new Date().toISOString(),
         type: "voice.audio",
         requestId,
-        ...identity,
+        ...identity(block.heading),
         provider: model.provider,
         model: model.id,
         voiceId: speaking.voiceId,
         format,
         status: "ready",
-        file,
+        file: files[index]!,
         cached: true,
-        characterCount: text.length,
+        characterCount: block.text.length,
         estimatedMicroUsd: 0,
+        ...(page ? { part: index, parts: blocks.length } : {}),
       } as DomainEvent);
-      return;
-    } catch {
-      /* confirmation required */
+    /*
+     * Which blocks would actually be paid for. A page is usually a mix — the Essence heard
+     * yesterday is in the cache, the Appearance rewritten this morning is not — and quoting the
+     * whole page when only half of it would be synthesised would overstate the spend.
+     */
+    const misses: number[] = [];
+    for (const index of blocks.keys()) {
+      try {
+        const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(files[index]!)))));
+        if (!cachedVoiceAudioLooksRight(bytes, format)) throw new Error("invalid cache");
+      } catch {
+        misses.push(index);
+      }
     }
-    const estimate = estimateMicroUsd(model, { characters: text.length });
-    const token = createHash("sha256").update(`${subject.id}\n${subject.version}\n${file}`).digest("hex");
-    const enqueued: EnqueueInput = {
+    if (misses.length === 0) {
+      blocks.forEach(cachedReady);
+      return;
+    }
+    const estimate = misses.reduce(
+      (sum, index) => sum + estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      0,
+    );
+    const token = createHash("sha256")
+      .update([subject.id, String(subject.version), ...misses.map((index) => files[index]!)].join("\n"))
+      .digest("hex");
+    const enqueued: EnqueueInput[] = misses.map((index) => ({
       worldId,
       target: {
         kind: "voice-preview",
-        id: `${subject.id}/${model.provider}/${model.id}/${speaking.voiceId}`,
+        // The heading keeps a page's blocks apart. They differ only in their words, and one
+        // target for all of them would be one job for all of them.
+        id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
       },
       capability: "voice-tts",
       provider: model.provider,
       model: model.id,
       params: {
         voiceId: speaking.voiceId,
-        text,
+        text: blocks[index]!.text,
         audioFormat: format,
         requestId,
         purpose,
         ...(input.sheetId !== undefined ? { sheetId: input.sheetId } : {}),
         sheetVersion: subject.version,
-        sectionHeading,
-        characterCount: text.length,
+        sectionHeading: blocks[index]!.heading,
+        characterCount: blocks[index]!.text.length,
+        ...(page ? { part: index, parts: blocks.length } : {}),
       },
-      estimatedMicroUsd: estimate,
-      landing: { dir: ".cache/voice-previews", name: file.split("/").pop()! },
-    };
+      estimatedMicroUsd: estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      landing: { dir: ".cache/voice-previews", name: files[index]!.split("/").pop()! },
+    }));
     if (input.confirmationToken !== token) {
-      this.pendingVoiceReads.set(requestId, { token, input: enqueued });
+      this.pendingVoiceReads.set(requestId, { token, inputs: enqueued });
       this.emit({
         at: new Date().toISOString(),
         type: "voice.audio",
         requestId,
-        ...identity,
+        // A page's price is the page's, not any one block's, so this names no section: it is
+        // the one thing the reader is being asked about before anything starts.
+        ...identity(page ? null : blocks[0]!.heading),
         provider: model.provider,
         model: model.id,
         voiceId: speaking.voiceId,
@@ -1235,7 +1301,7 @@ export class Coordinator {
         status: "confirmation-required",
         file: null,
         cached: false,
-        characterCount: text.length,
+        characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
       } as DomainEvent);
@@ -1243,12 +1309,14 @@ export class Coordinator {
     }
     const pending = this.pendingVoiceReads.get(requestId);
     if (!pending || pending.token !== token) {
-      fail("The read request changed; review it again.", text.length);
+      fail("The read request changed; review it again.", characters);
       return;
     }
     this.pendingVoiceReads.delete(requestId);
-    const queued = await this.enqueueBatch(requestId, input.frameKind, [pending.input]);
-    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", text.length);
+    // A block already in the cache never went to the queue, and is ready the moment the page is.
+    for (const [index, block] of blocks.entries()) if (!misses.includes(index)) cachedReady(block, index);
+    const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
+    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
   }
 
   /** Session config builder with the user's agent settings folded in. */
@@ -2007,7 +2075,7 @@ export class Coordinator {
   }
 
   private readonly askService: AskService | null;
-  private readonly pendingVoiceReads = new Map<string, { token: string; input: EnqueueInput }>();
+  private readonly pendingVoiceReads = new Map<string, { token: string; inputs: EnqueueInput[] }>();
 
   private onSetupComponentReady(componentId: string): Promise<void> {
     if (componentId !== "comfyui-runtime" && !isComfyUiWeightsComponent(componentId)) return Promise.resolve();
@@ -2915,6 +2983,7 @@ export class Coordinator {
           ...readIdentity,
           sheetVersion: Number(job.params["sheetVersion"]),
           ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+          ...voiceJobPart(job),
           provider: job.provider as ProviderId,
           model: job.model,
           voiceId: String(job.params["voiceId"]),
@@ -3303,6 +3372,7 @@ export class Coordinator {
             ...readIdentity,
             sheetVersion: Number(job.params["sheetVersion"]),
             ...(job.params["sectionHeading"] ? { sectionHeading: String(job.params["sectionHeading"]) } : {}),
+            ...voiceJobPart(job),
             provider: job.provider as ProviderId,
             model: job.model,
             voiceId,
@@ -8657,21 +8727,8 @@ export class Coordinator {
           this.transport.broadcastSnapshot();
         };
         try {
-          const production = store.getBundle().productions.find((p) => p.meta.id === msg.productionId);
-          if (!production) return;
-          if (production.spine !== null) throw new Error("this production is cut to a song; open it on the timeline and place its shots there");
-          const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
-          const scene = production.scenes.find((candidate) => candidate.id === msg.sceneId);
-          if (scene === undefined) throw new Error(`${msg.sceneId} is not a scene of this production`);
-          const assembly = assembleSceneCommands({ production, timeline, sceneId: msg.sceneId, artifacts: store.getBundle().artifacts });
-          if ("refused" in assembly) throw new Error(assembly.refused);
-          const { dropped } = await applyTimelineCommand(store, msg.productionId, {
-            kind: "commands",
-            commands: assembly.commands,
-            baseRevision: msg.baseRevision,
-            sourceFingerprint: msg.sourceFingerprint,
-            label: `Arke assembled ${scene.title}`,
-            notes: assembly.notes,
+          const { dropped } = await assembleTimelineScene(store, msg.productionId, msg.sceneId, {
+            baseRevision: msg.baseRevision, sourceFingerprint: msg.sourceFingerprint,
           });
           // The first write may fold cut.json; what it could not carry is named, as the command handler names it.
           for (const placement of dropped) {
@@ -8709,8 +8766,8 @@ export class Coordinator {
           // The same audible set the plan mixes (SPEC-038 R-6): a solo elsewhere silences these
           // clips in preview and export, so it silences them here too (round five).
           const dialogue = audibleTracks(record)
-            .filter((track) => track.kind === "dialogue")
-            .flatMap((track) => orderedTrackClips(track));
+            .filter((track) => AUDIO_TRACK_KINDS.has(track.kind))
+            .flatMap((track) => orderedTrackClips(track).filter(clip => effectiveAudioRole(track, clip) === "dialogue"));
           if (dialogue.length === 0) throw new Error("there are no Dialogue clips to transcribe");
           const takesById = new Map(production.takes.map((take) => [take.id, take] as const));
           const commands: TimelineCommand[] = [];
@@ -8720,37 +8777,28 @@ export class Coordinator {
           const at = new Date().toISOString();
           const ffmpeg = this.opts.ffmpeg;
           const heard: Array<{ startFrame: number; endFrame: number; text: string; clip: (typeof dialogue)[number] }> = [];
+          const transcriptionPlan = buildRenderPlan({ production, artifacts: store.getBundle().artifacts, timeline: production.timeline, scope: { kind: "production" }, preset: "review-cut" });
+          if (!transcriptionPlan.ok) throw new Error(transcriptionPlan.reason);
           for (const clip of dialogue) {
-            let path: string | null = null;
+            const heardSource = transcriptionPlan.plan.audio.find(item => item.clipId === clip.id);
+            if (!heardSource) throw new Error(clip.id + ": the Voice source is not audible in this cut");
+            const path = join(store.dir, fromPortable(heardSource.path));
             let sourceLengthSec: number | null = null;
             if (clip.source.kind === "take") {
               const take = takesById.get(clip.source.takeId);
-              if (take?.media !== undefined) {
-                path = join(store.dir, "productions", production.meta.id, "takes", take.id, take.media);
-                sourceLengthSec = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec ?? null;
-              }
+              sourceLengthSec = production.takeMediaInfo[take?.segment?.passTakeId ?? clip.source.takeId]?.mediaInfo.durationSec ?? null;
             } else if (clip.source.kind === "artifact") {
-              const artifactId = clip.source.artifactId;
-              const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === artifactId);
-              if (artifact !== undefined) {
-                path = join(store.dir, "artifacts", fromPortable(artifact.file));
-                sourceLengthSec = artifact.mediaInfo?.durationSec ?? null;
-              }
+              const source = clip.source;
+              sourceLengthSec = store.getBundle().artifacts.find(artifact => artifact.id === source.artifactId)?.mediaInfo?.durationSec ?? null;
+            } else if (clip.source.kind === "performance") {
+              const source = clip.source;
+              sourceLengthSec = production.performances.find(performance => performance.id === source.performanceId)?.provenance.outputTechnical.durationSec ?? null;
             }
-            if (path === null) continue;
-            /*
-             * The words the model hears must be the words the clip plays (round three). A clip
-             * that starts into its source, or stops short of its end, is windowed through ffmpeg
-             * before it is heard; only a clip that plays its whole source is read as the file.
-             * With no ffmpeg there is no window, and the clip is refused by name rather than
-             * transcribed with speech it never plays.
-             */
-            const sourceInSec = clip.sourceInFrames / record.frameRate;
-            const clipSec = clip.durationFrames / record.frameRate;
+            const sourceInSec = heardSource.sourceInSec;
+            const clipSec = heardSource.endSec - heardSource.startSec;
             // Whole-source equivalence has to be established, not assumed: an unmeasured source
             // under a tail-trimmed clip is windowed like any other (round four).
-            const wholeSource =
-              clip.sourceInFrames === 0 && sourceLengthSec !== null && clipSec >= sourceLengthSec - 1 / record.frameRate;
+            const wholeSource = playsWholeAudioSource(heardSource, sourceLengthSec, record.frameRate);
             let audio: Buffer;
             let contentType: string;
             if (ffmpeg !== undefined) {
@@ -10511,11 +10559,125 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: bibleText,
+          blocks: [{ heading: msg.sectionHeading, text: bibleText }],
           purpose: "bible-section",
-          sectionHeading: msg.sectionHeading,
           subject: { id: "bible", version: bible.version },
           fail: failBible,
+        });
+        return;
+      }
+      case "read-prose": {
+        /*
+         * Read-aloud for the rest of the world's authored prose (issue 857).
+         *
+         * The shape is the sheet and bible reads': resolve the words from the record on disk,
+         * fail by name if the source has moved, then hand the text to the same narrator. What
+         * differs is only how many kinds of record it can address.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const failProse = (error: string, characters = 0, heading = "Read aloud") =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetVersion: 1,
+            purpose: "prose",
+            sectionHeading: heading,
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        let resolved: { text: string; heading: string; version: number; subjectId: string };
+        try {
+          resolved = await this.resolveProse(store, msg.source);
+        } catch (error) {
+          failProse(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          blocks: [{ heading: resolved.heading, text: resolved.text }],
+          purpose: "prose",
+          subject: { id: resolved.subjectId, version: resolved.version },
+          fail: (error, characters) => failProse(error, characters, resolved.heading),
+        });
+        return;
+      }
+      case "read-prose-page": {
+        /*
+         * A page of prose, read in the order the screen declared (issue 859).
+         *
+         * An overview's cards and a season's answers are one document each; read through, they
+         * are a listen rather than four presses. Each source resolves the same way a single
+         * prose read does — the words never travel — and one that no longer resolves drops out
+         * rather than refusing the page, because a season with no ending written yet still has
+         * a question worth hearing.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const failPage = (error: string, characters = 0) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetVersion: 1,
+            purpose: "prose",
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        const blocks: { heading: string; text: string; subjectId: string }[] = [];
+        let version = 1;
+        for (const source of msg.sources) {
+          try {
+            const one = await this.resolveProse(store, source);
+            blocks.push({ heading: one.heading, text: one.text, subjectId: one.subjectId });
+            version = Math.max(version, one.version);
+          } catch {
+            /* not part of the page */
+          }
+        }
+        if (blocks.length === 0) {
+          failPage("Nothing to read yet.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          blocks,
+          purpose: "prose",
+          /*
+           * The page is named by its first block and the newest version any of them carries.
+           * That is only what the approval token is hashed over, and the token also covers every
+           * file the page would synthesise — so two pages sharing an opening block still ask
+           * separately. Each block keeps its own subject for its own queue row.
+           */
+          subject: { id: blocks[0]!.subjectId, version },
+          fail: failPage,
         });
         return;
       }
@@ -10567,9 +10729,73 @@ export class Coordinator {
           worldId: msg.worldId,
           requestId: msg.requestId,
           ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
-          text: resolved.text,
+          blocks: [{ heading: msg.sectionHeading, text: resolved.text }],
           purpose: "sheet-section",
-          sectionHeading: msg.sectionHeading,
+          subject: { id: sheet.id, version: sheet.version },
+          sheetId: sheet.id,
+          fail,
+        });
+        return;
+      }
+      case "read-sheet-page": {
+        /*
+         * The sheet read in order (issue 859). The screen declares which blocks and in what
+         * order; this resolves each one from the authoritative sheet and hands the ordered
+         * list over as a page. Nothing about the order is inferred here — deriving it would
+         * put the narration back at the mercy of whatever the layout happens to contain.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const sheet = store.getBundle().sheets.find((candidate) => candidate.id === msg.sheetId);
+        const fail = (error: string, characters = 0) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetId: msg.sheetId,
+            sheetVersion: sheet?.version ?? 1,
+            purpose: "sheet-page",
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        if (!sheet) {
+          fail("The character is no longer available.");
+          return;
+        }
+        /*
+         * A block with nothing in it drops out of the page rather than refusing it. A sheet
+         * whose Appearance has not been written yet still has an Essence worth hearing, and a
+         * page read that refuses because one of its blocks is empty reads as broken.
+         */
+        const blocks: { heading: string; text: string }[] = [];
+        for (const heading of msg.sections) {
+          try {
+            blocks.push({ heading, text: authoritativeSheetSpeech(sheet, heading).text });
+          } catch {
+            /* not part of the page */
+          }
+        }
+        if (blocks.length === 0) {
+          fail("Nothing to read yet.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          blocks,
+          purpose: "sheet-page",
           subject: { id: sheet.id, version: sheet.version },
           sheetId: sheet.id,
           fail,
@@ -10739,19 +10965,35 @@ export class Coordinator {
       case "upload-artifacts": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        if (!store || store.worldId !== msg.worldId || !pick) {
+        if (!store || store.worldId !== msg.worldId || (!pick && !msg.sourcePaths)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Filing artifacts is unavailable.");
           return;
         }
-        const chosen = await pick({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        const chosen = msg.sourcePaths ?? await pick!({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
         // A closed dialog is not a failure. Nothing was filed and nothing is said.
         if (chosen.length === 0) {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
           return;
         }
+        if (msg.editor) {
+          try {
+            const failures = await importEditorMedia(store, chosen, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            await this.refreshWorldSnapshot(msg.worldId);
+            this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
+          } catch (error) {
+            this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error ? error.message : String(error));
+            if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
+          }
+          return;
+        }
         const failures: Array<{ index: number; reason: string }> = [];
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
+          if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
           const outcome = await fileArtifact(store, {
             sourcePath,
             // Measured as it is filed (#283): an artifact is immutable, so its length and whether

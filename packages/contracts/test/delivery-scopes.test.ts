@@ -208,7 +208,7 @@ describe("one timeline, three delivery scopes (#682)", () => {
     );
     assert.equal(seeded.tracks[0]!.endFrame, 300, "the picture track remembers the song's end");
     assert.deepEqual(seeded.tracks[1]!.clips.map((clip) => [clip.id, clip.startFrame, clip.durationFrames]), [["cl_master", 0, 300]]);
-    assert.equal(seeded.tracks[1]!.kind, "music");
+    assert.equal(seeded.tracks[1]!.kind, "audio");
 
     const print = spineTimelineFingerprint(value, spine, 12);
     assert.match(print, /^spine-picture-v1:[0-9a-f]{16}$/);

@@ -102,7 +102,8 @@ describe("the song clock on the timeline (issue 682)", () => {
       "the anchors as they stand, in frames",
     );
     const master = saved.tracks.find((track) => track.id === "tr_master")!;
-    assert.equal(master.kind, "music");
+    assert.equal(master.kind, "audio");
+    assert.equal(master.clips[0]!.role, "music");
     assert.deepEqual(
       master.clips.map((clip) => clip.source),
       [{ kind: "artifact", artifactId: TRACK, label: "Master track" }],

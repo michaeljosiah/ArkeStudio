@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { describe, it } from "node:test";
-import { dispatchDuration, durationOptions, estimateMicroUsd } from "@arke-studio/contracts";
+import {
+  characterSpeakingVideoRoutes,
+  dispatchDuration,
+  durationOptions,
+  estimateMicroUsd,
+  frameDispatchFor,
+  modelCapabilityCopy,
+} from "@arke-studio/contracts";
 import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
   callerParamNames,
@@ -198,6 +206,42 @@ describe("the recipe catalogue projects into the manifest like any other model",
     // see that — the loader classes exist on every backend. Declared, so a big AMD card is
     // refused before the 42 GB download rather than at model load.
     assert.deepEqual(row.requires?.accelerator, ["cuda"]);
+  });
+
+  it("the h3 row is admitted as a speaking-sample route, stated untested and offered after the verified ones", () => {
+    const routes = characterSpeakingVideoRoutes(SHIPPED_MANIFEST.models);
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
+    // The whole point of issue 863: one face and sound, both declared, and H3's sound is declared
+    // as what it is — always emitted, no switch — rather than as a `generate_audio` it does not have.
+    assert.equal(row.accepts.referenceImages, 1);
+    assert.equal(row.limits.alwaysSound, true);
+    assert.equal(row.limits.soundChoice, undefined);
+    assert.ok(routes.some((m) => m.id === row.id), "h3 is offered as a speaking-sample route");
+    // Offered, not defaulted: the picker's first entry is a verified route while H3's speech is
+    // untested, which is what keeps a fifteen-minute local run from becoming the quiet default.
+    assert.equal(row.speechVideo, "untested");
+    assert.notEqual(routes[0]?.id, row.id);
+  });
+
+  it("the h3 row answers the one frame query the planner asks, on its own endpoint (issue 845)", () => {
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video")!;
+    // Before the mode was declared this answered null and every boundary frame fell back to a
+    // cold text-to-video run — the accepted still, the drawn keyframe and the chained pass alike.
+    const one = frameDispatchFor(row, 1);
+    assert.ok(one !== null, "h3 takes a first frame");
+    assert.equal(one.mode, "first-frame");
+    // Not a sibling route: node 7 with `first_frame` bound is the image-to-video graph.
+    assert.equal(one.route, null);
+    assert.deepEqual(one.locked, []);
+    // `last_frame` is on the node but has never been run under the floor, so it is not offered.
+    assert.equal(frameDispatchFor(row, 2), null);
+    // The picker's copy reads the same authority, and the draft row still claims nothing.
+    assert.match(modelCapabilityCopy(row), /start frame/);
+    const draft = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-draft-video")!;
+    assert.equal(frameDispatchFor(draft, 1), null);
+    assert.doesNotMatch(modelCapabilityCopy(draft), /frame/);
+    // The mode adds no duration vocabulary of its own, so a framed shot offers h3's own lengths.
+    assert.deepEqual(durationOptions(row, { taskMode: "first-frame" }), [5, 10, 15]);
   });
 
   it("the h3 recipe is the first whose output carries sound, muxed by the graph itself (D14 names it)", () => {
@@ -518,6 +562,116 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     // The prompt reaches the FL2VA node itself — it is the conditioning assembly, not CLIPTextEncode.
     assert.equal(posted.prompt["7"]!.inputs["prompt"], "harbour at dawn, gulls crying");
     assert.equal(posted.prompt["12"]!.inputs["fps"], 24);
+    // No face sent, so the carrier nodes and the slot they fed are gone: this is byte for byte
+    // the text-to-video graph v1 shipped, and `LoadImage.image` never reaches the engine holding
+    // a placeholder it has no file for.
+    assert.equal("first_frame" in posted.prompt["7"]!.inputs, false);
+    assert.equal(posted.prompt["14"], undefined);
+    assert.equal(posted.prompt["15"], undefined);
+  });
+
+  it("h3 video: one face is uploaded by its own bytes, cropped to the bucket, and bound as the first frame", async () => {
+    const face = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 9, 8, 7, 6]);
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "kest.png", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-face", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-h3-video",
+      capability: "video",
+      params: { prompt: "kest speaks to camera", durationSec: 5, aspect: "9:16", references: ["references/kest/main.png"] },
+      imageReferences: [{ name: "reference-01.png", contentType: "image/png", data: face }],
+    });
+    const upload = calls.find((c) => c.url.endsWith("/upload/image"))!;
+    // The world reader names references positionally, and the engine's input/ folder is one flat
+    // namespace shared by every world on the machine — so the bytes name themselves before they go.
+    assert.equal(upload.filename, `${createHash("sha256").update(face).digest("hex")}.png`);
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    // What the engine answered, not what was sent: LoadImage takes a name from its own folder.
+    assert.equal(posted.prompt["14"]!.inputs["image"], "kest.png");
+    assert.deepEqual(posted.prompt["7"]!.inputs["first_frame"], ["15", 0]);
+    // The node's own resize of first_frame is a plain stretch, so the scaler crops to exactly the
+    // canvas being generated — a portrait photo on a portrait bucket here, and the same numbers.
+    assert.equal(posted.prompt["15"]!.inputs["crop"], "center");
+    assert.equal(posted.prompt["15"]!.inputs["width"], 480);
+    assert.equal(posted.prompt["15"]!.inputs["height"], 864);
+    assert.equal(posted.prompt["7"]!.inputs["width"], 480);
+    assert.equal(posted.prompt["7"]!.inputs["height"], 864);
+  });
+
+  it("h3 video: the planner's framed bag binds the boundary still as the first frame (issue 845)", async () => {
+    // The exact bag the pass compiler emits for a first-frame route with no endpoint of its own
+    // (issue 154): the still rides as the one reference, and its identity rides beside it. The
+    // allow-list must let the identity through — refusing it would fail every framed shot on
+    // the row the moment the mode was declared.
+    const still = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 4, 4, 4, 4]);
+    const { fetch, calls } = engineFake([
+      { match: /\/upload\/image$/, status: 200, body: { name: "still.png", subfolder: "" } },
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-still", node_errors: {} } },
+    ]);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+      model: "comfyui-h3-video",
+      capability: "video",
+      params: {
+        prompt: "kest turns from the window",
+        durationSec: 5,
+        aspect: "16:9",
+        references: ["artifacts/frame-shot-1.png"],
+        taskMode: "first-frame",
+        startFrame: "artifacts/frame-shot-1.png",
+        frameArtifact: { id: "artifact-1", hash: "sha256:abc" },
+        dispatchTiming: { slotSource: "shot-duration", slotDurationSec: 5, requestedDurationSec: 5, providerDurationMode: "requested", providerPaddingSec: 0 },
+        provenance: { sheets: [] },
+      },
+      imageReferences: [{ name: "reference-01.png", contentType: "image/png", data: still }],
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["14"]!.inputs["image"], "still.png");
+    assert.deepEqual(posted.prompt["7"]!.inputs["first_frame"], ["15", 0]);
+    assert.equal(posted.prompt["7"]!.inputs["length"], 124);
+  });
+
+  it("a recipe with one frame refuses two pictures, and one with none still refuses every picture", async () => {
+    const picture = { name: "reference-01.png", contentType: "image/png" as const, data: Uint8Array.from([1, 2]) };
+    const two = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(two.fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-h3-video",
+        capability: "video",
+        params: { prompt: "x", references: ["a.png", "b.png"] },
+        imageReferences: [picture, picture],
+      }),
+      /takes one reference image/,
+    );
+    assert.equal(two.calls.length, 0);
+    const none = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(none.fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-draft-video",
+        capability: "video",
+        params: { prompt: "x", references: ["a.png"] },
+        imageReferences: [picture],
+      }),
+      /takes no reference images/,
+    );
+    assert.equal(none.calls.length, 0);
+  });
+
+  it("a face the queue named but never prepared refuses, rather than generating a stranger", async () => {
+    const { fetch, calls } = engineFake([{ match: /./, status: 200, body: { prompt_id: "p" } }]);
+    await assert.rejects(
+      new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-h3-video",
+        capability: "video",
+        params: { prompt: "x", references: ["references/kest/main.png"] },
+      }),
+      /reference image that never arrived/,
+    );
+    assert.equal(calls.length, 0);
   });
 
   it("a length h3 does not offer refuses with h3's own menu, not wan's", async () => {
@@ -1475,7 +1629,7 @@ describe("making room on the graphics card", () => {
   const client = (free: () => Promise<number | null>, fetch: FetchLike, onSleep: (ms: number) => void = () => {}) => {
     let now = 0;
     const sleep = async (ms: number): Promise<void> => { now += ms; onSleep(ms); };
-    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, sleep, () => now);
+    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, undefined, sleep, () => now);
   };
 
   it("dispatches when the card cannot be measured", async () => {
@@ -1494,6 +1648,7 @@ describe("making room on the graphics card", () => {
       OK_PREFLIGHT,
       undefined,
       async () => 1,
+      undefined,
       () => "remote",
     ).submit("", VOICE);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
@@ -1577,7 +1732,7 @@ describe("making room on the graphics card", () => {
     let now = 0;
     let asked = 0;
     const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
-    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, async (ms) => { now += ms; }, () => now);
+    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, undefined, async (ms) => { now += ms; }, () => now);
     await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
     assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
@@ -1593,7 +1748,7 @@ describe("making room on the graphics card", () => {
     let asked = 0;
     const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
     const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
-    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, sleep, () => now);
+    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, undefined, sleep, () => now);
     await assert.rejects(cancelled.submit("", { ...VOICE, signal: controller.signal }), (err: Error) => err.name === "AbortError");
     assert.equal(asked, 2, "measured before asking and on the answer, then never again");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
@@ -1604,6 +1759,36 @@ describe("making room on the graphics card", () => {
     const readings: Array<number | null> = [3000, 3000, null];
     await client(async () => readings.shift() ?? null, fetch).submit("", VOICE);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
+  });
+});
+
+/**
+ * Putting things down after a run (issue 846).
+ *
+ * A long ComfyUI session gets slower as it goes because what a video job streamed through system
+ * memory stays resident until the process ends. The queue says when the lane has drained; these
+ * cover what the client does with that — the one `/free`, only for a video recipe, and only on an
+ * engine whose memory is this machine's to reclaim.
+ */
+describe("putting things down when the lane drains", () => {
+  const ROUTES = [{ match: /\/free$/, status: 200, body: {} }];
+
+  it("asks a local engine to unload after a video job", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-h3-video");
+    const freed = calls.filter((c) => c.url.endsWith("/free") && c.method === "POST");
+    assert.equal(freed.length, 1);
+    assert.deepEqual(freed[0]!.body, { unload_models: true, free_memory: true });
+  });
+
+  it("leaves a voice or image recipe's cache alone, and a remote engine's memory to its owner", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-cloned-voice");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-draft-image");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("not-a-recipe");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, undefined, undefined, () => "remote").release("comfyui-h3-video");
+    await new ComfyUiClient(fetch, () => null, OK_PREFLIGHT).release("comfyui-h3-video");
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
   });
 });
 

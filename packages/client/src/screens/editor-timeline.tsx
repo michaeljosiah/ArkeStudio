@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
   basePictureTrack,
+  detachAudioCommands,
+  type ArtifactSidecar,
   formatFrames,
   orderedTrackClips,
   type FrameRate,
@@ -52,7 +54,7 @@ export interface PictureClipView {
 }
 
 /** Join the base Picture track with what the resolver found for each clip. */
-export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPictureCut | null): PictureClipView[] {
+export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPictureCut | null, artifacts: readonly ArtifactSidecar[] = []): PictureClipView[] {
   const base = basePictureTrack(timeline);
   if (base === null) return [];
   const played = (cut?.entries ?? []).filter((entry) => entry.hole !== true);
@@ -63,16 +65,19 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
   return orderedTrackClips(base).map((clip) => {
     const shotId = clip.source.kind === "shot" ? clip.source.shotId : null;
     const entry = byClip.get(clip.id) ?? (shotId !== null ? byShot.get(shotId) : undefined);
+    const artifact = clip.source.kind === "artifact" ? artifacts.find(item => clip.source.kind === "artifact" && item.id === clip.source.artifactId) : undefined;
+    const mediaPath = artifact ? `artifacts/${artifact.file}` : entry?.media?.path;
     return {
       clip,
       label:
-        entry !== undefined && entry.media !== null
-          ? `shot ${entry.shot.number}`
+        mediaPath
+          ? clip.source.label
           : clip.source.kind === "shot"
             ? `shot ${clip.source.shotNumber} · no accepted take`
             : clip.source.label,
-      poster: entry?.media ? posterize(entry.media.path) : null,
-      gap: entry === undefined || entry.media === null,
+      // Imported videos have no take-directory frame.png; show their label until a poster exists.
+      poster: artifact?.kind === "video" ? null : mediaPath ? posterize(mediaPath) : null,
+      gap: !mediaPath,
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
       shotId,
     };
@@ -100,6 +105,7 @@ export function PictureTrack({
   mintClipId,
   sourceLength,
   onDrop,
+  onFileDrop,
 }: {
   timeline: ProductionTimeline;
   views: readonly PictureClipView[];
@@ -118,6 +124,7 @@ export function PictureTrack({
   sourceLength: SourceLengthFrames;
   /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
   onDrop?: (drop: { artifactId: string; frame: number }) => void;
+  onFileDrop?: (files: File[], frame: number) => void;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
   const [over, setOver] = useState(false);
@@ -281,6 +288,9 @@ export function PictureTrack({
         className={cx("fy-track__lane", "fy-pictlane", over && "fy-typedlane--over", refused && "fy-typedlane--refuse", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
         onPointerDown={onLanePointerDown}
         onDragOver={(event) => {
+          if (!disabled && onFileDrop && Array.from(event.dataTransfer.types).includes("Files")) {
+            event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setOver(true); return;
+          }
           if (onDrop === undefined || disabled) return;
           if (!dragAccepts(event.dataTransfer.types, false)) {
             event.dataTransfer.dropEffect = "none";
@@ -296,6 +306,14 @@ export function PictureTrack({
           setRefused(false);
         }}
         onDrop={(event) => {
+          if (event.dataTransfer.files?.length) {
+            event.preventDefault(); event.stopPropagation(); setOver(false);
+            if (!disabled && onFileDrop) {
+              const box = event.currentTarget.getBoundingClientRect();
+              onFileDrop(Array.from(event.dataTransfer.files), frameAtPixel(event.clientX - box.left, box.width, span));
+            }
+            return;
+          }
           if (onDrop === undefined) return;
           event.preventDefault();
           setOver(false);
@@ -350,7 +368,9 @@ export function PictureTrack({
                 <span className="fy-pictclip__gap">{view.label}</span>
               ) : (
                 <>
-                  <Portrait worldSlug={slug} path={view.poster ?? ""} label={view.label} radius={0} />
+                  {view.poster === null
+                    ? <div className="fy-portrait--fallback"><Film size={18} /></div>
+                    : <Portrait worldSlug={slug} path={view.poster} label={view.label} radius={0} />}
                   <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
                 </>
               )}
@@ -501,6 +521,8 @@ export function PictureClipTiming({
   const end = clip.startFrame + clip.durationFrames;
   return (
     <div className="fy-cutinspect__rows">
+      <FrameStepper label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
+        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")} />
       <FrameStepper
         label="In"
         value={clip.startFrame}
@@ -528,3 +550,18 @@ export function PictureClipTiming({
 }
 
 export { clipAtFrame };
+
+export function DetachAudio({ production, timeline, artifacts, clip, disabled, onCommands, mintClipId }: {
+  production: ProductionBundle; timeline: ProductionTimeline; artifacts: readonly ArtifactSidecar[];
+  clip: TimelineClip; disabled: boolean; onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+  mintClipId: () => TimelineClipId;
+}) {
+  let reason: string | null = null;
+  try { detachAudioCommands(production, timeline, artifacts, clip.id, "cl_detach-preview"); }
+  catch (error) { reason = error instanceof Error ? error.message : String(error); }
+  return <div className="fy-cutinspect__rows">
+    <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={disabled || reason !== null}
+      onClick={() => onCommands([{ kind: "detach-audio", clipId: clip.id, newClipId: mintClipId() }], "Detach audio")}>Detach audio</button>
+    {reason && <p className="fy-cutinspect__note">{reason}</p>}
+  </div>;
+}

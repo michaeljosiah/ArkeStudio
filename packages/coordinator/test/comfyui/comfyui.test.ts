@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RuntimeProbes } from "@arke-studio/contracts";
+import type { ComfyUiSettings, DomainEvent, Job, LedgerEntry, RecipeReadiness, RuntimeProbes } from "@arke-studio/contracts";
 import { comfyUiRecoveryDecision } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
@@ -1396,6 +1396,39 @@ describe("readiness is one ladder with a specific reason on every rung (§2.12, 
     const unmeasured = await withMemFloor(null);
     assert.equal(unmeasured.startsWith("unknown|"), true);
     assert.match(unmeasured, /Memory could not be measured/);
+  });
+
+  it("a declared free-memory floor is a busy rung beside the card's, advisory and optimistic (issue 846)", async () => {
+    // The total floor above admits a 32 GB machine with 3 GB of it free, and offloading spends
+    // free RAM. Same doctrine as vram-busy: a measured shortfall disables with the machine's own
+    // figures and the cloud alternative; unmeasured dispatches; a remote engine is never judged
+    // by this machine's memory.
+    const withFreeFloor = async (freeMemMb: number | null, engineUrl = "http://127.0.0.1:8188"): Promise<RecipeReadiness> => {
+      const world = fakeWorld();
+      world.urls.set(engineUrl, {});
+      world.files.add("C:/models/checkpoints/sd_xl_base_1.0.safetensors");
+      world.hashes.set("C:/models/checkpoints/sd_xl_base_1.0.safetensors", "a".repeat(64));
+      const service = new ComfyUiEngineService({
+        ...engineDeps(world, "C:/app"),
+        recipes: [{ ...FACTS[0]!, minMemMb: 30720, minFreeMemMb: 20000 }],
+        freeVramMb: async () => 9000,
+        freeMemMb: async () => freeMemMb,
+      });
+      await service.applySettings({ enginePath: null, engineUrl, modelsDir: "C:/models" });
+      return (await service.status({ vramMb: 10240, memMb: 32000, diskFreeMb: 1000 })).recipes[0]!;
+    };
+    const short = await withFreeFloor(3000);
+    assert.equal(short.state, "disabled");
+    assert.equal(short.reasonKind, "memory-busy");
+    assert.match(short.reason ?? "", /Needs 20 GB memory free\. This machine has 3 GB free of 31 GB — close other programs/);
+    assert.equal(short.cloudAlternative, "Cloud image still works.");
+    assert.equal((await withFreeFloor(24000)).state, "ready");
+    assert.equal((await withFreeFloor(null)).state, "ready", "unmeasured free memory dispatches (D15)");
+    // A remote engine never reaches this rung — the walk stops at the card it cannot measure —
+    // and this machine's 3 GB must not become the reason either way.
+    const remote = await withFreeFloor(3000, "http://10.0.0.7:8188");
+    assert.notEqual(remote.state, "disabled");
+    assert.notEqual(remote.reasonKind, "memory-busy");
   });
 
   it("a card that cannot be asked how much is free is not refused for it", async () => {

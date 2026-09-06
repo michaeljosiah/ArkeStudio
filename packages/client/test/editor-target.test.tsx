@@ -128,6 +128,7 @@ function dragEvent(types: string[], artifactId: string, x = 50) {
 /** The story saved, the bells in the Library and once on a Music track, an empty Music 2 beside it. */
 function savedState(): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
+  state.world!.artifacts.find(artifact => artifact.id === BELLS)!.mediaInfo = { durationSec: 2, hasAudio: true };
   const production = state.world!.productions[0]!;
   const shots = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => ({ kind: "shot" as const, shotId: shot.id })));
   production.timeline = {
@@ -207,33 +208,18 @@ describe("lanes as the target draws them (R-13, R-10)", () => {
     }
   });
 
-  it("a drop on an empty lane adds that lane and places in one batch; the new-lane strip makes another", async () => {
+  it("creates generic audio tracks on demand instead of fixed empty role lanes", async () => {
     const screen = await mount(savedState());
     try {
-      const dialogue = screen.container.querySelector<HTMLElement>('[data-track="dialogue"] .fy-track__lane')!;
-      assert.ok(dialogue, "the empty Dialogue lane is drawn");
-      await act(async () => reactProps(dialogue)["onDrop"]!(dragEvent([ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND], BELLS)));
-      const [first] = commandsSent(screen);
-      assert.ok(first);
-      assert.deepEqual(first.map((command) => command.kind), ["add-track", "place"]);
-      assert.equal(first[0]!.kind === "add-track" && first[0]!.trackKind, "dialogue");
-
+      assert.equal(screen.container.querySelector('[data-track="dialogue"]'), null);
+      assert.equal(screen.container.querySelector('[data-track="ambience"]'), null);
       const strip = screen.container.querySelector<HTMLElement>('[data-track="new"] .fy-track__lane')!;
-      assert.ok(strip, "the new-lane strip sits under the lanes");
-      // The gate holds while one batch is in flight; the snapshot answers before the next.
-      const state = savedState();
-      const saved = state.world!.productions[0]!.timeline;
-      assert.ok(saved && saved.status === "ready");
-      state.world!.productions[0]!.timeline = { status: "ready", timeline: { ...saved.timeline, revision: 9 } };
-      await act(async () => __setStateForTest(state));
       await act(async () => reactProps(strip)["onDrop"]!(dragEvent([ARTIFACT_DRAG_TYPE, LANE_DRAG_SOUND], BELLS)));
-      const batches = commandsSent(screen);
-      const second = batches[batches.length - 1]!;
-      assert.deepEqual(second.map((command) => command.kind), ["add-track", "place"]);
-      assert.equal(second[0]!.kind === "add-track" && second[0]!.name, "Music 3", "a third Music lane, named in order");
-    } finally {
-      await close(screen);
-    }
+      const [batch] = commandsSent(screen); assert.ok(batch);
+      assert.deepEqual(batch.map(command => command.kind), ["add-track", "place"]);
+      assert.equal(batch[0]!.kind === "add-track" && batch[0]!.trackKind, "audio");
+      assert.equal(batch[0]!.kind === "add-track" && batch[0]!.name, "Audio 1");
+    } finally { await close(screen); }
   });
 
   it("an empty extra lane can be removed; the base Picture track cannot", async () => {
@@ -250,22 +236,16 @@ describe("lanes as the target draws them (R-13, R-10)", () => {
     }
   });
 
-  it("the Inspector's kind chips move a sound clip to another lane as one batch (A-3)", async () => {
+  it("changes a clip role without moving or replacing its source", async () => {
     const screen = await mount(savedState());
     try {
       await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_bells-1"]')!.click());
-      const chips = [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-movekind__chip")];
-      assert.equal(chips.length, 3, "Dialogue, Ambience, Music");
-      assert.equal(chips.find((chip) => chip.textContent === "Music")?.getAttribute("aria-pressed"), "true");
-      await act(async () => chips.find((chip) => chip.textContent === "Ambience")!.click());
+      const select = screen.container.querySelector<HTMLSelectElement>('[aria-label="Clip role"]')!;
+      assert.ok(select);
+      await act(async () => reactProps(select)["onChange"]!({ target: { value: "ambience" } }));
       const [batch] = commandsSent(screen);
-      assert.ok(batch, "one batch was sent");
-      assert.deepEqual(batch.map((command) => command.kind), ["delete", "add-track", "place"]);
-      assert.equal(batch[1]!.kind === "add-track" && batch[1]!.trackKind, "ambience");
-      assert.equal(batch[2]!.kind === "place" && batch[2]!.clip.source.kind === "artifact" && batch[2]!.clip.source.artifactId, BELLS);
-    } finally {
-      await close(screen);
-    }
+      assert.deepEqual(batch, [{ kind: "set-clip-role", clipId: "cl_bells-1", role: "ambience" }]);
+    } finally { await close(screen); }
   });
 });
 
@@ -359,14 +339,16 @@ describe("the export sheet (R-24, T-5)", () => {
 });
 
 describe("spoken lines in the Library (R-1, R-8)", () => {
-  it("lists every line under the audio filter, and places a read one on Dialogue", async () => {
+  it("lists read lines with the Voice role and reuses the generic track for later placements", async () => {
     const state = savedState();
     const production = state.world!.productions[0]!;
+    assert.ok(production.timeline?.status === "ready");
+    production.timeline.timeline.tracks = production.timeline.timeline.tracks.filter(track => track.kind === "picture");
     const spoken = production.scenes.flatMap((scene) => orderedShots(scene)).find((shot) => (shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue") && shot.audio.line);
     assert.ok(spoken, "the fixture has a spoken line");
     production.takes.push({
       ...production.takes[0]!,
-      id: "tk_voice_1" as never,
+      id: "tk_01J8G0000000000000000000V1" as never,
       coversShots: [spoken.id],
       kind: "voice",
       provider: "kokoro",
@@ -387,8 +369,18 @@ describe("spoken lines in the Library (R-1, R-8)", () => {
       const [batch] = commandsSent(screen);
       assert.ok(batch, "one batch was sent");
       assert.deepEqual(batch.map((command) => command.kind), ["add-track", "place"]);
-      assert.equal(batch[0]!.kind === "add-track" && batch[0]!.trackKind, "dialogue");
-      assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.source.kind === "take" && batch[1]!.clip.source.takeId, "tk_voice_1");
+      assert.equal(batch[0]!.kind === "add-track" && batch[0]!.trackKind, "audio");
+      assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.role, "dialogue");
+      assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.source.kind === "take" && batch[1]!.clip.source.takeId, "tk_01J8G0000000000000000000V1");
+      assert.ok(batch[0]?.kind === "add-track" && batch[1]?.kind === "place");
+      production.timeline.timeline = applyTimelineCommands(production.timeline.timeline, [batch[0], batch[1]]);
+      await act(async () => __setStateForTest(structuredClone(state)));
+      await act(async () => button(screen, "Add to timeline").click());
+      const next = commandsSent(screen).at(-1)!;
+      assert.equal(next.length, 1, "the next line reuses the existing track");
+      assert.ok(next[0]?.kind === "place" && batch[1]?.kind === "place");
+      assert.equal(next[0].trackId, batch[1].trackId);
+      assert.equal(next[0].clip.startFrame, batch[1].clip.startFrame + batch[1].clip.durationFrames, "the next line starts in the next free span");
     } finally {
       await close(screen);
     }
@@ -447,7 +439,7 @@ describe("the picker and the keys sheet, round two", () => {
     production.timeline = {
       status: "ready",
       timeline: applyTimelineCommands(
-        { ...seeded, tracks: [{ ...seeded.tracks[0]!, clips: [first] }] },
+        { ...seeded, tracks: [{ ...seeded.tracks[0]!, id: "tr_saved-picture", clips: [first] }] },
         [{ kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }] }],
       ),
     };
@@ -459,6 +451,7 @@ describe("the picker and the keys sheet, round two", () => {
       await act(async () => add.click());
       const [batch] = commandsSent(screen);
       assert.ok(batch && batch[0]!.kind === "place");
+      assert.equal(batch[0].trackId, "tr_saved-picture");
       assert.equal(batch[0]!.kind === "place" && batch[0]!.clip.startFrame, first.startFrame + first.durationFrames, "it slides past the clip at the playhead");
     } finally {
       await close(screen);
