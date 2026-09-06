@@ -55,6 +55,7 @@ import { artifactOpenLabel } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
+import { ReadAloud } from "../components/read-aloud.js";
 import { foundingNote } from "../components/queue-note.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
@@ -1612,9 +1613,11 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheet = useSheet(worldId, sheetId);
   const navigate = useNavigate();
   const voiceAudio = useVoiceAudio();
-  // Read-aloud is shared across the character's descriptive sections; the state tracks which one
-  // the user last asked to hear so the clip, cost note and failure attach to the right block.
-  const [read, setRead] = useState<{ requestId: string; section: "Essence" | "Appearance" } | null>(null);
+  // Read-aloud is shared across the sheet's sections; the state tracks which one the user last
+  // asked to hear so the clip, cost note and failure attach to the right block. Any section the
+  // sheet's shape declares, not the original Essence/Appearance pair (issue 857) — a location's
+  // Look and a faction's Wants are prose of the same kind, on screens that could not be heard.
+  const [read, setRead] = useState<{ requestId: string; section: string } | null>(null);
   const readResult = read ? voiceAudio[read.requestId] : undefined;
   // Reading a section aloud is narration, not dialogue: it uses the app's narrator, so it does
   // not depend on this character having a voice of their own. Gating it on `sheet.voice` was
@@ -1647,19 +1650,18 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   /*
    * What the sheet reads as a page, and in what order (issue 859).
    *
-   * Declared, never derived. Between the two paragraphs a reader wants sit a portrait, a voice
-   * card and a row of buttons; narration taken from the page as laid out would try to read
-   * them. Only blocks with words in them are declared, so the page never announces a heading
-   * and then says nothing.
+   * Declared, never derived — and declared to match what the screen draws: the Essence is
+   * lifted out as the lead paragraph and the rest follow in the grid, so that is the order.
+   * Between them sit a portrait, a voice card and a row of buttons, and narration taken from
+   * the page as laid out would try to read those. Empty blocks never enter, so the page never
+   * announces a heading and then says nothing.
    */
   const pageBlocks = useMemo<PageReadBlock[]>(() => {
-    if (sheet?.type !== "character") return [];
-    const blocks: PageReadBlock[] = [];
-    for (const heading of ["Essence", "Appearance"] as const) {
-      const body = sheet.sections.find((section) => section.heading === heading)?.body ?? "";
-      if (body.trim() !== "" && body.trim() !== "—") blocks.push({ heading, body });
-    }
-    return blocks;
+    const sections = sheet?.sections ?? [];
+    const lead = sheet?.type === "character" ? sections.find((s) => s.heading === "Essence") : undefined;
+    return (lead ? [lead, ...sections.filter((s) => s !== lead)] : sections)
+      .filter((s) => s.body.trim() !== "" && s.body.trim() !== "—")
+      .map((s) => ({ heading: s.heading, body: s.body }));
   }, [sheet?.type, sheet?.sections]);
   const pageRead = usePageRead({
     pageId: sheet?.id,
@@ -1671,7 +1673,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       readSheetPage(
         worldId ?? "",
         sheet?.id ?? "",
-        pageBlocks.map((block) => block.heading as "Essence" | "Appearance"),
+        pageBlocks.map((block) => block.heading),
         requestId,
         confirmationToken,
       ),
@@ -1708,9 +1710,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   // The Essence is the lead paragraph under the name (design 3a); the grid holds the rest.
   const essence = isCharacter ? sheet.sections.find((s) => s.heading === "Essence") : undefined;
   const gridSections = essence ? sheet.sections.filter((s) => s !== essence) : sheet.sections;
-  // The read controls, the loaded clip and the cost note for one section. Essence and Appearance
-  // share this; each shows its own speaker on hover and its own "preparing"/confirmation state.
-  const sectionAudio = (heading: "Essence" | "Appearance") => {
+  // The read controls, the loaded clip and the cost note for one section. Every section shares
+  // this; each shows its own speaker on hover and its own "preparing"/confirmation state.
+  const sectionAudio = (heading: string) => {
     const active = read?.section === heading ? readResult : undefined;
     const clip: Clip | null =
       active?.status === "ready" && active.file
@@ -1747,7 +1749,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   };
   // Text with the hover read-aloud/copy affordance (design 3a). The prose element differs by
   // section — a lead paragraph, a grid cell — so the caller passes it; the host is the same.
-  const readableProse = (heading: "Essence" | "Appearance", body: string, prose: ReactNode) => {
+  const readableProse = (heading: string, body: string, prose: ReactNode) => {
     const { clip, onRead, note } = sectionAudio(heading);
     return (
       <div className="fy-texthost">
@@ -1988,10 +1990,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         style={isCharacter ? undefined : { gridTemplateColumns: "1fr", gap: 14 }}
       >
         {gridSections.map((s) => {
-          // Appearance carries the same descriptive prose as the Essence, so it earns the same
-          // hover read-aloud — once it holds real text, not the empty-section placeholder.
-          const readable =
-            isCharacter && s.heading === "Appearance" && s.body.trim() !== "" && s.body.trim() !== "—";
+          // Every section carries authored prose, so every one earns the hover read-aloud — once
+          // it holds real text, not the empty-section placeholder. It used to be Appearance
+          // alone, which meant a location sheet or a faction sheet had no readable block at all.
+          const readable = s.body.trim() !== "" && s.body.trim() !== "—";
           const body = <div className="fy-sheet__secbody">{s.body}</div>;
           return (
             <div key={s.heading}>
@@ -2004,7 +2006,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
                   />
                 )}
               </div>
-              {readable ? readableProse("Appearance", s.body, body) : body}
+              {readable ? readableProse(s.heading, s.body, body) : body}
             </div>
           );
         })}
@@ -3814,7 +3816,15 @@ export function CanonEntryScreen() {
             {entry.retired && <Badge tone="danger">retired</Badge>}
           </div>
           <h1 className="fy-entry__title">{entry.title}</h1>
-          <div className="fy-entry__body">{entry.body}</div>
+          {/* The statement is the one thing on this screen somebody reads rather than scans. */}
+          <div className="fy-texthost">
+            <div className="fy-entry__body">{entry.body}</div>
+            <ReadAloud
+              source={{ of: "canon", canonId: entry.id }}
+              title={`${entry.id} · ${entry.title}`}
+              text={entry.body}
+            />
+          </div>
           <div className="fy-mono" style={{ marginTop: 14 }}>
             written v{entry.introducedAt}
             {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}

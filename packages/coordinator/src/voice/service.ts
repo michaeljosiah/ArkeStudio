@@ -9,12 +9,14 @@ import {
   extractVoiceAttributes,
   previewLineFor,
   rankVoices,
+  isGraphScene,
   splitBible,
   type ClonedVoice,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
   type PreviewLine,
+  type ProseReadSource,
   type Sheet,
   type VoiceCandidate,
   type VoiceAudioFormat,
@@ -178,23 +180,112 @@ export function concatWav(parts: readonly Uint8Array[]): Uint8Array {
  * was what tied one to the other.
  */
 export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text: string } {
-  if (sheet.type !== "character") throw new Error("Only character sections can be read aloud.");
-  if (heading !== "Essence" && heading !== "Appearance") {
-    throw new Error("This section is not available for read aloud.");
-  }
-  const text = normalizeSpeechText(sheet.sections.find((section) => section.heading === heading)?.body ?? "");
+  /*
+   * Any section the sheet actually has, rather than a character's Essence and Appearance
+   * (issue 857).
+   *
+   * The old pair was not a rule about what is readable; it was a record of which two blocks had
+   * a speaker drawn beside them. Everything else the shapes declare — Relationships, a
+   * location's Look and Sound, a faction's Wants — is prose of exactly the same kind, and
+   * refusing it meant a whole sheet type could not be listened to at all. So the check becomes
+   * the bible's: is the section on this sheet, and does it have words in it.
+   */
+  const section = sheet.sections.find((candidate) => candidate.heading === heading);
+  if (!section) throw new Error("That section is no longer on this sheet.");
+  const text = normalizeSpeechText(section.body);
   if (!text) throw new Error("Nothing to read yet.");
   return { text };
 }
 
 /**
+ * The world's other authored prose, named rather than sent (issue 857).
+ *
+ * The same contract as the sheet and bible resolvers, over the records the rest of the app puts
+ * on screen: a canon entry, a scene's synopsis, a shot's script, the production overview, the
+ * season and the Series. A source that no longer resolves refuses by name — an entry that has
+ * been retired out from under an open screen should say so, not read the wrong paragraph.
+ *
+ * The `reply` arm is deliberately absent: a conversation is an event log rather than part of the
+ * world bundle, so it is read where the log is, and this stays a pure function of the bundle.
+ */
+export function authoritativeProseSpeech(
+  bundle: WorldBundle,
+  source: Exclude<ProseReadSource, { of: "reply" }>,
+): { text: string; heading: string; version: number; subjectId: string } {
+  const production = (id: string) => {
+    const found = bundle.productions.find((candidate) => candidate.meta.id === id);
+    if (!found) throw new Error("That production is no longer in this world.");
+    return found;
+  };
+  // The subject id keys the cache target and the queue row, so it names the record rather than
+  // its kind: two canon entries read on the same voice must not land on one target.
+  const spoken = (raw: string | undefined, heading: string, version: number, subjectId: string) => {
+    const text = normalizeSpeechText(raw ?? "");
+    if (!text) throw new Error("Nothing to read yet.");
+    return { text, heading, version: Math.max(1, version), subjectId };
+  };
+  switch (source.of) {
+    case "canon": {
+      const entry = bundle.canon.find((candidate) => candidate.id === source.canonId);
+      if (!entry) throw new Error("That canon entry is no longer in this world.");
+      return spoken(entry.body, `${entry.id} · ${entry.title}`, bundle.meta.canonRevision, entry.id);
+    }
+    case "shot": {
+      const scene = production(source.productionId).scenes.find((candidate) => candidate.id === source.sceneId);
+      if (!scene) throw new Error("That scene is no longer in this production.");
+      // Read off the structure directly rather than through `orderedShots`, which throws on an
+      // invalid flow: a scene whose graph is broken still opens read-only, and its shots are
+      // still prose somebody may want read to them. Finding one by id needs no order at all.
+      const shots = isGraphScene(scene)
+        ? scene.flow.nodes.flatMap((node) => (node.kind === "shot" ? [node.shot] : []))
+        : scene.shots;
+      const shot = shots.find((candidate) => candidate.id === source.shotId);
+      if (!shot) throw new Error("That shot is no longer in this scene.");
+      return spoken(shot.description, `Shot ${shot.number} · script`, scene.version, shot.id);
+    }
+    case "story": {
+      const found = production(source.productionId);
+      const story = found.story;
+      const subjectId = `${source.productionId}/${source.field}`;
+      // story.md is a file of its own with no version stamp; the overview's is the closest
+      // honest number for a record that changes with it.
+      if (source.field === "treatment") {
+        return spoken(found.treatment ?? undefined, "Treatment", story?.version ?? 1, subjectId);
+      }
+      if (!story) throw new Error("Nothing has been settled about this production yet.");
+      if (source.field === "acts") {
+        const acts = (story.acts ?? [])
+          .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
+          .join(". ");
+        return spoken(acts, "Acts", story.version, subjectId);
+      }
+      return spoken(story[source.field], source.field === "logline" ? "Logline" : "Spine", story.version, subjectId);
+    }
+    case "season": {
+      const season = production(source.productionId).season;
+      if (!season) throw new Error("This production has no season record.");
+      return spoken(
+        season[source.field],
+        source.field === "question" ? "The question it answers" : "How it ends",
+        season.version,
+        `${source.productionId}/${source.field}`,
+      );
+    }
+    case "series": {
+      const series = bundle.series.find((candidate) => candidate.id === source.seriesId);
+      if (!series) throw new Error("That Series is no longer in this world.");
+      return spoken(series.engine, "Series engine", series.version, series.id);
+    }
+  }
+}
+
+/**
  * The same, for a section of the bible (2026-08-24).
  *
- * No enum of permitted headings, which is the one real difference from the sheet version. A
- * sheet's shape is authored by the app, so naming its two readable sections in a type is honest.
- * A bible is a blank page somebody types into — `splitBible` exists precisely because its
- * headings are the author's — so the readable set cannot be written down in advance, and the
- * check that matters is only whether the section is there and has words in it.
+ * The one difference from the sheet version is where the headings come from. A sheet's are its
+ * shape's, so a heading it does not carry is refused as gone; a bible is a blank page somebody
+ * types into — `splitBible` exists precisely because its headings are the author's. Either way
+ * the check is the same: is the section there, and does it have words in it.
  *
  * Asked for by an author who wanted the story read back to her rather than read. The bible is
  * where the whole arc lives and it was the one long-form document in the world with no way to
