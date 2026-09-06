@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   applyTimelineCommands,
+  AudioQcReportSchema,
   audioAtSec,
   buildFfmpegArgs,
   buildRenderPlan,
   cueAtSec,
   episodeTimelineRange,
+  duckingEnvelope,
   pictureAtSec,
+  PerformanceRecordSchema,
+  DialogueTimingIntentSchema,
   seedSpinePictureTimeline,
   seedStoryPictureTimeline,
   spineTimelineFingerprint,
@@ -18,6 +22,7 @@ import {
   type ProductionSpine,
   type RenderArtifact,
   type Scene,
+  type TimelineClip,
 } from "../src/index.js";
 
 /**
@@ -118,6 +123,50 @@ function ok<T extends { ok: boolean }>(result: T): Extract<T, { ok: true }> {
 }
 
 describe("one timeline, three delivery scopes (#682)", () => {
+  it("retains mutual dialogue approval across an episode boundary without delivering the partner's excluded sound (#895)", () => {
+    const value = production();
+    const timeline = seedStoryPictureTimeline(value);
+    value.timeline = { status: "ready", timeline };
+    const clips: TimelineClip[] = [];
+    for (const [shotId, partner, startFrame, durationSec, suffix] of [["sh_2", "sh_3", 50, 2, "1"], ["sh_3", "sh_2", 88, 1, "2"]] as const) {
+      const id = `pf_01J8G0000000000000000000P${suffix}`, hash = `sha256:${suffix.repeat(64)}`;
+      const technical = { container: "wav", codec: "pcm_s16le", sampleFormat: "s16", sampleRateHz: 48000, channels: 1, bitDepth: 16, durationSec, sizeBytes: 96000 * durationSec };
+      value.performances.push(PerformanceRecordSchema.parse({ id, kind: "scratch", file: `sha256-${suffix.repeat(64)}.wav`, createdAt: AT, recordedAt: AT,
+        target: { productionId: value.meta.id, sceneId: shotId === "sh_2" ? "sc_a" : "sc_b", sceneVersion: 1, shotId, speakerSheetId: "speaker", authoredTextHash: hash },
+        captureAcknowledgement: { basis: "self", statementVersion: 1, at: AT },
+        provenance: { schemaVersion: 1, source: { kind: "performance-recording", productionId: value.meta.id, performanceId: id, sourceFile: "capture.wav", sourceMediaHash: hash },
+          sourceTechnical: technical, outputHash: hash, outputTechnical: technical, preparation: [], createdAt: AT,
+          qualityReport: { schemaVersion: 1, sourceHash: hash, analyzer: { id: "arke-pcm-qc", version: 1, policyVersion: 1 }, analyzedAt: AT, technical,
+            measurements: Object.fromEntries(Object.keys(AudioQcReportSchema.shape.measurements.shape).map(key => [key, null])),
+            checks: Object.fromEntries(Object.keys(AudioQcReportSchema.shape.checks.shape).map(key => [key, { outcome: "unavailable", code: "fixture" }])),
+          },
+        },
+      }));
+      clips.push({ id: `cl_dialogue-${suffix}`, startFrame, durationFrames: durationSec * 25, sourceInFrames: 0,
+        source: { kind: "performance", performanceId: id, shotId, sourceHash: hash, label: shotId, leadInSec: 0,
+          timing: DialogueTimingIntentSchema.parse({ overflow: { mode: "overlap", withShotId: partner } }) } });
+    }
+    // Performance overlaps live on separate lanes, as the atomic placement command writes them.
+    clips.forEach((clip, index) => timeline.tracks.push({ id: `tr_dialogue-${index}`, kind: "dialogue", name: "Dialogue", order: index + 1, muted: false, clips: [clip] }));
+    const input = { production: value, artifacts, timeline: value.timeline, preset: "review-cut" as const };
+    const full = ok(buildRenderPlan({ ...input, scope: { kind: "production" } }));
+    for (const [episodeId, startSec, endSec] of [["ep_one", 0, 3.52], ["ep_two", 3.52, 9.52]] as const) {
+      const scope = { kind: "episode" as const, episodeId };
+      const actual = ok(buildRenderPlan({ ...input, scope })).plan, expected = windowPlan(full.plan, startSec, endSec, scope);
+      assert.deepEqual({ ...actual, speech: [] }, { ...expected, speech: [] });
+      // A shorter picture clock can bound the speech envelope at its end; audible gains agree.
+      for (const sec of [0, 0.25, endSec - startSec - 0.001]) {
+        assert.equal(duckingEnvelope(actual.speech, actual.mix, sec), duckingEnvelope(expected.speech, expected.mix, sec));
+      }
+    }
+    const first = ok(buildRenderPlan({ ...input, scope: { kind: "episode", episodeId: "ep_one" } }));
+    assert.deepEqual(first.plan.audio.filter(item => item.role === "dialogue").map(item => item.clipId), ["cl_dialogue-1"]);
+    const source = clips[1]!.source; assert.ok(source.kind === "performance");
+    source.timing.overflow = { mode: "forbid" };
+    const refused = buildRenderPlan({ ...input, scope: { kind: "episode", episodeId: "ep_one" } });
+    assert.ok(!refused.ok); assert.match(refused.reason, /mutual approval/);
+  });
+
   for (const lane of ["base", "overlay", "audio"] as const) {
     it(`ignores unavailable ${lane} media outside an episode, but refuses it inside (#895)`, () => {
       const value = production();
