@@ -2805,6 +2805,31 @@ export function readSheetSection(
 }
 
 /**
+ * The whole sheet, read in order (issue 859).
+ *
+ * The ordered list travels in one frame rather than one frame per block: handlers run
+ * concurrently, so a loop of sends would put several local syntheses on the one small
+ * on-device model at once — and the page's cost could only be stated a block at a time.
+ */
+export function readSheetPage(
+  worldId: string,
+  sheetId: string,
+  sections: readonly string[],
+  requestId = queueRequest("read-sheet-page"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-sheet-page",
+    worldId,
+    sheetId,
+    sections: [...sections],
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
  * The same for a section of the bible, whose headings are the author's own and so cannot be an
  * enum here the way a sheet's two readable sections can (2026-08-24).
  */
@@ -2841,6 +2866,28 @@ export function readProse(
     kind: "read-prose",
     worldId,
     source,
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
+/**
+ * The same prose, read as a page (issue 859) — the screen's ordered list in one frame.
+ *
+ * One frame rather than one per block: handlers run concurrently, so a loop of sends would start
+ * several local syntheses at once, and the page's price could only be stated a block at a time.
+ */
+export function readProsePage(
+  worldId: string,
+  sources: readonly ProseReadSource[],
+  requestId = queueRequest("read-prose-page"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-prose-page",
+    worldId,
+    sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
   });

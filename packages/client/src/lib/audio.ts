@@ -77,7 +77,7 @@ function handle(event: Event): void {
        */
       if (queue && state.clip?.id === queue.id) {
         queue.at += 1;
-        if (queue.urls[queue.at] !== undefined) {
+        if (queue.parts[queue.at] !== undefined) {
           void playQueued();
           return;
         }
@@ -155,24 +155,59 @@ export async function playClip(clip: Clip, playlistOwned = false): Promise<void>
  * Keyed by the request that owns the read. A second read replaces the first outright: two voices
  * over one another is never what anybody meant.
  */
-let queue: { id: string; urls: string[]; at: number; title: string; sub?: string } | null = null;
+/**
+ * Each piece names itself (issue 859). A block read's pieces are synthesis chunks of one
+ * passage and all say the same thing, but a page read's pieces are its blocks — so the dock
+ * says which block is sounding and where it sits in the page, rather than holding the title
+ * the first piece happened to arrive with.
+ */
+type QueuePart = { url: string; title: string; sub?: string };
+let queue: { id: string; parts: (QueuePart | undefined)[]; at: number } | null = null;
 
 /** Start a queued read, or append to the one already running under this id. */
 export async function enqueueClip(clip: Clip & { part: number }): Promise<void> {
-  if (!queue || queue.id !== clip.id) {
-    queue = { id: clip.id, urls: [], at: 0, title: clip.title, ...(clip.sub ? { sub: clip.sub } : {}) };
-  }
-  queue.urls[clip.part] = clip.url;
+  if (!queue || queue.id !== clip.id) queue = { id: clip.id, parts: [], at: 0 };
+  queue.parts[clip.part] = { url: clip.url, title: clip.title, ...(clip.sub ? { sub: clip.sub } : {}) };
   // Nothing sounding for this read yet — start it. `ended` carries the rest.
   const idle = state.clip?.id !== clip.id || state.status === "ended" || state.status === "idle";
-  if (idle && queue.urls[queue.at] !== undefined) await playQueued();
+  if (idle && queue.parts[queue.at] !== undefined) await playQueued();
 }
 
 async function playQueued(): Promise<void> {
-  if (!queue) return;
-  const url = queue.urls[queue.at];
-  if (url === undefined) return; // the next piece is still being made; `enqueueClip` resumes us
-  await playClip({ id: queue.id, url, title: queue.title, ...(queue.sub ? { sub: queue.sub } : {}) });
+  const part = queue?.parts[queue.at];
+  if (!queue || part === undefined) return; // still being made; `enqueueClip` resumes us
+  await playClip({ id: queue.id, url: part.url, title: part.title, ...(part.sub ? { sub: part.sub } : {}) });
+}
+
+/**
+ * Which piece of the sounding read is playing, or null when a queued read is not what is
+ * sounding. A page read's pieces are its blocks, so this is the position in the page.
+ */
+function queueAt(): number | null {
+  return queue && state.clip?.id === queue.id ? queue.at : null;
+}
+
+export function useQueueAt(): number | null {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    queueAt,
+    queueAt,
+  );
+}
+
+/**
+ * Move to a piece that already exists — a page read's step forward and back.
+ *
+ * Silently declines a piece that has not been made yet: skipping into a block still being
+ * synthesised would stop the read on a queue that looks like it is running.
+ */
+export function jumpQueue(part: number): void {
+  if (!queue || queue.parts[part] === undefined) return;
+  queue.at = part;
+  void playQueued();
 }
 
 /** Stop and forget a queued read — a new read, or the dock being dismissed. */

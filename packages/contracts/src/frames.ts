@@ -113,6 +113,36 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /**
+   * The whole sheet, read in order (issue 859).
+   *
+   * The order travels because the screen declares it. Deriving it from the sheet — or worse,
+   * from the DOM — would make the narration follow the layout, and voice whatever decorative
+   * thing happens to sit between two paragraphs. The screen already knows which blocks are
+   * prose and which order it reads them in; that list is the whole difference between this
+   * frame and pressing the per-block control twice.
+   *
+   * One frame carrying the list rather than one frame per block: handlers run concurrently
+   * here, and several local syntheses at once is how the one small on-device model is felled.
+   * It is also the only way the cost of the page can be stated once, before any of it starts.
+   */
+  z
+    .object({
+      kind: z.literal("read-sheet-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      /**
+       * The blocks the screen reads, in the order it reads them. Never derived server-side.
+       *
+       * Free text for the same reason the single-section read is (issue 857): a sheet's readable
+       * set is whatever its shape declares, so a location's Look and Sound make a page as
+       * honestly as a character's Essence and Appearance.
+       */
+      sections: z.array(z.string().min(1)).min(1).max(12),
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
    * The same for a section of the bible (2026-08-24).
    *
    * A separate frame rather than a widened `read-sheet-section`, because the two differ in the
@@ -148,6 +178,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       source: ProseReadSourceSchema,
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The same, read as a page (issue 859).
+   *
+   * A production overview is one document whose cards are its blocks, and a season record is
+   * three answers on one line — read through, they are a listen rather than four or three
+   * presses. The list is the screen's, in the order the screen draws it: nothing here works out
+   * what a page contains, because a page's shape is the thing only the screen knows.
+   *
+   * One frame carrying the ordered list, for the reasons `read-sheet-page` gives: several local
+   * syntheses started in the same tick fell the one on-device model, and a page's price can only
+   * be stated once if the whole page is asked for at once.
+   */
+  z
+    .object({
+      kind: z.literal("read-prose-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      /** Addresses, never words — the same rule one source at a time already follows. */
+      sources: z.array(ProseReadSourceSchema).min(1).max(12),
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
