@@ -226,7 +226,7 @@ describe("video sound defaults and export diagnostics (#908)", () => {
       p.takeMediaInfo[parent.id] = { sourceHash: `sha256:${"a".repeat(64)}`, probedAt: AT, mediaInfo: { durationSec: 5, hasAudio: true } };
       const source = lane === "shot" ? seedStoryPictureTimeline(p).tracks[0]!.clips[0]!.source
         : { kind: "take" as const, takeId: child.id, label: "Segment", offsetSec: .2 };
-      const trackId = lane === "upper" || lane === "audio" ? "tr_test" : "tr_picture";
+      const trackId: "tr_test" | "tr_picture" = lane === "upper" || lane === "audio" ? "tr_test" : "tr_picture";
       const timeline = applyTimelineCommands(seedEmptyPictureTimeline(p), [
         ...(trackId === "tr_picture" ? [] : [{ kind: "add-track" as const, trackId, trackKind: lane === "audio" ? "audio" as const : "picture" as const, name: "Test" }]),
         { kind: "place", trackId, clip: { id: "cl_segment", startFrame: 0, durationFrames: 50, sourceInFrames: 0, source } },
@@ -245,9 +245,9 @@ describe("video sound defaults and export diagnostics (#908)", () => {
 
   it("names unmeasured kept legacy videos until their placements are migrated", () => {
     const p = production({ cut: { audio: [], overlays: [
-      { id: "ov_01J8G0000000000000000000B1", artifactId: INSERT, startSec: 1, endSec: 2, audio: "keep" },
+      { id: "ov_01J8G0000000000000000000B1", artifactId: INSERT, startSec: 1, endSec: 2, audio: "keep", lane: 0 },
     ] } });
-    const timeline = seedEmptyPictureTimeline(p); timeline.migratedCut = false;
+    const timeline = seedEmptyPictureTimeline(p); delete timeline.migratedCut;
     const catalog = [{ id: INSERT, file: "unmeasured.mp4", kind: "video" as const }];
     const render = () => buildRenderPlan({ production: p, artifacts: catalog, timeline: { status: "ready" as const, timeline }, scope: { kind: "production" as const }, preset: "review-cut" as const });
     let result = render(); assert.ok(result.ok);
