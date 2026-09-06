@@ -182,6 +182,26 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.equal(store.getBundle().meta.schemaVersion, 10, "cleared is cleared, however it cleared, and cleared is adopted");
   });
 
+  it("adoption that fails after the last edit clears keeps the world gated, not writable below the boundary (codex on PR 903, round six)", async () => {
+    const dir = await makeTempWorld();
+    await writeFile(join(dir, "productions", PRODUCTION, "prose-style.json"), `${JSON.stringify({ version: 1, pov: "close third" }, null, 2)}\n`, "utf8");
+    const store = await WorldStore.open(dir, { clock: NOW });
+    closeOnCleanup(() => store.close());
+    assert.equal(store.getBundle().meta.schemaVersion, 10, "adopted on open");
+    // The next adoption refuses — as it would if the style's base moved under it — and the world
+    // is below the boundary again, as a hand-edited world.json would leave it.
+    (store as unknown as { adoptProseStyleBoundary: () => Promise<void> }).adoptProseStyleBoundary = async () => {
+      throw new Error("base moved while adopting");
+    };
+    await store.reload();
+    assert.deepEqual(
+      store.getBundle().externalEdits.map((edit) => ({ path: edit.path, refusal: edit.refusal })),
+      [{ path: `productions/${PRODUCTION}/prose-style.json`, refusal: "base moved while adopting" }],
+      "the style waits to be reconciled, with the reason",
+    );
+    await assert.rejects(() => store.commit({ kind: "blocked", source: "test", files: [] }), /external edits awaiting reconciliation/, "and writes stay gated");
+  });
+
   it("a world is fenced at a boundary on request, once, and only upward (codex on PR 903, round three)", async () => {
     const { store } = await open();
     const before = store.getBundle().meta.schemaVersion;

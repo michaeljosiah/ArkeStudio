@@ -607,7 +607,24 @@ export class WorldStore {
   private async afterExternalEditsCleared(): Promise<void> {
     if (this.externalEdits.length > 0) return;
     await this.adoptBibleIfMoved();
-    await this.adoptProseStyleBoundary();
+    try {
+      await this.adoptProseStyleBoundary();
+    } catch (err) {
+      // Adoption that fails — the style's base moved under it, say — must not leave the world
+      // writable below the style's boundary (codex on PR 903, round six): a downgrade could open
+      // it and ignore the style. The style goes back among the edits awaiting reconciliation,
+      // with the refusal, so writes stay gated until a reconcile lands it through the funnel
+      // that raises the boundary; a world with no style to adopt has nothing to gate.
+      const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+      if (styled === undefined) throw err;
+      this.externalEdits = [
+        {
+          path: `productions/${styled.meta.id}/prose-style.json`,
+          kind: "modified",
+          refusal: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+        },
+      ];
+    }
   }
 
   /**
