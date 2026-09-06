@@ -135,6 +135,7 @@ describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
     assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: true, where: "somewhere", knows: [] }] }).success, false, "a place with no span behind it is no record (codex on PR 907)");
     assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, knows: [] }] }).success, false, "nor is a departure");
     assert.ok(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, placed: "she left", knows: [] }] }).success);
+    assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, where: "the-vigil", placed: "she left", knows: [] }] }).success, false, "a departure has no place (codex on PR 907)");
     assert.deepEqual(summariseContinuity(record), {
       version: 4,
       hash: "sha256:x",

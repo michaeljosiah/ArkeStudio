@@ -109,9 +109,18 @@ describe("the continuity table (turn 129)", () => {
       ],
       ["maren-kest"],
     );
-    assert.equal(rows[1]!.cells[0], null, "gone: a dash, not the Vigil carried");
-    assert.equal(rows[2]!.cells[0], null, "and nothing carried from before it");
+    assert.deepEqual(rows[1]!.cells[0], { gone: true, since: 2, warn: false }, "gone: a dash, not the Vigil carried");
+    assert.deepEqual(rows[2]!.cells[0], { gone: true, since: 2, warn: false }, "and nothing carried from before it");
     assert.deepEqual(rows[3]!.cells[0], { where: "the-quay", warn: false }, "until a chapter places them again");
+
+    // A departure from a chapter that has since moved is a dash in warning, not one that looks
+    // current (codex, round six).
+    const moved = continuityRows(
+      [chapter(1, "h1", derived("h1", { "maren-kest": "the-vigil" })), chapter(2, "h2", derived("h2-before", { "maren-kest": null })), chapter(3, "h3", derived("h3", {}))],
+      ["maren-kest"],
+    );
+    assert.deepEqual(moved[1]!.cells[0], { gone: true, since: 2, warn: true });
+    assert.deepEqual(moved[2]!.cells[0], { gone: true, since: 2, warn: true }, "carried past, still in warning");
   });
 
   it("the panel's stamp says what the check proved and what it dropped or cut", () => {

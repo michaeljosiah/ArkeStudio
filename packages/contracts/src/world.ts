@@ -576,11 +576,16 @@ export const ChapterContinuityCharacterSchema = z
     knows: z.array(z.string().min(1)),
   })
   .strict()
-  // A place, or a departure, with no words of the chapter behind it is no record of either
-  // (codex on PR 907): a file that claims one is unreadable, not a source for the table.
-  .refine((entry) => (entry.where === undefined && entry.present) || (entry.placed !== undefined && entry.placed.length > 0), {
-    message: "a placing or a departure needs the span of the chapter behind it",
-  });
+  // A place, or a departure, with no words of the chapter behind it is no record of either,
+  // and a departure has no place (codex on PR 907): a file that claims otherwise is unreadable,
+  // not a source for the table.
+  .refine(
+    (entry) =>
+      entry.present
+        ? entry.where === undefined || (entry.placed !== undefined && entry.placed.length > 0)
+        : entry.where === undefined && entry.placed !== undefined && entry.placed.length > 0,
+    { message: "a placing or a departure needs the span of the chapter behind it, and a departure has no place" },
+  );
 export const ChapterContinuitySchema = z
   .object({
     version: z.number().int().min(1),

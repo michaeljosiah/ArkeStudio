@@ -127,10 +127,12 @@ describe("what the model said, held to the chapter (R-40)", () => {
         beyond: ["perrin-tallow"],
       },
       { characters: [{ character: "maren-kest", present: false, placed: "she left", knows: [] }], dropped: 0, omitted: 1, cut: 0, beyond: ["perrin-tallow"] },
+      // Spoken of again with no place given: the departure stands (codex on PR 907).
+      { characters: [{ character: "maren-kest", present: true, knows: ["three"] }], dropped: 0, omitted: 0, cut: 0 },
     ]);
     assert.deepEqual(merged, {
       characters: [
-        { character: "maren-kest", present: false, placed: "she left", knows: ["one", "two"] },
+        { character: "maren-kest", present: false, placed: "she left", knows: ["one", "two", "three"] },
         { character: "odile-sarn", present: true, knows: [] },
       ],
       dropped: 1,

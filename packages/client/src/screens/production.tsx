@@ -2371,13 +2371,17 @@ export function ChapterTreeScreen() {
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
-                      cell === null ? (
-                        <td key={cast[i]!.id} className="fy-cont__cell fy-cont__cell--none">
+                      cell === null || cell.gone ? (
+                        <td
+                          key={cast[i]!.id}
+                          className={cx("fy-cont__cell fy-cont__cell--none", cell?.warn && "fy-cont__cell--warn")}
+                          {...(cell?.gone ? { title: `gone since ${pad(cell.since!)}${cell.warn ? " · that chapter moved" : ""}` } : {})}
+                        >
                           —
                         </td>
                       ) : (
                         <td key={cast[i]!.id} className={cx("fy-cont__cell", cell.since !== undefined && "fy-cont__cell--carried", cell.warn && "fy-cont__cell--warn")}>
-                          {placeName(cell.where)}
+                          {placeName(cell.where ?? "")}
                           {cell.since !== undefined && <span className="fy-cont__since fy-mono">since {pad(cell.since)}</span>}
                         </td>
                       ),

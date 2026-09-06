@@ -10304,7 +10304,7 @@ export class Coordinator {
       case "stop-continuity": {
         const store = this.opts.provider.openStore?.();
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        this.derivingContinuity.get(`${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.abort();
+        this.derivingContinuity.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.abort();
         return;
       }
       case "derive-continuity": {
@@ -10315,11 +10315,17 @@ export class Coordinator {
         if (!store || store.worldId !== msg.worldId) return;
         const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
         if (!chapter) return;
-        const key = `${msg.productionId}/${chapter.file}`;
+        // By world as well as chapter (codex on PR 907): two worlds can share a production and a
+        // file stem, and a run left in one must not shadow the press in the other.
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
         // A second press while one runs is a double-click, not a second run.
         if (this.derivingContinuity.has(key)) return;
         const control = new AbortController();
         this.derivingContinuity.set(key, control);
+        // A run ends with the world that began it (codex on PR 907): closing the world aborts the
+        // passes still to come, rather than letting them spend on a world nobody is in.
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
         const finished = (
           outcome: "derived" | "stopped" | "unavailable" | "failed",
           counts: { placed: number; dropped: number; omitted: number; cut: number },
@@ -10360,7 +10366,9 @@ export class Coordinator {
             return;
           }
           const derived = await deriveContinuity(store, msg.productionId, chapter.id, deriver, control.signal);
-          await this.refreshWorldSnapshot(msg.worldId);
+          // Published only into a world still open (codex on PR 907): refreshing by id would
+          // reopen the world this run began in over the one the author has since moved to.
+          this.refreshIfStillOpen(store);
           finished("derived", { placed: derived.placed, dropped: derived.dropped, omitted: derived.omitted, cut: derived.record.cut }, { record: derived.record });
         } catch (err) {
           if (control.signal.aborted) {
@@ -10370,6 +10378,7 @@ export class Coordinator {
           void this.appLog?.append({ kind: "continuity.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
           finished("failed", none, { reason: err instanceof Error ? err.message.slice(0, 200) : String(err) });
         } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
           this.derivingContinuity.delete(key);
         }
         return;

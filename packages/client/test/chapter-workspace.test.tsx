@@ -581,6 +581,20 @@ describe("after this chapter (turn 129)", () => {
       __applyEventForTest(finished({ outcome: "unavailable", reason: "the writing service is not running" }));
     });
     assert.match(text(m), /could not derive · the writing service is not running/);
+    await act(async () => {
+      __applyEventForTest(finished({ outcome: "stopped" }));
+    });
+    assert.match(text(m), /stopped · the last record stands/, "a stop is said too (codex on PR 907)");
+  });
+
+  it("while a draft waits the press is disabled, and a name the cast knows now is marked (codex on PR 907, turn 129 round six)", async () => {
+    const locked = await mount(inkbound([DRAFT]));
+    await answerOpen(locked);
+    assert.equal((q(locked, ".fy-ch__derive") as HTMLButtonElement).disabled, true, "a record is derived from the saved chapter, never from a draft");
+
+    const m = await mount(withHash(inkbound(), HASH));
+    await answerOpenWith(m, { continuity: { ...RECORD, characters: [{ character: "Maren Kest", present: true, knows: [] }] } });
+    assert.match(text(m), /has a sheet now/, "the cast knows the name now; Derive again makes it a column");
   });
 
   it("a record that is there but cannot be read is said so, never offered as a first run (codex, round four)", async () => {

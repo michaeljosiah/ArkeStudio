@@ -11,10 +11,12 @@ import type { ChapterContinuity, ChapterSummary } from "@arke-studio/contracts";
  */
 
 export interface ContinuityCell {
-  where: string;
-  /** The order of the chapter that placed them, when this cell is carried rather than placed here. */
+  where?: string;
+  /** The last chapter to speak of them said they had gone (codex on turn 129): a dash, tracked like a place. */
+  gone?: true;
+  /** The order of the chapter that placed them, or said they had gone, when this cell is carried rather than placed here. */
   since?: number;
-  /** Placed by a chapter that has moved since, or carried from one. */
+  /** Placed by a chapter that has moved since, or carried from or past one. */
   warn: boolean;
 }
 
@@ -25,7 +27,7 @@ export interface ContinuityRow {
 }
 
 export function continuityRows(chapters: readonly ChapterSummary[], cast: readonly string[]): ContinuityRow[] {
-  const carry = new Map<string, { where: string; since: number; stale: boolean }>();
+  const carry = new Map<string, { where?: string; gone?: true; since: number; stale: boolean }>();
   return [...chapters]
     .sort((a, b) => a.order - b.order)
     .map((chapter) => {
@@ -44,17 +46,19 @@ export function continuityRows(chapters: readonly ChapterSummary[], cast: readon
       const cells = cast.map((id): ContinuityCell | null => {
         const entry = spoken(id);
         if (entry?.where !== undefined) return { where: entry.where, warn: stale };
-        // Said to have gone (codex on turn 129): a dash here, and nothing carried from before.
-        if (entry !== undefined && !entry.present) return null;
+        // Said to have gone (codex on turn 129): a dash here, tracked like a place so a departure
+        // from a chapter that has since moved is in warning, not a dash that looks current.
+        if (entry !== undefined && !entry.present) return { gone: true, since: chapter.order, warn: stale };
         const held = overCap ? undefined : carry.get(id);
-        return held === undefined ? null : { where: held.where, since: held.since, warn: held.stale };
+        if (held === undefined) return null;
+        return held.gone ? { gone: true, since: held.since, warn: held.stale } : { where: held.where!, since: held.since, warn: held.stale };
       });
       if (overCap) carry.clear();
       else {
         for (const id of cast) {
           const entry = spoken(id);
           if (entry?.where !== undefined) carry.set(id, { where: entry.where, since: chapter.order, stale });
-          else if (entry !== undefined && !entry.present) carry.delete(id);
+          else if (entry !== undefined && !entry.present) carry.set(id, { gone: true, since: chapter.order, stale });
           // A chapter that has moved may have moved anyone it did not place either (codex on turn
           // 129): every cell carried past it is in warning from here on, whatever its source says.
           else if (stale) {

@@ -249,9 +249,9 @@ function sheetOf(character: string, cast: ReadonlyArray<{ id: string; name: stri
 
 /**
  * What the model said, held to the chapter (SPEC-015 D2, D3; SPEC-012 R-40): a line, a placing,
- * or a departure is kept only when it is a span of the body — the whole chapter, whitespace
- * folded, since the file wraps where the model would not and a pass ends where the prose does
- * not — and everything else is dropped and counted. A placing that does not verify takes
+ * or a departure is kept only when it is a span of the text it was read from — the pass, never
+ * the context it was shown, whitespace folded since the file wraps where the model would not —
+ * and everything else is dropped and counted. A placing that does not verify takes
  * `where` with it: a location the model invented never reaches the table, let alone carries.
  * Sizes are enforced here, never trusted, and characters beyond the cap are counted as omitted
  * rather than silently cut.
@@ -339,11 +339,9 @@ export function mergePasses(passes: readonly VerifiedContinuity[]): VerifiedCont
         held.present = true;
         held.where = entry.where;
         held.placed = entry.placed!;
-      } else if (!held.present) {
-        // Spoken of again after leaving, with no place given: present, but nowhere yet.
-        held.present = true;
-        delete held.placed;
       }
+      // A later pass that speaks of them without placing them changes nothing about where they
+      // are (codex on PR 907): an evidenced departure stands until a pass places them again.
       for (const line of entry.knows) {
         if (held.knows.includes(line)) continue;
         if (held.knows.length >= CONTINUITY_BOUNDS.lines) cut++;
@@ -432,7 +430,10 @@ export async function deriveContinuity(
       signal,
     );
     if (signal?.aborted) throw new Error("stopped");
-    verified.push(verifyContinuity(raw, opened.body, cast));
+    // Against the pass it was read in, never the context or the whole chapter (codex on PR 907):
+    // a pass may only say what its own text says, or a later pass could quote the earlier text
+    // it was shown for context and put an old place over the one its own prose reached.
+    verified.push(verifyContinuity(raw, body, cast));
   }
   const merged = mergePasses(verified);
   const record: ChapterContinuity = {

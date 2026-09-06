@@ -634,10 +634,18 @@ export function ChapterWorkspace({
   const continuityRecord = continuity === "unreadable" ? null : continuity;
   // The record is keyed to the prose, and the summary carries the prose's own hash (R-39).
   const continuityStale = continuityRecord !== null && chapter.bodyHash !== undefined && chapter.bodyHash !== continuityRecord.hash;
-  const deriveFailure =
-    derivingState?.state === "unavailable" || derivingState?.state === "failed" ? (derivingState.reason ?? "the run failed") : null;
+  // Every ending short of derived is said where chapter moved is said (codex on PR 907): a
+  // stop as much as a failure, so a press that ended a run sees that it ended.
+  const deriveNote =
+    derivingState?.state === "unavailable" || derivingState?.state === "failed"
+      ? `could not derive · ${derivingState.reason ?? "the run failed"}`
+      : derivingState?.state === "stopped"
+        ? "stopped · the last record stands"
+        : null;
   const derive = () => {
-    if (derivingNow) return;
+    // A record is derived from the saved chapter, never from a draft standing in its place
+    // (codex on PR 907): while one waits the press is disabled, as Read the chapter is.
+    if (derivingNow || locked) return;
     if (draft !== null && draft !== live) {
       deriveAfterSave.current = true;
       flushSave(draft);
@@ -646,6 +654,11 @@ export function ChapterWorkspace({
     deriveContinuity(worldId, prodId, chapter.file);
   };
   const sheetName = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  // A name the cast did not know when the record was read, and knows now (codex on turn 129):
+  // the record is not stale, and Derive again is how the name becomes a column.
+  const sheetNow = (who: { character: string; sheet?: string }) =>
+    who.sheet === undefined &&
+    world.sheets.some((sheet) => sheet.type === "character" && !sheet.retired && sheet.name.trim().toLowerCase() === who.character.trim().toLowerCase());
   const named = (who: { character: string; sheet?: string }) => sheetName(who.sheet ?? who.character);
   const placedFirst = continuityRecord?.characters[0];
   const placedSecond = continuityRecord?.characters[1] ?? placedFirst;
@@ -897,7 +910,7 @@ export function ChapterWorkspace({
                     </button>
                   </span>
                 ) : (
-                  <button type="button" className="fy-ch__derive" onClick={derive}>
+                  <button type="button" className="fy-ch__derive" disabled={locked} onClick={derive}>
                     <RotateCcw size={11} />
                     {continuity === null ? "Derive" : "Derive again"}
                   </button>
@@ -908,7 +921,7 @@ export function ChapterWorkspace({
               {continuityStale && continuityRecord !== null && (
                 <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
               )}
-              {deriveFailure !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">could not derive · {deriveFailure}</div>}
+              {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
               {continuityRecord === null ? (
                 continuity === "unreadable" ? null : <p className="fy-bible__empty">Not derived yet.</p>
               ) : continuityRecord.characters.length === 0 ? (
@@ -928,6 +941,11 @@ export function ChapterWorkspace({
                         {!who.present && (
                           <span className="fy-ch__who-where fy-mono" title={who.placed}>
                             gone
+                          </span>
+                        )}
+                        {sheetNow(who) && (
+                          <span className="fy-ch__who-where fy-mono" title="Derive again to make them a column">
+                            has a sheet now
                           </span>
                         )}
                       </div>
