@@ -127,7 +127,7 @@ const shotNo = (shot: Shot) => shot.id.replace(/^sh_0*/, "");
 // Inline editors — display renders mentions as chips; a click opens plain text
 // ---------------------------------------------------------------------------
 
-function EditableText({
+export function EditableText({
   value,
   placeholder,
   className,

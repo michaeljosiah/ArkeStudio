@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, openChapter, reorderChapters, restoreChapter, saveChapter } from "../../src/productions/ops.js";
+import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -229,6 +229,36 @@ describe("the chapter workspace's own commands (turn 126)", () => {
         { id: "untitled-2", order: 2 },
       ],
     );
+  });
+
+  it("the plan saves in place, clears by null, rides on the summary, and keeps the version (turn 127)", async () => {
+    const { dir, store } = await open();
+    const before = await openChapter(store, LEDGER, "neap");
+    await editChapterPlan(store, LEDGER, "01-neap", {
+      title: "Neap, corrected",
+      synopsis: "The ledger is opened; a correction two centuries old is the same stroke Maren made on Tuesday.",
+      pov: "maren-kest",
+      when: "Neap · first night",
+      implies: [{ kind: "canon", what: "The bells can ring uncalled when the drowned city has a debt to collect." }],
+    });
+    const planned = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(planned.title, "Neap, corrected");
+    assert.match(planned.synopsis ?? "", /same stroke/);
+    assert.equal(planned.pov, "maren-kest");
+    assert.equal(planned.when, "Neap · first night");
+    assert.equal(planned.implies?.length, 1);
+    assert.equal(planned.version, before.version, "a plan edit cuts no version (SPEC-012 R-5)");
+    const after = await openChapter(store, LEDGER, "neap");
+    assert.equal(after.body, before.body, "the prose is untouched");
+
+    await editChapterPlan(store, LEDGER, "01-neap", { when: null, implies: null, synopsis: "   " });
+    const cleared = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(cleared.when, undefined);
+    assert.equal(cleared.implies, undefined);
+    assert.equal(cleared.synopsis, undefined, "a blank clears rather than storing a blank");
+    assert.equal(cleared.pov, "maren-kest", "untouched fields stay");
+
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
   });
 
   it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {

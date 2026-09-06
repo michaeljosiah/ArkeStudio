@@ -23,7 +23,15 @@ describe("chapter proposals are reviewable before the dormant draft flow convert
     const { dir, gate } = await open();
     const live = await readFile(join(dir, ...PATH.split("/")), "utf8");
     const chapter = MarkdownFile.parse(live);
-    chapter.setData({ status: "revised", draws: { sheets: ["maren-kest"], canon: ["CANON-001"] } });
+    chapter.setData({
+      status: "revised",
+      draws: { sheets: ["maren-kest"], canon: ["CANON-001"] },
+      synopsis: "The ledger opens.",
+      pov: "maren-kest",
+      when: "Neap · first night",
+      implies: [{ kind: "canon", what: "The bells can ring uncalled." }],
+      draftedAgainst: 3,
+    });
     chapter.setBody("The ledger opens under a moonless tide.");
     const proposal = await gate.stage({
       kind: "chapter-draft",
@@ -41,6 +49,12 @@ describe("chapter proposals are reviewable before the dormant draft flow convert
     assert.equal(fields.get("Draws from sheets"), "maren-kest");
     assert.equal(fields.get("Draws from canon"), "CANON-001");
     assert.equal(fields.get("Prose"), "The ledger opens under a moonless tide.");
+    // The plan is reviewed beside the prose (turn 127).
+    assert.equal(fields.get("Synopsis"), "The ledger opens.");
+    assert.equal(fields.get("Point of view"), "maren-kest");
+    assert.equal(fields.get("When"), "Neap · first night");
+    assert.equal(fields.get("Implies"), "canon: The bells can ring uncalled.");
+    assert.equal(fields.get("Drafted against"), "overview v3");
   });
 
   it("rejects malformed chapter frontmatter both before staging and before acceptance", async () => {

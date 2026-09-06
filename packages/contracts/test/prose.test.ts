@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProseReadSourceSchema, chapterParagraphs, countWords, targetWords } from "../src/prose.js";
+import { ProseReadSourceSchema, chapterParagraphs, countWords, overviewMoved, targetWords } from "../src/prose.js";
+import { ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema } from "../src/world.js";
+import { ClientMessageSchema } from "../src/frames.js";
 
 /**
  * The chapter arm and its helpers (design turn 126, issue 874). The helpers are shared by the
@@ -35,6 +37,26 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.equal(countWords(""), 0);
     assert.equal(countWords("   \n "), 0);
     assert.equal(countWords("Six, and the tide not yet called."), 7);
+  });
+
+  it("the overview moved only for a drafted chapter stamped below the current version (turn 127)", () => {
+    assert.equal(overviewMoved({ words: 1900, draftedAgainst: 2 }, { version: 3 }), true);
+    assert.equal(overviewMoved({ words: 1900, draftedAgainst: 3 }, { version: 3 }), false);
+    assert.equal(overviewMoved({ words: 0, draftedAgainst: 2 }, { version: 3 }), false, "a planned chapter is against nothing yet");
+    assert.equal(overviewMoved({ words: 1900 }, { version: 3 }), false, "typing never stamps, so an unstamped chapter is never stale");
+    assert.equal(overviewMoved({ words: 1900, draftedAgainst: 2 }, null), false);
+  });
+
+  it("the plan reads unbounded and writes bounded (turn 127)", () => {
+    const long = "x".repeat(700);
+    assert.ok(ChapterFrontmatterSchema.safeParse({ id: "neap", title: "Neap", version: 1, synopsis: long, implies: [{ kind: "canon", what: long }] }).success, "a long synopsis never drops a chapter from the scan");
+    assert.ok(ChapterSummarySchema.safeParse({ id: "neap", file: "01-neap", order: 1, title: "Neap", status: "planned", version: 1, synopsis: long, pov: "maren-kest", when: "Neap", implies: [], draftedAgainst: 2 }).success);
+    assert.equal(ChapterImpliesWriteSchema.safeParse([{ kind: "canon", what: long }]).success, false, "a fact is at most 300 characters");
+    assert.equal(ChapterImpliesWriteSchema.safeParse(Array.from({ length: 13 }, () => ({ kind: "canon", what: "x" }))).success, false, "at most twelve facts");
+    const plan = { kind: "edit-chapter-plan", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", productionId: "inkbound", chapterFile: "01-neap" };
+    assert.ok(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: "What this chapter is for.", pov: null } }).success);
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: {} }).success, false, "a plan edit changes something");
+    assert.equal(ClientMessageSchema.safeParse({ ...plan, changes: { synopsis: long } }).success, false, "a synopsis is at most 600 characters");
   });
 
   it("the target band draws only when the target says how many words", () => {

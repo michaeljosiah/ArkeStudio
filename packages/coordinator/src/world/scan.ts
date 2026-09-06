@@ -492,6 +492,12 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       version: fm.version,
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
+      // The plan rides on the summary (turn 127): the door and Arke's list_chapters read it.
+      ...(fm.synopsis !== undefined ? { synopsis: fm.synopsis } : {}),
+      ...(fm.pov !== undefined ? { pov: fm.pov } : {}),
+      ...(fm.when !== undefined ? { when: fm.when } : {}),
+      ...(fm.implies !== undefined ? { implies: fm.implies } : {}),
+      ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
     }));
 
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties

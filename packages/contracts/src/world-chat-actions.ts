@@ -36,6 +36,7 @@ import {
   SheetKindSchema,
   SheetStatusSchema,
   WorldAuthoredFieldChangesSchema,
+  ChapterImpliesWriteSchema,
 } from "./world.js";
 
 const CandidateRevisionSchema = z
@@ -675,6 +676,12 @@ const ProductionChapterModelActionSchema = z
           body: z.string(),
           status: z.string().trim().min(1).max(120).default("planned"),
           draws: ChapterDrawsSchema.optional(),
+          synopsis: z.string().trim().max(600).optional().describe("What this chapter is for, in a line or two; it steers the draft and the accepted draft keeps it."),
+          pov: SlugSchema.optional().describe("The character sheet whose point of view the chapter holds."),
+          when: z.string().trim().max(80).optional().describe("Story-time, in the story's own words."),
+          implies: ChapterImpliesWriteSchema.optional().describe(
+            "Facts about the world this prose implies but the world does not yet hold, each a kind and one sentence. They are listed on the chapter for the author to propose separately; this action never writes them into the world.",
+          ),
         })
         .strict(),
       z
@@ -687,6 +694,12 @@ const ProductionChapterModelActionSchema = z
               status: z.string().trim().min(1).max(120).optional(),
               body: z.string().optional(),
               draws: ChapterDrawsSchema.nullable().optional(),
+              synopsis: z.string().trim().max(600).nullable().optional(),
+              pov: SlugSchema.nullable().optional(),
+              when: z.string().trim().max(80).nullable().optional(),
+              implies: ChapterImpliesWriteSchema.nullable().optional().describe(
+                "Facts about the world this prose implies but the world does not yet hold; listed on the chapter for the author to propose, never written into the world by this action.",
+              ),
             })
             .strict()
             .refine((changes) => Object.keys(changes).length > 0, "a chapter edit must change at least one field"),
