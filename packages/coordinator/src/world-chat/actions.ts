@@ -2812,7 +2812,7 @@ async function sharedResourceProjection(
             ...(payload.action.subtitles ? { subtitles: payload.action.subtitles } : {}),
           });
       if (projected?.ok === false) approvalBlockedReason = projected.reason;
-      approvalBlockedReason ??= legacyArtifactScopeRefusal(production, bundle.artifacts, timeline);
+      approvalBlockedReason ??= legacyArtifactScopeRefusal(production, bundle.artifacts, timeline) ?? undefined;
       if (!deps.startProductionExport) approvalBlockedReason ??= "Local video export is unavailable in this host.";
       const sidecar = payload.action.subtitles && (payload.action.subtitles.mode === "sidecar" || payload.action.subtitles.mode === "burn-in+sidecar")
         ? payload.action.subtitles.sidecar ?? "srt"
