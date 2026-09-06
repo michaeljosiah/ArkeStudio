@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { paragraphSpans, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal } from "@arke-studio/contracts";
+import { paragraphSpans, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -121,7 +121,13 @@ function inkbound(proposals: StagedProposal[] = [], proseStyle: ProseStyle | nul
 /** A revision: one span of the body changed, the rest as it was (turn 128). */
 const PASSAGE: StagedProposal = {
   ...DRAFT,
-  proposal: { ...DRAFT.proposal, id: "pr_01J8H0000000000000000000P9", summary: "Revise a passage: The counting of bells" },
+  proposal: {
+    ...DRAFT.proposal,
+    id: "pr_01J8H0000000000000000000P9",
+    summary: "Revise a passage: The counting of bells",
+    // The origin's gesture is what says a passage was revised (codex on PR 899).
+    origin: { source: "world-chat-action:act_1", surface: "world-chat", gesture: "passage-revision", conversationId: "cv_01J8H0000000000000000000C1" },
+  },
   review: {
     targets: [
       {
@@ -136,6 +142,18 @@ const PASSAGE: StagedProposal = {
 };
 
 const STYLE: ProseStyle = { version: 2, pov: "close third", tense: "past", voice: "Short declaratives." };
+
+/** The production's thread, already open, so a line said goes straight to the send that carries the subject. */
+const THREAD: WorldChatSummary = {
+  id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+  title: "The counting of bells",
+  status: "open",
+  updatedAt: "2026-09-06T09:00:00.000Z",
+  entryContext: { kind: "production", productionId: "inkbound" },
+  pointCount: 0,
+  openProposalCount: 0,
+  notCarried: [],
+};
 
 interface Mounted {
   container: HTMLElement;
@@ -324,7 +342,8 @@ describe("the craft loop (turn 128)", () => {
   };
 
   it("a selection of three words or more is the subject: the press beside it, the prompts a revision's, the passage said before what is asked", async () => {
-    const m = await mount(inkbound([], STYLE));
+    const styled = inkbound([], STYLE);
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
     await answerOpen(m);
     assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
     assert.match(text(m), /settled in Develop · read by every draft/);
@@ -348,6 +367,13 @@ describe("the craft loop (turn 128)", () => {
     // The chapter and the paragraph ride with the words (codex on turn 128), so the passage can
     // be looked for where it was and nowhere else.
     assert.match(JSON.stringify(m.sent), /About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Tighten this/);
+    // And beside the words, as a structured subject the coordinator holds the revision to.
+    const said = m.sent.find((message) => message.kind === "world-chat-send" || message.kind === "world-chat-create") as { subject?: unknown } | undefined;
+    assert.deepEqual(
+      (m.sent.map((message) => (message as { subject?: unknown }).subject).find((subject) => subject !== undefined)),
+      { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." },
+      `the selection travels as a subject (${said?.subject === undefined ? "none sent" : "sent"})`,
+    );
 
     await keyup(area, 3, 3);
     assert.doesNotMatch(text(m), /Ask Arke · /, "the selection collapsed, the press goes");

@@ -578,6 +578,7 @@ export class WorldChatRunner {
         bible.version,
         sceneBaseVersion,
         refusedTools,
+        subject,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -618,6 +619,7 @@ export class WorldChatRunner {
           bible.version,
           sceneBaseVersion,
           refusedTools,
+          subject,
         );
       }
 
@@ -752,6 +754,8 @@ export class WorldChatRunner {
     sceneBaseVersion: number | null,
     /** Tools the confinement refused while this turn ran, deduplicated by the caller (#506). */
     refusedTools: ReadonlySet<string> = new Set(),
+    /** What was selected while the line was said (turn 128); actions are held to it. */
+    subject?: WorldChatSubject,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -940,6 +944,7 @@ export class WorldChatRunner {
         editorRequests: requests,
         actions: outcome.turn.actions,
         receipts: this.deps.receiptsFor(runId),
+        ...(subject !== undefined ? { subject } : {}),
         at,
       }) ?? [];
     } catch {
@@ -1147,6 +1152,8 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
             ? `the board containing shots ${subject.memberShotIds.join(", ")} in scene ${subject.sceneId}`
             : subject.kind === "edge"
               ? `the scene edge from ${subject.fromShotId ?? "the opening"} to ${subject.toShotId ?? "the ending"} in scene ${subject.sceneId}`
-              : `take ${subject.takeId}`;
+              : subject.kind === "passage"
+                ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
+                : `take ${subject.takeId}`;
   return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
 }

@@ -611,7 +611,12 @@ export function ChapterWorkspace({
    * chapter as it was. Drawn from the review's before and proposed; a draft that changes more
    * than one span is a draft, and is drawn as one.
    */
-  const passageChange: ChangedSpan | null = stagedDraft === undefined ? null : passageOf(stagedDraft.before, stagedDraft.body);
+  // Only when the action was a passage (its origin says so): a chapter recast between an
+  // untouched opening and closing has one span too, and is a draft.
+  const passageChange: ChangedSpan | null =
+    stagedDraft === undefined || stagedDraft.staged.proposal.origin?.gesture !== "passage-revision"
+      ? null
+      : passageOf(stagedDraft.before, stagedDraft.body);
   const waiting = stagedDraft === undefined ? null : passageChange === null ? "draft" : "passage";
   const foot = locked && stagedDraft !== undefined
     ? `Locked while a ${waiting} waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
@@ -936,6 +941,12 @@ export function ChapterWorkspace({
           productionId={prodId}
           entry={{ kind: "production", productionId: prodId }}
           {...(say === null ? {} : { openWith: say.line })}
+          // The selection travels beside the words as well as inside them (codex on turn 128):
+          // the coordinator holds a revision that comes back to this chapter, this paragraph
+          // and these words, whatever the model retold.
+          {...(passage === null
+            ? {}
+            : { subject: { kind: "passage" as const, chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage } })}
           dock={{
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,

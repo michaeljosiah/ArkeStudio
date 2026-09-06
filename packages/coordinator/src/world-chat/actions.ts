@@ -44,6 +44,7 @@ import {
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
   WorldChatProductionProseStyleActionSchema,
+  type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -249,6 +250,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  chapterFence,
   spineFence,
   timelineFence,
   takesFence,
@@ -286,6 +288,11 @@ export interface WorldChatActionTurn {
   readonly actions: readonly ModelWorldChatAction[];
   /** Present on live runs; absent only on callers created before complete target receipts. */
   readonly receipts?: readonly WorldChatCheckReceipt[];
+  /**
+   * What was selected while the line was said (turn 128): a passage revision the model returns
+   * is held against it, so the action can only aim at the words the author pointed at.
+   */
+  readonly subject?: WorldChatSubject;
   readonly at: string;
 }
 
@@ -486,8 +493,13 @@ function currentWorldObservation(
       return { target: productionId, fence: episodesFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
     }
     case "chapters": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
+      // alone; the bare production id is the list (codex on PR 899).
+      const targetId = target ?? store.worldId;
+      const [productionId, chapterId] = targetId.split(":");
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      if (chapterId) return { target: targetId, fence: chapterFence(production, chapterId) };
+      return { target: targetId, fence: chaptersFence(production) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -571,8 +583,15 @@ function productionActionTargets(
     ];
     case "production-chapter": {
       const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      // A passage is quoted from a read of that chapter (turn 128), so the read is required by
+      // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
+      // sends the model back to read it again rather than to guess.
+      const quotedFrom = action.change.operation === "edit" && action.change.changes.passage !== undefined
+        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${action.change.chapterId}` }]
+        : [];
       return [
         { requirement: "chapters", target: action.productionId },
+        ...quotedFrom,
         { requirement: "story", target: action.productionId },
         ...(draws
           ? [
@@ -901,6 +920,29 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
   return undefined;
 }
 
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection, the chapter and the paragraph exist as a structured subject on the turn, not only
+ * in the words said, so an action that comes back naming another chapter, another paragraph, or
+ * words outside the selection is refused by name rather than staged. Whitespace is folded on both
+ * sides, because the selection is rendered text and the quote is the file's.
+ */
+function heldToPassage(action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
+  if (subject?.kind !== "passage") return;
+  if (action.kind !== "production-chapter" || action.change.operation !== "edit" || action.change.changes.passage === undefined) return;
+  const passage = action.change.changes.passage;
+  if (action.change.chapterId !== subject.chapterId) {
+    throw new Error(`This ask was about a passage in chapter ${subject.chapterId}; the revision names ${action.change.chapterId}.`);
+  }
+  if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${subject.chapterId}; the revision names paragraph ${passage.paragraph}.`);
+  }
+  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (!fold(subject.text).includes(fold(passage.find))) {
+    throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
+  }
+}
+
 function worldActionTargets(
   store: WorldStore,
   action: ModelWorldChatAction,
@@ -1132,6 +1174,7 @@ export function prepareWorldChatActions(
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
+    heldToPassage(action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {

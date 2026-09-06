@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { newId, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { overviewSteer, proseStyleSteer } from "../../src/productions/ops.js";
-import { replacePassage, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { foldedOccurrences, replacePassage, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { storyFence } from "../../src/world-chat/target-reads.js";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -104,7 +104,20 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.equal(replacePassage(twins, { find: "at Maren", with: "at Ines", paragraph: 1 }, "chapter 01"), "Maren looked at Ines in the glass.\n\nThe tide came.");
     const proposal = await anchored(2);
     assert.match(proposal.summary, /^Revise a passage/);
+    assert.equal(proposal.origin?.gesture, "passage-revision", "the origin says a passage was revised, so the screen draws one only then");
     await assert.rejects(() => anchored(1), /not in paragraph 1 of chapter 01 as it stands · read the chapter again/);
+  });
+
+  it("finds a quote across a wrapped line, with whitespace folded (codex, round three)", () => {
+    const body = "The ledger of the Vigil is kept in a hand that changes every\ngeneration and a form that never has.\n\nMaren checks it.";
+    assert.deepEqual(foldedOccurrences(body, "changes every generation"), [{ start: 47, end: 71 }]);
+    assert.equal(
+      replacePassage(body, { find: "changes every generation", with: "changes each generation", paragraph: 1 }, "chapter 01"),
+      "The ledger of the Vigil is kept in a hand that changes each generation and a form that never has.\n\nMaren checks it.",
+      "the file's own wrap is inside the span replaced",
+    );
+    assert.deepEqual(foldedOccurrences("a  b a b", "a b"), [{ start: 0, end: 4 }, { start: 5, end: 8 }], "each occurrence, in file offsets");
+    assert.deepEqual(foldedOccurrences("a b", "   "), [], "nothing is not a passage");
   });
 });
 

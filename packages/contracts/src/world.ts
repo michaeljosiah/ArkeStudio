@@ -560,6 +560,12 @@ export const ChapterSummarySchema = z
     title: z.string().min(1),
     status: z.string().min(1),
     version: z.number().int().min(1),
+    /**
+     * The file's content hash from the scan (turn 128): what a read of one chapter is fenced
+     * on, so a receipt for `get_chapter` can be re-observed from the bundle without the body,
+     * and what says a direct save moved the chapter while its version stayed.
+     */
+    hash: z.string().optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({

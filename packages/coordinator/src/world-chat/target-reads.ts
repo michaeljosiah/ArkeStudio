@@ -162,6 +162,15 @@ export function chaptersFence(production: ProductionBundle | undefined): string 
   return fence(production?.chapters ?? []);
 }
 
+/**
+ * One chapter's fence (turn 128): the summary, which carries the file's content hash, so a
+ * receipt for `get_chapter` can be re-observed from the bundle without reading the body again.
+ */
+export function chapterFence(production: ProductionBundle | undefined, chapterId: string): string {
+  const chapter = production?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId) ?? null;
+  return fence(chapter, chapter === null ? "absent" : `${chapter.version}:${chapter.hash ?? "unhashed"}`);
+}
+
 export function scenesFence(production: ProductionBundle | undefined): string {
   return fence(sortScenes(production?.scenes ?? []));
 }
@@ -644,7 +653,9 @@ export class WorldChatTargetReads {
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
         readTarget = target("chapters", `${productionId}:${chapterId}`);
         rows = chapter ? [{ key: "metadata", value: chapter }, ...chunks(body ?? "")] : [];
-        revisionOrDigest = fence({ chapter: chapter ?? null, body }, chapter?.version ?? "absent");
+        // Fenced on the summary's content hash rather than the body read here, so the action
+        // check can re-observe the same fence from the bundle (codex on PR 899).
+        revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
         break;
       }
       case "list_scenes": {

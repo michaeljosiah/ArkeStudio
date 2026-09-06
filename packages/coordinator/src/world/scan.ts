@@ -495,6 +495,9 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       title: fm.title,
       status: fm.status ?? "planned",
       version: fm.version,
+      // The content hash rides on the summary (turn 128) so one chapter's read can be fenced
+      // and re-observed from the bundle alone.
+      ...(manifest[`productions/${id}/chapters/${file}.md`] !== undefined ? { hash: manifest[`productions/${id}/chapters/${file}.md`]! } : {}),
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
       // The plan rides on the summary (turn 127): the door and Arke's list_chapters read it.

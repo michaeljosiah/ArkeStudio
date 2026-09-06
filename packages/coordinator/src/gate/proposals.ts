@@ -1079,7 +1079,7 @@ export class ProposalManager {
       // older build opens the world and silently drops what was just accepted.
       const crossesBoundary = files.some((file) => {
         const track = classify(file.path).track;
-        return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story";
+        return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story" || track === "prose-style";
       });
       /*
        * New draft and World Chat proposals are graph scenes. A persisted proposal can predate
@@ -1435,6 +1435,7 @@ export class ProposalManager {
         const jsonTrack =
           track === "scene" ||
           track === "story" ||
+          track === "prose-style" ||
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
@@ -1530,6 +1531,7 @@ export class ProposalManager {
         resolved =
           track === "scene" ||
           track === "story" ||
+          track === "prose-style" ||
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
@@ -1805,6 +1807,7 @@ function readVersion(path: string, raw: string): number | null {
     if (
       kind.track === "scene" ||
       kind.track === "story" ||
+      kind.track === "prose-style" ||
       kind.track === "routing" ||
       kind.track === "season" ||
       kind.track === "episode" ||

@@ -61,6 +61,37 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
 }
 
 /**
+ * Every occurrence of `find` in `text` with whitespace folded on both sides — a run of spaces
+ * and line breaks reads as one space — returned as offsets into the unfolded `text`, so the
+ * span replaced is the file's own bytes, wrapping included.
+ */
+export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let folded = "";
+  for (let i = 0; i < text.length; i++) {
+    if (/\s/.test(text[i]!)) {
+      if (folded.endsWith(" ")) {
+        ends[ends.length - 1] = i + 1;
+        continue;
+      }
+      folded += " ";
+    } else {
+      folded += text[i];
+    }
+    starts.push(i);
+    ends.push(i + 1);
+  }
+  const needle = find.replace(/\s+/g, " ").trim();
+  if (needle === "") return [];
+  const hits: Array<{ start: number; end: number }> = [];
+  for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
+    hits.push({ start: starts[at]!, end: ends[at + needle.length - 1]! });
+  }
+  return hits;
+}
+
+/**
  * One passage replaced in a chapter's body (turn 128). An ask that named its paragraph is looked
  * for there and only there — current uniqueness is never passage identity, because the author
  * may have typed over the selected occurrence while Arke answered, and a quote that then matches
@@ -75,18 +106,23 @@ export function replacePassage(
 ): string {
   if (passage.paragraph !== undefined) {
     const span = paragraphSpans(body)[passage.paragraph - 1];
-    const paragraph = span === undefined ? "" : body.slice(span.start, span.end);
-    const within = paragraph.indexOf(passage.find);
-    if (span === undefined || within < 0) {
+    if (span === undefined) {
+      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+    }
+    const paragraph = body.slice(span.start, span.end);
+    // Found with whitespace folded (codex, round three): the file wraps its lines where the
+    // editor showed one, so a quote across a soft break is still the same words.
+    const hits = foldedOccurrences(paragraph, passage.find);
+    if (hits.length === 0) {
       throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
     }
     // Still exactly once inside the paragraph (codex, round two): a twin left standing after
     // the selected copy was typed over is exactly the wrong one to change.
-    if (paragraph.indexOf(passage.find, within + passage.find.length) >= 0) {
+    if (hits.length > 1) {
       throw new Error(`that passage occurs more than once in paragraph ${passage.paragraph} of ${label} · quote more of it`);
     }
-    const at = span.start + within;
-    return body.slice(0, at) + passage.with + body.slice(at + passage.find.length);
+    const [hit] = hits;
+    return body.slice(0, span.start + hit!.start) + passage.with + body.slice(span.start + hit!.end);
   }
   const first = body.indexOf(passage.find);
   if (first < 0) throw new Error(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
@@ -435,10 +471,13 @@ export async function stageWorldChatProductionAuthoredAction(
     for (const key of ["draws", "synopsis", "pov", "when", "implies"] as const) if (doc.data[key] === undefined) delete doc.data[key];
     if (body !== undefined) doc.setBody(body);
     ChapterFrontmatterSchema.parse(doc.data);
+    // The gesture says a passage was revised (codex, round two): the card and the manuscript draw
+    // a passage only when the action was one, never from a common head and tail alone — a whole
+    // chapter recast between an untouched opening and closing is a draft, and is said to be.
     return gate.stage({
       kind: "chapter-draft",
       summary: changes.passage === undefined ? `Edit chapter: ${chapter.title}` : `Revise a passage: ${chapter.title}`,
-      ...context,
+      ...(changes.passage === undefined ? context : { ...context, origin: { ...context.origin, gesture: "passage-revision" } }),
       targets: [{ path, content: doc.serialize() }],
     }, precondition);
   }
