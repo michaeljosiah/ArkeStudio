@@ -57,6 +57,8 @@ export interface TargetReadDeps {
   readonly getJobs?: () => readonly Job[];
   readonly getExports?: () => readonly ArkeExportReadRecord[] | Promise<readonly ArkeExportReadRecord[]>;
   readonly getChapterBody?: (productionId: string, chapterFile: string) => Promise<string | null>;
+  /** The continuity record beside a chapter (turn 129), so an ask can be answered from the record rather than the whole prose. */
+  readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
 }
 
 export interface TargetReadOutcome {
@@ -651,10 +653,15 @@ export class WorldChatTargetReads {
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
+        // The full record beside the chapter (turn 129): the summary carries only its stamp and
+        // placings, and a question about what a character learned is answered from the lines.
+        const continuity = chapter && this.deps.getChapterContinuity ? await this.deps.getChapterContinuity(productionId, chapter.file) : null;
         // The receipt names the chapter by its id whichever spelling was asked for, so an edit
         // that names it the other way still matches (codex on PR 899).
         readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}`);
-        rows = chapter ? [{ key: "metadata", value: chapter }, ...chunks(body ?? "")] : [];
+        rows = chapter
+          ? [{ key: "metadata", value: chapter }, ...(continuity !== null ? [{ key: "continuity", value: continuity }] : []), ...chunks(body ?? "")]
+          : [];
         // Fenced on the summary's content hash rather than the body read here, so the action
         // check can re-observe the same fence from the bundle (codex on PR 899).
         revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);

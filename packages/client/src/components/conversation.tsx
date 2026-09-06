@@ -789,7 +789,7 @@ export function ProductionConversation({
      * the style`) says so, and the send carries it, so the coordinator refuses any action the
      * turn comes back with.
      */
-    prompts?: readonly (string | { label: string; replyOnly?: boolean })[];
+    prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
     /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
@@ -1192,10 +1192,19 @@ export function ProductionConversation({
               {dock.prompts.map((entry) => {
                 const prompt = typeof entry === "string" ? entry : entry.label;
                 const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+                const press = typeof entry === "string" ? undefined : entry.press;
                 // A prompt is said with the subject before it, as a typed line is (turn 128):
                 // `Tighten this` said bare names nothing, and the thread never sees the selection.
+                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
+                // again` under a stale record derives, and nothing is said.
                 return (
-                  <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly)}>
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="fy-arke__prompt"
+                    disabled={press === undefined && (opening !== null || running || languageUnavailableReason !== undefined)}
+                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
+                  >
                     {prompt}
                   </button>
                 );

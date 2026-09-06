@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { paragraphSpans, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
+import { paragraphSpans, type ChapterContinuity, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
 import { ChapterScreen, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -426,5 +426,152 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(paragraphAt("A b.\n\nC d.", 7), 2);
     assert.equal(paragraphAt("", 0), null, "no paragraph in nothing");
     assert.equal(stagedChapterDraft([PASSAGE], PATH)?.before, BODY, "the review's before rides with the proposed");
+  });
+});
+
+/**
+ * After this chapter (design turn 129, issue 901, SPEC-012 §2.4.1): the record beside the
+ * chapter, read with it and never off the summary; the press that derives; the states the
+ * panel can be in; and the prompts the record answers.
+ */
+describe("after this chapter (turn 129)", () => {
+  const RECORD: ChapterContinuity = {
+    version: 4,
+    hash: HASH,
+    derivedAt: "2026-09-06T12:00:00.000Z",
+    passes: 1,
+    dropped: 0,
+    omitted: 0,
+    cut: 0,
+    characters: [
+      {
+        character: "maren-kest",
+        present: true,
+        where: "the-vigil",
+        placed: "Maren counted the bells.",
+        knows: ["Maren counted the bells.", "Six, and the tide", "not yet called", "a fourth line the panel counts"],
+      },
+      { character: "odile-sarn", present: true, knows: [] },
+    ],
+  };
+  const withHash = (state: ClientState, hash: string): ClientState => ({
+    ...state,
+    world: {
+      ...state.world!,
+      productions: state.world!.productions.map((p) =>
+        p.meta.id === "inkbound" ? { ...p, chapters: p.chapters.map((c) => (c.id === "neap" ? { ...c, hash } : c)) } : p,
+      ),
+    },
+  });
+  async function answerOpenWith(m: Mounted, extra: { continuity?: ChapterContinuity; continuityUnreadable?: true }): Promise<void> {
+    const ask = m.sent.find((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
+    await act(async () => {
+      __applyEventForTest({
+        at: "2026-09-06T12:00:01Z",
+        type: "chapter.open-result",
+        requestId: ask.requestId,
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "inkbound",
+        chapterId: "neap",
+        disposition: "opened",
+        body: BODY,
+        version: 4,
+        hash: HASH,
+        versions: [1, 2, 3],
+        ...extra,
+      });
+    });
+  }
+  const finished = (extra: { outcome: "derived" | "stopped" | "unavailable" | "failed"; placed?: number; reason?: string; record?: ChapterContinuity }) => ({
+    at: "2026-09-06T12:00:02Z",
+    type: "continuity.finished" as const,
+    worldId: FIXTURE_WORLD_ID,
+    productionId: "inkbound",
+    chapterId: "neap",
+    placed: 0,
+    dropped: 0,
+    omitted: 0,
+    cut: 0,
+    ...extra,
+  });
+
+  it("not derived yet: the panel says so, and the press asks for a derivation by the chapter's file", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.match(text(m), /After this chapter/);
+    assert.match(text(m), /where they end up · what they learn here/);
+    assert.match(text(m), /Not derived yet\./);
+    const press = q(m, ".fy-ch__derive")!;
+    assert.match(press.textContent ?? "", /Derive$/);
+    await act(async () => {
+      press.click();
+    });
+    const derive = m.sent.find((message) => message.kind === "derive-continuity") as Extract<ClientMessage, { kind: "derive-continuity" }>;
+    assert.ok(derive, "the press derives");
+    assert.equal(derive.productionId, "inkbound");
+    assert.equal(derive.chapterFile, "01-neap");
+  });
+
+  it("derived: each placed character, where as a mark, the lines as the chapter's own words with three shown, the stamp, and prompts the record answers", async () => {
+    const m = await mount(withHash(inkbound(), HASH));
+    await answerOpenWith(m, { continuity: RECORD });
+    assert.match(text(m), /Maren Kest/);
+    assert.match(text(m), /The Vigil|the-vigil/);
+    assert.match(text(m), /“Maren counted the bells\.”/);
+    assert.match(text(m), /and 1 more/, "three lines shown, the rest counted");
+    assert.doesNotMatch(text(m), /a fourth line the panel counts/);
+    assert.match(text(m), /derived · v4 · every line is the chapter’s own words/);
+    assert.match(text(m), /Derive again/);
+    assert.match(text(m), /What does Maren Kest learn here\?/);
+    assert.match(text(m), /Where is (Odile Sarn|odile-sarn) now\?/);
+    assert.doesNotMatch(text(m), /chapter moved/);
+  });
+
+  it("stale: the summary's hash has moved past the record's, the lines stay, and the prompt that reads again is a press, not a line", async () => {
+    const m = await mount(withHash(inkbound(), `sha256:${"b".repeat(64)}`));
+    await answerOpenWith(m, { continuity: RECORD });
+    assert.match(text(m), /chapter moved · derived against v4/);
+    assert.match(text(m), /“Maren counted the bells\.”/, "a stale record is still a record");
+    assert.match(text(m), /Who is in this chapter\?/);
+    const prompts = [...m.container.querySelectorAll(".fy-arke__prompt")] as HTMLElement[];
+    const again = prompts.find((prompt) => prompt.textContent === "Derive again");
+    assert.ok(again, "Derive again is under the dock");
+    await act(async () => {
+      again!.click();
+    });
+    assert.ok(m.sent.some((message) => message.kind === "derive-continuity"), "the press derives");
+    assert.ok(!m.sent.some((message) => message.kind === "world-chat-send"), "and says nothing");
+  });
+
+  it("deriving puts the press away; finishing brings the record; a rerun that fails says why and leaves the last record standing", async () => {
+    const m = await mount(withHash(inkbound(), HASH));
+    await answerOpen(m);
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "continuity.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" });
+    });
+    assert.match(text(m), /deriving…/);
+    assert.equal(q(m, ".fy-ch__derive"), null, "the press is put away");
+    await act(async () => {
+      __applyEventForTest(finished({ outcome: "derived", placed: 2, record: RECORD }));
+    });
+    assert.match(text(m), /“Maren counted the bells\.”/, "the lines are here without a second read");
+    assert.ok(q(m, ".fy-ch__derive"), "the press is back");
+    await act(async () => {
+      __applyEventForTest(finished({ outcome: "failed", reason: "the model did not answer with a continuity record" }));
+    });
+    assert.match(text(m), /could not derive · the model did not answer with a continuity record/);
+    assert.match(text(m), /“Maren counted the bells\.”/, "the last record stands");
+    await act(async () => {
+      __applyEventForTest(finished({ outcome: "unavailable", reason: "the writing service is not running" }));
+    });
+    assert.match(text(m), /could not derive · the writing service is not running/);
+  });
+
+  it("a record that is there but cannot be read is said so, never offered as a first run (codex, round four)", async () => {
+    const m = await mount(inkbound());
+    await answerOpenWith(m, { continuityUnreadable: true });
+    assert.match(text(m), /record unreadable · Derive again replaces it/);
+    assert.doesNotMatch(text(m), /Not derived yet/);
+    assert.match(q(m, ".fy-ch__derive")?.textContent ?? "", /Derive again/);
   });
 });

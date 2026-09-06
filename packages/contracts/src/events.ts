@@ -5,6 +5,7 @@ import { TableReadPlanSchema } from "./rehearsal.js";
 import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
+import { ChapterContinuitySchema } from "./world.js";
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -281,6 +282,13 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        * with no v1–v3 to put back, and a Restore that always fails is worse than none.
        */
       versions: z.array(z.number().int().min(1)).optional(),
+      /**
+       * The continuity record beside the chapter (turn 129, SPEC-012 R-42): the lines come with
+       * the chapter, because the summary in the bundle carries only the stamp and the placings.
+       */
+      continuity: ChapterContinuitySchema.optional(),
+      /** A record is there but cannot be read; the panel says so rather than offering a first run. */
+      continuityUnreadable: z.literal(true).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -874,6 +882,39 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       found: z.number().int().min(0),
       /** Quotes that did not appear in the document, dropped before anyone saw them (D3). */
       dropped: z.number().int().min(0),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
+   * Continuity derived for a chapter (turn 129, SPEC-012 §2.4.1): started, then finished with a
+   * named ending. "derived" carries the record itself, so the open panel has the lines without a
+   * second read, and how many characters were placed, lines dropped and characters cut;
+   * "stopped" is the author's own doing; "unavailable" is the harness; "failed" names its
+   * reason. Every ending short of "derived" leaves the last record standing.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("continuity.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("continuity.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["derived", "stopped", "unavailable", "failed"]),
+      placed: z.number().int().min(0),
+      dropped: z.number().int().min(0),
+      omitted: z.number().int().min(0),
+      cut: z.number().int().min(0),
+      record: ChapterContinuitySchema.optional(),
       reason: z.string().optional(),
     })
     .strict(),

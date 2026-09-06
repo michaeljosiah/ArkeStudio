@@ -6627,6 +6627,45 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-arke__subject { color: var(--neutral-400); padding: 0 2px; }
 .fy-story__stylehead { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
 .fy-story__stylehead > .fy-mono { color: var(--neutral-400); font-size: 10px; }
+/*
+ * Continuity (turn 129). The panel is the side's: a name, its place as a mark with the words that
+ * put it there as the mark's title, the lines under it as the chapter's own words, the stamp
+ * saying what the check proved. The door's table carries a place across chapters quietly, naming
+ * the chapter that placed it, and in warning past any chapter that has moved.
+ */
+.fy-ch__paneltitle--row { display: flex; align-items: baseline; gap: 8px; }
+.fy-ch__panelpush { flex: 1; }
+.fy-ch__derive { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; cursor: pointer; font: 500 11px var(--font-sans); color: var(--foreground); letter-spacing: 0; text-transform: none; }
+.fy-ch__derive:disabled { cursor: default; color: var(--muted-foreground); }
+.fy-ch__scope { margin: -3px 0 0; font-size: 10px; }
+.fy-ch__moved--line { display: flex; border-radius: 8px; padding: 5px 9px; }
+.fy-ch__who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fy-ch__who > li { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.fy-ch__who-head { display: flex; align-items: center; gap: 8px; }
+.fy-ch__who-name { font: 500 12px var(--font-sans); flex: 1; min-width: 0; }
+.fy-ch__who-where { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
+.fy-ch__line { position: relative; padding-left: 14px; margin-top: 3px; font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground); }
+.fy-ch__line::before { content: "·"; position: absolute; left: 2px; top: 0; color: var(--neutral-400); }
+.fy-ch__line--more { color: var(--neutral-400); }
+.fy-ch__stamp { margin: 6px 0 0; font-size: 9.5px; }
+.fy-cont__meta { margin-top: 8px; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-cont { margin-top: 18px; overflow-x: auto; }
+.fy-cont__table { border-collapse: collapse; width: 100%; }
+.fy-cont__th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font: 500 10.5px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.fy-cont__th--chapter { padding-left: 0; }
+.fy-cont__row { cursor: pointer; }
+.fy-cont__row:hover .fy-cont__title, .fy-cont__row:focus-visible .fy-cont__title { text-decoration: underline; }
+.fy-cont__chapter { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.fy-cont__chapter > .fy-mono { font-size: 10px; margin-right: 8px; }
+.fy-cont__chapter > .fy-mono:last-child { margin: 0 0 0 8px; font-size: 9.5px; }
+.fy-cont__title { font: 500 12px var(--font-sans); }
+.fy-cont__cell { padding: 8px 10px; border-bottom: 1px solid var(--border); font: 400 11.5px var(--font-sans); white-space: nowrap; }
+.fy-cont__cell--none { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-cont__cell--carried { color: var(--muted-foreground); }
+.fy-cont__cell--warn, .fy-cont__cell--warn .fy-cont__since { color: var(--warning); }
+.fy-cont__since { font-size: 9.5px; margin-left: 6px; }
+.fy-cont__stamp { padding: 8px 0 8px 10px; border-bottom: 1px solid var(--border); font-size: 9.5px; white-space: nowrap; text-align: right; }
+.fy-cont__stamp--warn { color: var(--warning); }
 @container (max-width: 900px) {
   .fy-ch__body { flex-direction: column; }
   .fy-ch__side { width: auto; }

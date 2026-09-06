@@ -2756,6 +2756,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) })
     .strict(),
+  /**
+   * Continuity after a chapter (turn 129): derived by a press, never by a save, one run per
+   * chapter at a time, stoppable the way extraction is.
+   */
+  z
+    .object({ kind: z.literal("derive-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

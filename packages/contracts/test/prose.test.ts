@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProseReadSourceSchema, changedSpan, chapterParagraphs, countWords, overviewMoved, passageOf, targetWords } from "../src/prose.js";
-import { ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ProseStyleSchema } from "../src/world.js";
+import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ProseStyleSchema, summariseContinuity } from "../src/world.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -115,5 +115,36 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.equal(targetWords("24 chapters"), null);
     // A figure too small to be a book's length is a number in a sentence.
     assert.equal(targetWords("12 words"), null);
+  });
+});
+
+describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
+  it("the record parses with its counts, the summary carries the stamp and the placings, and an unreadable record is its own state", () => {
+    const record = {
+      version: 4,
+      hash: "sha256:x",
+      derivedAt: "2026-09-06T12:00:00.000Z",
+      passes: 2,
+      dropped: 1,
+      omitted: 0,
+      cut: 0,
+      characters: [{ character: "maren-kest", present: true, where: "the-vigil", placed: "Maren stood on the Vigil", knows: ["a line of the chapter"] }],
+    };
+    assert.ok(ChapterContinuitySchema.safeParse(record).success);
+    assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: true, knows: [], mood: "dark" }] }).success, false, "nothing outside the record");
+    assert.deepEqual(summariseContinuity(record), {
+      version: 4,
+      hash: "sha256:x",
+      derivedAt: "2026-09-06T12:00:00.000Z",
+      passes: 2,
+      dropped: 1,
+      omitted: 0,
+      cut: 0,
+      placed: [{ character: "maren-kest", where: "the-vigil" }],
+    });
+    const summary = { id: "neap", file: "01-neap", order: 1, title: "Neap", status: "drafted", version: 4 };
+    assert.ok(ChapterSummarySchema.safeParse({ ...summary, continuity: summariseContinuity(record) }).success, "the stamp and the placings ride on the summary");
+    assert.ok(ChapterSummarySchema.safeParse({ ...summary, continuity: { unreadable: true } }).success, "so does the word that a record cannot be read");
+    assert.equal(ChapterSummarySchema.safeParse({ ...summary, continuity: record }).success, false, "the lines never do");
   });
 });
