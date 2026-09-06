@@ -63,14 +63,22 @@ type OpenedRecord = { body: string; version: number; hash: string; versions: num
  * any component. A refusal ends it — the base moved, and there is no screen left to adopt the
  * disk for; the next open reads the file.
  */
-function flushAfter(pending: string, save: { worldId: string; prodId: string; file: string; value: string }): void {
+function flushAfter(
+  pending: string,
+  save: { worldId: string; prodId: string; file: string; value: string; baseHash: string; landedBody: string | null },
+): void {
+  // Parked first, sent later: the reply this waits for never comes if the transport drops, and
+  // a reconnect brings a snapshot rather than the event. The next screen to open the chapter
+  // takes the parked text up and settles it against what is on disk (codex, PR 879).
+  const key = parkedKey(save.worldId, save.prodId, save.file);
+  parkedDrafts.set(key, { value: save.value, baseHash: save.baseHash, landedBody: save.landedBody });
   const unsubscribe = subscribeChapterSaveResults((result) => {
     if (result.requestId !== pending) return;
     unsubscribe();
-    if (result.disposition === "saved" && result.hash !== undefined) {
-      const sent = saveChapter(save.worldId, save.prodId, save.file, save.value, result.hash);
-      if (sent === null) parkedDrafts.set(parkedKey(save.worldId, save.prodId, save.file), { value: save.value, baseHash: result.hash });
-    }
+    if (result.disposition !== "saved" || result.hash === undefined) return;
+    const sent = saveChapter(save.worldId, save.prodId, save.file, save.value, result.hash);
+    if (sent !== null) parkedDrafts.delete(key);
+    else parkedDrafts.set(key, { value: save.value, baseHash: result.hash, landedBody: null });
   });
 }
 
@@ -78,9 +86,11 @@ function flushAfter(pending: string, save: { worldId: string; prodId: string; fi
  * Drafts a screen could not send before it was gone (codex, PR 879): the transport was down at
  * unmount, or the flush behind a save in flight found it down. Kept here, outside any component,
  * by chapter file, and taken up by the next screen to open that chapter, which sends them against
- * the base they were written on if the record has not moved since — and says so if it has.
+ * the base they were written on if the record has not moved since — or against the text an
+ * older save of the same screen carried, `landedBody`, if that is what is on disk — and says so
+ * if the record has genuinely moved.
  */
-const parkedDrafts = new Map<string, { value: string; baseHash: string }>();
+const parkedDrafts = new Map<string, { value: string; baseHash: string; landedBody: string | null }>();
 const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
 
 /** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
@@ -193,6 +203,8 @@ export function ChapterWorkspace({
   const parked = parkedDrafts.get(parkedKey(worldId, prodId, chapter.file));
   const unsentDraft = useRef<string | null>(parked?.value ?? null);
   const unsentBase = useRef<string | null>(parked?.baseHash ?? null);
+  /** The text an older save of the screen that parked this carried; on disk, it is not a move. */
+  const unsentLanded = useRef<string | null>(parked?.landedBody ?? null);
   /** The text the pending save carried, so the answer can become the record without a re-read. */
   const savedText = useRef<string | null>(null);
   /** A read asked for while a save was pending; begun once the save lands (turn 126's fourth rule). */
@@ -236,11 +248,16 @@ export function ChapterWorkspace({
         // an edit outside the app keeps the version (codex, PR 879).
         const unsent = unsentDraft.current;
         const unsentAgainst = unsentBase.current ?? previous?.hash ?? null;
+        const landed = unsentLanded.current;
         unsentDraft.current = null;
         unsentBase.current = null;
+        unsentLanded.current = null;
         // Our own save landing just before the transport dropped is not a move: the body read is
-        // the text that save carried, and the newer text goes out against its hash.
-        const ours = savedText.current !== null && opened.body === savedText.current;
+        // the text that save carried, and the newer text goes out against its hash. The same for
+        // the save a previous screen on this chapter had in flight when it parked the text.
+        const ours =
+          (savedText.current !== null && opened.body === savedText.current) ||
+          (landed !== null && opened.body === landed);
         if (unsent !== null && (unsentAgainst === opened.hash || ours)) {
           if (opened.body !== unsent) {
             setSaving(true);
@@ -352,11 +369,22 @@ export function ChapterWorkspace({
    * against a fresh base, and the foot says so rather than staying on "Saving…" (codex, PR 879).
    */
   useEffect(() => {
-    if (connection === "open" || pendingSave.current === null) return;
+    if (connection === "open") return;
+    // The newest text not yet on disk: what is being typed inside the pause, else what waits
+    // behind the save in flight, else what that save carried. The pause itself is cancelled —
+    // its timer would find no transport — and the reopen on reconnect sends the text instead
+    // of adopting the disk over it (codex, PR 879).
+    const typing = timer.current !== null ? draftRef.current : null;
+    const value = typing ?? queuedDraft.current ?? (pendingSave.current !== null ? savedText.current : null);
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
     pendingSave.current = null;
-    unsentDraft.current = queuedDraft.current ?? savedText.current;
-    unsentBase.current = recordRef.current?.hash ?? null;
     queuedDraft.current = null;
+    if (value === null || value === recordRef.current?.body) return;
+    unsentDraft.current = value;
+    unsentBase.current = recordRef.current?.hash ?? null;
     setSaving(false);
     setSaveRefusal("offline · kept to send");
   }, [connection]);
@@ -383,13 +411,22 @@ export function ChapterWorkspace({
       if (value === null || base === null) return;
       if (current !== null && value === current.body && unsentDraft.current === null) return;
       if (pendingSave.current !== null) {
-        if (savedText.current !== value) flushAfter(pendingSave.current, { worldId, prodId, file: chapter.file, value });
+        if (savedText.current !== value) {
+          flushAfter(pendingSave.current, {
+            worldId,
+            prodId,
+            file: chapter.file,
+            value,
+            baseHash: base,
+            landedBody: savedText.current,
+          });
+        }
         return;
       }
       // A transport that is down here would lose the words with the screen; they are parked for
       // the next one to open this chapter (codex, PR 879).
       const sent = saveChapter(worldId, prodId, chapter.file, value, base);
-      if (sent === null) parkedDrafts.set(parkedKey(worldId, prodId, chapter.file), { value, baseHash: base });
+      if (sent === null) parkedDrafts.set(parkedKey(worldId, prodId, chapter.file), { value, baseHash: base, landedBody: null });
     },
     [worldId, prodId, chapter.file],
   );

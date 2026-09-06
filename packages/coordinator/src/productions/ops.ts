@@ -662,11 +662,15 @@ export async function createChapter(
   );
   const taken = [...existing.flatMap((c) => [c.file, c.id]), ...staged];
   const slug = uniqueSlug(slugify(input.title) || `chapter-${input.order}`, "chapter", taken);
+  // The rank the press asks for is the dense count plus one, and the bundle's orders are dense
+  // too; the files are not. A legacy production ranked 10, 20 would take a new chapter at 3 and
+  // sort it first, so the rank written is at least one past the highest persisted (codex, PR 879).
+  const order = Math.max(input.order, (await highestChapterRank(store, productionId, existing.map((c) => c.file))) + 1);
   const doc = MarkdownFile.create(
     {
       id: slug,
       title: input.title,
-      order: input.order,
+      order,
       status: "planned",
       version: 1,
       created: store.now().slice(0, 10),
@@ -685,6 +689,19 @@ export async function createChapter(
     ],
   });
   return slug;
+}
+
+/** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
+async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
+  let highest = 0;
+  for (const file of files) {
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
+    if (raw === null) continue;
+    const data = MarkdownFile.parse(raw).data;
+    const rank = typeof data["order"] === "number" ? data["order"] : typeof data["number"] === "number" ? data["number"] : 0;
+    if (Number.isFinite(rank) && rank > highest) highest = rank;
+  }
+  return highest;
 }
 
 /** Direct authoring: saves in place, no proposal, no version cut (R-5). */

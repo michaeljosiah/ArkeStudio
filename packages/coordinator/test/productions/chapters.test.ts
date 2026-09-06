@@ -231,6 +231,27 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     );
   });
 
+  it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {
+    const { dir, store } = await open();
+    await createProduction(store, { title: "Inkbound", format: "story" });
+    // Legacy-ranked chapters, written through the committer: a file written by hand under an
+    // open store is an outside edit the world refuses to write over until it is reconciled.
+    for (const [file, number] of [["ten", 10], ["twenty", 20]] as const) {
+      const doc = MarkdownFile.create({ id: file, number, title: file, status: "drafted", version: 1 }, "Words.");
+      await store.commit({
+        kind: "chapter-create",
+        source: "test",
+        files: [{ path: `productions/inkbound/chapters/${file}.md`, action: "create", content: doc.serialize(), baseHash: null }],
+      });
+    }
+    // The dense count says 3; the files say 20.
+    await createChapter(store, "inkbound", { title: "Untitled", order: 3 });
+    const chapters = await chaptersOf(dir, "inkbound");
+    assert.deepEqual(chapters.map((c) => c.id), ["ten", "twenty", "untitled"], "the new chapter is last");
+    const raw = await readFile(join(dir, "productions", "inkbound", "chapters", "untitled.md"), "utf8");
+    assert.match(raw, /^order: 21$/m);
+  });
+
   it("an accepted draft cuts a version, and Earlier versions puts the one before it back as a new one", async () => {
     const { dir, store } = await open();
     const gate = new ProposalManager(store);
