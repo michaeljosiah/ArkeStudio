@@ -2147,5 +2147,30 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
     assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, asked), /This ask was for a reply only; nothing is staged from it/);
     const quiet = turn(w.conversationId, context, { actions: [], replyOnly: true });
     assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, quiet), [], "a reply with no action is the promise kept");
+    // Every channel, not only actions (codex, round five): a bible edit, a scene edit, an editor
+    // request or a candidate on a reply-only turn is refused the same way.
+    const edited = turn(w.conversationId, context, { bibleEdits: [{ op: "append", text: "The bells answer a called tide." } as never], replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, edited), /This ask was for a reply only/);
+    const grouped = turn(w.conversationId, context, { groups: [{ id: "grp_1", status: "live", members: [] } as never], replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, grouped), /This ask was for a reply only/, "a group change is a change too");
+  });
+
+  it("the guard folds emphasis as the matcher does: a quote of the file's __not__ is within a selection served as **not** (codex on PR 903, round four)", async () => {
+    const w = await setup(context);
+    const held = (find: string, text: string) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [revision("neap", find, 2)], subject: { ...subject, text } }));
+    // Within, once the markers fold: the next refusal is the missing read receipt, which is the
+    // proof the guard let it through.
+    assert.throws(() => held("__not__ wrong", "She was **not** wrong."), (err: unknown) => !/This ask was about|not within the words/.test(String(err)));
+    assert.throws(() => held("not right", "She was **not** wrong."), /not within the words this ask was about/);
+  });
+
+  it("the paragraph the ask named must come back, and either spelling of the chapter is the chapter (codex, round five)", async () => {
+    const w = await setup(context);
+    const held = (action: ReturnType<typeof revision>) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [action], subject }));
+    assert.throws(() => held(revision("neap", "the 1820 volume")), /the revision must name that paragraph/, "an action without the paragraph would search the whole chapter");
+    // The file stem names the same chapter as its id; the guard resolves both before comparing.
+    assert.throws(() => held(revision("01-neap", "the 1820 volume", 2)), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "the stem is the chapter, so only the read is missing");
   });
 });

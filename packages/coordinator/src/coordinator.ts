@@ -14353,6 +14353,9 @@ export class Coordinator {
        * into B's words.
        */
       worldContext: () => currentLookContext(store.getBundle().artDirection),
+      // A turn held to a passage or to a reply fences this runner's own world first (codex on
+      // PR 903), for the same reason as the look above: never whichever world is open now.
+      raiseSchemaBoundary: (version) => store.raiseSchemaBoundary(version, "world-chat-constraints"),
       // Read at the same instant as the look above, and from the same world, so what a draft
       // says it was based on is what the model was actually shown — the words as well as the
       // number, because a derived look is v1 however often the world's tone is edited under it.

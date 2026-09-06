@@ -20,6 +20,7 @@ import { readChanges } from "./change-writer.js";
 import {
   CommitPlanError,
   Committer,
+  PROSE_STYLE_SCHEMA_VERSION,
   classify,
   type CommitHooks,
   type CommitInput,
@@ -181,6 +182,7 @@ export class WorldStore {
       );
       if (!opts.readOnly) {
         await store.adoptBibleIfMoved();
+        await store.adoptProseStyleBoundary();
         await store.ensureCurrentHistorySnapshots();
         await store.saveScanState();
         store.startWatcher();
@@ -536,11 +538,13 @@ export class WorldStore {
         if (live !== null && committedHash === sha256(live)) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
         if (live === null && committedHash === undefined) {
           this.externalEdits = this.externalEdits.filter((candidate) => candidate.path !== portablePath);
           await this.rescan();
+          await this.afterExternalEditsCleared();
           return;
         }
 
@@ -566,7 +570,7 @@ export class WorldStore {
         });
         this.externalEdits = this.externalEdits.filter((e) => e.path !== portablePath);
         await this.rescan();
-        if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+        await this.afterExternalEditsCleared();
       } catch (err) {
         const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
         this.externalEdits = this.externalEdits.map((candidate) =>
@@ -588,9 +592,52 @@ export class WorldStore {
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
       await this.saveScanState();
-      if (this.externalEdits.length === 0) await this.adoptBibleIfMoved();
+      await this.afterExternalEditsCleared();
     });
     return this.getBundle();
+  }
+
+  /**
+   * What waited on the last external edit clearing (codex on PR 903, rounds two and three): the
+   * Bible adopted if it moved, and the style's boundary. A world that opened with edits waiting
+   * skipped both, and every path that empties the set comes through here — an edit committed,
+   * an edit found put back or already gone, a reload — because the moment they clear is the
+   * moment adoption can happen, whichever way they cleared.
+   */
+  private async afterExternalEditsCleared(): Promise<void> {
+    if (this.externalEdits.length > 0) return;
+    await this.adoptBibleIfMoved();
+    try {
+      await this.adoptProseStyleBoundary();
+    } catch (err) {
+      // Adoption that fails — the style's base moved under it, say — must not leave the world
+      // writable below the style's boundary (codex on PR 903, round six): a downgrade could open
+      // it and ignore the style. The style goes back among the edits awaiting reconciliation,
+      // with the refusal, so writes stay gated until a reconcile lands it through the funnel
+      // that raises the boundary; a world with no style to adopt has nothing to gate.
+      const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+      if (styled === undefined) throw err;
+      this.externalEdits = [
+        {
+          path: `productions/${styled.meta.id}/prose-style.json`,
+          kind: "modified",
+          refusal: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+        },
+      ];
+    }
+  }
+
+  /**
+   * Fence the world at a boundary a feature needs with no file of its own to carry it (codex on
+   * PR 903): a World Chat turn held to a passage or to a reply is recorded as an event a build
+   * older than the constraints reads as corruption, so the world is raised first and that build
+   * refuses it by name instead. Only ever raises; a world already there is left alone, and a
+   * world with external edits waiting is refused like any other write.
+   */
+  async raiseSchemaBoundary(version: number, kind: string): Promise<void> {
+    const current = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (current >= version) return;
+    await this.commit({ kind, source: "app", files: [], raiseSchemaVersion: version });
   }
 
   close(): Promise<void> {
@@ -831,6 +878,46 @@ export class WorldStore {
             baseHash: sha256(live),
             committedBase: committed,
             committedBaseHash: sha256(committed),
+          },
+        ],
+      });
+      await this.rescan();
+      this.events.onAdopted?.();
+    } finally {
+      this.watcher?.unsuppress();
+    }
+  }
+
+  /**
+   * A prose style written by hand into a world below its boundary (turn 128, codex on PR 897):
+   * the record is adopted through the committer — the one funnel that raises the schema when
+   * style bytes land — so a build older than the style refuses the world rather than drafting
+   * without a style the author plainly meant. Nothing in the record changes; adoption bumps its
+   * version and stamps it, as every external edit's does. Skipped while other external edits
+   * wait, since those gate every write until they are reconciled.
+   */
+  private async adoptProseStyleBoundary(): Promise<void> {
+    if (this.closed || this.externalEdits.length > 0) return;
+    const schemaVersion = (this.scan.bundle.meta as { schemaVersion?: number }).schemaVersion ?? 1;
+    if (schemaVersion >= PROSE_STYLE_SCHEMA_VERSION) return;
+    const styled = this.scan.bundle.productions.find((production) => production.proseStyle);
+    if (styled === undefined) return;
+    const path = `productions/${styled.meta.id}/prose-style.json`;
+    const live = await this.readEntity(path);
+    if (live === null) return;
+    const committed = await latestHistoryContent(this.dir, path);
+    this.watcher?.suppress();
+    try {
+      await this.committer.commit({
+        kind: "prose-style-adopted",
+        source: "external-edit",
+        files: [
+          {
+            path,
+            action: "replace",
+            content: live,
+            baseHash: sha256(live),
+            ...(committed !== null ? { committedBase: committed, committedBaseHash: sha256(committed) } : { committedBaseHash: null }),
           },
         ],
       });

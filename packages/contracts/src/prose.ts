@@ -54,6 +54,11 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
       of: z.literal("story"),
       productionId: SlugSchema,
       field: z.enum(["logline", "spine", "acts", "treatment", "voice", "samples"]),
+      /**
+       * One sample, counted from zero, rather than all of them (codex on turn 128): six samples
+       * at their bound outrun a narrator's prompt cap read as one, so each is its own block.
+       */
+      sample: z.number().int().min(0).optional(),
     })
     .strict(),
   /** The season record's two authored answers (SPEC-023 R-10). */

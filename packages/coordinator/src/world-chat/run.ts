@@ -19,6 +19,7 @@ import {
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
+import { TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
 import { SceneEditRefused } from "../productions/scene-edits.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
 import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
@@ -132,6 +133,12 @@ export interface RunDeps {
    * existed and is stale against neither.
    */
   artDirectionLook?: () => CurrentLook;
+  /**
+   * Fence the world at the boundary a constrained turn needs before its constraints are written
+   * (codex on PR 903): a build older than the constraints reads the event as corruption, and
+   * must refuse the world by name instead. Absent under test, where the world is a fixture.
+   */
+  raiseSchemaBoundary?: (version: number) => Promise<void>;
   /**
    * The author's Bible as it stands right now (master §4.5).
    *
@@ -369,7 +376,14 @@ export class WorldChatRunner {
       .reverse()
       .map(({ event }) => ("run" in event ? event.run : undefined))
       .find((run) => run?.turnId === turnId)?.model;
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, undefined, previousModel);
+    // The guard the line ran under runs again with it (codex on PR 899): the selected passage
+    // and the reply-only promise are in the log beside the line, not only on the send that
+    // first carried them.
+    const constraints = [...events]
+      .reverse()
+      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
+      .find((held) => held?.turnId === turnId);
+    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, previousModel, constraints?.replyOnly === true);
   }
 
   /**
@@ -512,12 +526,36 @@ export class WorldChatRunner {
       startedAt: at,
     };
 
-    // The user's words are durable before the model is asked. Whatever happens next, they said it.
-    // On a retry they already are, so only the new run is recorded.
-    await store.append(
-      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
-      { at },
-    );
+    // What the line was said under goes in as its own line, and first (codex on PR 903, rounds
+    // two and three): written after the words, a crash between the two would leave a retryable
+    // turn without what it was held to, and a retry could stage what the ask forbade; written
+    // before them, the worst a crash leaves is a constraint with no turn, which nothing reads.
+    // Only the constraints that hold a turn to something — a passage, or a reply and nothing
+    // else — are worth the fence; the other subjects only colour the narration, as they always
+    // did, and are not written.
+    const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage");
+    try {
+      if (constrained) {
+        await this.deps.raiseSchemaBoundary?.(TURN_CONSTRAINTS_SCHEMA_VERSION);
+        await store.append(
+          { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
+          { at },
+        );
+      }
+      // The user's words are durable before the model is asked. Whatever happens next, they said it.
+      // On a retry they already are, so only the new run is recorded.
+      await store.append(
+        existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+        { at },
+      );
+    } catch (err) {
+      // A write the world refuses — the boundary, with an external edit waiting to be reconciled,
+      // or the log itself — ends the turn before it began (codex on PR 903, round four): the
+      // controller registered above is let go, or the conversation would stay live with no run
+      // and no way to send again until the app restarted.
+      this.cancelling.delete(conversationId);
+      throw err;
+    }
     if (modelChoice.reason !== undefined) {
       const reason = `rejected: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);

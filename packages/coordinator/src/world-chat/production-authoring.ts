@@ -65,28 +65,86 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
  * and line breaks reads as one space — returned as offsets into the unfolded `text`, so the
  * span replaced is the file's own bytes, wrapping included.
  */
-export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
+/**
+ * A character of emphasis, or a character of the words. Only the two spellings of emphasis fold
+ * (codex on PR 903): `*` and `_` say the same thing, while a backtick or a tilde changes what
+ * the words are, and a quote must not match across it. And either mark between two letters or
+ * digits is not emphasis at all in prose — `foo_bar` and `foo*bar` are one word each — so it
+ * stays a character of the words, and a quote of the word never matches prose the author has
+ * since joined up (codex, rounds three and four). A letter or a digit on both sides, and only
+ * those: `\w` would count the underscore itself, and read the inner pair of `__not__` as the
+ * middle of a word.
+ */
+function isMarker(source: string, i: number): boolean {
+  const c = source[i]!;
+  if (c !== "*" && c !== "_") return false;
+  const before = i > 0 ? source[i - 1]! : " ";
+  const after = i + 1 < source.length ? source[i + 1]! : " ";
+  return !(/[^\W_]/.test(before) && /[^\W_]/.test(after));
+}
+
+/** A text with its whitespace folded to single spaces and, when asked, its emphasis markers dropped. */
+function foldSource(source: string, markers: boolean): { folded: string; starts: number[]; ends: number[] } {
   const starts: number[] = [];
   const ends: number[] = [];
   let folded = "";
-  for (let i = 0; i < text.length; i++) {
-    if (/\s/.test(text[i]!)) {
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+    if (markers && isMarker(source, i)) continue;
+    if (/\s/.test(c)) {
       if (folded.endsWith(" ")) {
         ends[ends.length - 1] = i + 1;
         continue;
       }
       folded += " ";
     } else {
-      folded += text[i];
+      folded += c;
     }
     starts.push(i);
     ends.push(i + 1);
   }
-  const needle = find.replace(/\s+/g, " ").trim();
+  return { folded, starts, ends };
+}
+
+/**
+ * The words alone, folded as the matcher folds them, for a guard that asks whether one text is
+ * within another (codex on PR 903, round four): the selection the editor served as `**not**`
+ * holds a quote of the file's `__not__` only when both are folded the same way.
+ */
+export function foldedText(text: string, markers: boolean): string {
+  return foldSource(text, markers).folded.trim();
+}
+
+export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
+  // The selection is what the editor showed and the quote is what the file holds (codex, round
+  // four): `**bold**` selected in part, or `__bold__` stored where the editor would write
+  // `**bold**`, differ only in emphasis markers. The words are matched plainly and with the
+  // markers folded, and the two sets are joined (codex on PR 903): a paragraph holding the words
+  // plain and again in emphasis has two occurrences whichever way the quote was spelled, and
+  // uniqueness must see both, or a revision lands on the wrong copy. A plain hit keeps its plain
+  // span; a marked hit that is the same words already found plainly is the same occurrence.
+  const hits = foldedOccurrencesWith(text, find, false);
+  for (const hit of foldedOccurrencesWith(text, find, true)) {
+    if (!hits.some((held) => hit.start < held.end && held.start < hit.end)) hits.push(hit);
+  }
+  return hits.sort((a, b) => a.start - b.start);
+}
+
+function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {
+  const haystack = foldSource(text, markers);
+  const needle = foldSource(find, markers).folded.trim();
   if (needle === "") return [];
   const hits: Array<{ start: number; end: number }> = [];
-  for (let at = folded.indexOf(needle); at >= 0; at = folded.indexOf(needle, at + needle.length)) {
-    hits.push({ start: starts[at]!, end: ends[at + needle.length - 1]! });
+  for (let at = haystack.folded.indexOf(needle); at >= 0; at = haystack.folded.indexOf(needle, at + needle.length)) {
+    let start = haystack.starts[at]!;
+    let end = haystack.ends[at + needle.length - 1]!;
+    // The markers that wrap the matched words go with them: a span that began after `__` and
+    // ended before it would leave half a mark standing on either side of the replacement.
+    if (markers) {
+      while (start > 0 && isMarker(text, start - 1)) start--;
+      while (end < text.length && isMarker(text, end)) end++;
+    }
+    hits.push({ start, end });
   }
   return hits;
 }

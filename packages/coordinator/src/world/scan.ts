@@ -94,7 +94,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
  * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 11;
+export const SUPPORTED_SCHEMA_VERSION = 12;
 
 export class WorldOpenError extends Error {
   constructor(
