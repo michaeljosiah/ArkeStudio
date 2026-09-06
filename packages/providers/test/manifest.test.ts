@@ -892,7 +892,8 @@ describe("the recommendation (SPEC-033 R-33..R-38)", () => {
     const modest = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 16 * 1024 }), detectedAt);
     assert.equal(modest.recommended.video, "comfyui-draft-video");
     const big = gateLocalRuntimes(SHIPPED_MANIFEST, probes({ vramMb: 24 * 1024 }), detectedAt);
-    assert.equal(big.recommended.video, "comfyui-h3-video");
+    // The native size leads on the card its author would recommend it for (issue 849).
+    assert.equal(big.recommended.video, "comfyui-h3-video-768");
   });
 
   it("nothing runs well here means no recommendation, stated as an absence (row 22, R-37)", () => {

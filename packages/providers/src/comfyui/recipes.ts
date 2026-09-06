@@ -534,6 +534,46 @@ const H3_VIDEO: ComfyUiRecipe = {
 };
 
 /**
+ * Local · H3 Video 768p — the same graph and weights at the model's native size (issue 849).
+ *
+ * A second recipe rather than a `resolution` param, because a size is a floor: hardware is
+ * declared per recipe and `fitFor` judges per floor, and what has been watched finish at 768p
+ * is one length, not the seven the 480p row offers. The 480p row stays as the fall-through the
+ * preference list exists for — ten minutes against thirteen for the same five seconds — and it
+ * is the one proven from a first frame, so this row declares text-to-video only.
+ *
+ * Measured on the reference 3080, not the 24 GB card the runs-well boundary names: 124 frames
+ * at 1344×768 completed there, so the floor is the same 10 GB class and the 24 GB figure stays
+ * the authored boundary above which the row is recommended. 10 s and 15 s at 768p are unrun —
+ * whether they fit the RAM behind a 24 GB card is a separate run per length (issue 848's rule).
+ */
+const H3_VIDEO_768: ComfyUiRecipe = {
+  ...H3_VIDEO,
+  id: "comfyui-h3-video-768",
+  displayName: "Local · H3 Video 768p",
+  recipeVersion: 1,
+  params: {
+    ...H3_VIDEO.params,
+    // The one length watched finish at this size (H3_768_FRAMES_BY_SECONDS).
+    durationSec: { ...H3_VIDEO.params["durationSec"]!, values: [5] },
+  },
+  hardware: {
+    minVramMb: 10000,
+    // Measured the way the 480p floor was: the second run in floorSource started with 3.8 GB of
+    // the card free, 4 GiB of it deliberately held by another process, and completed in the
+    // same time as the first.
+    minFreeVramMb: 4000,
+    recommendedVramMb: 24000,
+    minMemMb: 30720,
+    floorSource:
+      "measured through ComfyUI on Arke reference hardware 2026-09-06: RTX 3080 10 GB, ~2 GB held by other " +
+      "applications, 1344×768×124 frames at 8 steps completed in 12m48s with peak card usage 9466 MiB and system " +
+      "RAM bottoming at 321 MB free of 32 GB from 16.1 GB free at dispatch; repeated with 4 GiB of the card " +
+      "deliberately held (3.8 GB free at dispatch) and completed in 12m32s at peak card usage 9749 MiB",
+  },
+};
+
+/**
  * Local · Cloned Voice — IndexTTS 2.5 through TTS-Audio-Suite (SPEC-022).
  *
  * The first recipe that needs a custom node, and the first whose input is **a file the app owns**
@@ -696,7 +736,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -878,6 +918,32 @@ export const H3_DIMENSIONS: Record<string, { width: number; height: number }> = 
 };
 
 /**
+ * The model's native 768p-class sizes, raised from a measured run rather than the node's
+ * defaults (issue 849). Its own table because the 768p row is its own recipe: a size is a floor.
+ */
+export const H3_768_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  "16:9": { width: 1344, height: 768 },
+  "9:16": { width: 768, height: 1344 },
+};
+
+/**
+ * What has been watched finish at 768p — the same rule as H3_FRAMES_BY_SECONDS, one length so
+ * far. Measured on the reference 3080 (10 GB, 31.9 GB system RAM, engine v0.33.1), text-to-video
+ * at 1344×768, 8 steps, the engine put down first:
+ *
+ *   124 frames → 5.167 s   321 MB RAM to spare, 9,466 MiB VRAM  —  12m48s  (8.0 GB of the card free at dispatch)
+ *   124 frames → 5.167 s     0 MB RAM to spare, 9,749 MiB VRAM  —  12m32s  (3.8 GB free, 4 GiB deliberately held)
+ *
+ * Three minutes over the 480p run of the same length, and the same shape otherwise: the
+ * transformer streams either way, the decoded sequence is what grows. The second run is the
+ * free-VRAM floor's measurement — the card held at 305 MiB free for the whole of the sampling
+ * and the run took no longer for it — and its RAM low-water mark of nothing at all is the page
+ * cache filling what the machine had (issue 848's finding), not a run that paged to a halt.
+ * Longer clips at this size are unrun and are not offered.
+ */
+export const H3_768_FRAMES_BY_SECONDS: Record<string, number> = { "5": 124 };
+
+/**
  * Which tables derive a video recipe's internal params (frames, pixels) from the caller's chosen
  * seconds and aspect. Keyed by recipe id because the derivation is recipe arithmetic — Wan's 4k+1
  * against H3's 17k+5 — and the client dispatching them should hold no model names of its own.
@@ -888,6 +954,7 @@ export const VIDEO_DERIVATIONS: Record<
 > = {
   [DRAFT_VIDEO.id]: { dimensions: WAN_DIMENSIONS, framesBySeconds: WAN_FRAMES_BY_SECONDS },
   [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
+  [H3_VIDEO_768.id]: { dimensions: H3_768_DIMENSIONS, framesBySeconds: H3_768_FRAMES_BY_SECONDS },
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
@@ -1006,6 +1073,37 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       // encoder is NVFP4 AWQ; the engine's own non-CUDA backends report those capabilities
       // unavailable. The node-catalogue probe cannot catch this (the loader classes exist
       // everywhere), so the machine is refused here, before a 42 GB download it cannot run.
+      accelerator: ["cuda"],
+    },
+  },
+  {
+    /*
+     * The 768p sibling (issue 849): the row above's declarations at the native size, for the one
+     * length run there — the comments above are its comments too. Text-to-video only, because
+     * that is what was watched finish at this size: no first-frame mode and no reference budget,
+     * so nothing binds a picture to it. Same weights, so the same disk figure.
+     */
+    id: H3_VIDEO_768.id,
+    provider: "comfyui",
+    capability: "video",
+    displayName: H3_VIDEO_768.displayName,
+    accepts: { referenceImages: 0, startFrame: false, endFrame: false },
+    limits: {
+      maxPromptChars: 2000,
+      alwaysSound: true,
+      maxDurationSec: 5,
+      durations: { "5": "5" },
+      durationWire: "number",
+      resolutions: ["768p"],
+      aspects: Object.keys(H3_768_DIMENSIONS),
+    },
+    speechVideo: "untested",
+    pricing: { kind: "unmetered" },
+    requires: {
+      vramMb: H3_VIDEO_768.hardware.minVramMb,
+      recommendedVramMb: H3_VIDEO_768.hardware.recommendedVramMb,
+      memMb: H3_VIDEO_768.hardware.minMemMb,
+      diskMb: 42371,
       accelerator: ["cuda"],
     },
   },

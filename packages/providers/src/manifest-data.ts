@@ -14,9 +14,9 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 22,
+  manifestVersion: 23,
   dialogueGuidance: [],
-  generated: "2026-09-05",
+  generated: "2026-09-06",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured
@@ -30,7 +30,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // Quality order, the voice-tts pattern applied to video: H3 generates the better take (with
     // its own audio) and needs the bigger card, so it leads and a machine under its floor falls
     // through to the Wan draft.
-    video: ["comfyui-h3-video", "comfyui-draft-video"],
+    // The native size leads where the card runs it well (issue 849): the 768p row shares H3's
+    // floors, so on a 10 GB card both are offered and neither recommended, and the draft still
+    // catches a machine under H3's floor.
+    video: ["comfyui-h3-video-768", "comfyui-h3-video", "comfyui-draft-video"],
     // A cloned voice speaks in the character's own voice; Kokoro speaks in one of six presets.
     // Quality order, so the bigger one leads and a machine that cannot hold it falls through.
     "voice-tts": ["comfyui-cloned-voice", "kokoro-82m"],

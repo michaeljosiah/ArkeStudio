@@ -160,7 +160,7 @@ describe("the recipe catalogue projects into the manifest like any other model",
   });
 
   it("the image and video recipes still need no custom node (D11 holds where it was written)", () => {
-    for (const id of ["comfyui-draft-image", "comfyui-draft-video", "comfyui-h3-video"]) {
+    for (const id of ["comfyui-draft-image", "comfyui-draft-video", "comfyui-h3-video", "comfyui-h3-video-768"]) {
       const recipe = comfyUiRecipeById(id)!;
       assert.equal(recipe.requires.customNodes.length, 0, id);
       assert.ok(recipe.requires.checkpoints.length > 0, id);
@@ -542,6 +542,49 @@ describe("submit dispatches the substituted graph, and refuses before the wire w
     assert.equal(posted.prompt["7"]!.inputs["width"], 704);
     assert.equal(posted.prompt["7"]!.inputs["height"], 1280);
     assert.equal(posted.prompt["10"]!.inputs["fps"], 24);
+  });
+
+  it("h3 768p: the same graph at the native size, offering only the length run there (issue 849)", async () => {
+    const native = comfyUiRecipeById("comfyui-h3-video-768")!;
+    const base = comfyUiRecipeById("comfyui-h3-video")!;
+    // One graph, one set of weights, two recipes: the identity differs by id alone, so a job
+    // frozen against either row is refused against the other and verified once per file.
+    assert.deepEqual(native.graph, base.graph);
+    assert.deepEqual(native.requires.checkpoints, base.requires.checkpoints);
+    assert.equal(comfyUiRecipeIdentity(native).templateDigest, comfyUiRecipeIdentity(base).templateDigest);
+    assert.notEqual(comfyUiRecipeIdentity(native).id, comfyUiRecipeIdentity(base).id);
+    // Its own floors, measured on the reference card rather than transcribed from the 24 GB
+    // boundary; the 24 GB figure stays the authored runs-well line.
+    assert.equal(native.hardware.minVramMb, 10000);
+    assert.equal(native.hardware.recommendedVramMb, 24000);
+    assert.match(native.hardware.floorSource, /1344×768×124 frames/);
+    const { fetch, calls } = engineFake([
+      { match: /\/prompt$/, status: 200, body: { prompt_id: "p-768", number: 5, node_errors: {} } },
+    ]);
+    const client = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT);
+    await client.submit("", {
+      model: "comfyui-h3-video-768",
+      capability: "video",
+      params: { prompt: "harbour at dawn, gulls crying", durationSec: 5, aspect: "16:9" },
+    });
+    const posted = calls.find((c) => c.url.endsWith("/prompt"))!.body as {
+      prompt: Record<string, { inputs: Record<string, unknown> }>;
+    };
+    assert.equal(posted.prompt["7"]!.inputs["length"], 124);
+    assert.equal(posted.prompt["7"]!.inputs["width"], 1344);
+    assert.equal(posted.prompt["7"]!.inputs["height"], 768);
+    assert.equal(posted.prompt["15"], undefined, "text-to-video drops the frame carriers here too");
+    // A length the 480p row offers is still refused here until it has been run at this size.
+    await assert.rejects(
+      client.submit("", { model: "comfyui-h3-video-768", capability: "video", params: { prompt: "x", durationSec: 10 } }),
+      /cannot be asked for 10s — it offers 5s/,
+    );
+    // The row says the same: one length, one size, no frame mode and no reference budget.
+    const row = SHIPPED_MANIFEST.models.find((m) => m.id === "comfyui-h3-video-768")!;
+    assert.deepEqual(durationOptions(row), [5]);
+    assert.deepEqual(row.limits.resolutions, ["768p"]);
+    assert.equal(frameDispatchFor(row, 1), null);
+    assert.equal(row.accepts.referenceImages, 0);
   });
 
   it("h3 video: seconds become the 17k+5 frame count, the aspect picks the verified dimensions", async () => {
