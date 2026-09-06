@@ -86,9 +86,33 @@ describe("what the model said, held to the chapter (R-40)", () => {
     );
     assert.equal(tagged.characters[0]!.sheet, "maren-kest", "matched by name");
     assert.deepEqual(tagged.characters[1], { character: "odile-sarn", sheet: "odile-sarn", present: false, placed: "Odile found her there an hour later", knows: [] });
-    assert.equal(tagged.characters.length, 3, "a departure with no words behind it is dropped");
+    assert.equal(tagged.characters.length, 4);
     assert.equal(tagged.dropped, 1);
-    assert.equal(tagged.characters[2]!.sheet, undefined, "a slug-shaped name the cast does not know is a name");
+    assert.deepEqual(tagged.characters[2], { character: "Perrin", present: true, unsure: true, knows: [] }, "a departure with no words behind it is dropped, and leaves them unsure (round seven)");
+    assert.equal(tagged.characters[3]!.sheet, undefined, "a slug-shaped name the cast does not know is a name");
+
+    // Entries naming one character are one character before the cap (codex on PR 907), and a
+    // name two sheets carry is nobody's tag.
+    const twice = verifyContinuity(
+      {
+        characters: [
+          { character: "Maren Kest", where: "the-vigil", placed: "Maren stood on the Vigil", knows: ["still holding the rope"] },
+          { character: "maren-kest", knows: ["at slack water"] },
+          ...Array.from({ length: 11 }, (_, i) => ({ character: `guest-${i}`, knows: [] })),
+        ],
+      },
+      body,
+      cast,
+    );
+    assert.equal(twice.characters.length, 12);
+    assert.deepEqual(twice.characters[0]!.knows, ["still holding the rope", "at slack water"], "folded into one");
+    assert.equal(twice.omitted, 0, "twelve distinct characters is not over the cap");
+    const shared = verifyContinuity(
+      { characters: [{ character: "Odile Sarn", knows: [] }] },
+      body,
+      [...cast, { id: "odile-sarn-2", name: "Odile Sarn" }],
+    );
+    assert.equal(shared.characters[0]!.sheet, undefined, "two sheets with one name: a guess, so no tag");
 
     const many = verifyContinuity({ characters: [{ character: "maren-kest", knows: ["Maren", "stood", "on the", "Vigil", "at", "slack", "water"] }] }, body);
     assert.equal(many.characters[0]!.knows.length, 6, "six lines is the cap");
@@ -130,6 +154,11 @@ describe("what the model said, held to the chapter (R-40)", () => {
       // Spoken of again with no place given: the departure stands (codex on PR 907).
       { characters: [{ character: "maren-kest", present: true, knows: ["three"] }], dropped: 0, omitted: 0, cut: 0 },
     ]);
+    const unsureLater = mergePasses([
+      { characters: [{ character: "maren-kest", present: true, where: "a", placed: "pa", knows: [] }], dropped: 0, omitted: 0, cut: 0 },
+      { characters: [{ character: "maren-kest", present: true, unsure: true, knows: [] }], dropped: 1, omitted: 0, cut: 0 },
+    ]);
+    assert.deepEqual(unsureLater.characters[0], { character: "maren-kest", present: true, unsure: true, knows: [] }, "a dropped claim in a later pass leaves them unsure, the earlier place gone (round seven)");
     assert.deepEqual(merged, {
       characters: [
         { character: "maren-kest", present: false, placed: "she left", knows: ["one", "two", "three"] },

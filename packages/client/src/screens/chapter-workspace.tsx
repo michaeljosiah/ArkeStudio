@@ -256,6 +256,13 @@ export function ChapterWorkspace({
    * `chapter.save-result` with the new hash instead.
    */
   const [record, setRecord] = useState<OpenedRecord | null>(null);
+  /**
+   * The continuity record a derivation finished with (turn 129), held rather than read back off
+   * the store each render: a rerun that fails replaces the store's last word, and the last
+   * record must still stand. A fresh open replaces it (codex on PR 907): what the disk holds now
+   * is the record, whether that is a newer one, none, or one that cannot be read.
+   */
+  const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const [reopen, setReopen] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
@@ -319,6 +326,7 @@ export function ChapterWorkspace({
         const previous = recordRef.current;
         recordRef.current = opened;
         setRecord(opened);
+        setFinishedRecord(null);
         setOpenFailure(null);
         // A draft the transport could not carry goes out now, against the base just read —
         // unless the record moved while it waited, in which case the disk text is the text and
@@ -618,9 +626,6 @@ export function ChapterWorkspace({
    * leaves the last record standing and says so.
    */
   const derivingState = useDeriving()[`${worldId}/${prodId}/${chapter.id}`];
-  // The record a derivation finished with is held, not read back off the store each render: a
-  // rerun that fails replaces the store's last word, and the last record must still stand.
-  const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
   useEffect(() => {
     if (derivingState?.state === "derived" && derivingState.record !== undefined) setFinishedRecord(derivingState.record);
   }, [derivingState]);
@@ -941,6 +946,11 @@ export function ChapterWorkspace({
                         {!who.present && (
                           <span className="fy-ch__who-where fy-mono" title={who.placed}>
                             gone
+                          </span>
+                        )}
+                        {who.unsure && (
+                          <span className="fy-ch__who-where fy-mono" title="the chapter said they moved and could not prove where">
+                            place dropped
                           </span>
                         )}
                         {sheetNow(who) && (

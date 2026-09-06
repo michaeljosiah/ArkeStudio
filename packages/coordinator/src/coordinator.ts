@@ -1008,8 +1008,8 @@ export class Coordinator {
   private readonly benchDispatchActions = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
-  /** Chapters whose continuity is being derived right now, by `productionId/chapterFile` (turn 129). */
-  private readonly derivingContinuity = new Map<string, AbortController>();
+  /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
+  private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
    *
@@ -1900,6 +1900,11 @@ export class Coordinator {
         const findings = this.diagnosticsSnapshot?.currentSnapshot();
         if (findings !== undefined) {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
+        }
+        // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
+        // started, so a reload never hides a paid run from the press that could stop it.
+        for (const run of this.derivingContinuity.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "continuity.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
         return replayed;
       },
@@ -10304,7 +10309,7 @@ export class Coordinator {
       case "stop-continuity": {
         const store = this.opts.provider.openStore?.();
         const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
-        this.derivingContinuity.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.abort();
+        this.derivingContinuity.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
         return;
       }
       case "derive-continuity": {
@@ -10321,7 +10326,7 @@ export class Coordinator {
         // A second press while one runs is a double-click, not a second run.
         if (this.derivingContinuity.has(key)) return;
         const control = new AbortController();
-        this.derivingContinuity.set(key, control);
+        this.derivingContinuity.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
         // A run ends with the world that began it (codex on PR 907): closing the world aborts the
         // passes still to come, rather than letting them spend on a world nobody is in.
         const onClose = () => control.abort();
@@ -14851,7 +14856,7 @@ export class Coordinator {
       for (const controller of this.reading.values()) controller.abort();
       // A continuity run is passes of two-minute turns (turn 129): shutdown aborts it rather
       // than waiting on every pass (codex on PR 907), and the last record stands.
-      for (const controller of this.derivingContinuity.values()) controller.abort();
+      for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.

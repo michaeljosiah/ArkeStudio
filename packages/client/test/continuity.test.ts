@@ -121,6 +121,18 @@ describe("the continuity table (turn 129)", () => {
     );
     assert.deepEqual(moved[1]!.cells[0], { gone: true, since: 2, warn: true });
     assert.deepEqual(moved[2]!.cells[0], { gone: true, since: 2, warn: true }, "carried past, still in warning");
+
+    // A claim the check dropped is an uncertainty, not silence (round seven).
+    const unsure = continuityRows(
+      [
+        chapter(1, "h1", derived("h1", { "maren-kest": "the-vigil" })),
+        { ...chapter(2, "h2", derived("h2", {})), continuity: { ...(derived("h2", {}) as Exclude<ChapterContinuityState, { unreadable: true }>), placed: [{ character: "Maren Kest", sheet: "maren-kest", present: true, unsure: true }] } },
+        chapter(3, "h3", derived("h3", {})),
+      ],
+      ["maren-kest"],
+    );
+    assert.deepEqual(unsure[1]!.cells[0], { unsure: true, warn: false }, "a dash where the chapter said they moved and could not prove where");
+    assert.equal(unsure[2]!.cells[0], null, "and nothing carried past it");
   });
 
   it("the panel's stamp says what the check proved and what it dropped or cut", () => {

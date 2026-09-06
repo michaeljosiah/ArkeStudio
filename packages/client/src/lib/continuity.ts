@@ -14,6 +14,8 @@ export interface ContinuityCell {
   where?: string;
   /** The last chapter to speak of them said they had gone (codex on turn 129): a dash, tracked like a place. */
   gone?: true;
+  /** The chapter claimed a move it could not prove (round seven): a dash, and nothing carried. */
+  unsure?: true;
   /** The order of the chapter that placed them, or said they had gone, when this cell is carried rather than placed here. */
   since?: number;
   /** Placed by a chapter that has moved since, or carried from or past one. */
@@ -49,6 +51,9 @@ export function continuityRows(chapters: readonly ChapterSummary[], cast: readon
         // Said to have gone (codex on turn 129): a dash here, tracked like a place so a departure
         // from a chapter that has since moved is in warning, not a dash that looks current.
         if (entry !== undefined && !entry.present) return { gone: true, since: chapter.order, warn: stale };
+        // A claim the check dropped is an uncertainty, not silence (round seven): a dash, and
+        // nothing carried for them from here.
+        if (entry?.unsure) return { unsure: true, warn: stale };
         const held = overCap ? undefined : carry.get(id);
         if (held === undefined) return null;
         return held.gone ? { gone: true, since: held.since, warn: held.stale } : { where: held.where!, since: held.since, warn: held.stale };
@@ -59,6 +64,7 @@ export function continuityRows(chapters: readonly ChapterSummary[], cast: readon
           const entry = spoken(id);
           if (entry?.where !== undefined) carry.set(id, { where: entry.where, since: chapter.order, stale });
           else if (entry !== undefined && !entry.present) carry.set(id, { gone: true, since: chapter.order, stale });
+          else if (entry?.unsure) carry.delete(id);
           // A chapter that has moved may have moved anyone it did not place either (codex on turn
           // 129): every cell carried past it is in warning from here on, whatever its source says.
           else if (stale) {

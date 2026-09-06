@@ -110,9 +110,9 @@ export function makeAdapterContinuityDeriver(
       let finalText = "";
       const abort = new AbortController();
       const onStop = () => {
-        void (adapter as { interrupt?: (id: string) => Promise<void> }).interrupt
-          ?.call(adapter, session.sessionId)
-          .catch(() => {});
+        // The session's own generation is told, not only this listener (codex on PR 907): a
+        // harness with no interrupt leaves a stopped run spending until it is disposed.
+        void adapter.interrupt?.(session.sessionId).catch(() => {});
         abort.abort();
       };
       signal?.addEventListener("abort", onStop, { once: true });
@@ -244,7 +244,14 @@ export interface VerifiedContinuity {
  */
 function sheetOf(character: string, cast: ReadonlyArray<{ id: string; name: string }>): string | undefined {
   const wanted = character.trim().toLowerCase();
-  return cast.find((entry) => entry.id.toLowerCase() === wanted || entry.name.trim().toLowerCase() === wanted)?.id;
+  // An exact id first, anywhere in the cast; then a name, and only a name exactly one sheet
+  // carries (codex on PR 907): two sheets with one name, or a name that is another sheet's id,
+  // are a guess, and a guess would place and carry under the wrong column. Untagged, the name
+  // stays a name, shown in the panel and never a column.
+  const byId = cast.find((entry) => entry.id.toLowerCase() === wanted);
+  if (byId !== undefined) return byId.id;
+  const byName = cast.filter((entry) => entry.name.trim().toLowerCase() === wanted);
+  return byName.length === 1 ? byName[0]!.id : undefined;
 }
 
 /**
@@ -261,47 +268,57 @@ export function verifyContinuity(raw: RawContinuity, body: string, cast: Readonl
   const inBody = (quote: string) => quote !== "" && quote.length <= CONTINUITY_BOUNDS.line && folded.includes(quote);
   let dropped = 0;
   let cut = 0;
-  const characters: ChapterContinuity["characters"] = [];
-  const named = raw.characters.filter((entry) => entry.character.trim() !== "");
-  for (const entry of named.slice(0, CONTINUITY_BOUNDS.characters)) {
+  // Entries naming one character are one character, folded in the order given, before the cap
+  // is counted (codex on PR 907): a response that says Maren twice has not named two people.
+  const byKey = new Map<string, ChapterContinuity["characters"][number]>();
+  for (const entry of raw.characters) {
     const character = entry.character.trim().slice(0, CONTINUITY_BOUNDS.character);
+    if (character === "") continue;
     const sheet = sheetOf(character, cast);
-    const knows: string[] = [];
+    const key = sheet ?? character;
+    let held = byKey.get(key);
+    if (held === undefined) {
+      held = { character, ...(sheet !== undefined ? { sheet } : {}), present: true, knows: [] };
+      byKey.set(key, held);
+    }
     for (const line of entry.knows ?? []) {
       const quote = fold(line);
       // The cap first (codex on PR 907): a seventh line is cut whether or not it verifies, so
       // the stamp gives the right reason; only a line within the cap can be dropped.
-      if (knows.includes(quote)) continue;
-      if (knows.length >= CONTINUITY_BOUNDS.lines) cut++;
+      if (held.knows.includes(quote)) continue;
+      if (held.knows.length >= CONTINUITY_BOUNDS.lines) cut++;
       else if (!inBody(quote)) dropped++;
-      else knows.push(quote);
+      else held.knows.push(quote);
     }
     const placed = entry.placed === undefined ? "" : fold(entry.placed);
-    if (entry.present === false) {
-      // A departure is evidenced like a placing (codex on turn 129): the words that say they
-      // have gone, or the claim is dropped and the chapter is taken to say nothing of them.
-      if (!inBody(placed)) {
-        dropped++;
-        continue;
-      }
-      characters.push({ character, ...(sheet !== undefined ? { sheet } : {}), present: false, placed, knows });
+    const where = entry.present === false ? "" : entry.where === undefined ? "" : fold(entry.where).slice(0, CONTINUITY_BOUNDS.where);
+    if (entry.present !== false && where === "") continue;
+    if (!inBody(placed)) {
+      // A placing or a departure with no words of the chapter behind it is dropped — and the
+      // character is left unsure (codex on turn 129, round seven): the chapter said they moved,
+      // or had gone, and could not prove where, which is an uncertainty and not silence. Nothing
+      // is carried for them from here, and the panel says so.
+      dropped++;
+      held.present = true;
+      delete held.where;
+      delete held.placed;
+      held.unsure = true;
       continue;
     }
-    const where = entry.where === undefined ? "" : fold(entry.where).slice(0, CONTINUITY_BOUNDS.where);
-    const placedHere = where !== "" && inBody(placed);
-    if (where !== "" && !placedHere) dropped++;
-    characters.push({
-      character,
-      ...(sheet !== undefined ? { sheet } : {}),
-      present: true,
-      ...(placedHere ? { where, placed } : {}),
-      knows,
-    });
+    delete held.unsure;
+    if (entry.present === false) {
+      held.present = false;
+      delete held.where;
+      held.placed = placed;
+    } else {
+      held.present = true;
+      held.where = where;
+      held.placed = placed;
+    }
   }
-  const beyond = named.slice(CONTINUITY_BOUNDS.characters).map((entry) => {
-    const character = entry.character.trim().slice(0, CONTINUITY_BOUNDS.character);
-    return sheetOf(character, cast) ?? character;
-  });
+  const all = [...byKey.values()];
+  const characters = all.slice(0, CONTINUITY_BOUNDS.characters);
+  const beyond = all.slice(CONTINUITY_BOUNDS.characters).map((entry) => entry.sheet ?? entry.character);
   return { characters, dropped, omitted: beyond.length, cut, beyond };
 }
 
@@ -331,17 +348,27 @@ export function mergePasses(passes: readonly VerifiedContinuity[]): VerifiedCont
         continue;
       }
       if (entry.sheet !== undefined) held.sheet = entry.sheet;
+      // Placings, departures and dropped claims fold in pass order, the latest event winning
+      // (codex on turn 129, round seven): a departure ends an earlier place and has none of its
+      // own; a dropped claim leaves them unsure; and a later pass that only speaks of them
+      // changes nothing about where they are, so an evidenced departure stands until a pass
+      // places them again (codex on PR 907).
       if (!entry.present) {
         held.present = false;
         delete held.where;
+        delete held.unsure;
         held.placed = entry.placed!;
       } else if (entry.where !== undefined) {
         held.present = true;
         held.where = entry.where;
         held.placed = entry.placed!;
+        delete held.unsure;
+      } else if (entry.unsure) {
+        held.present = true;
+        delete held.where;
+        delete held.placed;
+        held.unsure = true;
       }
-      // A later pass that speaks of them without placing them changes nothing about where they
-      // are (codex on PR 907): an evidenced departure stands until a pass places them again.
       for (const line of entry.knows) {
         if (held.knows.includes(line)) continue;
         if (held.knows.length >= CONTINUITY_BOUNDS.lines) cut++;

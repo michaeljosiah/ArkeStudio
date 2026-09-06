@@ -569,6 +569,8 @@ export const ChapterContinuityCharacterSchema = z
     sheet: SlugSchema.optional(),
     /** False only when the chapter says they have gone, evidenced by `placed` like a placing, with no `where`. */
     present: z.boolean(),
+    /** A placing or a departure the check dropped: the chapter said they moved and could not prove where. Carried as nothing. */
+    unsure: z.literal(true).optional(),
     /** A location slug, or the chapter's own words. */
     where: z.string().optional(),
     /** The span of the chapter that puts them where `where` says, or that says they have gone; without one, the claim is dropped. */
@@ -621,7 +623,15 @@ export const ChapterContinuitySummarySchema = z
     omitted: z.number().int().min(0),
     cut: z.number().int().min(0),
     placed: z.array(
-      z.object({ character: z.string().min(1), sheet: SlugSchema.optional(), present: z.boolean(), where: z.string().optional() }).strict(),
+      z
+        .object({
+          character: z.string().min(1),
+          sheet: SlugSchema.optional(),
+          present: z.boolean(),
+          unsure: z.literal(true).optional(),
+          where: z.string().optional(),
+        })
+        .strict(),
     ),
   })
   .strict();
@@ -648,6 +658,7 @@ export function summariseContinuity(record: ChapterContinuity): ChapterContinuit
       character: entry.character,
       ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}),
       present: entry.present,
+      ...(entry.unsure ? { unsure: true as const } : {}),
       ...(entry.where !== undefined ? { where: entry.where } : {}),
     })),
   };

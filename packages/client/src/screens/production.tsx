@@ -2371,11 +2371,15 @@ export function ChapterTreeScreen() {
                       <span className="fy-mono">v{row.chapter.version}</span>
                     </td>
                     {row.cells.map((cell, i) =>
-                      cell === null || cell.gone ? (
+                      cell === null || cell.gone || cell.unsure ? (
                         <td
                           key={cast[i]!.id}
                           className={cx("fy-cont__cell fy-cont__cell--none", cell?.warn && "fy-cont__cell--warn")}
-                          {...(cell?.gone ? { title: `gone since ${pad(cell.since!)}${cell.warn ? " · that chapter moved" : ""}` } : {})}
+                          {...(cell?.gone
+                            ? { title: `gone since ${pad(cell.since!)}${cell.warn ? " · that chapter moved" : ""}` }
+                            : cell?.unsure
+                              ? { title: "place dropped · the chapter said they moved and could not prove where" }
+                              : {})}
                         >
                           —
                         </td>

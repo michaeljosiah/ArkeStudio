@@ -597,6 +597,26 @@ describe("after this chapter (turn 129)", () => {
     assert.match(text(m), /has a sheet now/, "the cast knows the name now; Derive again makes it a column");
   });
 
+  it("a fresh open replaces the record a derivation finished with (codex on PR 907)", async () => {
+    const m = await mount(withHash(inkbound(), HASH));
+    await answerOpen(m);
+    await act(async () => {
+      __applyEventForTest(finished({ outcome: "derived", placed: 2, record: RECORD }));
+    });
+    assert.match(text(m), /“Maren counted the bells\.”/);
+    // The chapter is opened again — a reconnect, say — and the disk holds no record now.
+    m.sent.length = 0;
+    await act(async () => {
+      __setStateForTest(withHash(inkbound(), HASH), { connection: "closed" as never });
+    });
+    await act(async () => {
+      __setStateForTest(withHash(inkbound(), HASH), { connection: "open" });
+    });
+    await answerOpen(m);
+    assert.match(text(m), /Not derived yet\./, "what the disk holds now is the record");
+    assert.doesNotMatch(text(m), /“Maren counted the bells\.”/);
+  });
+
   it("a record that is there but cannot be read is said so, never offered as a first run (codex, round four)", async () => {
     const m = await mount(inkbound());
     await answerOpenWith(m, { continuityUnreadable: true });
