@@ -38,7 +38,7 @@ SPEC-042 R-13 through R-16 and T-6 through T-9 now cover the compatibility requi
 - **#115:** Preserve shot-linked reviewed `performance` sources, atomic mutually approved dialogue placement, the in-gate placement checks, saved-timeline slot authority and exact physical audio ranges in preview/export. Ordinary imported/detached artifact or take audio remains independently editable, including on Dialogue tracks. Editing referenced shot slots must surface stale/ambiguous reviewed timing and its existing recovery.
 - **#256:** Preserve `performanceSourceClipId`, `set-performance-source`, timeline hashes and undo. Master generation references map Picture timeline time into Music source time; Picture media trims do not shift them. This relationship is not an editing link. Embedded-audio detachment must not copy/mute the external soundtrack or copy the Picture-only reference onto an audio clip. New preparation/dispatch revalidates changed bindings; queued prepared audio stays frozen.
 
-Implementation is in progress on the branch below, including editor imports, independent audio detachment, generic Audio tracks, optional roles and backward-compatible rendering/history. SPEC-042 is the associated specification.
+Implementation is available in [PR #865](https://github.com/michaeljosiah/ArkeStudio/pull/865), including editor imports, independent audio detachment, generic Audio tracks, optional roles and backward-compatible rendering/history. SPEC-042 is the associated specification.
 
 ## Implementation branch
 

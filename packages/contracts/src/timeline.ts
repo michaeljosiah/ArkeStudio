@@ -870,7 +870,7 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: TimelineClipCommand[];
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" }>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -914,7 +914,7 @@ export function assembleSceneCommands(input: {
   // the tail is kept as the track's `endFrame`, and the next scene goes after it.
   let cursor = base === undefined ? 0 : Math.max(base.endFrame ?? 0, base.clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0));
   const startFrame = cursor;
-  const commands: TimelineClipCommand[] = [];
+  const commands: SceneAssembly["commands"] = [];
   const placed: string[] = [];
   const gaps: string[] = [];
   const cues: Array<{ id: SubtitleCueId; text: string; startFrame: number; endFrame: number; speaker?: string }> = [];

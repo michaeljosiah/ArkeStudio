@@ -11,7 +11,7 @@ import {
   storyTimelineFingerprint,
   type ProductionTimeline,
   type TimelineClipId,
-  type TimelineCommand,
+  type ModelEditorRequest,
 } from "@arke-studio/contracts";
 import { decideEditorRequest, EditorRequestRefused, retainEditorRequests, stageEditorRequests } from "../../src/productions/editor-requests.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
@@ -45,7 +45,7 @@ const timelinePath = (store: WorldStore): string => join(store.dir, "productions
 const requestsPath = (store: WorldStore): string => join(store.dir, "productions", PRODUCTION, "editor-requests.json");
 
 /** The story on the timeline, and a request that needs its clips there: swap the first two shots. */
-async function moveSecondEarlier(store: WorldStore): Promise<{ timeline: ProductionTimeline; commands: TimelineCommand[]; movingId: TimelineClipId }> {
+async function moveSecondEarlier(store: WorldStore): Promise<{ timeline: ProductionTimeline; commands: ModelEditorRequest["commands"]; movingId: TimelineClipId }> {
   const timeline = await assembleStory(store, PRODUCTION);
   const clips = orderedTrackClips(timeline.tracks[0]!);
   return { timeline, commands: [{ kind: "move-adjacent", clipId: clips[1]!.id, direction: "earlier" }], movingId: clips[1]!.id };
@@ -242,7 +242,7 @@ describe("Arke's editor requests (issue 684)", () => {
       trackId: "tr_music" as const,
       clip: { id: "cl_ghost" as const, startFrame: 0, durationFrames: 10, sourceInFrames: 0, source: { kind: "artifact" as const, artifactId: "ar_01J8G0000000000000000000ZZ", label: "nowhere" } },
     };
-    const commands: TimelineCommand[] = [{ kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" }, ghost];
+    const commands: ModelEditorRequest["commands"] = [{ kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" }, ghost];
     await assert.rejects(
       stageEditorRequests(store, { conversationId: CONVERSATION, entryContext: THREAD, requests: [{ summary: "Place a ghost", commands }], now: NOW }),
       (error: unknown) => error instanceof EditorRequestRefused && /does not have/.test(error.reason),

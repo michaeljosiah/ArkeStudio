@@ -6,7 +6,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
   applyTimelineCommands, audioGainDbAt, buildFfmpegArgs, buildRenderPlan, detachAudioCommands, effectiveAudioRole,
-  mediaPlacementCommands, seedEmptyPictureTimeline, storyTimelineFingerprint, type ProductionBundle,
+  mediaPlacementCommands, orderedShots, seedEmptyPictureTimeline, storyTimelineFingerprint, type ProductionBundle,
 } from "@arke-studio/contracts";
 import { createHash } from "node:crypto";
 import { acceptTake, setTrim } from "../../src/takes/review.js";
@@ -196,7 +196,7 @@ it("assembles a scene after migrating an older saved timeline's audio lanes", as
   assert.equal(assembled.migratedCut, true);
   assert.equal(assembled.tracks.find(track => track.id === "tr_audio-1")!.name, "Ambience");
   assert.equal(assembled.tracks.find(track => track.id === "tr_audio-2")!.clips[0]!.role, "ambience");
-  assert.equal(assembled.tracks[0]!.clips.length, scene.shots.length);
+  assert.equal(assembled.tracks[0]!.clips.length, orderedShots(scene).length);
   await applyTimelineCommand(store, "saltlight", { kind: "undo", baseRevision: assembled.revision });
   assert.equal(saved(p()).tracks.some(track => track.id === "tr_audio-2"), false);
   assert.equal(saved(p()).tracks.find(track => track.id === "tr_audio-1")!.clips.length, 1, "undo retains the migrated legacy mix");
