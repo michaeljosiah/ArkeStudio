@@ -59,9 +59,20 @@ describe("the chapter tree renders resolved order", () => {
     assert.match(html, /3 chapters/, "the header counts every chapter");
   });
 
+  it("is called Chapters, and every row is a destination (turn 126)", () => {
+    const html = render(CHAPTERS);
+    assert.match(html, /<h1[^>]*>Chapters<\/h1>/, "the screen is titled by the rail's word");
+    assert.doesNotMatch(html, /Chapter tree/);
+    const rows = html.match(/<button[^>]*class="fy-row[^"]*"/g) ?? [];
+    assert.equal(rows.length, 3, "a row is a button that opens the chapter, not a line in a list");
+    assert.match(html, /6,050 words/, "the book's count is the sum of the chapters' words");
+    assert.match(html, /in hand/, "the first chapter without words is the one in hand");
+    assert.match(html, />New chapter</, "New chapter is a press on the door");
+  });
+
   it("a chapter without words shows its status instead", () => {
     const html = render(CHAPTERS);
     assert.match(html, /planned/, "the planned chapter says so");
-    assert.match(html, /3120 words/, "a drafted chapter shows its words");
+    assert.match(html, /3,120 words/, "a drafted chapter shows its words, formatted");
   });
 });

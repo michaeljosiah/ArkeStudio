@@ -1,0 +1,473 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router";
+import {
+  chapterParagraphs,
+  countWords,
+  targetWords,
+  type ChapterSummary,
+  type ProductionBundle,
+  type ProseReadSource,
+  type StagedProposal,
+  type WorldBundle,
+} from "@arke-studio/contracts";
+import { ProductionConversation, StagedDecision } from "../components/conversation.js";
+import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
+import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
+import { Pin } from "../components/icons.js";
+import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
+import { EmptyState, Screen } from "../components/layout.js";
+import { Button } from "../components/ui.js";
+import { useProduction } from "../lib/selectors.js";
+import {
+  openChapter,
+  restoreChapter,
+  saveChapter,
+  subscribeChapterOpenResults,
+  subscribeChapterSaveResults,
+  type ChapterOpenResult,
+  type ChapterSaveResult,
+} from "../lib/store.js";
+
+/**
+ * The chapter, opened (design turn 126, issue 874): a manuscript you can read, type into and
+ * hear, beside what it draws on and the thread that drafts it.
+ *
+ * The scene workspace's sibling, and drawn on its shell: the rail folded to marks, the
+ * manuscript in the centre, Arke docked on the right. What is different is what the centre holds.
+ * A chapter is prose with an order (SPEC-012 §2.1), so the centre is an editor at a reading
+ * measure and nothing here mentions shots, takes or dispatch.
+ *
+ * Three things this screen holds by rule rather than by habit:
+ *
+ * - The body is fetched on open and never carried on the summary. `ChapterSummary` is body-free
+ *   so the bundle is not the book; `open-chapter` answers with the body, its version and the hash
+ *   of the bytes read, and the editor holds those three until the record moves.
+ * - Typing saves in place after a pause, with no proposal and no version cut (SPEC-012 R-5).
+ *   The save names the base it read, so a save over a file that moved is refused, not merged.
+ * - Arke's drafts arrive as the staged card in the thread (issue 714). While one waits the
+ *   editor locks and the draft stands in the prose's place; Accept and Discard live on the card.
+ */
+
+/** Long enough that a pause reads as a pause, short enough that nobody watches the word "Saving". */
+const AUTOSAVE_MS = 1200;
+
+/** What an empty chapter says. */
+const PLACEHOLDER = "Start here. It saves as you go.";
+
+type OpenedRecord = { body: string; version: number; hash: string };
+
+export function ChapterScreen() {
+  const { worldId, prodId, chapterId } = useParams();
+  const { world, production } = useProduction(worldId, prodId);
+  const chapter = production?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+  if (world && production && chapter) {
+    return (
+      <ChapterWorkspace
+        key={`${world.meta.worldId}/${production.meta.id}/${chapter.id}`}
+        world={world}
+        production={production}
+        chapter={chapter}
+      />
+    );
+  }
+  return (
+    <Screen id="chapter">
+      <EmptyState title="Opening chapter…" />
+    </Screen>
+  );
+}
+
+/** Where the chapter's file lives, world-relative — the path a staged draft names as its target. */
+function chapterPath(production: ProductionBundle, chapter: ChapterSummary): string {
+  return `productions/${production.meta.id}/chapters/${chapter.file}.md`;
+}
+
+/**
+ * The draft waiting on this chapter, if one is (the scene workspace's rule for a staged scene).
+ *
+ * Newest first, because two drafts can target one file and the one the thread is showing is the
+ * later one. The review projection carries the prose (`chapter-review.test.ts`), which is what
+ * lets the page draw the draft without a second read path.
+ */
+export function stagedChapterDraft(
+  proposals: readonly StagedProposal[],
+  path: string,
+): { staged: StagedProposal; body: string | null } | undefined {
+  const staged = [...proposals]
+    .filter((entry) => entry.proposal.kind === "chapter-draft" && entry.proposal.targets.some((t) => t.path === path))
+    .sort((left, right) =>
+      left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
+    )
+    .at(-1);
+  if (!staged) return undefined;
+  const prose = staged.review?.targets.find((t) => t.path === path)?.fields.find((f) => f.field === "Prose");
+  return { staged, body: prose?.proposed ?? null };
+}
+
+export function ChapterWorkspace({
+  world,
+  production,
+  chapter,
+}: {
+  world: WorldBundle;
+  production: ProductionBundle;
+  chapter: ChapterSummary;
+}) {
+  const worldId = world.meta.worldId;
+  const prodId = production.meta.id;
+  const path = chapterPath(production, chapter);
+
+  /*
+   * What was read, and the request that read it.
+   *
+   * Re-asked whenever the summary's version moves: an accepted draft cuts a version, and the
+   * editor must adopt it rather than keep showing the text it read before. A direct save keeps
+   * the version, so this does not refire on the editor's own saves — those come back through
+   * `chapter.save-result` with the new hash instead.
+   */
+  const [record, setRecord] = useState<OpenedRecord | null>(null);
+  const [openFailure, setOpenFailure] = useState<string | null>(null);
+  useEffect(() => {
+    const requestId = openChapter(worldId, prodId, chapter.id);
+    if (requestId === null) return;
+    return subscribeChapterOpenResults((result: ChapterOpenResult) => {
+      if (result.requestId !== requestId) return;
+      if (result.disposition === "opened" && result.body !== undefined && result.version !== undefined && result.hash !== undefined) {
+        setRecord({ body: result.body, version: result.version, hash: result.hash });
+        setOpenFailure(null);
+        // Someone else's edit is adopted, ours has already been saved: either way the text on
+        // disk is the text (the Bible's three-writer rule).
+        setDraft(null);
+      } else {
+        setOpenFailure(result.reason ?? "The chapter could not be opened.");
+      }
+    });
+  }, [worldId, prodId, chapter.id, chapter.version]);
+
+  const [draft, setDraft] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveRefusal, setSaveRefusal] = useState<string | null>(null);
+  const [readNow, setReadNow] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSave = useRef<string | null>(null);
+  /** The text the pending save carried, so the answer can become the record without a re-read. */
+  const savedText = useRef<string | null>(null);
+  /** A read asked for while a save was pending; begun once the save lands (turn 126's fourth rule). */
+  const readAfterSave = useRef(false);
+
+  const live = record?.body ?? "";
+  const text = draft ?? live;
+
+  useEffect(() => {
+    return subscribeChapterSaveResults((result: ChapterSaveResult) => {
+      if (result.requestId !== pendingSave.current) return;
+      pendingSave.current = null;
+      setSaving(false);
+      if (result.disposition === "saved" && result.version !== undefined && result.hash !== undefined) {
+        const savedBody = savedText.current;
+        setRecord((current) => ({ body: savedBody ?? current?.body ?? "", version: result.version!, hash: result.hash! }));
+        setSaveRefusal(null);
+        // Dropped only when the editor still holds exactly what was saved; a keystroke since
+        // then is a newer draft and stays.
+        setDraft((current) => (current === savedBody ? null : current));
+        if (readAfterSave.current) {
+          readAfterSave.current = false;
+          setReadNow(true);
+        }
+      } else {
+        readAfterSave.current = false;
+        setSaveRefusal(result.reason ?? "Not saved: the chapter moved.");
+      }
+    });
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  const flushSave = (value: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    if (record === null) return;
+    savedText.current = value;
+    const requestId = saveChapter(worldId, prodId, chapter.file, value, record.hash);
+    pendingSave.current = requestId;
+    if (requestId === null) setSaving(false);
+  };
+
+  const onChange = (value: string) => {
+    richWrite.current = richMode ? value : null;
+    setDraft(value);
+    setSaving(true);
+    setSaveRefusal(null);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => flushSave(value), AUTOSAVE_MS);
+  };
+
+  /* Which editor owns this chapter: the Bible's gate, for the Bible's reasons. */
+  const [preferSource, setPreferSource] = useState(false);
+  const richWrite = useRef<string | null>(null);
+  const gate = useRef<RichModeGate | null>(null);
+  if (!preferSource) gate.current = updateRichModeGate(gate.current, text, richWrite.current);
+  const richRefusal = gate.current?.verdict ?? null;
+  const richMode = richRefusal === null && !preferSource;
+
+  /* The draft waiting on this chapter, if one is; the editor locks while it waits. */
+  const stagedDraft = stagedChapterDraft(world.proposals, path);
+  const locked = stagedDraft !== undefined || record === null;
+
+  /*
+   * Read the chapter: a page read, one block per paragraph, of the saved record (issue 859).
+   *
+   * The blocks are declared from the text on screen and resolved against the file, so the
+   * press waits out a pending save before it asks — otherwise the voice and the page would
+   * disagree about what the chapter says.
+   */
+  const paragraphs = useMemo(() => chapterParagraphs(live), [live]);
+  const blocks: (PageReadBlock & { source: ProseReadSource })[] = paragraphs.map((body, i) => ({
+    heading: `${i + 1} of ${paragraphs.length}`,
+    body,
+    source: { of: "chapter", productionId: prodId, chapterId: chapter.id, paragraph: i },
+  }));
+  const pageRead = useProsePageRead({ pageId: chapter.id, title: chapter.title, blocks });
+  useEffect(() => {
+    if (!readNow) return;
+    setReadNow(false);
+    pageRead.begin();
+  }, [readNow, pageRead]);
+  const read = {
+    ...pageRead,
+    begin: () => {
+      if (draft !== null && draft !== live) {
+        readAfterSave.current = true;
+        flushSave(draft);
+        return;
+      }
+      pageRead.begin();
+    },
+  };
+
+  // The words of the text on screen once it is here; the summary's count only while it is not.
+  const words = record === null ? (chapter.words ?? 0) : countWords(text);
+  const bookWords = production.chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
+  const target = targetWords(production.story?.targetLength);
+  const history = useMemo(() => {
+    const current = record?.version ?? chapter.version;
+    return Array.from({ length: Math.max(0, current - 1) }, (_, i) => current - 1 - i).slice(0, 12);
+  }, [record?.version, chapter.version]);
+
+  const [dock, setDock] = useState(true);
+  const draws = chapter.draws ?? { sheets: [], canon: [] };
+  const drawsEmpty = draws.sheets.length === 0 && draws.canon.length === 0;
+  const chapterLabel = `chapter ${String(chapter.order).padStart(2, "0")}`;
+  const foot = locked && stagedDraft !== undefined
+    ? `Locked while a draft waits · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`
+    : saveRefusal !== null
+      ? `Not saved · ${saveRefusal}`
+      : saving
+        ? "Saving…"
+        : `Saved · v${record?.version ?? chapter.version} · ${words.toLocaleString()} words`;
+
+  return (
+    <div className="fy-sw" data-screen="chapter" data-testid="chapter-workspace" data-dock={dock ? "true" : "false"}>
+      <main className="fy-sw__centre">
+        <header className="fy-sw__head">
+          <p className="fy-sw__breadcrumb">
+            CHAPTER {String(chapter.order).padStart(2, "0")} OF {production.chapters.length}
+          </p>
+          <div className="fy-sw__headline">
+            <h1 className="fy-sw__title">{chapter.title}</h1>
+            <div className="fy-sw__actions">
+              {paragraphs.length > 0 && <PageReadControl read={read} label="Read the chapter" />}
+            </div>
+          </div>
+          <div className="fy-sw__context" aria-label="Chapter state">
+            <span>{chapter.status}</span>
+            <span>{words.toLocaleString()} words</span>
+            <span>{stagedDraft !== undefined ? "draft waiting" : saving ? "saving" : "saved"}</span>
+          </div>
+        </header>
+
+        <div className="fy-ch__body">
+          <div className="fy-ch__manuscript">
+            {openFailure !== null ? (
+              <EmptyState title={openFailure} />
+            ) : record === null ? (
+              <EmptyState title="Opening…" />
+            ) : stagedDraft !== undefined ? (
+              <div className="fy-ch__prose">
+                <div className="fy-ch__band">
+                  <span className="fy-ch__band-who">Arke&rsquo;s draft</span>
+                  {stagedDraft.body !== null && <span>· {countWords(stagedDraft.body).toLocaleString()} words</span>}
+                  <span>· against v{record.version}</span>
+                  <span className="fy-ch__band-push" />
+                  <span>decide in the thread</span>
+                </div>
+                {/* Read, not edited: the draft is decided on the card, so it is drawn as paragraphs
+                    rather than handed to an editor that would have to refuse every keystroke. */}
+                <div className="fy-ch__draft" aria-label="Arke's draft">
+                  {chapterParagraphs(stagedDraft.body ?? live).map((paragraph, i) => (
+                    <p key={i}>{paragraph}</p>
+                  ))}
+                </div>
+              </div>
+            ) : richMode ? (
+              <div className="fy-ch__prose">
+                <RichMarkdownEditor
+                  // Remounting on the record is what re-reads the document; without it a second
+                  // chapter would open into the first one's editor, holding the first one's text.
+                  key={`${chapter.id}:${record.version}`}
+                  value={text}
+                  onChange={onChange}
+                  placeholder={PLACEHOLDER}
+                  ariaLabel={`Chapter ${chapter.order}`}
+                />
+              </div>
+            ) : (
+              <textarea
+                className="fy-ch__source"
+                value={text}
+                onChange={(e) => onChange(e.target.value)}
+                spellCheck
+                placeholder={PLACEHOLDER}
+                aria-label={`Chapter ${chapter.order}`}
+              />
+            )}
+            <div className="fy-ch__foot">
+              <span className="fy-mono">{foot}</span>
+              <span className="fy-ch__foot-push" />
+              {richRefusal ? (
+                <span className="fy-mono">{richRefusal.message}</span>
+              ) : (
+                <Button variant="ghost" disabled={locked} onClick={() => setPreferSource((source) => !source)}>
+                  {preferSource ? "Rich text" : "Markdown source"}
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <aside className="fy-ch__side">
+            <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">The book</h2>
+              <p className="fy-bible__empty fy-mono">
+                {target === null
+                  ? `${bookWords.toLocaleString()} words`
+                  : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
+              </p>
+              {target !== null && (
+                <div className="fy-ch__target" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
+                  <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
+                </div>
+              )}
+            </section>
+
+            <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">Draws on</h2>
+              {drawsEmpty ? (
+                <p className="fy-bible__empty">Draws on nothing yet</p>
+              ) : (
+                <ul className="fy-ch__draws">
+                  {draws.sheets.map((slug) => {
+                    const sheet = world.sheets.find((s) => s.id === slug);
+                    // Each kind has its own screen; a sheet the world no longer holds still links
+                    // to where it would be, and says its slug, rather than vanishing from the list.
+                    const shelf = sheet?.type === "location" ? "locations" : sheet?.type === "faction" ? "factions" : "cast";
+                    return (
+                      <li key={`sheet:${slug}`}>
+                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/${shelf}/${encodeURIComponent(slug)}`}>
+                          <span className="fy-mono">{sheet?.type ?? "sheet"}</span>
+                          <span className="fy-ch__draw-name">{sheet?.name ?? slug}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                  {draws.canon.map((id) => {
+                    const entry = world.canon.find((c) => c.id === id);
+                    return (
+                      <li key={`canon:${id}`}>
+                        <Link className="fy-ch__draw" to={`/w/${encodeURIComponent(worldId)}/canon/${encodeURIComponent(id)}`}>
+                          <span className="fy-mono">{id}</span>
+                          <span className="fy-ch__draw-name">{entry?.title ?? id}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">Earlier versions</h2>
+              {history.length === 0 ? (
+                <p className="fy-bible__empty">v{record?.version ?? chapter.version} is the first.</p>
+              ) : (
+                <>
+                  <ul className="fy-bible__versions">
+                    {history.map((version) => (
+                      <li key={version}>
+                        <span className="fy-mono">v{version}</span>
+                        <Button variant="ghost" disabled={locked} onClick={() => restoreChapter(worldId, prodId, chapter.file, version)}>
+                          Restore
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="fy-bible__empty fy-mono">restoring makes a new version</p>
+                </>
+              )}
+            </section>
+          </aside>
+        </div>
+      </main>
+
+      {dock ? (
+        <ProductionConversation
+          worldId={worldId}
+          productionId={prodId}
+          entry={{ kind: "production", productionId: prodId }}
+          dock={{
+            title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
+            subject: `${chapter.title} · ${production.meta.title}`,
+            conversationFirst: true,
+            onPutAway: () => setDock(false),
+            prompts: ["Draft the rest", "What does this chapter draw on?"],
+            // The thread is the production's own (no new entry context, turn 126): the chapter
+            // the dock names has to be in the words themselves or the studio never hears it.
+            subjectPrefix: `About ${chapterLabel}:`,
+            note: "talking changes nothing here · a draft waits for your yes",
+          }}
+          openingNote="opening…"
+          emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
+          placeholder={`Ask about ${chapterLabel}`}
+          {...(stagedDraft === undefined
+            ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the chapter appears here." }
+            : {
+                side: (
+                  <StagedDecision
+                    worldId={worldId}
+                    subject={chapterLabel}
+                    staged={stagedDraft.staged}
+                    writes="Replaces the chapter's prose."
+                    items={[
+                      {
+                        label: `${chapterLabel} · draft`,
+                        meta: stagedDraft.body !== null ? `${countWords(stagedDraft.body).toLocaleString()} words` : "draft",
+                      },
+                    ]}
+                  />
+                ),
+              })}
+        />
+      ) : (
+        <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>
+          <span className="fy-sw__rail-dot" aria-hidden="true" />
+          <span className="fy-sw__rail-label">Ask Arke</span>
+          <span className="fy-sw__rail-pin"><Pin size={13} /></span>
+        </button>
+      )}
+    </div>
+  );
+}

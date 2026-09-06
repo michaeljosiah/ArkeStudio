@@ -426,7 +426,11 @@ export class WorldStore {
     precondition?: WorldStatePrecondition,
   ): Promise<CommitResult> {
     const kind = classify(portablePath);
-    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "season", "episode", "art-direction"]);
+    // Chapters joined the list with turn 126: an accepted draft cuts a version and a snapshot
+    // (commit.ts keeps one per version on the chapter track), so "Earlier versions" can put one
+    // back exactly as the bible does. A direct save preserves the version and refreshes the
+    // current snapshot, which is why only accepted drafts appear in that list.
+    const restorable = new Set(["sheet", "canon", "bible", "scene", "story", "season", "episode", "art-direction", "chapter"]);
     const historyPath = restorable.has(kind.track) ? historyPathForVersion(portablePath, version) : null;
     if (historyPath === null) {
       throw new CommitPlanError(

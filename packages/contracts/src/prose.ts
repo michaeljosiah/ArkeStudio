@@ -27,6 +27,23 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     .object({ of: z.literal("shot"), productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema })
     .strict(),
   /**
+   * A chapter's prose, by the id its frontmatter carries (design turn 126, issue 874).
+   *
+   * The body is not in the bundle — a novel on every snapshot broadcast would be the bundle
+   * turned into the book — so this is the one arm the coordinator resolves off disk rather than
+   * off the bundle. `paragraph` names one paragraph of the saved body, counted from 0 across
+   * blank-line breaks, and is what lets a page read of a chapter be one block per paragraph
+   * (turn 126: "a paragraph at a time"). Absent, the whole chapter is one block.
+   */
+  z
+    .object({
+      of: z.literal("chapter"),
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      paragraph: z.number().int().min(0).optional(),
+    })
+    .strict(),
+  /**
    * The production overview: the pieces of `story.json` and the freeform treatment beside it.
    * `acts` is a list rather than a paragraph, so it is read whole or not at all.
    */
@@ -51,3 +68,38 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
   z.object({ of: z.literal("reply"), conversationId: ConversationIdSchema, messageId: MessageIdSchema }).strict(),
 ]);
 export type ProseReadSource = z.infer<typeof ProseReadSourceSchema>;
+
+/**
+ * A chapter's paragraphs (turn 126): blank-line breaks, trimmed, empties dropped.
+ *
+ * One rule for both ends of a page read. The screen declares its blocks from the text it holds
+ * and the coordinator resolves `paragraph` against the saved file; if the two split differently
+ * the position would name one paragraph and the voice read another.
+ */
+export function chapterParagraphs(body: string): string[] {
+  return body
+    .split(/\r?\n[ \t]*\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph !== "");
+}
+
+/** The count every surface shows for a chapter: whitespace-separated words of the body. */
+export function countWords(body: string): number {
+  const trimmed = body.trim();
+  return trimmed === "" ? 0 : trimmed.split(/\s+/).length;
+}
+
+/**
+ * The number of words a target names, or null when it names none (turn 126: "the band draws
+ * only when it parses to a number of words"). `targetLength` is a free string the overview
+ * holds — "80,000 words", "about 90k", "three acts" — and the band is not drawn for the last.
+ */
+export function targetWords(targetLength: string | undefined): number | null {
+  if (!targetLength) return null;
+  const match = /(\d[\d,]*(?:\.\d+)?)\s*(k)?/i.exec(targetLength);
+  if (!match) return null;
+  const figure = Number(match[1]!.replace(/,/g, ""));
+  if (!Number.isFinite(figure) || figure <= 0) return null;
+  const words = match[2] ? figure * 1000 : figure;
+  return words >= 100 ? Math.round(words) : null;
+}

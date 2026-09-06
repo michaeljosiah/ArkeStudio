@@ -1,5 +1,9 @@
 import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
-import { resolvedAuthoredDuration, type ProseReadSource } from "@arke-studio/contracts";
+import {
+  resolvedAuthoredDuration,
+  type ProseReadSource,
+  targetWords,
+} from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -202,6 +206,8 @@ import {
   subscribeSceneCreateResults,
   subscribeTimelineRefusals,
   subscribeVoiceUploadConfirmations,
+  createChapter,
+  subscribeChapterCreateResults,
 } from "../lib/store.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
@@ -360,6 +366,40 @@ export function useNewScene(worldId: string | undefined, prodId: string | undefi
     create: (episodeId?: string) => {
       if (!worldId || !prodId || pendingRequest !== null) return;
       setPendingRequest(createScene(worldId, prodId, episodeId === undefined ? {} : { episodeId }));
+    },
+  };
+}
+
+/**
+ * `New chapter` (turn 126): a press, not a form. It creates `Untitled` live and opens it, the
+ * shape SPEC-036 R-37 gave `New scene`, on the answer `create-chapter` now returns.
+ */
+export function useNewChapter(worldId: string | undefined, prodId: string | undefined) {
+  const navigate = useNavigate();
+  const connection = useStore().connection;
+  const [pendingRequest, setPendingRequest] = useState<string | null>(null);
+  useEffect(() => {
+    if (pendingRequest === null) return;
+    return subscribeChapterCreateResults((result) => {
+      if (result.requestId !== pendingRequest) return;
+      setPendingRequest(null);
+      // The result's own world and production, not this route's (the New scene lesson, PR 708).
+      if (result.disposition === "created" && result.chapterId !== undefined) {
+        navigate(
+          `/w/${encodeURIComponent(result.worldId)}/p/${encodeURIComponent(result.productionId)}/story/chapters/${encodeURIComponent(result.chapterId)}`,
+        );
+      }
+    });
+  }, [pendingRequest, navigate]);
+  // A result lost to a dropped connection never arrives; the press is offered again on reconnect.
+  useEffect(() => {
+    if (connection !== "open") setPendingRequest(null);
+  }, [connection]);
+  return {
+    pending: pendingRequest !== null,
+    create: (order: number) => {
+      if (!worldId || !prodId || pendingRequest !== null) return;
+      setPendingRequest(createChapter(worldId, prodId, "Untitled", order));
     },
   };
 }
@@ -611,7 +651,10 @@ export function ProductionLayout() {
   const [railChoice, setRailChoice] = useRailCollapsed();
   const [episodeExpansion, setEpisodeExpansion] = useState<Record<string, boolean>>({});
   const newScene = useNewScene(worldId, prodId);
-  const sceneDetailDefault = /\/scenes\/[^/]+\/?$/.test(location.pathname);
+  // A chapter opened is a workspace as much as a scene opened is (turn 126), and folds by the
+  // same default: the manuscript wants the width, and the width is the person's afterwards.
+  const sceneDetailDefault =
+    /\/scenes\/[^/]+\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
   /*
    * A mark for every destination, without exception (turn 101). Folded, the label is the tooltip
@@ -2135,26 +2178,64 @@ function OverviewStoryScreen() {
   );
 }
 
+/**
+ * Chapters, the door (turn 126): every row a destination, the in-hand chapter marked, the book's
+ * count as a band under the title, and `New chapter` as a press. The screen is called by the
+ * rail's word; "Chapter tree" was a title nobody pressed.
+ */
 export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
   const { production } = useProduction(worldId, prodId);
+  const navigate = useNavigate();
+  const newChapter = useNewChapter(worldId, prodId);
+  const chapters = production?.chapters ?? [];
+  const isStory = production ? productionShape(production.meta).hasChapters : false;
+  const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
+  const target = targetWords(production?.story?.targetLength);
+  // The same "in hand" the dashboard derives: the first chapter with no words yet.
+  const inHand = chapters.find((c) => !c.words) ?? null;
   return (
     <div className="fy-prodmain" data-screen="chapter-tree">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Chapter tree</h1>
-        <span className="fy-h1row__meta">{production?.chapters.length ?? 0} chapters</span>
+        <h1 className="fy-h1">Chapters</h1>
+        <span className="fy-h1row__meta">
+          {chapters.length} chapter{chapters.length === 1 ? "" : "s"} ·{" "}
+          {target === null
+            ? `${bookWords.toLocaleString()} words`
+            : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
+        </span>
+        <span className="fy-h1row__push" />
+        {isStory && (
+          <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
+            New chapter
+          </Button>
+        )}
       </div>
-      {production && production.chapters.length > 0 ? (
-        <div>
-          {production.chapters.map((c) => (
-            <div key={c.id} className="fy-listrow">
+      {target !== null && (
+        <div className="fy-ch__target fy-ch__target--page" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
+          <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
+        </div>
+      )}
+      {production && chapters.length > 0 ? (
+        <div className="fy-ledger">
+          {chapters.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={cx("fy-row", c === inHand && "fy-row--inhand")}
+              onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)}
+            >
               <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-              <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
-                {c.title}
-              </span>
+              <span className="fy-row__name">{c.title}</span>
               <Badge tone="outline">v{c.version}</Badge>
-              <span className="fy-mono">{c.words ? `${c.words} words` : c.status}</span>
-            </div>
+              <span className="fy-row__meta">
+                {c.words ? `${c.words.toLocaleString()} words` : c.status}
+                {c === inHand ? " · in hand" : ""}
+              </span>
+              <span className="fy-row__chev">
+                <ChevronRight size={15} />
+              </span>
+            </button>
           ))}
         </div>
       ) : (

@@ -36,6 +36,7 @@ import {
   type WorldBundle,
   type Capability,
   orderedShots,
+  countWords,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -642,7 +643,11 @@ export async function createChapter(
   productionId: string,
   input: { title: string; order: number },
 ): Promise<string> {
-  const slug = slugify(input.title) || `chapter-${input.order}`;
+  // `New chapter` makes every chapter `Untitled` (turn 126), so the second press would have
+  // collided with the first on the file the create refuses to overwrite. Unique against the
+  // stems already on disk, the same way the chat action's create is.
+  const taken = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.map((c) => c.file) ?? [];
+  const slug = uniqueSlug(slugify(input.title) || `chapter-${input.order}`, "chapter", taken);
   const doc = MarkdownFile.create(
     {
       id: slug,
@@ -674,20 +679,69 @@ export async function saveChapter(
   productionId: string,
   chapterFile: string,
   body: string,
-): Promise<void> {
+  options: { baseHash?: string } = {},
+): Promise<{ version: number; hash: string }> {
   const path = `productions/${productionId}/chapters/${chapterFile}.md`;
-  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const file = toExtendedLength(join(store.dir, fromPortable(path)));
+  const live = await readFile(file, "utf8");
   const doc = MarkdownFile.parse(live);
   doc.setBody(body);
   // The summary's word count follows the prose it summarises: every surface that reads
   // `words` (the chapter tree, the story dashboard) would otherwise report the count the
   // chapter had when it was last stamped by hand, indefinitely.
-  doc.setData({ words: body.trim() === "" ? 0 : body.trim().split(/\s+/).length });
+  doc.setData({ words: countWords(body) });
+  // The base is the file the editor read when the caller says so (turn 126), not the file as
+  // it is now: hashing the live bytes here would make every save pass, including one written
+  // over an accepted draft the editor never saw. The committer refuses a moved base.
   await store.commit({
     kind: "chapter-save",
     source: "editor",
-    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true }],
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }],
   });
+  // Read back rather than hashing what was handed over: the committer stamps `updated` and
+  // `version` on the way through, so the bytes on disk are the base the next save must name.
+  const saved = await readFile(file, "utf8");
+  const stamped = MarkdownFile.parse(saved);
+  const version = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
+  return { version: Math.max(1, version), hash: sha256(saved) };
+}
+
+/**
+ * The chapter a screen asked to open (turn 126): body and version off disk, and the hash of
+ * exactly those bytes so the editor's first save can name the base it read. Addressed by the
+ * frontmatter id the route carries, resolved to the file stem through the bundle so a chapter
+ * whose id and stem differ (the fixture's `01-neap.md` is `neap`) opens all the same.
+ */
+export async function openChapter(
+  store: WorldStore,
+  productionId: string,
+  chapterId: string,
+): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string }> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) throw new Error("That production is no longer in this world.");
+  const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+  if (!summary) throw new Error("That chapter is no longer in this production.");
+  const path = `productions/${productionId}/chapters/${summary.file}.md`;
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
+  if (live === null) throw new Error("That chapter is no longer in this production.");
+  const doc = MarkdownFile.parse(live);
+  const version = typeof doc.data["version"] === "number" ? (doc.data["version"] as number) : summary.version;
+  // A chapter born by a press serialises with a bare newline for a body; the editor should open
+  // on nothing rather than on one blank line it did not type.
+  const body = doc.body.trim() === "" ? "" : doc.body;
+  return { file: summary.file, title: summary.title, order: summary.order, body, version: Math.max(1, version), hash: sha256(live) };
+}
+
+/** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */
+export async function restoreChapter(
+  store: WorldStore,
+  productionId: string,
+  chapterFile: string,
+  version: number,
+): Promise<number> {
+  const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  const result = await store.restoreVersion(path, version, "editor");
+  return result.versions[path] ?? version;
 }
 
 /** Reorder: frontmatter only — no file renamed, no history path moved (R-4, D3). */

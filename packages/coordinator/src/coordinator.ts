@@ -172,6 +172,8 @@ import {
   saveChapter,
   setProductionAspect,
   setProductionModel,
+  openChapter,
+  restoreChapter,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -306,6 +308,7 @@ import {
   type CloudVoiceSource,
   type SidecarLike,
   voiceLineRequest,
+  chapterProseSpeech,
 } from "./voice/service.js";
 import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
@@ -1080,6 +1083,12 @@ export class Coordinator {
     store: WorldStore,
     source: ProseReadSource,
   ): Promise<{ text: string; heading: string; version: number; subjectId: string }> {
+    // A chapter's body is not in the bundle (turn 126), so it is the one authored record read
+    // off disk here rather than by the pure resolver; `openChapter` fails by name if it is gone.
+    if (source.of === "chapter") {
+      const chapter = await openChapter(store, source.productionId, source.chapterId);
+      return chapterProseSpeech(chapter, source);
+    }
     if (source.of !== "reply") return authoritativeProseSpeech(store.getBundle(), source);
     const loaded = await new WorldChatService(store.dir).load(source.conversationId);
     const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
@@ -6774,16 +6783,103 @@ export class Coordinator {
         return;
       }
       case "create-chapter": {
+        // Answered, not fire-and-forget (turn 126): the press opens the chapter it made, so it
+        // needs the id back — the shape `create-scene` settled for `New scene` (SPEC-036 R-37).
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await createChapter(store, msg.productionId, { title: msg.title, order: msg.order }).catch(() => {});
+        const answer = (
+          result: { disposition: "created"; chapterId: string } | { disposition: "failed"; reason: string },
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.create-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        let chapterId: string;
+        try {
+          chapterId = await createChapter(store, msg.productionId, { title: msg.title, order: msg.order });
+        } catch (err) {
+          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be created" });
+          return;
+        }
+        // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
+        answer({ disposition: "created", chapterId });
+        return;
+      }
+      case "open-chapter": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          result:
+            | { disposition: "opened"; body: string; version: number; hash: string }
+            | { disposition: "failed"; reason: string },
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.open-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterId: msg.chapterId,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        try {
+          const chapter = await openChapter(store, msg.productionId, msg.chapterId);
+          answer({ disposition: "opened", body: chapter.body, version: chapter.version, hash: chapter.hash });
+        } catch (err) {
+          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
+        }
         return;
       }
       case "save-chapter": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        await saveChapter(store, msg.productionId, msg.chapterFile, msg.body).catch(() => {});
+        const answer = (
+          result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string },
+        ) => {
+          if (msg.requestId === undefined) return;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.save-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterFile: msg.chapterFile,
+            ...result,
+          });
+        };
+        // A save refused for a moved base leaves the editor's text where it is (the Bible's
+        // rule, turn 126's second binding): the refusal is answered by name when the sender
+        // asked to hear back, and the refreshed snapshot below says what the record is now.
+        try {
+          const saved = await saveChapter(
+            store,
+            msg.productionId,
+            msg.chapterFile,
+            msg.body,
+            msg.baseHash !== undefined ? { baseHash: msg.baseHash } : {},
+          );
+          answer({ disposition: "saved", ...saved });
+        } catch (err) {
+          answer({ disposition: "refused", reason: err instanceof Error ? err.message : "the chapter was not saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-chapter": {
+        const store = this.opts.provider.openStore?.();
+        if (!store) return;
+        await restoreChapter(store, msg.productionId, msg.chapterFile, msg.version).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

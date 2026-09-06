@@ -69,6 +69,7 @@ import {
   StoryScreen,
   VoiceLineDialogScreen,
 } from "./screens/production.js";
+import { ChapterScreen } from "./screens/chapter-workspace.js";
 import { ShotSheetScreen } from "./screens/storyboard.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
@@ -274,6 +275,8 @@ export function App() {
           {/* Scene Chat moved into the scene workspace; old bookmarks retain their subject. */}
           <Route path="story/scenes/:sceneId" element={<RetiredSceneChatRoute />} />
           <Route path="story/chapters" element={<ChapterTreeScreen />} />
+          {/* The chapter, opened (turn 126): the scene workspace's sibling, under Chapters. */}
+          <Route path="story/chapters/:chapterId" element={<ChapterScreen />} />
           {/* Arcs, themes, setups and payoffs — off the season, under one rail item
               (turn 99): a season is its episodes. */}
           <Route path="story-structure" element={<StoryStructureScreen />} />

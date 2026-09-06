@@ -74,6 +74,9 @@ export const SCREENS: ScreenEntry[] = [
   // Arcs, themes, setups and payoffs — off the season and under one rail item (turn 99).
   { id: "story-structure", samplePath: `${P}/story-structure` },
   { id: "chapter-tree", samplePath: `${P}/story/chapters` },
+  // The chapter, opened (turn 126); the fixture's story production is chapterless, so the sample
+  // path renders the opening state and the chrome around it.
+  { id: "chapter", samplePath: `${P}/story/chapters/neap` },
   { id: "scenes", samplePath: `${P}/scenes` },
   { id: "scene-detail", samplePath: `${P}/scenes/sc_04` },
   { id: "shot-sheet", samplePath: `${P}/scenes/sc_04/shots/sh_12` },

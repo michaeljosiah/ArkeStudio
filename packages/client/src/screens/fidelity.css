@@ -6571,6 +6571,36 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   from { opacity: 0; transform: translateY(-6px) scale(.985); }
   to   { opacity: 1; transform: none; }
 }
+/* ---- The chapter, opened (turn 126) ------------------------------------------------------
+   The scene workspace's shell holds the head and the dock; these are the centre's own bands.
+   The manuscript sits at a reading measure of 640, the side is 250 — the numbers the turn pins. */
+.fy-ch__body { flex: 1; min-height: 0; display: flex; gap: 28px; }
+.fy-ch__manuscript { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.fy-ch__prose { flex: 1; min-height: 0; overflow: auto; padding: 6px 2px 0; max-width: 640px; font: 400 15px/1.75 var(--font-sans); }
+.fy-ch__prose .rich-markdown-editor { min-height: 100%; }
+.fy-ch__source { flex: 1; min-height: 0; max-width: 640px; resize: none; padding: 6px 2px 0; border: 0; background: transparent; color: var(--foreground); font: 400 15px/1.75 var(--font-sans); }
+.fy-ch__source:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; border-radius: 6px; }
+.fy-ch__foot { flex: none; display: flex; align-items: center; gap: 14px; padding: 10px 0 16px; border-top: 1px solid var(--border); font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-ch__foot-push { flex: 1; }
+.fy-ch__band { display: flex; align-items: center; gap: 6px; padding: 8px 12px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-ch__band-who { color: var(--foreground); }
+.fy-ch__band-push { flex: 1; }
+.fy-ch__draft { border-left: 2px solid var(--border); padding-left: 14px; }
+.fy-ch__side { width: 250px; flex: none; display: flex; flex-direction: column; gap: 20px; padding-top: 6px; overflow: auto; }
+.fy-ch__target { height: 4px; border-radius: 99px; background: var(--secondary); margin-top: 7px; overflow: hidden; }
+.fy-ch__target > span { display: block; height: 100%; background: var(--foreground); }
+.fy-ch__target--page { margin: 18px 0 14px; flex: none; }
+.fy-ch__draws { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fy-ch__draw { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); color: inherit; text-decoration: none; }
+.fy-ch__draw:hover .fy-ch__draw-name, .fy-ch__draw:focus-visible .fy-ch__draw-name { text-decoration: underline; }
+.fy-ch__draw > .fy-mono { width: 64px; flex: none; color: var(--neutral-400); font-size: 10px; }
+.fy-ch__draw-name { font: 500 12px var(--font-sans); min-width: 0; overflow-wrap: anywhere; }
+.fy-row--inhand { background: var(--secondary); }
+@container (max-width: 900px) {
+  .fy-ch__body { flex-direction: column; }
+  .fy-ch__side { width: auto; }
+}
+
 .fy-sw { display: grid; grid-template-columns: minmax(0, 1fr) 331px; width: 100%; height: 100%; min-height: 0; }
 /* Put away, Arke leaves a slim rail: a way back, and the word that it is here (the design's
    collapsed panel). */

@@ -363,6 +363,9 @@ const CLIENT_COMMAND_METADATA = {
   "scene-command": action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]),
   "create-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"]),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
+  "open-chapter": readOnly(QUERY),
+  "restore-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "save-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "draft-chapter": humanOnly(RECURSIVE_AGENT),
