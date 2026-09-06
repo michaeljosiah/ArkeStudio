@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { withImpliedIds } from "../productions/ops.js";
 import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
@@ -112,6 +113,14 @@ function requireDraws(
   if (missingSheet) throw new Error(`sheet ${missingSheet} is not in this world`);
   const missingCanon = draws.canon.find((id) => !canon.has(id));
   if (missingCanon) throw new Error(`Canon entry ${missingCanon} is not in this world`);
+}
+
+/** A point of view is a character the world holds (turn 127). */
+function requirePov(store: WorldStore, pov: string | null | undefined): void {
+  if (pov === null || pov === undefined) return;
+  if (!store.getBundle().sheets.some((sheet) => sheet.id === pov && sheet.type === "character")) {
+    throw new Error(`sheet ${pov} is not a character in this world`);
+  }
 }
 
 function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
@@ -304,6 +313,7 @@ export async function stageWorldChatProductionAuthoredAction(
     const change = payload.action.change;
     if (change.operation === "create") {
       requireDraws(store, change.draws);
+      requirePov(store, change.pov);
       const stem = uniqueSlug(change.title, "chapter", [
         ...production.chapters.map((chapter) => chapter.file),
         ...proposedTargetStems(store, new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`)),
@@ -317,6 +327,13 @@ export async function stageWorldChatProductionAuthoredAction(
         version: 1,
         words: body.trim() === "" ? 0 : body.trim().split(/\s+/).length,
         ...(change.draws ? { draws: change.draws } : {}),
+        // The plan and what the draft implied ride with it (turn 127); the overview version the
+        // draft was written against is stamped here, by the coordinator, never by the client.
+        ...(change.synopsis !== undefined && change.synopsis !== "" ? { synopsis: change.synopsis } : {}),
+        ...(change.pov !== undefined ? { pov: change.pov } : {}),
+        ...(change.when !== undefined && change.when !== "" ? { when: change.when } : {}),
+        ...(change.implies !== undefined && change.implies.length > 0 ? { implies: withImpliedIds(change.implies) } : {}),
+        ...(body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
         created: store.now().slice(0, 10),
         updated: store.now().slice(0, 10),
       }, body);
@@ -332,6 +349,7 @@ export async function stageWorldChatProductionAuthoredAction(
       candidate.id === change.chapterId || candidate.file === change.chapterId);
     if (!chapter) throw new Error(`chapter ${change.chapterId} is not in ${production.meta.id}`);
     requireDraws(store, change.changes.draws);
+    requirePov(store, change.changes.pov);
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
     const doc = MarkdownFile.parse(await readLive(store, path));
     const changes = change.changes;
@@ -339,10 +357,18 @@ export async function stageWorldChatProductionAuthoredAction(
       ...(changes.title !== undefined ? { title: changes.title } : {}),
       ...(changes.status !== undefined ? { status: changes.status } : {}),
       ...(changes.draws !== undefined ? { draws: changes.draws ?? undefined } : {}),
+      ...(changes.synopsis !== undefined ? { synopsis: changes.synopsis || undefined } : {}),
+      ...(changes.pov !== undefined ? { pov: changes.pov ?? undefined } : {}),
+      ...(changes.when !== undefined ? { when: changes.when || undefined } : {}),
+      ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? withImpliedIds(changes.implies) : undefined } : {}),
       ...(changes.body !== undefined
         ? { words: changes.body.trim() === "" ? 0 : changes.body.trim().split(/\s+/).length }
         : {}),
+      // A new draft is against the overview as it is now; a plan edit alone restamps nothing.
+      ...(changes.body !== undefined && changes.body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
     });
+    // Cleared fields are dropped, not left as nulls the read schema would refuse.
+    for (const key of ["draws", "synopsis", "pov", "when", "implies"] as const) if (doc.data[key] === undefined) delete doc.data[key];
     if (changes.body !== undefined) doc.setBody(changes.body);
     ChapterFrontmatterSchema.parse(doc.data);
     return gate.stage({

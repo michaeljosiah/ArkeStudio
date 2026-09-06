@@ -9,6 +9,7 @@ import {
   type ProseReadSource,
   type StagedProposal,
   type WorldBundle,
+  overviewMoved,
 } from "@arke-studio/contracts";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
@@ -18,6 +19,7 @@ import { PageReadControl, useProsePageRead, type PageReadBlock } from "../compon
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button } from "../components/ui.js";
 import { useProduction } from "../lib/selectors.js";
+import { EditableText, SceneTitle } from "./storyboard.js";
 import {
   openChapter,
   restoreChapter,
@@ -27,6 +29,7 @@ import {
   type ChapterOpenResult,
   type ChapterSaveResult,
   useStore,
+  editChapterPlan,
 } from "../lib/store.js";
 
 /**
@@ -95,6 +98,14 @@ const parkedKey = (worldId: string, prodId: string, file: string): string => `${
 
 /** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
 const PAGE_READ_BLOCK_CAP = 1000;
+
+/**
+ * The dock's first prompt follows the plan (turn 127): a chapter with a synopsis and no prose is
+ * drafted from the synopsis; a chapter with prose is continued. A pure decision, so it is one.
+ */
+export function firstPrompt(live: string, synopsis: string | undefined): string {
+  return live.trim() === "" && synopsis !== undefined && synopsis.trim() !== "" ? "Draft from the synopsis" : "Draft the rest";
+}
 
 export function ChapterScreen() {
   const { worldId, prodId, chapterId } = useParams();
@@ -502,6 +513,18 @@ export function ChapterWorkspace({
   const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
 
   const [dock, setDock] = useState(true);
+  /*
+   * The plan (turn 127): typed where it reads and saved in place, one write for every field.
+   * A fact proposed is said into the production thread in the author's name — handed to the
+   * dock as its opening line, which says it once per mount, so the dock is keyed by the press.
+   */
+  const plan = (changes: Parameters<typeof editChapterPlan>[3]) => editChapterPlan(worldId, prodId, chapter.file, changes);
+  const [say, setSay] = useState<{ line: string; seq: number } | null>(null);
+  const implies = chapter.implies ?? [];
+  const stale = overviewMoved(chapter, production.story);
+  const characters = world.sheets.filter(
+    (sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId),
+  );
   const draws = chapter.draws ?? { sheets: [], canon: [] };
   const drawsEmpty = draws.sheets.length === 0 && draws.canon.length === 0;
   const chapterLabel = `chapter ${String(chapter.order).padStart(2, "0")}`;
@@ -521,17 +544,67 @@ export function ChapterWorkspace({
             CHAPTER {String(chapter.order).padStart(2, "0")} OF {production.chapters.length}
           </p>
           <div className="fy-sw__headline">
-            <h1 className="fy-sw__title">{chapter.title}</h1>
+            <h1 className="fy-sw__title">
+              <SceneTitle title={chapter.title} locked={locked} onCommit={(title) => plan({ title })} />
+            </h1>
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
               {paragraphs.length > 0 && stagedDraft === undefined && <PageReadControl read={read} label="Read the chapter" />}
             </div>
           </div>
+          {/* The synopsis, typed where it reads (turn 127), the way the scene's is. */}
+          {locked ? (
+            chapter.synopsis !== undefined && chapter.synopsis !== "" ? (
+              <div className="fy-sbsynopsis fy-ch__synopsis--locked">{chapter.synopsis}</div>
+            ) : null
+          ) : (
+            <EditableText
+              value={chapter.synopsis ?? ""}
+              placeholder="What this chapter is for."
+              className="fy-sbsynopsis"
+              rows={2}
+              onCommit={(next) => plan({ synopsis: next.trim() === "" ? null : next.trim() })}
+            />
+          )}
           <div className="fy-sw__context" aria-label="Chapter state">
+            <span className="fy-ch__mark">
+              <select
+                className="fy-ch__pick"
+                aria-label="Point of view"
+                value={chapter.pov ?? ""}
+                disabled={locked}
+                onChange={(e) => plan({ pov: e.target.value === "" ? null : e.target.value })}
+              >
+                <option value="">Point of view</option>
+                {characters.map((sheet) => (
+                  <option key={sheet.id} value={sheet.id}>
+                    {sheet.name}
+                  </option>
+                ))}
+              </select>
+            </span>
+            <span className="fy-ch__mark">
+              {locked ? (
+                <span className="fy-mono">{chapter.when ?? ""}</span>
+              ) : (
+                <EditableText
+                  value={chapter.when ?? ""}
+                  placeholder="When"
+                  className="fy-ch__when"
+                  rows={1}
+                  onCommit={(next) => plan({ when: next.trim() === "" ? null : next.trim() })}
+                />
+              )}
+            </span>
             <span>{chapter.status}</span>
             <span>{words.toLocaleString()} words</span>
             <span>{stagedDraft !== undefined ? "draft waiting" : saving ? "saving" : "saved"}</span>
+            {stale && (
+              <span className="fy-ch__moved">
+                overview moved · v{chapter.draftedAgainst} → v{production.story?.version}
+              </span>
+            )}
           </div>
         </header>
 
@@ -609,6 +682,60 @@ export function ChapterWorkspace({
             </section>
 
             <section className="fy-bible__panel">
+              <h2 className="fy-bible__paneltitle">
+                Implies <span className="fy-mono">{implies.length}</span>
+              </h2>
+              {implies.length === 0 ? (
+                <p className="fy-bible__empty">Nothing implied yet.</p>
+              ) : (
+                <ul className="fy-ch__implies">
+                  {implies.map((fact, i) => {
+                    // The state lives on the item (codex on turn 127): a reload keeps what was
+                    // pressed, and a proposed fact offers no Dismiss — the card is where a
+                    // proposal is discarded.
+                    const key = fact.id ?? `${i}:${fact.kind}:${fact.what}`;
+                    const isProposed = fact.state === "proposed";
+                    return (
+                      <li key={key}>
+                        <span className="fy-mono">{fact.kind}</span>
+                        <span className="fy-ch__fact">{fact.what}</span>
+                        {isProposed ? (
+                          <span className="fy-mono">proposed</span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            disabled={locked}
+                            onClick={() => {
+                              // Written first, said second: the state is the record, the line is the ask.
+                              plan({ implies: implies.map((other, j) => (j === i ? { ...other, state: "proposed" as const } : other)) });
+                              setSay((current) => ({ line: `Propose as ${fact.kind}: ${fact.what}`, seq: (current?.seq ?? 0) + 1 }));
+                            }}
+                          >
+                            Propose
+                          </Button>
+                        )}
+                        {!isProposed && (
+                          <button
+                            type="button"
+                            className="fy-ch__dismiss"
+                            aria-label="Dismiss"
+                            disabled={locked}
+                            onClick={() => {
+                              const rest = implies.filter((_, j) => j !== i);
+                              plan({ implies: rest.length === 0 ? null : rest });
+                            }}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            <section className="fy-bible__panel">
               <h2 className="fy-bible__paneltitle">Draws on</h2>
               {drawsEmpty ? (
                 <p className="fy-bible__empty">Draws on nothing yet</p>
@@ -669,15 +796,19 @@ export function ChapterWorkspace({
 
       {dock ? (
         <ProductionConversation
+          key={`dock:${say?.seq ?? 0}`}
           worldId={worldId}
           productionId={prodId}
           entry={{ kind: "production", productionId: prodId }}
+          {...(say === null ? {} : { openWith: say.line })}
           dock={{
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,
             subject: `${chapter.title} · ${production.meta.title}`,
             conversationFirst: true,
             onPutAway: () => setDock(false),
-            prompts: ["Draft the rest", "What does this chapter draw on?"],
+            // The first prompt follows the plan (turn 127): a synopsis with no prose is drafted
+            // from; a chapter with prose is continued.
+            prompts: [firstPrompt(live, chapter.synopsis), "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: `About ${chapterLabel}:`,

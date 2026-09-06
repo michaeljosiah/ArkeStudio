@@ -105,3 +105,21 @@ export function targetWords(targetLength: string | undefined): number | null {
   const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
   return words >= 100 ? Math.round(words) : null;
 }
+
+/**
+ * Whether the overview moved under a chapter (turn 127): the chapter has words and was drafted
+ * against an overview version below the current one. Stamped by the coordinator on an accepted
+ * draft; typing never restamps it, so a chapter with no stamp is never called stale.
+ */
+export function overviewMoved(
+  chapter: { words?: number | undefined; draftedAgainst?: number | undefined },
+  story: { version: number } | null | undefined,
+): boolean {
+  return (
+    (chapter.words ?? 0) > 0 &&
+    chapter.draftedAgainst !== undefined &&
+    story !== null &&
+    story !== undefined &&
+    chapter.draftedAgainst < story.version
+  );
+}

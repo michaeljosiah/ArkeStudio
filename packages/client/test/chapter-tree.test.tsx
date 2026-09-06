@@ -24,7 +24,7 @@ function withChapters(chapters: ChapterSummary[]): ClientState {
       ...world,
       productions: [
         ...world.productions,
-        { ...salt, meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" }, chapters },
+        { ...salt, meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" }, story: { version: 3 }, chapters },
       ],
     },
   };
@@ -42,9 +42,21 @@ function render(chapters: ChapterSummary[]): string {
 }
 
 const CHAPTERS: ChapterSummary[] = [
-  { id: "the-same-ink", file: "02-the-same-ink", order: 1, title: "The same ink", status: "drafted", version: 4, words: 2930 },
-  { id: "neap", file: "01-neap", order: 2, title: "Neap", status: "drafted", version: 4, words: 3120 },
-  { id: "her-own-hand", file: "04-her-own-hand", order: 3, title: "Her own hand", status: "planned", version: 1 },
+  {
+    id: "the-same-ink",
+    file: "02-the-same-ink",
+    order: 1,
+    title: "The same ink",
+    status: "drafted",
+    version: 4,
+    words: 2930,
+    synopsis: "Odile's hand and the correction's are one hand.",
+    pov: "maren-kest",
+    when: "Neap · second night",
+    draftedAgainst: 2,
+  },
+  { id: "neap", file: "01-neap", order: 2, title: "Neap", status: "drafted", version: 4, words: 3120, draftedAgainst: 3 },
+  { id: "her-own-hand", file: "04-her-own-hand", order: 3, title: "Her own hand", status: "planned", version: 1, synopsis: "Maren writes the seventh bell in." },
 ];
 
 describe("the chapter tree renders resolved order", () => {
@@ -68,6 +80,17 @@ describe("the chapter tree renders resolved order", () => {
     assert.match(html, /6,050 words/, "the book's count is the sum of the chapters' words");
     assert.match(html, /in hand/, "the first chapter without words is the one in hand");
     assert.match(html, />New chapter</, "New chapter is a press on the door");
+  });
+
+  it("is the outline: the plan under the title, and the mark for an overview that moved (turn 127)", () => {
+    const html = render(CHAPTERS);
+    assert.match(html, /Odile&#x27;s hand and the correction&#x27;s are one hand\./, "a drafted chapter shows its synopsis");
+    assert.match(html, /Maren writes the seventh bell in\./, "a planned chapter is its synopsis with no words");
+    assert.match(html, /Maren Kest/, "the point of view is shown by name, not by slug");
+    assert.match(html, /Neap · second night/);
+    assert.equal((html.match(/overview moved/g) ?? []).length, 1, "only the chapter drafted below the overview's version is marked");
+    assert.match(html, /overview moved · v2 → v3/, "the row says both versions, as the chip does");
+    assert.match(html, /2 drafted/, "the meta counts drafted chapters");
   });
 
   it("a chapter without words shows its status instead", () => {

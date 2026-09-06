@@ -34,7 +34,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
@@ -1950,6 +1950,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * R-27, the rule the Bible's `baseVersion` stands in for.
        */
       baseHash: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+   * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
+   * field. The sizes here are the writer's; the read path has none.
+   */
+  z
+    .object({
+      kind: z.literal("edit-chapter-plan"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      changes: z
+        .object({
+          title: z.string().trim().min(1).max(200).optional(),
+          synopsis: z.string().trim().max(600).nullable().optional(),
+          pov: SlugSchema.nullable().optional(),
+          when: z.string().trim().max(80).nullable().optional(),
+          implies: ChapterImpliesWriteSchema.nullable().optional(),
+        })
+        .strict()
+        .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),
     })
     .strict(),
   /** Undo for a chapter (turn 126): v<n> comes back as a new version, nothing between is lost. */

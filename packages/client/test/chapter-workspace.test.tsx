@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ChapterSummary, ClientMessage, ClientState, StagedProposal } from "@arke-studio/contracts";
-import { ChapterScreen, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { ChapterScreen, firstPrompt, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -56,6 +56,14 @@ const CHAPTERS: ChapterSummary[] = [
     version: 4,
     words: 1900,
     draws: { sheets: ["maren-kest"], canon: ["CANON-002"] },
+    synopsis: "Maren hears the seventh bell before the tide is called.",
+    pov: "maren-kest",
+    when: "Neap · third night",
+    implies: [
+      { id: "if_bells", kind: "canon", what: "The bells can ring uncalled when the drowned city has a debt to collect.", state: "open" },
+      { id: "if_ledger", kind: "character", what: "Odile keeps a second ledger the Council does not know about.", state: "open" },
+    ],
+    draftedAgainst: 2,
   },
 ];
 
@@ -101,7 +109,7 @@ function inkbound(proposals: StagedProposal[] = []): ClientState {
         {
           ...salt,
           meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" },
-          story: { ...(salt.story ?? { version: 1 }), targetLength: "80,000 words" },
+          story: { ...(salt.story ?? { version: 1 }), version: 3, targetLength: "80,000 words" },
           chapters: CHAPTERS,
         },
       ],
@@ -218,6 +226,51 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /No such chapter/);
     assert.match(text(m), /Chapters/, "the way back is offered");
     assert.equal(m.sent.some((message) => message.kind === "open-chapter"), false, "nothing is asked for a chapter that is not there");
+  });
+
+  it("carries the plan: the synopsis under the title, the marks, and the overview having moved (turn 127)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    assert.match(text(m), /Maren hears the seventh bell before the tide is called\./, "the synopsis is under the title");
+    assert.match(text(m), /Neap · third night/);
+    assert.match(text(m), /overview moved · v2 → v3/);
+    assert.ok(q(m, "select.fy-ch__pick"), "point of view is picked from the world's characters");
+    assert.match(text(m), /Draft the rest/, "a chapter with prose is continued, not drafted from the synopsis");
+    assert.match(text(m), /Implies 2/, "the implied facts are listed with their count");
+    assert.match(text(m), /The bells can ring uncalled/);
+  });
+
+  it("a chapter with a synopsis and no prose is drafted from the synopsis (turn 127)", () => {
+    // Decided as a function: an empty body puts the rich editor up, which linkedom cannot mount.
+    assert.equal(firstPrompt("", "Maren hears the seventh bell."), "Draft from the synopsis");
+    assert.equal(firstPrompt("  \n ", "Maren hears the seventh bell."), "Draft from the synopsis");
+    assert.equal(firstPrompt("", undefined), "Draft the rest", "no synopsis, nothing to draft from");
+    assert.equal(firstPrompt("", "   "), "Draft the rest");
+    assert.equal(firstPrompt("Maren counted the bells.", "Maren hears the seventh bell."), "Draft the rest", "prose is continued");
+  });
+
+  it("Propose says the fact into the thread in the author's name, and Dismiss edits the plan (turn 127)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const propose = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent?.trim() === "Propose") as HTMLElement | undefined;
+    assert.ok(propose, "each implied fact has a press");
+    await act(async () => propose!.click());
+    const stated = m.sent.find((message) => message.kind === "edit-chapter-plan") as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
+    assert.ok(stated, "the state is written on the item first");
+    assert.equal(stated.changes.implies?.[0]?.state, "proposed");
+    assert.equal(stated.changes.implies?.[0]?.id, "if_bells", "the id is kept through the write");
+    assert.equal(stated.changes.implies?.[1]?.state, "open", "the other fact is untouched");
+    const said = m.sent.find((message) => JSON.stringify(message).includes("Propose as canon: The bells can ring uncalled"));
+    assert.ok(said, "then the fact is said into the thread rather than written into the world by this screen");
+
+    // Without a snapshot the items stay open here, so both still offer Dismiss; a proposed item would not.
+    const dismissers = Array.from(m.container.querySelectorAll("button.fy-ch__dismiss"));
+    assert.equal(dismissers.length, 2, "both facts are still open in this state, so both can be dismissed");
+    await act(async () => (dismissers[1] as HTMLElement).click());
+    const edited = m.sent.filter((message) => message.kind === "edit-chapter-plan").at(-1) as Extract<ClientMessage, { kind: "edit-chapter-plan" }> | undefined;
+    assert.ok(edited, "dismissing is a plan edit");
+    assert.equal(edited.changes.implies?.length, 1, "the dismissed fact is gone and the other stays");
+    assert.equal(edited.changes.implies?.[0]?.kind, "canon");
   });
 
   it("picks the newest draft for the file and reads its prose off the review projection", () => {

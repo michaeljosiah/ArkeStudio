@@ -37,6 +37,8 @@ import {
   type Capability,
   orderedShots,
   countWords,
+  ChapterFrontmatterSchema,
+  type ChapterImplies,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -777,6 +779,64 @@ export async function openChapter(
     .filter((candidate) => candidate >= 1 && candidate < version)
     .sort((a, b) => a - b);
   return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), versions };
+}
+
+/**
+ * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+ * the draft implied, saved in place like the prose — no proposal, no version cut (SPEC-012
+ * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
+ * as a null the read schema would refuse.
+ */
+export async function editChapterPlan(
+  store: WorldStore,
+  productionId: string,
+  chapterFile: string,
+  changes: {
+    title?: string;
+    synopsis?: string | null;
+    pov?: string | null;
+    when?: string | null;
+    implies?: ChapterImplies | null;
+  },
+): Promise<void> {
+  const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = MarkdownFile.parse(live);
+  const next: Record<string, unknown> = { ...doc.data };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) continue;
+    if (value === null || (typeof value === "string" && value.trim() === "")) delete next[key];
+    else next[key] = value;
+  }
+  if (Array.isArray(next["implies"])) next["implies"] = withImpliedIds(next["implies"] as ChapterImplies);
+  // A point of view must be a character the world holds; anything else is a typo written into
+  // frontmatter with the confidence of a fact.
+  if (typeof next["pov"] === "string" && !store.getBundle().sheets.some((sheet) => sheet.id === next["pov"] && sheet.type === "character")) {
+    throw new Error(`sheet ${String(next["pov"])} is not a character in this world`);
+  }
+  doc.data = next;
+  doc.setData({});
+  ChapterFrontmatterSchema.parse(doc.data);
+  await store.commit({
+    kind: "chapter-plan",
+    source: "editor",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true }],
+  });
+}
+
+/**
+ * Every implied fact carries an id and a state (codex on turn 127). Minted here, at the write,
+ * for any item that arrives without one — Arke's action and the screen both send bare facts —
+ * and kept for any that has one, so a state written by Propose survives the next edit.
+ */
+export function withImpliedIds(implies: ChapterImplies): ChapterImplies {
+  const seen = new Set<string>();
+  return implies.map((fact, index) => {
+    let id = fact.id ?? `if_${createHash("sha256").update(`${fact.kind}\n${fact.what}\n${index}`).digest("hex").slice(0, 10)}`;
+    while (seen.has(id)) id = `${id}-${index}`;
+    seen.add(id);
+    return { ...fact, id, state: fact.state ?? "open" };
+  });
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */

@@ -3,6 +3,7 @@ import {
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
+  overviewMoved,
 } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -2196,11 +2197,12 @@ function OverviewStoryScreen() {
  */
 export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newChapter = useSharedNewChapter(worldId, prodId);
   const chapters = production?.chapters ?? [];
   const isStory = production ? productionShape(production.meta).hasChapters : false;
+  const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production?.story?.targetLength);
   // The same "in hand" the dashboard derives: the first chapter with no words yet.
@@ -2210,7 +2212,7 @@ export function ChapterTreeScreen() {
       <div className="fy-h1row">
         <h1 className="fy-h1">Chapters</h1>
         <span className="fy-h1row__meta">
-          {chapters.length} chapter{chapters.length === 1 ? "" : "s"} ·{" "}
+          {chapters.length} chapter{chapters.length === 1 ? "" : "s"} · {drafted} drafted ·{" "}
           {target === null
             ? `${bookWords.toLocaleString()} words`
             : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
@@ -2229,7 +2231,11 @@ export function ChapterTreeScreen() {
       )}
       {production && chapters.length > 0 ? (
         <div className="fy-ledger">
-          {chapters.map((c) => (
+          {chapters.map((c) => {
+            // The outline (turn 127): the plan under the title, and the overview having moved.
+            const stale = overviewMoved(c, production?.story);
+            const pov = c.pov === undefined ? null : (world?.sheets.find((s) => s.id === c.pov)?.name ?? c.pov);
+            return (
             <button
               key={c.id}
               type="button"
@@ -2237,7 +2243,21 @@ export function ChapterTreeScreen() {
               onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)}
             >
               <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-              <span className="fy-row__name">{c.title}</span>
+              <span className="fy-row__plan">
+                <span className="fy-row__name">{c.title}</span>
+                {c.synopsis !== undefined && c.synopsis !== "" && <span className="fy-row__syn">{c.synopsis}</span>}
+                {(pov !== null || c.when !== undefined || stale) && (
+                  <span className="fy-row__marks">
+                    {pov !== null && <span className="fy-mono">{pov}</span>}
+                    {c.when !== undefined && <span className="fy-mono">{pov !== null ? "· " : ""}{c.when}</span>}
+                    {stale && (
+                      <span className="fy-row__moved">
+                        overview moved · v{c.draftedAgainst} → v{production?.story?.version}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </span>
               <Badge tone="outline">v{c.version}</Badge>
               <span className="fy-row__meta">
                 {c.words ? `${c.words.toLocaleString()} words` : c.status}
@@ -2247,7 +2267,8 @@ export function ChapterTreeScreen() {
                 <ChevronRight size={15} />
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <EmptyState
