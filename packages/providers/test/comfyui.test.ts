@@ -1567,7 +1567,7 @@ describe("making room on the graphics card", () => {
   const client = (free: () => Promise<number | null>, fetch: FetchLike, onSleep: (ms: number) => void = () => {}) => {
     let now = 0;
     const sleep = async (ms: number): Promise<void> => { now += ms; onSleep(ms); };
-    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, sleep, () => now);
+    return new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, free, undefined, undefined, sleep, () => now);
   };
 
   it("dispatches when the card cannot be measured", async () => {
@@ -1586,6 +1586,7 @@ describe("making room on the graphics card", () => {
       OK_PREFLIGHT,
       undefined,
       async () => 1,
+      undefined,
       () => "remote",
     ).submit("", VOICE);
     assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
@@ -1669,7 +1670,7 @@ describe("making room on the graphics card", () => {
     let now = 0;
     let asked = 0;
     const slowProbe = async (): Promise<number | null> => { asked += 1; now += 1500; return 3072; };
-    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, async (ms) => { now += ms; }, () => now);
+    const slow = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, slowProbe, undefined, undefined, async (ms) => { now += ms; }, () => now);
     await assert.rejects(slow.submit("", VOICE), (err: Error) => err instanceof ProviderBusyError);
     assert.ok(asked <= 4, `asked ${asked} times: a probe that takes 1.5 s runs the window out in two rounds, not eight`);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
@@ -1685,7 +1686,7 @@ describe("making room on the graphics card", () => {
     let asked = 0;
     const probe = async (): Promise<number | null> => { asked += 1; return 3072; };
     const sleep = async (ms: number): Promise<void> => { now += ms; controller.abort(); };
-    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, sleep, () => now);
+    const cancelled = new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, probe, undefined, undefined, sleep, () => now);
     await assert.rejects(cancelled.submit("", { ...VOICE, signal: controller.signal }), (err: Error) => err.name === "AbortError");
     assert.equal(asked, 2, "measured before asking and on the answer, then never again");
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), false, "nothing was queued");
@@ -1696,6 +1697,36 @@ describe("making room on the graphics card", () => {
     const readings: Array<number | null> = [3000, 3000, null];
     await client(async () => readings.shift() ?? null, fetch).submit("", VOICE);
     assert.equal(calls.some((c) => c.url.endsWith("/prompt")), true, "the probe failing is not the card filling up");
+  });
+});
+
+/**
+ * Putting things down after a run (issue 846).
+ *
+ * A long ComfyUI session gets slower as it goes because what a video job streamed through system
+ * memory stays resident until the process ends. The queue says when the lane has drained; these
+ * cover what the client does with that — the one `/free`, only for a video recipe, and only on an
+ * engine whose memory is this machine's to reclaim.
+ */
+describe("putting things down when the lane drains", () => {
+  const ROUTES = [{ match: /\/free$/, status: 200, body: {} }];
+
+  it("asks a local engine to unload after a video job", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-h3-video");
+    const freed = calls.filter((c) => c.url.endsWith("/free") && c.method === "POST");
+    assert.equal(freed.length, 1);
+    assert.deepEqual(freed[0]!.body, { unload_models: true, free_memory: true });
+  });
+
+  it("leaves a voice or image recipe's cache alone, and a remote engine's memory to its owner", async () => {
+    const { fetch, calls } = engineFake(ROUTES);
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-cloned-voice");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("comfyui-draft-image");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).release("not-a-recipe");
+    await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT, undefined, undefined, undefined, () => "remote").release("comfyui-h3-video");
+    await new ComfyUiClient(fetch, () => null, OK_PREFLIGHT).release("comfyui-h3-video");
+    assert.equal(calls.some((c) => c.url.endsWith("/free")), false);
   });
 });
 

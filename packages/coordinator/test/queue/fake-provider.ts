@@ -49,6 +49,9 @@ export class FakeProvider implements DispatchClient {
   submitCount = 0;
   pollCount = 0;
   cancelCount = 0;
+  /** Every time the queue said the lane had drained, with the model it named (issue 846). */
+  readonly released: string[] = [];
+  onRelease: ((model: string) => void) | null = null;
   inFlightNow = 0;
   maxObservedConcurrent = 0;
   readonly submittedKeys: Array<string | undefined> = [];
@@ -154,6 +157,11 @@ export class FakeProvider implements DispatchClient {
     this.cancelCount += 1;
     const job = this.remote.get(remoteId);
     if (job) job.state = "cancelled";
+  }
+
+  async release(model: string): Promise<void> {
+    this.released.push(model);
+    this.onRelease?.(model);
   }
 
   async lookupByKey(_key: string, idempotencyKey: string): Promise<{ remoteId: string } | null> {

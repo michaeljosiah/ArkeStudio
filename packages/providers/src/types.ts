@@ -203,7 +203,8 @@ export type ProviderOperation =
   | "cancel"
   | "lookup-by-key"
   | "list-recent"
-  | "list-voices";
+  | "list-voices"
+  | "release";
 
 export interface ProviderTransportScope extends ProviderCallContext {
   provider: ProviderId;
@@ -263,6 +264,11 @@ export interface ProviderClient {
   resetTransport?(): void;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void;
+  /**
+   * The provider's lane has drained after `model`'s job settled (issue 846): a local engine may
+   * put down what it loaded. Never awaited by a terminal row, and nothing the queue can see fails.
+   */
+  release?(model: string, context?: ProviderCallContext): Promise<void>;
   lookupByKey?(key: string, idempotencyKey: string, context?: ProviderCallContext): Promise<{ remoteId: string } | null>;
   listRecent?(key: string, context?: ProviderCallContext): Promise<Array<{ remoteId: string; idempotencyKey?: string; createdAt: string }>>;
 }

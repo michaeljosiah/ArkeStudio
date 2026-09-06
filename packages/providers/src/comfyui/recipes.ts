@@ -132,6 +132,14 @@ export interface ComfyUiRecipe {
      * reach dispatch without ever meeting `fitFor`.
      */
     minMemMb?: number;
+    /**
+     * The free-system-memory floor, where one was measured: what the pre-dispatch room check
+     * and readiness's memory-busy rung compare the machine's free RAM against (issue 846). A
+     * separate figure from `minMemMb` for the reason the two VRAM floors are separate — "is the
+     * machine big enough" against "is enough of it free right now". Absent means the run that
+     * would fix the number has not been recorded, and both checks stay silent rather than guess.
+     */
+    minFreeMemMb?: number;
     /** Where the floor came from, so nobody mistakes a transcription for a measurement (§1.4). */
     floorSource: string;
   };
@@ -495,6 +503,11 @@ const H3_VIDEO: ComfyUiRecipe = {
     // 30720 rather than 32768 because a nominal-32 GB machine reports slightly under (the
     // reference machine says 32676), and the floor must admit the machine class it was measured on.
     minMemMb: 30720,
+    // No free-RAM floor yet (issue 846). The runs above recorded where free memory BOTTOMED
+    // (758 MB on the 15 s clip) but not where it stood at dispatch, and the floor is the
+    // difference between the two. Deriving it from the weight sizes would be the transcription
+    // `floorSource` exists to expose, so the next measured run records both figures and the
+    // floor lands then; until it does, the drain-time /free is what keeps a session from growing.
     floorSource:
       "measured through ComfyUI on Arke reference hardware 2026-08-28: RTX 3080 10 GB, ~6 GB already in use by " +
       "other applications, 864×480×124 frames at 8 steps completed in 14m53s with peak card usage 9699 MB and " +

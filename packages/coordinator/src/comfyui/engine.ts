@@ -39,6 +39,8 @@ export interface ComfyUiRecipeFacts {
   minFreeVramMb: number;
   /** The measured system-memory floor, where the recipe states one — offloading spends RAM. */
   minMemMb?: number;
+  /** The measured free-system-memory floor, where the recipe states one (issue 846). */
+  minFreeMemMb?: number;
   recommendedVramMb: number;
   checkpoints: ReadonlyArray<{ file: string; sha256: string; sizeMb: number; url: string }>;
   customNodes: ReadonlyArray<{ id: string; pinnedRef: string }>;
@@ -77,6 +79,11 @@ export interface EngineServiceDeps {
    * (SPEC-022 §2.6). Optional: a build that cannot ask simply gates on total VRAM as before.
    */
   freeVramMb?: () => Promise<number | null>;
+  /**
+   * Free system memory right now, in MB, or null where it cannot be asked (issue 846). Optional
+   * for the same reason: without it a recipe's free-RAM floor is simply not checked here.
+   */
+  freeMemMb?: () => Promise<number | null>;
   /** Where well-known installs are looked for. Injectable so tests need no real home. */
   homeDir?: string;
   onStatus?: (status: ComfyUiEngineStatus) => void;
@@ -1193,9 +1200,16 @@ export class ComfyUiEngineService {
         }
         return freeVramReading;
       };
+      let freeMemReading: Promise<number | null> | null = null;
+      const freeMemMb = (): Promise<number | null> => {
+        if (freeMemReading === null) {
+          freeMemReading = this.deps.freeMemMb?.().catch(() => null) ?? Promise.resolve(null);
+        }
+        return freeMemReading;
+      };
       const recipes: RecipeReadiness[] = [];
       for (const recipe of this.deps.recipes) {
-        recipes.push(await this.recipeReadiness(recipe, engine, probes, reclaimableVramMb, freeVramMb));
+        recipes.push(await this.recipeReadiness(recipe, engine, probes, reclaimableVramMb, freeVramMb, freeMemMb));
       }
       // Unlike verification churn, a changed reservation cannot be returned stale: the health
       // interval is slow and every pass awaits real work, so retrying here cannot spin a core.
@@ -1211,8 +1225,16 @@ export class ComfyUiEngineService {
     probes: RuntimeProbes | null,
     measuredReclaimableVramMb: number | null,
     freeVramMb: () => Promise<number | null>,
+    freeMemMb: () => Promise<number | null>,
   ): Promise<RecipeReadiness> {
-    const readiness = await this.recipeReadinessInner(recipe, engine, probes, measuredReclaimableVramMb, freeVramMb);
+    const readiness = await this.recipeReadinessInner(
+      recipe,
+      engine,
+      probes,
+      measuredReclaimableVramMb,
+      freeVramMb,
+      freeMemMb,
+    );
     // Above the exercised ceiling, warn and never refuse (R-19, D15): a false "disabled" is the
     // failure this spec exists to prevent, and the engine's own error is an honest one — made
     // diagnosable by saying which pairing was never tried.
@@ -1237,6 +1259,7 @@ export class ComfyUiEngineService {
     probes: RuntimeProbes | null,
     measuredReclaimableVramMb: number | null,
     freeVramMb: () => Promise<number | null>,
+    freeMemMb: () => Promise<number | null>,
   ): Promise<RecipeReadiness> {
     const base = {
       recipeId: recipe.id,
@@ -1419,6 +1442,27 @@ export class ComfyUiEngineService {
         `Needs ${gb(recipe.minFreeVramMb)} free. This machine has ${gb(free)} free of ${gb(vram)} — close other programs using the graphics card. Cloud ${recipe.capability} still works.`,
         `Cloud ${recipe.capability} still works.`,
       );
+    }
+    /*
+     * 7b · System memory that is free enough, where the recipe measured a free floor (issue 846).
+     *
+     * The question of 7 asked of the resource offloading actually spends: 6b admits a 32 GB
+     * machine with 3 GB of it free, and H3's verified runs bottomed under a gigabyte. No reclaim
+     * allowance is credited here, because what `/free` hands back in RAM has not been measured —
+     * and the lane now asks the engine to put things down when it drains, so an idle engine's
+     * reading is already the machine's rather than the model cache's. Advisory like 7: dispatch
+     * measures again, asks the engine to unload, and decides. Unmeasured dispatches (D15).
+     */
+    if (recipe.minFreeMemMb !== undefined && engine.locality !== "remote") {
+      const freeMem = await freeMemMb();
+      if (freeMem !== null && freeMem < recipe.minFreeMemMb) {
+        const total = probes?.memMb ?? null;
+        return disabled(
+          "memory-busy",
+          `Needs ${gb(recipe.minFreeMemMb)} memory free. This machine has ${gb(freeMem)} free${total === null ? "" : ` of ${gb(total)}`} — close other programs. Cloud ${recipe.capability} still works.`,
+          `Cloud ${recipe.capability} still works.`,
+        );
+      }
     }
     return { ...base, state: "ready" };
   }

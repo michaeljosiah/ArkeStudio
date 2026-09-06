@@ -52,6 +52,8 @@ export interface ProviderClientDeps {
     openSocket?: (url: string) => ProgressSocket;
     /** Free graphics memory right now, in MB, or null where the device cannot be asked. */
     freeVramMb?: () => Promise<number | null>;
+    /** Free system memory right now, in MB, or null where it cannot be asked (issue 846). */
+    freeMemMb?: () => Promise<number | null>;
     locality?: EngineLocality;
   };
   capture?: ProviderCallCapture;
@@ -138,6 +140,7 @@ export function createProviderClients(deps: ProviderClientDeps): Partial<Record<
                 deps.comfyui!.preflight,
                 deps.comfyui!.openSocket,
                 deps.comfyui!.freeVramMb,
+                deps.comfyui!.freeMemMb,
                 deps.comfyui!.locality,
               ),
             deps.comfyui!.fetch ?? fetchImpl,

@@ -639,6 +639,31 @@ describe("ephemeral provider image references", () => {
   });
 });
 
+describe("putting the engine's models down when the lane drains (issue 846)", () => {
+  it("asks once after the last job settles, never between two queued jobs", async () => {
+    // A long local session gets slower as it goes because what a video job streamed through
+    // system memory stays resident until the process ends. Between two queued jobs the cache is
+    // worth keeping — the second would only reload it — so the ask waits for a lane with nothing
+    // running and nothing behind it, and names the job that drained it.
+    const fake = new FakeProvider({});
+    // The smallest MP4 the verifier accepts: an empty ftyp, moov and mdat box each.
+    const box = (tag: string): number[] => [0, 0, 0, 8, ...tag.split("").map((c) => c.charCodeAt(0))];
+    fake.artifacts = [{ name: "clip.mp4", contentType: "video/mp4", data: Uint8Array.from([...box("ftyp"), ...box("moov"), ...box("mdat")]) }];
+    const order: string[] = [];
+    fake.onRelease = (model) => order.push(`release:${model}`);
+    const h = await makeHarness({ comfyui: fake }, { providerConcurrency: { comfyui: 1 }, onTerminal: (job) => { order.push(job.id); } });
+    await h.queue.start();
+    const local = { source: "managed" as const, instanceId: "e-1", locality: "local" as const };
+    const first = await h.queue.enqueue({ ...INPUT, provider: "comfyui", model: "comfyui-h3-video", engine: local });
+    const second = await h.queue.enqueue({ ...INPUT, provider: "comfyui", model: "comfyui-draft-video", engine: local });
+    await until(() => fake.released.length > 0, "the lane to drain and the engine to be asked", FOLD_MS);
+    assert.equal(foldedJob(h, first.id)?.status, "succeeded", foldedJob(h, first.id)?.error ?? undefined);
+    assert.equal(foldedJob(h, second.id)?.status, "succeeded", foldedJob(h, second.id)?.error ?? undefined);
+    assert.deepEqual(order, [first.id, second.id, "release:comfyui-draft-video"], "one ask, after the second job, not between them");
+    h.queue.dispose();
+  });
+});
+
 describe("ephemeral provider voice references", () => {
   it("refuses a remote upload without destination-specific confirmation before journalling", async () => {
     const fake = new FakeProvider({});
