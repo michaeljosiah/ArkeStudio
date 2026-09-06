@@ -643,6 +643,18 @@ export function ChapterWorkspace({
     setVoicedNow(false);
     voicedRead.begin();
   }, [voicedNow, voicedRead]);
+  // A recast landing while a voiced read plays would remap the band, the count and the speaker
+  // labels onto audio made from the earlier cast (codex on PR 914, round two): the read stops
+  // with the cast it was made from, and the next press reads the new one.
+  const castKey = voicesRecord === null ? null : `${voicesRecord.hash}:${voicesRecord.lines.length}`;
+  const readCast = useRef<string | null>(null);
+  useEffect(() => {
+    if (!voicedRead.reading) {
+      readCast.current = castKey;
+      return;
+    }
+    if (readCast.current !== castKey) voicedRead.stop();
+  }, [castKey, voicedRead]);
   const castNote =
     castingState?.state === "unavailable" || castingState?.state === "failed"
       ? `could not cast · ${castingState.reason ?? "the run failed"}`

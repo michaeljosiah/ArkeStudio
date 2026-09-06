@@ -191,16 +191,22 @@ export function voicedBlocks(
       const twins = here.filter((other) => fold(other.quote) === key).length;
       const hits = occurrencesOf(paragraph, line.quote);
       const hit = hits.length === twins && held.get(key) === named.get(key) ? hits[line.occurrence] : undefined;
-      // Not there, not at that occurrence, or the same bytes already spoken for: narration.
-      if (hit === undefined || spans.some((span) => hit.start < span.end && span.start < hit.end)) {
+      // Not there, or not at that occurrence: narration.
+      if (hit === undefined) {
         ambiguous += 1;
         continue;
       }
       spans.push({ ...hit, speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}) });
     }
-    spans.sort((a, b) => a.start - b.start);
+    // Two spans sharing bytes are neither speaker's (codex on PR 914): the extractor gave two
+    // people words that overlap, and keeping whichever came first would voice the shared words
+    // in an arbitrary voice. Both fall back, and both are counted.
+    const overlapping = spans.filter((span) => spans.some((other) => other !== span && span.start < other.end && other.start < span.end));
+    ambiguous += overlapping.length;
+    const kept = spans.filter((span) => !overlapping.includes(span));
+    kept.sort((a, b) => a.start - b.start);
     let cursor = 0;
-    for (const span of spans) {
+    for (const span of kept) {
       const before = paragraph.slice(cursor, span.start).trim();
       if (before !== "") blocks.push({ paragraph: index, text: before });
       blocks.push({ paragraph: index, text: paragraph.slice(span.start, span.end), speaker: span.speaker, ...(span.sheet !== undefined ? { sheet: span.sheet } : {}) });

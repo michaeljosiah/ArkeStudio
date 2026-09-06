@@ -49,6 +49,8 @@ import {
   lookHoldingScope,
   type CharacterLook,
   type FrameRate,
+  LanguageTagSchema,
+  type ChapterSummary,
   type ProductionBundle,
   type ProductionTimeline,
   type ResolvedPictureCut,
@@ -176,6 +178,13 @@ import {
   acceptTake,
   attachCharacterLook,
   cancelExport,
+  cancelManuscript,
+  exportManuscript,
+  importManuscript,
+  openExportsFolder,
+  pickManuscript,
+  rereadManuscript,
+  useManuscripts,
   createSheetFromSentence,
   attachHostFiles,
   attachHostText,
@@ -2286,6 +2295,35 @@ export function ChapterTreeScreen() {
   const newChapter = useSharedNewChapter(worldId, prodId);
   const chapters = production?.chapters ?? [];
   const isStory = production ? productionShape(production.meta).hasChapters : false;
+  /*
+   * A manuscript out and in (turn 131): two presses beside New chapter and two sheets in the
+   * film export dialog's shape. The import's request is the sheet's; what came of it is the
+   * session's line under the band.
+   */
+  const [sheet, setSheet] = useState<"export" | "import" | null>(null);
+  const [importRequest, setImportRequest] = useState<string | null>(null);
+  const [imported, setImported] = useState<{ fileName: string; created: number; after: number } | null>(null);
+  const manuscripts = useManuscripts();
+  const importState = importRequest === null ? undefined : manuscripts[importRequest];
+  useEffect(() => {
+    if (importState?.state !== "imported" || importRequest === null) return;
+    setImported({ fileName: importState.fileName ?? "", created: importState.created ?? 0, after: importState.after ?? 0 });
+    setImportRequest(null);
+    setSheet(null);
+  }, [importState, importRequest]);
+  useEffect(() => {
+    setImported(null);
+  }, [prodId]);
+  const beginImport = () => {
+    if (!worldId || !prodId) return;
+    setImportRequest(pickManuscript(worldId, prodId));
+    setSheet("import");
+  };
+  const closeImport = () => {
+    if (worldId && importRequest !== null && importState?.state !== "importing") cancelManuscript(worldId, importRequest);
+    setImportRequest(null);
+    setSheet(null);
+  };
   const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production?.story?.targetLength);
@@ -2335,11 +2373,39 @@ export function ChapterTreeScreen() {
         )}
         <span className="fy-h1row__push" />
         {isStory && (
-          <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
-            New chapter
-          </Button>
+          <>
+            <Button onClick={() => setSheet("export")} data-testid="export-manuscript">
+              <Download size={13} />
+              Export
+            </Button>
+            <Button onClick={beginImport} data-testid="import-manuscript">
+              <Upload size={13} />
+              Import
+            </Button>
+            <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
+              New chapter
+            </Button>
+          </>
         )}
       </div>
+      {isStory && production && (
+        <ManuscriptExportSheet open={sheet === "export"} onClose={() => setSheet(null)} worldId={worldId} prodId={prodId} production={production} chapters={chapters} />
+      )}
+      {isStory && (
+        <ManuscriptImportSheet
+          open={sheet === "import"}
+          onClose={closeImport}
+          worldId={worldId}
+          prodId={prodId}
+          requestId={importRequest}
+          state={importState}
+        />
+      )}
+      {view === "outline" && imported !== null && (
+        <div className="fy-cont__meta" data-testid="imported-line">
+          imported · {imported.fileName} · {imported.created} chapter{imported.created === 1 ? "" : "s"} · after {imported.after}
+        </div>
+      )}
       {view === "outline" && target !== null && (
         <div className="fy-ch__target fy-ch__target--page" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
@@ -2445,6 +2511,7 @@ export function ChapterTreeScreen() {
                   </span>
                 )}
               </span>
+              {c.source !== undefined && <Badge tone="outline">imported</Badge>}
               <Badge tone="outline">v{c.version}</Badge>
               <span className="fy-row__meta">
                 {c.words ? `${c.words.toLocaleString()} words` : c.status}
@@ -2472,6 +2539,196 @@ export function ChapterTreeScreen() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The export sheet (turn 131, SPEC-012 R-49, R-51): the format, what goes in and what is left
+ * out, the language an EPUB is marked with, and what was delivered. The file is built whole by
+ * the coordinator and lands under the world's exports folder; the sheet only names and counts.
+ */
+function ManuscriptExportSheet({
+  open,
+  onClose,
+  worldId,
+  prodId,
+  production,
+  chapters,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  production: ProductionBundle;
+  chapters: readonly ChapterSummary[];
+}) {
+  const [format, setFormat] = useState<"docx" | "epub">("docx");
+  const [language, setLanguage] = useState("en");
+  // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
+  // reader may refuse, so the press waits until the field is one.
+  const languageOk = format !== "epub" || LanguageTagSchema.safeParse(language.trim()).success;
+  const exportsState = useExports();
+  const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
+  const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
+  const leftOut = chapters.length - withProse.length;
+  const delivered = Object.entries(exportsState)
+    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId)
+    .slice(-4);
+  // Only a host can open a folder (R-51): a browser session lists the file and has no folder to open.
+  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
+  const name = (output: string | null) => output?.split("/").pop() ?? "";
+  return (
+    <EditorDialog open={open} title="Export manuscript" subtitle={`${production.meta.title} · ${withProse.length} of ${chapters.length} chapters · ${words.toLocaleString()} words`} onClose={onClose} width={430} labelledBy="manuscript-export-title">
+      <div className="fy-exsheet" data-testid="manuscript-export">
+        <nav className="fy-seg" aria-label="Format">
+          <button type="button" className={cx("fy-seg__item", format === "docx" && "fy-seg__item--active")} onClick={() => setFormat("docx")}>
+            Word · .docx
+          </button>
+          <button type="button" className={cx("fy-seg__item", format === "epub" && "fy-seg__item--active")} onClick={() => setFormat("epub")}>
+            EPUB
+          </button>
+        </nav>
+        <div className="fy-mono fy-exsheet__status">
+          {withProse.length} chapter{withProse.length === 1 ? "" : "s"} with prose, in order{leftOut > 0 ? ` · ${leftOut} planned left out` : ""}
+        </div>
+        <div className="fy-mono fy-exsheet__status">
+          title page · chapter titles as headings · *emphasis* kept · *** as a scene break
+          {format === "epub" ? " · language " : ""}
+          {format === "epub" && (
+            <Input aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 64, display: "inline-block" }} />
+          )}
+        </div>
+        {delivered.length > 0 && (
+          <div className="fy-exsheet__delivered">
+            <span className="fy-exsheet__name">Delivered</span>
+            {delivered.map(([id, entry]) => (
+              <div key={id} className="fy-exsheet__export" data-testid="manuscript-delivery">
+                <span className="fy-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
+                <span className="fy-mono fy-exsheet__status">
+                  {entry.status}
+                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
+                  {entry.error ? ` · ${entry.error}` : ""}
+                </span>
+                {entry.status === "running" && (
+                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
+                    Cancel
+                  </button>
+                )}
+                {entry.status === "done" && hosted && (
+                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && openExportsFolder(worldId)}>
+                    Show in folder
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Said from the summaries, and the press stays live (codex on PR 916): a chapter written
+            outside the app carries no count until it is next saved, so the export reads the
+            chapters themselves and refuses in these words only when there is truly nothing. */}
+        {withProse.length === 0 && <div className="fy-mono fy-exsheet__status">nothing to export · no chapter has prose yet</div>}
+        {!languageOk && <div className="fy-mono fy-exsheet__status">language · not a BCP 47 tag</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={chapters.length === 0 || !languageOk || !worldId || !prodId}
+            onClick={() => worldId && prodId && exportManuscript(worldId, prodId, format, language.trim())}
+          >
+            {format === "docx" ? "Export .docx" : "Export EPUB"}
+          </Button>
+        </div>
+      </div>
+    </EditorDialog>
+  );
+}
+
+/**
+ * The import sheet (turn 131, R-50, R-51): the file read and shown before anything is written,
+ * the chapters as rows, and the press that counts them. Cancel writes nothing.
+ */
+function ManuscriptImportSheet({
+  open,
+  onClose,
+  worldId,
+  prodId,
+  requestId,
+  state,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  requestId: string | null;
+  state: ReturnType<typeof useManuscripts>[string] | undefined;
+}) {
+  const found = state?.chapters ?? [];
+  const after = state?.after ?? 0;
+  const shown = found.slice(0, 6);
+  const subtitle =
+    state?.state === "read" || state?.state === "importing"
+      ? `${state.fileName} · ${(state.words ?? 0).toLocaleString()} words · read, nothing written yet`
+      : state?.state === "refused"
+        ? (state.fileName ?? "")
+        : "reading…";
+  return (
+    <EditorDialog open={open} title="Import manuscript" subtitle={subtitle} onClose={onClose} width={430} labelledBy="manuscript-import-title">
+      <div className="fy-exsheet" data-testid="manuscript-import">
+        {state?.state === "refused" && <div className="fy-mono fy-exsheet__status">could not read · {state.reason}</div>}
+        {state?.state === "failed" && <div className="fy-mono fy-exsheet__status">could not import · {state.reason}</div>}
+        {(state?.state === "read" || state?.state === "importing") && (
+          <>
+            <div className="fy-mono fy-exsheet__status">
+              {found.length} chapter{found.length === 1 ? "" : "s"}
+              {state.headingLevel !== undefined ? ` · ${state.headingLevel} as chapter titles` : " · no headings · the file name is the title"}
+              {(state.leftOut ?? 0) > 0 ? ` · ${state.leftOut} heading${state.leftOut === 1 ? "" : "s"} above left out` : ""}
+              {(state.notes ?? 0) > 0 ? ` · ${state.notes} footnote${state.notes === 1 ? "" : "s"} not carried` : ""} · after chapter {after} · nothing existing changes
+            </div>
+            {(state.levels?.length ?? 0) > 1 && (
+              <nav className="fy-seg" aria-label="Chapter level" data-testid="manuscript-levels">
+                {state.levels!.map((entry) => (
+                  <button
+                    key={entry.level}
+                    type="button"
+                    className={cx("fy-seg__item", entry.chosen && "fy-seg__item--active")}
+                    disabled={state.state === "importing"}
+                    onClick={() => worldId && prodId && requestId !== null && !entry.chosen && rereadManuscript(worldId, prodId, requestId, entry.level)}
+                  >
+                    {entry.label} · {entry.count}
+                  </button>
+                ))}
+              </nav>
+            )}
+            <div className="fy-exsheet__delivered">
+              {shown.map((chapter, index) => (
+                <div key={index} className="fy-exsheet__export" data-testid="manuscript-row">
+                  <span className="fy-mono">{String(after + index + 1).padStart(2, "0")}</span>
+                  <span className="fy-exsheet__name">{chapter.title}</span>
+                  <span className="fy-mono fy-exsheet__status">{chapter.words.toLocaleString()} words</span>
+                </div>
+              ))}
+              {found.length > shown.length && <div className="fy-mono fy-exsheet__status">and {found.length - shown.length} more</div>}
+            </div>
+          </>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          {(state?.state === "read" || state?.state === "importing") && (
+            <Button
+              variant="primary"
+              disabled={state.state === "importing" || !worldId || !prodId || requestId === null}
+              onClick={() => worldId && prodId && requestId !== null && importManuscript(worldId, prodId, requestId)}
+            >
+              Import {found.length} chapter{found.length === 1 ? "" : "s"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
   );
 }
 

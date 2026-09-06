@@ -951,6 +951,48 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
 
   /**
+   * A manuscript read for import (turn 131): what the file holds, before anything is written —
+   * or why it could not be read. Held by request until imported or cancelled.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("manuscript.read-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      fileName: z.string().min(1).optional(),
+      words: z.number().int().min(0).optional(),
+      chapters: z.array(z.object({ title: z.string().min(1), words: z.number().int().min(0) }).strict()).optional(),
+      /** The style that started chapters, as the sheet names it; absent for a document with none. */
+      headingLevel: z.string().min(1).optional(),
+      /** Headings above the chapter level, the book's name or a part's, left out and counted. */
+      leftOut: z.number().int().min(0).optional(),
+      /** Every level the document uses, with its count and whether chapters were found at it: the sheet's segment. */
+      levels: z
+        .array(z.object({ level: z.enum(["title", "subtitle", "heading1", "heading2"]), label: z.string().min(1), count: z.number().int().min(0), chosen: z.boolean() }).strict())
+        .optional(),
+      /** Footnote and endnote references, not carried and said so. */
+      notes: z.number().int().min(0).optional(),
+      /** The highest order there is: the chapters would follow it. */
+      after: z.number().int().min(0).optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("manuscript.import-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      created: z.number().int().min(0).optional(),
+      after: z.number().int().min(0).optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
    * One file handed to a genesis conversation. Outcome rather than two event types: there is
    * no world yet, so there is no artifact to name and nothing to look up — a chip and, when it
    * would not go, the reason, is the whole of what the screen can say.

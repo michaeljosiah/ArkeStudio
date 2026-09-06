@@ -451,6 +451,13 @@ const CLIENT_COMMAND_METADATA = {
   // The cast of lines (turn 130): the same discipline, turned on speech.
   "cast-voices": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
   "stop-voices": action("production", "command", "extraction", "external-network-action", ["chapters"]),
+  // A manuscript out and in (turn 131): a file the host writes, a file the host picks.
+  "export-manuscript": action("production", "host-action", "export", "export", ["chapters", "exports"]),
+  "open-exports-folder": globalOnly(GLOBAL_OPERATION),
+  "pick-manuscript": humanOnly("Opening the manuscript picker is a human evidence-control gesture."),
+  "import-manuscript": action("production", "host-action", "artifact-store", "host-file-access", ["chapters"]),
+  "reread-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
+  "cancel-manuscript": action("production", "command", "artifact-store", "host-file-access", ["chapters"]),
   "resolve-extraction": action("world", "take-review", "proposal-manager", "authored-change", ["artifacts", "canon", "sheets"]),
   "check-updates": readOnly(QUERY),
   "download-update": globalOnly(GLOBAL_OPERATION),

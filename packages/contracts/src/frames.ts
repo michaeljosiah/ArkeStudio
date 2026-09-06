@@ -2775,6 +2775,35 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
+  /**
+   * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under
+   * the world's `exports/` and reports through `export.progress`; the import is read by the host
+   * and shown before anything is written, then appended in one commit.
+   */
+  z
+    .object({
+      kind: z.literal("export-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      format: z.enum(["docx", "epub"]),
+      /** The EPUB's language, as the sheet named it — a BCP 47 tag, the subtitles' own rule; the world records none. */
+      language: LanguageTagSchema.optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */
+  z
+    .object({
+      kind: z.literal("reread-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      headingLevel: z.enum(["title", "subtitle", "heading1", "heading2"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("cancel-manuscript"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

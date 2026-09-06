@@ -204,6 +204,26 @@ interface StoreState {
    * is: what the Voices panel shows while one runs and how it ended, with the record a run
    * finished with.
    */
+  /**
+   * A manuscript read for import (turn 131), by request: what the file holds before anything
+   * is written, then what the import made of it. The import sheet reads this.
+   */
+  manuscripts: Record<
+    string,
+    {
+      state: "reading" | "read" | "refused" | "importing" | "imported" | "failed";
+      fileName?: string;
+      words?: number;
+      chapters?: Array<{ title: string; words: number }>;
+      headingLevel?: string;
+      leftOut?: number;
+      levels?: Array<{ level: "title" | "subtitle" | "heading1" | "heading2"; label: string; count: number; chosen: boolean }>;
+      notes?: number;
+      after?: number;
+      created?: number;
+      reason?: string;
+    }
+  >;
   casting: Record<
     string,
     {
@@ -343,6 +363,7 @@ let current: StoreState = {
   reading: {},
   deriving: {},
   casting: {},
+  manuscripts: {},
   archiveNote: null,
   permissions: {},
   askResults: {},
@@ -956,6 +977,11 @@ function handleFrame(json: string): void {
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       voiceParts: changedWorld ? {} : current.voiceParts,
+      // A run still going is replayed after the snapshot (turn 129, turn 130); one that finished
+      // while this window was away is not, and would otherwise stay "casting" forever (codex on
+      // PR 914, round two). The snapshot's records say what stands.
+      deriving: {},
+      casting: {},
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -980,6 +1006,7 @@ function handleFrame(json: string): void {
     let reading = current.reading;
     let deriving = current.deriving;
     let casting = current.casting;
+    let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
@@ -1252,6 +1279,33 @@ function handleFrame(json: string): void {
           ...(event.record !== undefined ? { record: event.record } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
+      };
+    } else if (event.type === "manuscript.read-result") {
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.reason !== undefined
+            ? { state: "refused", ...(event.fileName !== undefined ? { fileName: event.fileName } : {}), reason: event.reason }
+            : {
+                state: "read",
+                fileName: event.fileName ?? "",
+                words: event.words ?? 0,
+                chapters: event.chapters ?? [],
+                ...(event.headingLevel !== undefined ? { headingLevel: event.headingLevel } : {}),
+                leftOut: event.leftOut ?? 0,
+                levels: event.levels ?? [],
+                notes: event.notes ?? 0,
+                after: event.after ?? 0,
+              },
+      };
+    } else if (event.type === "manuscript.import-result") {
+      const held = manuscripts[event.requestId] ?? { state: "read" as const };
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.reason !== undefined
+            ? { ...held, state: "failed", reason: event.reason }
+            : { ...held, state: "imported", created: event.created ?? 0, ...(event.after !== undefined ? { after: event.after } : {}) },
       };
     } else if (event.type === "voices.started") {
       casting = {
@@ -1559,6 +1613,7 @@ function handleFrame(json: string): void {
       reading,
       deriving,
       casting,
+      manuscripts,
       archiveNote,
       permissions,
       askResults,
@@ -3881,6 +3936,47 @@ export function stopVoices(worldId: string, productionId: string, chapterFile: s
   send({ kind: "stop-voices", worldId, productionId, chapterFile });
 }
 
+// ---- turn 131: a manuscript out and in ------------------------------------
+
+export function exportManuscript(worldId: string, productionId: string, format: "docx" | "epub", language?: string): boolean {
+  return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
+}
+
+export function openExportsFolder(worldId: string): void {
+  send({ kind: "open-exports-folder", worldId });
+}
+
+/** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */
+export function pickManuscript(worldId: string, productionId: string): string {
+  const requestId = ulid();
+  emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { state: "reading" } } });
+  send({ kind: "pick-manuscript", worldId, productionId, requestId });
+  return requestId;
+}
+
+export function importManuscript(worldId: string, productionId: string, requestId: string): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "importing" } } });
+  send({ kind: "import-manuscript", worldId, productionId, requestId });
+}
+
+/** The same file again at the level the person chose; the rows are read again, nothing is written. */
+export function rereadManuscript(worldId: string, productionId: string, requestId: string, headingLevel: "title" | "subtitle" | "heading1" | "heading2"): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "reading" } } });
+  send({ kind: "reread-manuscript", worldId, productionId, requestId, headingLevel });
+}
+
+export function cancelManuscript(worldId: string, requestId: string): void {
+  const { [requestId]: _dropped, ...rest } = current.manuscripts;
+  emitChange({ ...current, manuscripts: rest });
+  send({ kind: "cancel-manuscript", worldId, requestId });
+}
+
+export function useManuscripts(): StoreState["manuscripts"] {
+  return useStore().manuscripts;
+}
+
 /** How each chapter's casting is going, keyed by `worldId/productionId/chapterId` — the Voices panel reads this. */
 export function useCasting(): StoreState["casting"] {
   return useStore().casting;
@@ -4062,6 +4158,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     reading: {},
   deriving: {},
     casting: {},
+  manuscripts: {},
     archiveNote: null,
     permissions: {},
     askResults: {},

@@ -249,6 +249,12 @@ export const PROSE_STYLE_SCHEMA_VERSION = 10;
  * and neither has an arm for the event, so a world either can open must not hold one.
  */
 export const TURN_CONSTRAINTS_SCHEMA_VERSION = 12;
+/**
+ * An imported chapter carries `source` (turn 131), a field of a strict record: a build without
+ * it drops every imported chapter on scan rather than refusing, so the import commit fences the
+ * world past the constraints' boundary and the older build refuses it by name (codex on PR 916).
+ */
+export const CHAPTER_SOURCE_SCHEMA_VERSION = 13;
 
 /**
  * Would writing this actually change what the world says?

@@ -415,12 +415,21 @@ function chunks(text: string): Row[] {
  */
 function voiceRows(voices: ChapterVoices): Row[] {
   const rows: Row[] = [{ key: "voices", value: summariseVoices(voices) }];
-  for (let offset = 0; offset < voices.lines.length; offset += VOICE_ROW_LINES) {
-    rows.push({ key: `voices:${padded(offset)}`, value: { offset, lines: voices.lines.slice(offset, offset + VOICE_ROW_LINES) } });
+  let offset = 0;
+  while (offset < voices.lines.length) {
+    // As many lines as fit the text chunk a body row holds, and at least one: a row's size is
+    // its characters, not its count (codex on PR 914, round two).
+    let end = offset;
+    let size = 0;
+    while (end < voices.lines.length && (end === offset || size + JSON.stringify(voices.lines[end]).length <= TEXT_CHUNK_CHARS)) {
+      size += JSON.stringify(voices.lines[end]).length;
+      end += 1;
+    }
+    rows.push({ key: `voices:${padded(offset)}`, value: { offset, lines: voices.lines.slice(offset, end) } });
+    offset = end;
   }
   return rows;
 }
-const VOICE_ROW_LINES = 50;
 
 function productionOf(bundle: WorldBundle, productionId: string): ProductionBundle | undefined {
   return bundle.productions.find((production) => production.meta.id === productionId);

@@ -539,6 +539,8 @@ export const ChapterFrontmatterSchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    /** The file an imported chapter came from (turn 131); the first editor save drops it. */
+    source: z.string().min(1).optional(),
     created: z.string().optional(),
     updated: z.string().optional(),
   })
@@ -699,7 +701,8 @@ export const ChapterVoicesSchema = z
     dropped: z.number().int().min(0),
     /** Lines beyond the cap, counted rather than silently cut; they read as narration. */
     omitted: z.number().int().min(0),
-    lines: z.array(ChapterVoiceLineSchema),
+    /** At most four hundred (R-45): a record holding more is not one this build wrote, and reads as unreadable. */
+    lines: z.array(ChapterVoiceLineSchema).max(400),
   })
   .strict();
 export type ChapterVoices = z.infer<typeof ChapterVoicesSchema>;
@@ -779,6 +782,8 @@ export const ChapterSummarySchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    /** The file an imported chapter came from (turn 131), while it is still the import's. */
+    source: z.string().min(1).optional(),
   })
   .strict();
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;
