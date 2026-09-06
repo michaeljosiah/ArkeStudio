@@ -199,8 +199,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema,
       worldId: UlidSchema,
       /** Addresses, never words — the same rule one source at a time already follows. */
-      sources: z.array(ProseReadSourceSchema).min(1).max(12),
+      /*
+       * Twelve covered every page there was until a chapter became one (turn 126): its blocks
+       * are its paragraphs, and a dialogue-heavy chapter has hundreds. The cap guards the wire,
+       * not the engine — a page is narrated one block at a time whatever its length — so it is
+       * sized by the frame: a source is an address of under a hundred bytes, and a thousand of
+       * them is a novella's worth of paragraphs in well under a hundred kilobytes. The screen
+       * caps what it sends at the same figure, so a longer chapter reads its first thousand
+       * rather than sending a frame the schema drops on the floor (codex, PR 879).
+       */
+      sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * Stop a page read this window started (codex, PR 879). A chapter is narrated a paragraph at a
+   * time and can run to a thousand blocks; the Stop control clears playback on the client, and
+   * this is what tells the coordinator not to synthesise the rest.
+   */
+  z
+    .object({
+      kind: z.literal("stop-prose-page"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
     })
     .strict(),
   z
@@ -1888,20 +1909,57 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("create-chapter"),
+      /**
+       * Answered by `chapter.create-result`, correlated by requestId, so the press that made the
+       * chapter can open it (turn 126; the shape SPEC-036 R-37 gave `New scene`).
+       */
+      requestId: UlidSchema,
       worldId: UlidSchema,
       productionId: SlugSchema,
       title: z.string().min(1).max(200),
       order: z.number().int().min(1),
     })
     .strict(),
+  /**
+   * Open a chapter: the body and its version, fetched on demand and answered by
+   * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
+   */
+  z
+    .object({
+      kind: z.literal("open-chapter"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+    })
+    .strict(),
   /** SPEC-012 R-5: direct authoring saves in place — no proposal, no version cut. */
   z
     .object({
       kind: z.literal("save-chapter"),
+      /** Present when the sender wants `chapter.save-result` back: the editor needs the new base. */
+      requestId: UlidSchema.optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       body: z.string(),
+      /**
+       * The hash of the file the editor read (turn 126). A direct save keeps the version, so
+       * the version cannot say whether the file moved underneath the editor; the committer's
+       * base hash can, and a save against a moved base is refused rather than merged — SPEC-002
+       * R-27, the rule the Bible's `baseVersion` stands in for.
+       */
+      baseHash: z.string().min(1).optional(),
+    })
+    .strict(),
+  /** Undo for a chapter (turn 126): v<n> comes back as a new version, nothing between is lost. */
+  z
+    .object({
+      kind: z.literal("restore-chapter"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
     })
     .strict(),
   /**

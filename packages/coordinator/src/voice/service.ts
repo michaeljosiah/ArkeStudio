@@ -23,6 +23,7 @@ import {
   voiceFormatForModel,
   voiceTargetKey,
   type WorldBundle,
+  chapterParagraphs,
 } from "@arke-studio/contracts";
 import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
@@ -210,7 +211,7 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
  */
 export function authoritativeProseSpeech(
   bundle: WorldBundle,
-  source: Exclude<ProseReadSource, { of: "reply" }>,
+  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" }>,
 ): { text: string; heading: string; version: number; subjectId: string } {
   const production = (id: string) => {
     const found = bundle.productions.find((candidate) => candidate.meta.id === id);
@@ -277,6 +278,40 @@ export function authoritativeProseSpeech(
       return spoken(series.engine, "Series engine", series.version, series.id);
     }
   }
+}
+
+/**
+ * A chapter, or one paragraph of it, as speech (turn 126, issue 874).
+ *
+ * The chapter arm is resolved off disk by the coordinator — the body is not in the bundle — and
+ * handed here already read, so this stays a pure function like the resolver above it. A page
+ * read names one paragraph per source; the whole chapter as one block is the per-block read of
+ * a long section and streams the way the bible's does.
+ */
+export function chapterProseSpeech(
+  chapter: { body: string; title: string; version: number },
+  source: Extract<ProseReadSource, { of: "chapter" }>,
+): { text: string; heading: string; version: number; subjectId: string } {
+  const subjectId = `${source.productionId}/chapters/${source.chapterId}`;
+  if (source.paragraph === undefined) {
+    const text = normalizeSpeechText(chapter.body);
+    if (!text) throw new Error("Nothing to read yet.");
+    return { text, heading: chapter.title, version: Math.max(1, chapter.version), subjectId };
+  }
+  const paragraphs = chapterParagraphs(chapter.body);
+  const paragraph = paragraphs[source.paragraph];
+  // Refused by name rather than read off the end: a page declared against an unsaved draft
+  // could name a paragraph the saved chapter does not have, and the wrong words would be worse
+  // than the missing block the page read already tolerates.
+  if (paragraph === undefined) throw new Error("That paragraph is not in the saved chapter.");
+  const text = normalizeSpeechText(paragraph);
+  if (!text) throw new Error("Nothing to read yet.");
+  return {
+    text,
+    heading: `${chapter.title} · ${source.paragraph + 1} of ${paragraphs.length}`,
+    version: Math.max(1, chapter.version),
+    subjectId: `${subjectId}#${source.paragraph}`,
+  };
 }
 
 /**

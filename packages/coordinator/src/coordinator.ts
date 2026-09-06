@@ -172,6 +172,8 @@ import {
   saveChapter,
   setProductionAspect,
   setProductionModel,
+  openChapter,
+  restoreChapter,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -306,6 +308,7 @@ import {
   type CloudVoiceSource,
   type SidecarLike,
   voiceLineRequest,
+  chapterProseSpeech,
 } from "./voice/service.js";
 import {
   AUDIO_EXTENSIONS as CLONEABLE_AUDIO_EXTENSIONS,
@@ -1079,7 +1082,22 @@ export class Coordinator {
   private async resolveProse(
     store: WorldStore,
     source: ProseReadSource,
+    chapters?: Map<string, ReturnType<typeof openChapter>>,
   ): Promise<{ text: string; heading: string; version: number; subjectId: string }> {
+    // A chapter's body is not in the bundle (turn 126), so it is the one authored record read
+    // off disk here rather than by the pure resolver; `openChapter` fails by name if it is gone.
+    // A page read hands in a map so every paragraph of one chapter comes from one read: a
+    // chapter saved while the page was being resolved would otherwise be narrated as a mix of
+    // its old first half and its new second half (codex, PR 879).
+    if (source.of === "chapter") {
+      const key = `${source.productionId}/${source.chapterId}`;
+      let opened = chapters?.get(key);
+      if (opened === undefined) {
+        opened = openChapter(store, source.productionId, source.chapterId);
+        chapters?.set(key, opened);
+      }
+      return chapterProseSpeech(await opened, source);
+    }
     if (source.of !== "reply") return authoritativeProseSpeech(store.getBundle(), source);
     const loaded = await new WorldChatService(store.dir).load(source.conversationId);
     const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
@@ -1169,9 +1187,13 @@ export class Coordinator {
            * at once is the other way to fell it.
            */
           for (const [index, block] of blocks.entries()) {
+            // A chapter can be a thousand blocks; the Stop control, and the coordinator going
+            // down, end the read at the next boundary rather than after the last synthesis.
+            if (this.stopping || this.stoppedReads.has(requestId)) break;
             const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text);
             ready(block, result.file, result.cached, { part: index, parts: blocks.length });
           }
+          this.stoppedReads.delete(requestId);
           return;
         }
         /*
@@ -1315,8 +1337,21 @@ export class Coordinator {
     this.pendingVoiceReads.delete(requestId);
     // A block already in the cache never went to the queue, and is ready the moment the page is.
     for (const [index, block] of blocks.entries()) if (!misses.includes(index)) cachedReady(block, index);
+    // Stopped while the price was on the table: nothing is queued.
+    if (this.stoppedReads.has(requestId)) {
+      this.stoppedReads.delete(requestId);
+      return;
+    }
     const queued = await this.enqueueBatch(requestId, input.frameKind, pending.inputs);
     if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+    // Stop can land while the batch is still being journalled, when there is nothing yet to
+    // cancel; the ids come back here and are cancelled rather than kept (codex, PR 879).
+    if (this.stoppedReads.has(requestId)) {
+      this.stoppedReads.delete(requestId);
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
+    if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
   }
 
   /** Session config builder with the user's agent settings folded in. */
@@ -1491,6 +1526,10 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
+  private readonly stoppedReads = new Set<string>();
+  /** Cloud jobs queued for a page read, by requestId, so Stop can cancel what it already paid for. */
+  private readonly readJobs = new Map<string, string[]>();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
   private readonly creatingProductions = new Set<string>();
@@ -3585,7 +3624,7 @@ export class Coordinator {
     requestId: string,
     command: QueueCommand,
     inputs: readonly EnqueueInput[],
-  ): Promise<{ accepted: boolean; reason?: string }> {
+  ): Promise<{ accepted: boolean; reason?: string; jobIds: string[] }> {
     if (!this.jobQueue) {
       this.rejectEnqueue(
         requestId,
@@ -3595,11 +3634,12 @@ export class Coordinator {
       return {
         accepted: false,
         reason: "The job queue is unavailable. Try again after restarting the studio.",
+        jobIds: [],
       };
     }
     if (inputs.length === 0) {
       this.emitEnqueueResult(requestId, command, 0, [], [], true);
-      return { accepted: true };
+      return { accepted: true, jobIds: [] };
     }
     const outcome = await enqueueInputs(inputs, async input => {
       if (input.params.audioReferences !== undefined) {
@@ -3619,6 +3659,8 @@ export class Coordinator {
     return {
       accepted: outcome.acceptedJobIds.length > 0,
       ...(outcome.failures[0]?.reason ? { reason: outcome.failures[0].reason } : {}),
+      // The ids, so a caller that may be told to stop can cancel what it queued.
+      jobIds: outcome.acceptedJobIds,
     };
   }
 
@@ -6785,16 +6827,109 @@ export class Coordinator {
         return;
       }
       case "create-chapter": {
+        // Answered, not fire-and-forget (turn 126): the press opens the chapter it made, so it
+        // needs the id back — the shape `create-scene` settled for `New scene` (SPEC-036 R-37).
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await createChapter(store, msg.productionId, { title: msg.title, order: msg.order }).catch(() => {});
+        const answer = (
+          result: { disposition: "created"; chapterId: string } | { disposition: "failed"; reason: string },
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.create-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        let chapterId: string;
+        try {
+          chapterId = await createChapter(store, msg.productionId, { title: msg.title, order: msg.order });
+        } catch (err) {
+          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be created" });
+          return;
+        }
+        // The snapshot before the answer, so the sender opens a chapter its state already holds.
         await this.refreshWorldSnapshot(msg.worldId);
+        answer({ disposition: "created", chapterId });
+        return;
+      }
+      case "open-chapter": {
+        const store = this.opts.provider.openStore?.();
+        const answer = (
+          result:
+            | { disposition: "opened"; body: string; version: number; hash: string; versions: number[] }
+            | { disposition: "failed"; reason: string },
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.open-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterId: msg.chapterId,
+            ...result,
+          });
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "failed", reason: "that world is not open" });
+          return;
+        }
+        try {
+          const chapter = await openChapter(store, msg.productionId, msg.chapterId);
+          answer({ disposition: "opened", body: chapter.body, version: chapter.version, hash: chapter.hash, versions: chapter.versions });
+        } catch (err) {
+          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
+        }
         return;
       }
       case "save-chapter": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await saveChapter(store, msg.productionId, msg.chapterFile, msg.body).catch(() => {});
+        const answer = (
+          result: { disposition: "saved"; version: number; hash: string } | { disposition: "refused"; reason: string },
+        ) => {
+          if (msg.requestId === undefined) return;
+          this.emit({
+            at: new Date().toISOString(),
+            type: "chapter.save-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterFile: msg.chapterFile,
+            ...result,
+          });
+        };
+        // The world the message named, not whichever is open now: a workspace unmounted by
+        // another window opening a different world flushes its last draft, and two worlds copied
+        // from one can share a production, a stem and the base bytes (codex, PR 879).
+        if (!store || store.worldId !== msg.worldId) {
+          answer({ disposition: "refused", reason: "that world is not open" });
+          return;
+        }
+        // A save refused for a moved base leaves the editor's text where it is (the Bible's
+        // rule, turn 126's second binding): the refusal is answered by name when the sender
+        // asked to hear back, and the refreshed snapshot below says what the record is now.
+        try {
+          const saved = await saveChapter(
+            store,
+            msg.productionId,
+            msg.chapterFile,
+            msg.body,
+            msg.baseHash !== undefined ? { baseHash: msg.baseHash } : {},
+          );
+          answer({ disposition: "saved", ...saved });
+        } catch (err) {
+          answer({ disposition: "refused", reason: err instanceof Error ? err.message : "the chapter was not saved" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "restore-chapter": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await restoreChapter(store, msg.productionId, msg.chapterFile, msg.version).catch(() => {});
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -10627,6 +10762,18 @@ export class Coordinator {
         });
         return;
       }
+      case "stop-prose-page": {
+        // Told to stop: the local loop checks between blocks; a price not yet answered is
+        // dropped so a late Confirm is refused rather than started; and jobs already queued for
+        // a cloud narrator are cancelled, because a thousand paid syntheses after Stop is the
+        // spend the control exists to prevent (codex, PR 879).
+        this.stoppedReads.add(msg.requestId);
+        this.pendingVoiceReads.delete(msg.requestId);
+        const jobs = this.readJobs.get(msg.requestId) ?? [];
+        this.readJobs.delete(msg.requestId);
+        for (const jobId of jobs) await this.jobQueue?.cancel(jobId).catch(() => {});
+        return;
+      }
       case "read-prose-page": {
         /*
          * A page of prose, read in the order the screen declared (issue 859).
@@ -10660,9 +10807,10 @@ export class Coordinator {
           } as DomainEvent);
         const blocks: { heading: string; text: string; subjectId: string }[] = [];
         let version = 1;
+        const chapters = new Map<string, ReturnType<typeof openChapter>>();
         for (const source of msg.sources) {
           try {
-            const one = await this.resolveProse(store, source);
+            const one = await this.resolveProse(store, source, chapters);
             blocks.push({ heading: one.heading, text: one.text, subjectId: one.subjectId });
             version = Math.max(version, one.version);
           } catch {

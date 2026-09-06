@@ -185,6 +185,7 @@ const CLIENT_COMMAND_METADATA = {
   "read-bible-section": readOnly(QUERY),
   "read-prose": readOnly(QUERY),
   "read-prose-page": readOnly(QUERY),
+  "stop-prose-page": readOnly(QUERY),
   "generate-world-image": action("world", "generation", "job-queue", "spend-and-compute", ["world-metadata", "art-direction"], { preparation: GENERATION_QUOTE }),
   "upload-world-image": action("world", "host-action", "host", "host-file-access", ["world-metadata"]),
   "use-world-image": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata", "references"], { preparation: MEDIA_TARGET }),
@@ -363,6 +364,9 @@ const CLIENT_COMMAND_METADATA = {
   "scene-command": action("production", "command", "scene-store", "authored-change", ["scenes", "shots", "stage", "boards"]),
   "create-chapter": action("production", "command", "chapter-store", "authored-change", ["chapters"]),
   "save-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
+  // The chapter workspace's own commands (turn 126): a read, and an undo shaped like the bible's.
+  "open-chapter": readOnly(QUERY),
+  "restore-chapter": action("production", "authored-diff", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "save-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "restore-bible": action("world", "authored-diff", "bible", "authored-change", ["bible"]),
   "draft-chapter": humanOnly(RECURSIVE_AGENT),

@@ -12,6 +12,8 @@ import {
   useStore,
   useUpdateStatus,
   type QueueEnqueueResult,
+  isOwnChapterCreate,
+  subscribeChapterCreateResults,
 } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
@@ -195,6 +197,27 @@ export function QueueToaster() {
           title: "That scene was not created",
           meta: `production ${result.productionId}`,
           reason: result.reason ?? "the scene could not be created",
+        };
+        toast.custom(
+          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: duration(note) },
+        );
+      }),
+    [],
+  );
+
+  useEffect(
+    () =>
+      // The same for a chapter that could not be made (codex, PR 879): the press comes back and
+      // the reason is said here, whichever screen pressed it.
+      subscribeChapterCreateResults((result) => {
+        if (result.disposition !== "failed" || !isOwnChapterCreate(result.requestId)) return;
+        const note: QueueNote = {
+          id: `chapter-create:${result.requestId}`,
+          tone: "refused",
+          title: "That chapter was not created",
+          meta: `production ${result.productionId}`,
+          reason: result.reason ?? "the chapter could not be created",
         };
         toast.custom(
           (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,

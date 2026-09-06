@@ -58,7 +58,8 @@ interface LossyShape {
 const LOSSY_SHAPES: LossyShape[] = [
   {
     reason: "html",
-    message: "This bible contains HTML, which the rich editor would rewrite. Editing as source.",
+    // "This text", not "this bible": the gate guards a chapter now as well (turn 126).
+    message: "This text contains HTML, which the rich editor would rewrite. Editing as source.",
     pattern: /<\/?[A-Za-z][\w.:-]*(?:\s[^<>]*)?\/?>|<!--[\s\S]*?-->/,
   },
   {

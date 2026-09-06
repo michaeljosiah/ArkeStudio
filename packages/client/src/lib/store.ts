@@ -492,6 +492,30 @@ export function subscribeProductionCreateResults(
   return () => productionCreateListeners.delete(listener);
 }
 
+/** The correlated answer to one `New chapter` press (turn 126), by requestId. */
+export type ChapterCreateResult = Extract<DomainEvent, { type: "chapter.create-result" }>;
+const chapterCreateListeners = new Set<(result: ChapterCreateResult) => void>();
+export function subscribeChapterCreateResults(listener: (result: ChapterCreateResult) => void): () => void {
+  chapterCreateListeners.add(listener);
+  return () => chapterCreateListeners.delete(listener);
+}
+
+/** A chapter's body, answered to the screen that asked (turn 126), by requestId. */
+export type ChapterOpenResult = Extract<DomainEvent, { type: "chapter.open-result" }>;
+const chapterOpenListeners = new Set<(result: ChapterOpenResult) => void>();
+export function subscribeChapterOpenResults(listener: (result: ChapterOpenResult) => void): () => void {
+  chapterOpenListeners.add(listener);
+  return () => chapterOpenListeners.delete(listener);
+}
+
+/** What became of one chapter save (turn 126): the new base, or a refusal by name. */
+export type ChapterSaveResult = Extract<DomainEvent, { type: "chapter.save-result" }>;
+const chapterSaveListeners = new Set<(result: ChapterSaveResult) => void>();
+export function subscribeChapterSaveResults(listener: (result: ChapterSaveResult) => void): () => void {
+  chapterSaveListeners.add(listener);
+  return () => chapterSaveListeners.delete(listener);
+}
+
 /** The correlated answer to one create-scene request (SPEC-036 R-37), by requestId. */
 export type SceneCreateResult = Extract<DomainEvent, { type: "scene.create-result" }>;
 const sceneCreateListeners = new Set<(result: SceneCreateResult) => void>();
@@ -948,6 +972,16 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "chapter.create-result") {
+      for (const listener of chapterCreateListeners) listener(event);
+      issuedChapterCreates.delete(event.requestId);
+    }
+    if (event.type === "chapter.open-result") {
+      for (const listener of chapterOpenListeners) listener(event);
+    }
+    if (event.type === "chapter.save-result") {
+      for (const listener of chapterSaveListeners) listener(event);
     }
     if (event.type === "scene.create-result") {
       for (const listener of sceneCreateListeners) listener(event);
@@ -3184,12 +3218,67 @@ export function runBibleHelper(input: {
   return sent ? requestId : null;
 }
 
-export function createChapter(worldId: string, productionId: string, title: string, order: number): void {
-  send({ kind: "create-chapter", worldId, productionId, title, order });
+/**
+ * `New chapter` (turn 126): returns the requestId `chapter.create-result` will carry, or null
+ * when nothing was sent — a press that waited on a message that never left would wait forever.
+ */
+export function createChapter(worldId: string, productionId: string, title: string, order: number): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "create-chapter", worldId, productionId, requestId, title, order })) return null;
+  issuedChapterCreates.add(requestId);
+  return requestId;
 }
 
-export function saveChapter(worldId: string, productionId: string, chapterFile: string, body: string): void {
-  send({ kind: "save-chapter", worldId, productionId, chapterFile, body });
+/** The chapter presses this window made and has not heard back on; every window hears every answer. */
+const issuedChapterCreates = new Set<string>();
+export function isOwnChapterCreate(requestId: string): boolean {
+  return issuedChapterCreates.has(requestId);
+}
+
+/** Stop a page read this window started (codex, PR 879); the coordinator stops at the next block. */
+export function stopProsePage(worldId: string, requestId: string): void {
+  send({ kind: "stop-prose-page", worldId, requestId });
+}
+
+/** Ask for a chapter's body (turn 126). The answer is `chapter.open-result`, by requestId. */
+export function openChapter(worldId: string, productionId: string, chapterId: string): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "open-chapter", worldId, productionId, requestId, chapterId })) return null;
+  return requestId;
+}
+
+/**
+ * Save a chapter in place (SPEC-012 R-5). `baseHash` is the hash of the file the editor read;
+ * a save against a file that has since moved is refused, not merged. The answer, by requestId,
+ * carries the new base for the next save.
+ */
+export function saveChapter(
+  worldId: string,
+  productionId: string,
+  chapterFile: string,
+  body: string,
+  baseHash?: string,
+): string | null {
+  const requestId = ulid();
+  if (
+    !send({
+      kind: "save-chapter",
+      worldId,
+      productionId,
+      requestId,
+      chapterFile,
+      body,
+      ...(baseHash !== undefined ? { baseHash } : {}),
+    })
+  ) {
+    return null;
+  }
+  return requestId;
+}
+
+/** Undo for a chapter (turn 126): v<n> returns as a new version and nothing between is lost. */
+export function restoreChapter(worldId: string, productionId: string, chapterFile: string, version: number): void {
+  send({ kind: "restore-chapter", worldId, productionId, chapterFile, version });
 }
 
 export function draftChapter(

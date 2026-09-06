@@ -119,6 +119,12 @@ export interface CommitResult {
   allocatedCanonIds: string[];
   /** path → new version (sheets, scenes, chapters, story). */
   versions: Record<string, number>;
+  /**
+   * path → hash of the bytes this commit wrote, for every file it wrote. A caller that reads
+   * the file back to learn its base can be handed an outside edit that landed in between; the
+   * transaction knows what it committed (codex, PR 879).
+   */
+  hashes?: Record<string, string>;
 }
 
 interface JournalFile {
@@ -407,6 +413,7 @@ export class Committer {
     const files: JournalFile[] = [];
     const changes: object[] = [];
     const versions: Record<string, number> = {};
+    const hashes: Record<string, string> = {};
 
     for (const f of input.files) {
       const kind = classify(f.path);
@@ -585,6 +592,7 @@ export class Committer {
         ...(input.requestId ? { requestId: input.requestId } : {}),
       });
 
+      if (newContent !== null) hashes[f.path] = fileHash(newContent, f.encoding);
       files.push({
         path: f.path,
         ...(f.encoding ? { encoding: f.encoding } : {}),
@@ -779,7 +787,7 @@ export class Committer {
     hooks.at?.("committing-marked");
 
     await this.rollForward(journal, hooks);
-    return { commitId, canonRevision: revisionTo, allocatedCanonIds, versions };
+    return { commitId, canonRevision: revisionTo, allocatedCanonIds, versions, hashes };
   }
 
   /** Idempotent completion from `committing` — every step checks recorded hashes. */

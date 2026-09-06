@@ -3,7 +3,8 @@ import { describe, it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, reorderChapters, saveChapter } from "../../src/productions/ops.js";
+import { createChapter, createProduction, openChapter, reorderChapters, restoreChapter, saveChapter } from "../../src/productions/ops.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -155,5 +156,127 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
     assert.ok(after, "the chapter is still first after the save");
     assert.equal(after.words, 4, "a save addressed by the summary's stem lands in the same chapter");
     assert.equal(after.version, first.version, "a direct save cuts no version (R-5)");
+  });
+});
+
+/**
+ * The chapter, opened (design turn 126, issue 874): fetched off disk by id, saved against the
+ * base it read, made unique by a press, and put back from history after an accepted draft.
+ */
+const LEDGER = "the-ledger-of-nights";
+const NEAP_PATH = join("productions", LEDGER, "chapters", "01-neap.md");
+
+describe("the chapter workspace's own commands (turn 126)", () => {
+  it("opens by id or by file stem and answers body, version and the hash of the bytes read", async () => {
+    const { dir, store } = await open();
+    const byId = await openChapter(store, LEDGER, "neap");
+    const byFile = await openChapter(store, LEDGER, "01-neap");
+    assert.equal(byId.file, "01-neap", "the fixture's id and stem differ, and both open it");
+    assert.equal(byId.version, 4);
+    assert.match(byId.body, /The ledger of the Vigil/);
+    assert.match(byId.hash, /^sha256:[0-9a-f]{64}$/);
+    assert.deepEqual(byFile, byId);
+    await assert.rejects(() => openChapter(store, LEDGER, "no-such-chapter"), /no longer in this production/);
+    await assert.rejects(() => openChapter(store, "no-such-production", "neap"), /no longer in this world/);
+    const live = await readFile(join(dir, NEAP_PATH), "utf8");
+    assert.match(live, /^id: neap$/m, "opening reads; it writes nothing");
+  });
+
+  it("a save names the base it read, and a save against a moved base is refused with nothing written", async () => {
+    const { dir, store } = await open();
+    const opened = await openChapter(store, LEDGER, "neap");
+    const saved = await saveChapter(store, LEDGER, "01-neap", "One paragraph.\n\nTwo.", { baseHash: opened.hash });
+    assert.equal(saved.version, 4, "a direct save keeps the version (SPEC-012 R-5)");
+    assert.notEqual(saved.hash, opened.hash, "the bytes moved, so the base did");
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")?.words, 3, "the summary's count follows the prose");
+
+    // An editor that read v4 before that save still holds the old base.
+    await assert.rejects(() => saveChapter(store, LEDGER, "01-neap", "Overwritten.", { baseHash: opened.hash }));
+    const again = await openChapter(store, LEDGER, "neap");
+    assert.equal(again.body.trim(), "One paragraph.\n\nTwo.", "the refused save wrote nothing");
+    assert.equal(again.hash, saved.hash, "the save's answer is the base the next save must name");
+    const next = await saveChapter(store, LEDGER, "01-neap", "One paragraph.\n\nTwo.\n\nThree.", { baseHash: saved.hash });
+    assert.equal(next.version, 4);
+  });
+
+  it("two Untitled presses make two chapters rather than one refusal", async () => {
+    const { dir, store } = await open();
+    await createProduction(store, { title: "Inkbound", format: "story" });
+    const first = await createChapter(store, "inkbound", { title: "Untitled", order: 1 });
+    const second = await createChapter(store, "inkbound", { title: "Untitled", order: 2 });
+    assert.equal(first, "untitled");
+    assert.equal(second, "untitled-2");
+    // The frontmatter id is reserved as well as the stem: the fixture's `01-neap.md` is `neap`,
+    // and a new `neap.md` would answer to two chapters by id (codex, PR 879).
+    assert.equal(await createChapter(store, LEDGER, { title: "Neap", order: 9 }), "neap-2");
+    // A stem a staged draft has claimed is taken too, or accepting that draft would find its
+    // create refused as stale (codex, PR 879).
+    const gate = new ProposalManager(store);
+    await gate.stage({
+      kind: "chapter-draft",
+      summary: "New chapter: Untitled",
+      source: "test",
+      targets: [{
+        path: `productions/${LEDGER}/chapters/untitled.md`,
+        content: MarkdownFile.create({ id: "untitled", title: "Untitled", order: 10, status: "planned", version: 1 }, "").serialize(),
+      }],
+    });
+    assert.equal(await createChapter(store, LEDGER, { title: "Untitled", order: 10 }), "untitled-2");
+    assert.deepEqual(
+      (await chaptersOf(dir, "inkbound")).map((c) => ({ id: c.id, order: c.order })),
+      [
+        { id: "untitled", order: 1 },
+        { id: "untitled-2", order: 2 },
+      ],
+    );
+  });
+
+  it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {
+    const { dir, store } = await open();
+    await createProduction(store, { title: "Inkbound", format: "story" });
+    // Legacy-ranked chapters, written through the committer: a file written by hand under an
+    // open store is an outside edit the world refuses to write over until it is reconciled.
+    for (const [file, number] of [["ten", 10], ["twenty", 20]] as const) {
+      const doc = MarkdownFile.create({ id: file, number, title: file, status: "drafted", version: 1 }, "Words.");
+      await store.commit({
+        kind: "chapter-create",
+        source: "test",
+        files: [{ path: `productions/inkbound/chapters/${file}.md`, action: "create", content: doc.serialize(), baseHash: null }],
+      });
+    }
+    // The dense count says 3; the files say 20.
+    await createChapter(store, "inkbound", { title: "Untitled", order: 3 });
+    const chapters = await chaptersOf(dir, "inkbound");
+    assert.deepEqual(chapters.map((c) => c.id), ["ten", "twenty", "untitled"], "the new chapter is last");
+    const raw = await readFile(join(dir, "productions", "inkbound", "chapters", "untitled.md"), "utf8");
+    assert.match(raw, /^order: 21$/m);
+  });
+
+  it("an accepted draft cuts a version, and Earlier versions puts the one before it back as a new one", async () => {
+    const { dir, store } = await open();
+    const gate = new ProposalManager(store);
+    const before = await openChapter(store, LEDGER, "neap");
+    assert.deepEqual(before.versions, [], "an imported v4 with no history offers nothing to put back");
+    const doc = MarkdownFile.parse(await readFile(join(dir, NEAP_PATH), "utf8"));
+    doc.setBody("Drafted anew, from the seventh bell.");
+    const proposal = await gate.stage({
+      kind: "chapter-draft",
+      summary: "Draft the rest",
+      source: "test",
+      targets: [{ path: NEAP_PATH.split("\\").join("/"), content: doc.serialize() }],
+    });
+    const outcome = await gate.accept(proposal.id);
+    assert.notEqual(outcome.status, "invalid");
+    const drafted = await openChapter(store, LEDGER, "neap");
+    assert.equal(drafted.version, 5, "an accepted draft cuts a version (SPEC-012 R-5)");
+    assert.match(drafted.body, /Drafted anew/);
+    assert.deepEqual(drafted.versions, [4], "the version the accept moved off is the one that can come back");
+
+    const restored = await restoreChapter(store, LEDGER, "01-neap", 4);
+    assert.equal(restored, 6, "restoring makes a new version; nothing between is lost");
+    const back = await openChapter(store, LEDGER, "neap");
+    assert.equal(back.version, 6);
+    assert.equal(back.body.trim(), before.body.trim());
+    assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
   });
 });

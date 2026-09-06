@@ -8,7 +8,7 @@ import {
   playbackSnapshot,
   useQueueAt,
 } from "../lib/audio.js";
-import { readProsePage, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
+import { readProsePage, useStore, useVoiceAudio, useVoiceParts, stopProsePage } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { Button } from "./ui.js";
 
@@ -54,8 +54,14 @@ export function usePageRead(input: {
   blocks: readonly PageReadBlock[];
   /** Ask for the page. Called again with the token when a charged read is confirmed. */
   start: (requestId?: string, confirmationToken?: string) => string;
+  /** Tell the coordinator to stop making the page (codex, PR 879); absent, stopping is local. */
+  cancel?: (requestId: string) => void;
 }): PageRead {
   const { pageId, title, narratorLabel, worldSlug, blocks, start } = input;
+  // Read through a ref so a caller's inline arrow does not change `stop`'s identity every render
+  // — the effect below stops the read when `stop` changes, which would stop it constantly.
+  const cancel = useRef(input.cancel);
+  cancel.current = input.cancel;
   const [run, setRun] = useState<string | null>(null);
   /*
    * The read whose price has been answered. The newest event for a request stays
@@ -86,6 +92,7 @@ export function usePageRead(input: {
     setRun(null);
     setConfirmed(null);
     if (id === null) return;
+    cancel.current?.(id);
     if (playbackSnapshot().clip?.id === id) dismissPlayback();
     clearQueue();
   }, []);
@@ -185,6 +192,7 @@ export function useProsePageRead(input: {
         requestId,
         confirmationToken,
       ),
+    cancel: (requestId) => stopProsePage(world?.meta.worldId ?? "", requestId),
   });
 }
 

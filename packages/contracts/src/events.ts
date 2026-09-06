@@ -239,6 +239,69 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
 
+  /** The answer to one `create-chapter` press, so the sender can open what it made (turn 126). */
+  z
+    .object({
+      ...base,
+      type: z.literal("chapter.create-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      disposition: z.enum(["created", "failed"]),
+      chapterId: SlugSchema.optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /**
+   * A chapter's body, answered to the screen that asked for it (turn 126).
+   *
+   * The one place prose travels to the client: the summary is body-free so the bundle is not
+   * the book, and the editor holds what it read here — `version` for the foot, `hash` for the
+   * save's base — until the next snapshot says the record moved.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("chapter.open-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      disposition: z.enum(["opened", "failed"]),
+      body: z.string().optional(),
+      version: z.number().int().min(1).optional(),
+      hash: z.string().min(1).optional(),
+      /**
+       * The earlier versions a snapshot actually exists for, ascending. Derived from history on
+       * disk rather than counted down from the version number: an imported chapter can be v4
+       * with no v1–v3 to put back, and a Restore that always fails is worse than none.
+       */
+      versions: z.array(z.number().int().min(1)).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
+  /**
+   * What became of one save (turn 126). A save keeps the version but changes the bytes, so the
+   * editor needs the new hash before its next save can name a base; a refusal says the file
+   * moved underneath it and the text on screen was not written.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("chapter.save-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      disposition: z.enum(["saved", "refused"]),
+      version: z.number().int().min(1).optional(),
+      hash: z.string().min(1).optional(),
+      reason: z.string().min(1).optional(),
+    })
+    .strict(),
+
   /** A revision- or source-fenced timeline command was refused and no timeline bytes changed. */
   z
     .object({
