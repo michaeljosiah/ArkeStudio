@@ -689,7 +689,7 @@ export function languageChoiceReason(
   if (modelId === undefined) return undefined;
   if (model === undefined) return `This production still names ${modelId}, which is no longer available.`;
   if ((state?.app.models.disabled ?? []).includes(model.id)) {
-    return `${model.displayName} is turned off in Providers and has not been replaced.`;
+    return `${model.displayName} is turned off in AI models and has not been replaced.`;
   }
   if (PROVIDERS[model.provider].local && !modelEligible(model, eligibilityInputs(state))) {
     return `${model.displayName} is unavailable and has not been replaced.`;

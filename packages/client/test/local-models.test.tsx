@@ -169,10 +169,15 @@ function render(state: ClientState, path = "/settings/providers?provider=ollama"
 }
 
 /**
- * One engine's pane. The rail draws one at a time, so a row assertion has to ask for the engine
- * that hosts the model's provider (SPEC-034 R-7) rather than for a capability.
+ * One engine's section on AI models (SPEC-042 R-12). The pane draws one kind at a time, so a row
+ * assertion asks for the kind this fixture's model of that engine makes.
  */
+const KIND_OF_ENGINE: Record<EngineId, string> = { ollama: "llm", voxa: "voice-tts", comfyui: "video" };
 const renderEngine = (state: ClientState, engine: EngineId): string =>
+  render(state, `/settings/models?half=local&kind=${KIND_OF_ENGINE[engine]}`);
+
+/** The engine's own pane on Providers: its machinery, and no model (SPEC-042 R-19). */
+const renderPane = (state: ClientState, engine: EngineId): string =>
   render(state, `/settings/providers?provider=${engine}`);
 
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
@@ -192,21 +197,37 @@ function rowFor(html: string, name: string): string {
   return html.slice(start, next === -1 ? undefined : next);
 }
 
-describe("Providers: an engine's pane, and the models it hosts (SPEC-034 R-7, R-13)", () => {
-  it("mounts on Providers and groups an engine's models under it", () => {
+/** One model's tile, the container an image or video model takes (SPEC-042 R-13). */
+function tileFor(html: string, name: string): string {
+  const at = html.indexOf(`>${name}<`);
+  // The root, not one of its bands: `fy-mtile__body` and `fy-mtile__row` are divs too, and sit
+  // between the root and the name.
+  const root = /<div class="fy-mtile(?: fy-mtile--out)?"/g;
+  let start = -1;
+  let next = -1;
+  for (const m of html.matchAll(root)) {
+    if (m.index < at) start = m.index;
+    else if (next === -1) next = m.index;
+  }
+  return html.slice(start, next === -1 ? undefined : next);
+}
+
+describe("AI models: an engine's section, and the models it hosts (SPEC-042 R-12; SPEC-034 R-7, R-13)", () => {
+  it("mounts on AI models and groups an engine's models under it", () => {
     const text = plain(renderEngine(stateWith(), "ollama"));
-    assert.match(render(stateWith()), /data-screen="settings-providers"/);
-    assert.match(text, /MODELS\s+0 OF 1 INSTALLED/);
+    assert.match(renderEngine(stateWith(), "ollama"), /data-screen="settings-models"/);
+    assert.match(text, /Ollama\s+0 of 1 ready/);
     assert.match(text, /Gemma 4 12B/);
   });
 
   it("names both providers where one engine hosts two, and neither where it hosts one", () => {
-    // Voxa is the case R-7 exists for. Kokoro's group is headed by capability and provider; a
-    // single-provider engine takes the engine's own word, because the rail item has already
-    // named the provider one line above.
+    // Voxa is the case R-7 exists for, and SPEC-042 R-12 keeps its answer: the section is the
+    // engine, so Kokoro sits under Voxa on the kind it makes, and the engine's name is not
+    // repeated on the row.
     const voxa = plain(renderEngine(stateWith(), "voxa"));
-    assert.match(voxa, /TEXT-TO-SPEECH · KOKORO/);
-    assert.doesNotMatch(plain(renderEngine(stateWith(), "ollama")), /· OLLAMA/);
+    assert.match(voxa, /Voxa\s+1 of 1 ready/);
+    assert.match(voxa, /Kokoro 82M/);
+    assert.doesNotMatch(plain(rowFor(renderEngine(stateWith(), "voxa"), "Kokoro 82M")), /Voxa|Kokoro\b(?! 82M)/);
   });
 
   it("names no cloud provider in any engine pane, in any state (SPEC-033 R-2)", () => {
@@ -246,18 +267,21 @@ describe("Providers: an engine's pane, and the models it hosts (SPEC-034 R-7, R-
     });
     const ollama = plain(renderEngine(declared, "ollama"));
     assert.equal(ollama.match(/Gemma 4 12B/g)?.length, 1, "the model is stated once");
-    assert.match(ollama, /Ollama runtime/, "and the engine's own pieces keep their band");
+    assert.doesNotMatch(ollama, /Ollama runtime/, "and the engine's own pieces are on Providers, not beside its models");
+    const pane = plain(renderPane(declared, "ollama"));
+    assert.match(pane, /Ollama runtime/, "where they keep their band");
+    assert.doesNotMatch(pane, /Gemma 4 12B/, "and the model is not stated again (SPEC-042 R-3)");
   });
 
   it("states the machine in every figure a verdict turns on (R-53, SPEC-034 R-13)", () => {
-    assert.match(plain(renderEngine(stateWith(), "ollama")), /cuda · 12 GB VRAM · 32 GB memory · 480 GB free/);
+    assert.match(plain(renderPane(stateWith(), "ollama")), /cuda · 12 GB VRAM · 32 GB memory · 480 GB free/);
   });
 
   it("tells not yet measured from measured and failed (R-58, rows 23, 24)", () => {
-    const never = plain(renderEngine(stateWith({ runtime: null }), "ollama"));
+    const never = plain(renderPane(stateWith({ runtime: null }), "ollama"));
     assert.match(never, /not measured/);
     const failed = plain(
-      renderEngine(
+      renderPane(
         stateWith({ runtime: runtime({ probes: { vramMb: null, memMb: 32 * 1024, diskFreeMb: 480 * 1024, accelerators: ["cuda"], platform: "win32" } }) }),
         "ollama",
       ),
@@ -288,12 +312,12 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
     // Green stood for `installed` and the word beside it had already said so; grey stood for five
     // states and separated none of them. One dot on the list is one that can be found.
     const ollama = renderEngine(stateWith(), "ollama");
-    const rows = ollama.slice(ollama.indexOf("MODELS"));
+    const rows = ollama.slice(ollama.indexOf('data-testid="models-section"'));
     assert.doesNotMatch(rows, /fy-set__dot/);
     // Asserted on the status span, not on the row: the reason line beneath carries a warn dot
     // of its own, so a document-wide match is satisfied whether or not the status has one.
     const refusing = renderEngine(stateWith(), "comfyui");
-    const status = rowFor(refusing, "Draft video");
+    const status = tileFor(refusing, "Draft video");
     assert.match(status.slice(0, status.indexOf("fy-set__why")), /fy-set__dot--warn/);
     // And an installed row has none — the case the rule is named for, where green said what the
     // word beside it had already said.
@@ -392,13 +416,13 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
   it("dims a declared refusal and leaves a measured shortfall alone (SPEC-034 R-23)", () => {
     // SPEC-033 D8: a machine short of VRAM can be given more; one with no supported accelerator
     // cannot. The row state folds the two, so the dimming reads the verdict instead.
-    assert.doesNotMatch(rowFor(renderEngine(stateWith(), "comfyui"), "Draft video"), /fy-set__row--off/);
+    assert.doesNotMatch(tileFor(renderEngine(stateWith(), "comfyui"), "Draft video"), /fy-mtile--out/);
     const declared = stateWith({
       runtime: runtime({
         models: runtime().models.map((m) => (m.provider === "comfyui" ? { ...m, fit: "unsupported" as const } : m)),
       }),
     });
-    assert.match(rowFor(renderEngine(declared, "comfyui"), "Draft video"), /fy-set__row--off/);
+    assert.match(tileFor(renderEngine(declared, "comfyui"), "Draft video"), /fy-mtile--out/);
   });
 
   it("keeps a refusal to one clause, carrying its figures and nothing else (R-88)", () => {
@@ -416,28 +440,29 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
 
   it("never names a model row by its engine (row 47, R-52)", () => {
     // Model ids carry their runtime, so a row that printed one would be listing engines whether
-    // it meant to or not. The pane is headed by the engine — that is R-7's arrangement — but the
-    // row between the group heading and the actions still says nothing about it.
-    const text = plain(renderEngine(stateWith(), "ollama"));
-    const row = text.slice(text.indexOf("MODELS"));
+    // it meant to or not. The section is headed by the engine — that is R-12's arrangement — but
+    // the row between the heading and the actions still says nothing about it.
+    const row = plain(rowFor(renderEngine(stateWith(), "ollama"), GEMMA.displayName));
     assert.doesNotMatch(row, /Ollama/);
     assert.doesNotMatch(row, /gemma4-12b/);
   });
 
-  it("states a model switched off in Providers as switched off, at any row state (R-32)", () => {
+  it("states a model switched off as switched off, at any row state (R-32)", () => {
     // Being turned down is a decision; unsupported, unavailable and missing are conditions, and
     // letting the first read as one of the other three sends the reader to the wrong screen.
     const text = plain(renderEngine(stateWith({ models: { disabled: [GEMMA.id] } }), "ollama"));
-    assert.match(text, /Gemma 4 12B[\s\S]{0,120}turned off in Providers/);
+    assert.match(text, /Gemma 4 12B[\s\S]{0,120}turned off in AI models/);
   });
 
   it("says the machine has not been measured once, in its own row (SPEC-034 R-13, R-20)", () => {
     // R-28 offers an unmeasured model rather than withholding it, and R-13's row is where the
     // machine says so. Repeating it per model was the same sentence once for every row.
-    const unmeasured = plain(renderEngine(stateWith({ runtime: null }), "voxa"));
-    assert.match(unmeasured, /THIS MACHINE\s+not measured/);
-    assert.equal(unmeasured.match(/not measured/g)?.length, 1, "once, not once per model");
-    assert.match(unmeasured, /Kokoro 82M\s+installed · 400 MB/);
+    const pane = plain(renderPane(stateWith({ runtime: null }), "voxa"));
+    assert.match(pane, /THIS MACHINE\s+not measured/);
+    assert.equal(pane.match(/not measured/g)?.length, 1, "once, not once per model");
+    const models = plain(renderEngine(stateWith({ runtime: null }), "voxa"));
+    assert.doesNotMatch(models, /not measured/, "and never on a row");
+    assert.match(models, /Kokoro 82M\s+installed · 400 MB/);
   });
 
   it("names a remote engine twice, and never on the rows it serves (SPEC-034 R-9, R-11)", () => {
@@ -470,8 +495,10 @@ describe("what a model row states (R-51, R-52, R-27)", () => {
     });
     const rail = plain(render(state, "/settings/providers"));
     assert.match(rail, /ComfyUI\s+elsewhere/);
+    assert.match(plain(renderPane(state, "comfyui")), /another machine/);
+    // And the engine's section on AI models says the same word, once, at its heading (R-12).
     const text = plain(renderEngine(state, "comfyui"));
-    assert.match(text, /another machine/);
+    assert.match(text, /ComfyUI\s+elsewhere/);
     // No verdict about this machine, and no figures for one that has none to explain (R-13).
     assert.doesNotMatch(text, /runs well|runs slowly|not enough here|not measured/);
     assert.doesNotMatch(text, /GB VRAM/);
@@ -541,7 +568,7 @@ describe("Voxa states three readable voice lines, once (R-48, rows 18, 19)", () 
 
   it("kokoro unavailable with whisper ready still reads as dictation usable", () => {
     const half = stateWith({ voiceRuntime: voxa("failed", "ready") });
-    const text = plain(renderEngine(half, "voxa"));
+    const text = plain(renderPane(half, "voxa"));
     assert.match(text, /Local voices\s+failed/);
     assert.match(text, /Dictation\s+ready/);
     // Neither capability collapses to one failed state, which is SPEC-028 R-2 preserved exactly.
@@ -553,8 +580,7 @@ describe("Voxa states three readable voice lines, once (R-48, rows 18, 19)", () 
 
   it("both halves ready reads as conversational voice ready", () => {
     const ready = stateWith({ voiceRuntime: voxa("ready", "ready") });
-    assert.match(plain(renderEngine(ready, "voxa")), /Conversational voice\s+ready/);
-    assert.match(plain(renderEngine(ready, "voxa")), /Conversational voice\s+ready/);
+    assert.match(plain(renderPane(ready, "voxa")), /Conversational voice\s+ready/);
   });
 
 });
@@ -588,21 +614,22 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
       },
     });
 
-  it("draws it under RECIPES and not again under MODELS", () => {
-    // The two lists partition rather than overlap. Drawn in both, one fetch would carry two
-    // Downloads on one pane — the duplication `statedElsewhere` existed to hide.
-    const text = plain(renderEngine(answered(), "comfyui"));
-    assert.match(text, /RECIPES/);
-    assert.equal(text.match(/Draft video/g)?.length, 1);
-    assert.doesNotMatch(text.slice(text.indexOf("RECIPES")), /MODELS/);
+  it("draws it from the recipe's own facts once the engine has answered, and only once", () => {
+    // The two projections partition rather than overlap. Drawn from both, one fetch would carry
+    // two Downloads on one screen — the duplication `statedElsewhere` existed to hide.
+    const html = renderEngine(answered(), "comfyui");
+    assert.match(html, /data-testid="comfyui-recipe"/);
+    assert.doesNotMatch(html, /data-testid="model-tile"/);
+    assert.equal(plain(html).match(/Draft video/g)?.length, 1);
   });
 
-  it("draws it under MODELS while the engine has not answered for it", () => {
+  it("draws it from the manifest while the engine has not answered for it", () => {
     // With no engine resolved the recipe list is empty, and dropping the manifest row with it
     // would withhold every model this machine could install — the opposite of R-28.
-    const text = plain(renderEngine(stateWith(), "comfyui"));
-    assert.match(text, /MODELS/);
-    assert.match(text, /Draft video/);
+    const html = renderEngine(stateWith(), "comfyui");
+    assert.match(html, /data-testid="model-tile"/);
+    assert.doesNotMatch(html, /data-testid="comfyui-recipe"/);
+    assert.match(plain(html), /Draft video/);
   });
 
   it("carries the fit verdict the recipe list had no way to state (SPEC-034 R-6)", () => {
@@ -665,7 +692,7 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
         }),
       },
     };
-    assert.match(renderEngine(declared, "comfyui"), /fy-set__row--off/);
+    assert.match(tileFor(renderEngine(declared, "comfyui"), "Draft video"), /fy-mtile--out/);
   });
 });
 

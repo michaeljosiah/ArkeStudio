@@ -168,6 +168,6 @@ describe("a local default is an ordinary default, not a fault (SPEC-034 R-15)", 
     await file.setModelEnabled("comfyui-draft-video", false);
     const faults = routingFaults(await file.load(), MANIFEST);
     assert.equal(faults.length, 1);
-    assert.match(faults[0]!.reason, /switched off in Providers/);
+    assert.match(faults[0]!.reason, /switched off in AI models/);
   });
 });

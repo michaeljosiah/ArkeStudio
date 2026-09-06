@@ -23,6 +23,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "new-world", samplePath: "/worlds/new" },
   { id: "building", samplePath: `/building/${FIXTURE_WORLD_ID}` },
   { id: "settings-providers", samplePath: "/settings/providers" },
+  { id: "settings-models", samplePath: "/settings/models" },
   { id: "settings-notifications", samplePath: "/settings/notifications" },
   { id: "settings-appearance", samplePath: "/settings/appearance" },
   { id: "settings-downloads", samplePath: "/settings/downloads" },

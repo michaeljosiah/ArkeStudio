@@ -207,7 +207,7 @@ describe("a routed default that cannot run", () => {
     __setStateForTest(stateWith({ disabled: [FAL_IMAGE.id] }));
     const html = bar();
     assert.ok(html.includes("UNAVAILABLE"), "the pill says so");
-    assert.ok(html.includes("turned off in Providers"), "and names the repair");
+    assert.ok(html.includes("turned off in AI models"), "and names the repair");
     assert.match(html, /<button[^>]*disabled=""[^>]*>Generate<\/button>/, "and cannot be dispatched");
   });
 
@@ -215,7 +215,7 @@ describe("a routed default that cannot run", () => {
     __setStateForTest(stateWith({ providers: [provider("fal")], routedImage: OPENAI_IMAGE.id }));
     const html = bar();
     assert.ok(html.includes("no OpenAI key"));
-    assert.ok(!html.includes("turned off in Providers"), "the two strands are fixed in different places");
+    assert.ok(!html.includes("turned off in AI models"), "the two strands are fixed in different places");
   });
 
   it("is not called stranded when it is simply usable", () => {

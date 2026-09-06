@@ -305,7 +305,7 @@ function GenerateFramesDialogOpen({
       : compatibleAlternative.displayName;
   const displayedBlockedReason = blockedReason !== null && aspectVerdict?.ok === false && blockedReason.includes("cannot deliver")
     ? `${blockedReason}. ${alternativeName === null
-      ? `No available image model supports ${aspect}; turn one on in Providers.`
+      ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
   const references = matchingOptions ? quoteReferences(quote, scene, world) : [];

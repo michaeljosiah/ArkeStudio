@@ -1,7 +1,8 @@
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { ActivityIcon, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
+import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
 import { computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
 
 /**
@@ -46,6 +47,7 @@ export function AppChrome({
   divided?: boolean;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { state } = useStore();
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
@@ -120,10 +122,20 @@ export function AppChrome({
             <button
               type="button"
               className={cx("fy-iconbtn", current === "settings" && "fy-iconbtn--current")}
-              title="Settings"
-              aria-label="Settings"
+              title={current === "settings" ? "Leave Settings" : "Settings"}
+              aria-label={current === "settings" ? "Leave Settings" : "Settings"}
               aria-current={current === "settings" ? "page" : undefined}
-              onClick={() => navigate("/settings/providers")}
+              // On a Settings surface the gear is the way back (SPEC-042 R-6): Settings is a page
+              // with no close of its own, and the route it returns to is the one this control
+              // was pressed from — not /worlds, which is where the old panel's close always went.
+              onClick={() => {
+                if (current === "settings") {
+                  navigate(settingsReturnPath());
+                  return;
+                }
+                rememberSettingsReturn(location.pathname + location.search);
+                navigate("/settings/providers");
+              }}
             >
               <Cog size={13} />
             </button>

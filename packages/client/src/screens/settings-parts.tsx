@@ -119,14 +119,18 @@ export function RuntimeHead({
   caps,
   tone,
   state,
+  mark,
 }: {
   title: string;
   caps: string;
   tone: RuntimeTone;
   state: string;
+  /** The engine's mark, where the head is an engine's (SPEC-042 R-20). */
+  mark?: string;
 }) {
   return (
     <div className="fy-rt__head">
+      {mark !== undefined && <ProviderMark id={mark} label={title} size="lg" />}
       <span className="fy-rt__title">{title}</span>
       <span className="fy-rt__caps">{caps}</span>
       <span style={{ flex: 1 }} />
@@ -169,5 +173,93 @@ export function HealthDot({ label, health }: { label: string; health: ComponentH
       tone={HEALTH_TONE[status]}
       label={`${label} — ${status}${health?.reason ? ` (${health.reason})` : ""}`}
     />
+  );
+}
+
+/**
+ * The kind a model is drawn under (SPEC-042 R-8, R-12): the row that claims it by id, else the
+ * row that owns its capability. The claim comes first because it exists for exactly one model —
+ * the cloned voice dispatches as `voice-tts` and is drawn under Voice clone — and asking the
+ * capability first would file it under the heading it was moved away from.
+ */
+export function kindOf(model: { id: string; capability: Capability }): CapabilityRow {
+  return (
+    CAPABILITY_ROWS.find((row) => row.claims?.includes(model.id)) ??
+    CAPABILITY_ROWS.find((row) => row.capabilities.includes(model.capability))!
+  );
+}
+
+/** A kind's address in the URL (SPEC-042 R-11): its first capability, which is unique per row. */
+export function kindId(row: CapabilityRow): Capability {
+  return row.capabilities[0]!;
+}
+
+/**
+ * The marks under public/marks, by provider or engine (SPEC-042 R-20). Bundled with the client
+ * and never fetched from the provider at runtime. Voxa is our own engine, so it carries Arke's.
+ */
+const MARK_SRC: Partial<Record<string, string>> = {
+  fal: "./marks/fal.ico",
+  anthropic: "./marks/anthropic.ico",
+  elevenlabs: "./marks/elevenlabs.ico",
+  higgsfield: "./marks/higgsfield.ico",
+  comfyui: "./marks/comfyui.ico",
+  ollama: "./marks/ollama.png",
+  voxa: "./marks/arke.ico",
+};
+
+/**
+ * A provider's or engine's mark, on one light plate whatever the theme: half of these are a
+ * black glyph on nothing and would disappear against a dark pane. A source with no bundled mark
+ * keeps a monogram in the same slot, so nothing in the layout depends on having one.
+ */
+export function ProviderMark({ id, label, size = "sm" }: { id: string; label: string; size?: "sm" | "lg" }) {
+  const src = MARK_SRC[id];
+  return (
+    <span className={cx("fy-mark", size === "lg" && "fy-mark--lg", src === undefined && "fy-mark--letter")} aria-hidden="true">
+      {src !== undefined ? <img src={src} alt="" /> : label.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * An action that says its verb, with the icon that makes it findable (SPEC-042 R-18). Not
+ * icon-only: that made every row tidy and every action a guess, and `Test again` is not a glyph
+ * anyone knows. The visible label is the accessible name, so nothing carries it a second time.
+ */
+export function ActionButton({
+  icon,
+  children,
+  danger,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode;
+  children: ReactNode;
+  /** Destructive: quiet at rest, the signal colour only under the pointer. */
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className={cx("fy-act", danger && "fy-act--danger")} disabled={disabled} onClick={onClick}>
+      {icon}
+      <span>{children}</span>
+    </button>
+  );
+}
+
+/**
+ * A half of the second column, drawn as a level above the rows under it (SPEC-042 R-10): a rule
+ * above, an icon beside the words, the foreground's weight where the rows stay muted. Never a
+ * larger size and never capitals — the first fights the pane title, the second is the eyebrow
+ * turn 69 spent a sweep removing.
+ */
+export function HalfHeading({ icon, children }: { icon: ReactNode; children: ReactNode }) {
+  return (
+    <div className="fy-half">
+      {icon}
+      <span>{children}</span>
+    </div>
   );
 }

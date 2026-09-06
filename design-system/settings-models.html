@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings · AI models</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+/* ---------------------------------------------------------------------------
+   Settings — three columns, and a model is an object you can consider.
+
+   What this screen is for, in the order it is asked:
+     1. can I use this right now
+     2. which one should I pick for this shot
+     3. turn it on, or get it here
+
+   (1) wants every kind of model present at once, so the kinds are a rail, not a
+   scroll. (2) wants the picture and the price side by side and each model as its
+   own object, so the tiles have air around them. (3) wants a control you cannot
+   mistake, so the switch is a switch.
+
+   Within a kind, models are grouped by who supplies them — the section is the
+   provider, and a provider that cannot be reached says so once, at its heading,
+   with the remedy there. Never a route to another tab: the switch and the thing
+   that unlocks it stay reachable from the same place (SPEC-033 R-7).
+
+   Colour comes from the previews. The interface is achromatic apart from one
+   signal, reserved for something a person has to act on.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #000000;
+  --secondary-text: #6E6E6E;
+  --edge: #E3E3E1;
+  --rule: #EFEFED;
+  --hover: #F5F5F3;
+  --signal: #B45309;
+  --unexposed: #E6E6E3;
+  --plate: #FCFCFB;
+  --lift: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.10);
+
+  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html.dark {
+  --background: #0A0A0A;
+  --foreground: #FFFFFF;
+  --secondary-text: #949494;
+  --edge: #262626;
+  --rule: #1B1B1B;
+  --hover: #161616;
+  --signal: #F0A83A;
+  --unexposed: #1C1C1C;
+  --plate: #101010;
+  --lift: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.6);
+}
+
+html.dark .mark { background: #E9E9E6; border-color: #333; }
+html.dark .mark--letter { color: #4A4A48; }
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 34px 0 70px;
+  background: #EDEDEB;
+  font-family: var(--font);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+html.dark body { background: #050505; }
+
+.shot {
+  width: 1360px; height: 850px;
+  margin: 0 auto 34px;
+  background: var(--background);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 2px 22px rgba(0,0,0,.14);
+}
+.caption { width: 1360px; margin: 0 auto; padding: 26px 0 6px; font-size: 13px; color: #6E6E6E; }
+html.dark .caption { color: #949494; }
+
+/* --- window chrome --------------------------------------------------------- */
+
+.chrome {
+  flex: none; height: 44px; display: flex; align-items: center;
+  padding: 0 16px; border-bottom: 1px solid var(--rule); position: relative;
+}
+.chrome__where { flex: 1; font-size: 12.5px; color: var(--secondary-text); }
+.chrome__mark {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 15px; font-weight: 600; letter-spacing: -.02em;
+}
+.chrome__mark span { font-weight: 400; color: var(--secondary-text); }
+.chrome__tools { flex: 1; display: flex; justify-content: flex-end; gap: 3px; }
+.chrome__tool {
+  width: 26px; height: 22px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--secondary-text);
+}
+.chrome__tool[data-here] { color: var(--foreground); background: var(--rule); }
+
+/* --- column one: the settings sections ------------------------------------- */
+
+.page { flex: 1; min-height: 0; display: flex; }
+
+.rail {
+  width: 200px; flex: none;
+  border-right: 1px solid var(--rule);
+  padding: 30px 18px 18px 30px;
+  display: flex; flex-direction: column;
+}
+.rail__title { font-size: 21px; font-weight: 600; letter-spacing: -.03em; margin: 0 0 20px; }
+.rail a { display: block; padding: 6px 0; font-size: 13.5px; color: var(--secondary-text); text-decoration: none; }
+.rail a[aria-current] {
+  color: var(--foreground); font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--foreground);
+  padding-left: 12px; margin-left: -12px;
+}
+.rail__spring { flex: 1; }
+.rail__build { font-size: 11.5px; color: var(--secondary-text); }
+
+/* --- column two: the kinds of model ---------------------------------------- */
+
+.kinds {
+  width: 206px; flex: none;
+  border-right: 1px solid var(--rule);
+  padding: 30px 14px 18px 18px;
+  overflow-y: auto;
+}
+/* The two halves have to read as a level above the kinds under them, and neither a bigger
+   size nor capitals is the way: the rule separates, the icon identifies, and the items
+   indent past the heading so the hierarchy is spatial as well as tonal. */
+.kinds__where {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px 10px;
+  font-size: 12.5px; font-weight: 500; color: var(--foreground);
+}
+.kinds__where:not(:first-child) {
+  margin-top: 22px; padding-top: 18px;
+  border-top: 1px solid var(--rule);
+}
+.kinds__where svg { flex: none; color: var(--secondary-text); }
+.kind {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px 7px 22px; border-radius: 8px;
+  font-size: 13.5px; color: var(--secondary-text);
+  text-decoration: none;
+}
+.kind:hover { background: var(--hover); }
+.kind[aria-current] { background: var(--rule); color: var(--foreground); font-weight: 500; }
+.kind__name { flex: 1; }
+.kind__n { font-size: 12px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.kind--empty { opacity: .5; }
+
+/* --- column three: the models ---------------------------------------------- */
+
+.pane { flex: 1; min-width: 0; padding: 30px 34px 0; overflow: hidden; display: flex; flex-direction: column; }
+
+.pane__head { display: flex; align-items: baseline; gap: 14px; padding-bottom: 4px; }
+.pane__name { font-size: 27px; font-weight: 600; letter-spacing: -.035em; line-height: 1.1; margin: 0; }
+.pane__where { font-size: 13px; color: var(--secondary-text); flex: 1; }
+.pane__count { font-size: 13px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+
+/* A provider is a section: its mark, its name, and — when it cannot be reached —
+   the remedy, once, here. */
+.by { margin-top: 28px; }
+.by + .by { margin-top: 34px; }
+.by__head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+/* Every mark sits on the same light plate, whatever it brings with it: half of these are a
+   black glyph on nothing, which would disappear against a dark pane. */
+.mark {
+  width: 22px; height: 22px; flex: none; border-radius: 6px;
+  background: #F1F1EF; border: 1px solid var(--edge);
+  display: inline-flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.mark img { width: 100%; height: 100%; object-fit: contain; padding: 2px; }
+.mark--letter { font-size: 11px; font-weight: 600; letter-spacing: -.01em; color: #4A4A48; }
+.mark--lg { width: 32px; height: 32px; border-radius: 8px; }
+.mark--lg.mark--letter { font-size: 14px; }
+.by__name { font-size: 14px; font-weight: 500; letter-spacing: -.01em; }
+.by__spring { flex: 1; }
+.by__state { font-size: 12.5px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.by__fix {
+  font-size: 12.5px; color: var(--signal);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+
+.tiles { display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch; }
+
+.tile {
+  appearance: none; margin: 0; padding: 0; text-align: left; font: inherit; color: inherit;
+  width: 282px; flex: none;
+  background: var(--plate);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex; flex-direction: column;
+  transition: box-shadow 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+/* The hover has a job here: it is what starts the sample playing. */
+.tile:hover { border-color: var(--secondary-text); box-shadow: var(--lift); transform: translateY(-2px); }
+.tile:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+
+.tile__pic {
+  display: block; width: 100%; aspect-ratio: 16 / 9;
+  object-fit: cover; background: var(--unexposed);
+  border-bottom: 1px solid var(--edge);
+}
+.tile__pic--none {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--secondary-text);
+}
+
+.tile__body { padding: 12px 14px 13px; display: flex; flex-direction: column; flex: 1; }
+.tile__row { display: flex; align-items: center; gap: 10px; }
+.tile__name {
+  font-size: 14px; font-weight: 500; letter-spacing: -.01em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile__meta {
+  margin-top: auto; padding-top: 6px;
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 12.5px; color: var(--secondary-text);
+}
+.tile__at { font-variant-numeric: tabular-nums; }
+.tile__spring { flex: 1; }
+.tile__note { font-size: 12.5px; color: var(--secondary-text); white-space: nowrap; }
+.tile__note--short { color: var(--signal); }
+.tile__do {
+  font-size: 12.5px; color: var(--foreground);
+  text-decoration: underline; text-underline-offset: 3px; white-space: nowrap;
+}
+.tile__bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.tile__bar i { position: absolute; inset: 0 auto 0 0; background: var(--background); }
+.tile__pic-wrap { position: relative; }
+
+/* Off keeps the picture, at a weight that says you are not using it. A model
+   whose provider cannot be reached reads the same; its remedy is on the heading. */
+.tile--out { background: var(--background); }
+.tile--out .tile__pic { opacity: .38; filter: grayscale(1); }
+.tile--out .tile__name { color: var(--secondary-text); }
+
+.switch {
+  width: 34px; height: 20px; flex: none; border-radius: 999px;
+  background: var(--foreground);
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  padding: 0 3px;
+  transition: background 140ms ease;
+}
+.switch i { width: 14px; height: 14px; border-radius: 999px; background: var(--background); display: block; }
+.switch--off { background: var(--edge); justify-content: flex-start; }
+.switch--off i { background: var(--background); }
+html.dark .switch--off i { background: var(--secondary-text); }
+
+/* --- kinds with nothing to show -------------------------------------------- */
+
+.rows { border-top: 1px solid var(--rule); }
+.rows__row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 2px; border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+}
+.rows__play--none { width: 26px; height: 26px; flex: none; }
+.rows__play {
+  width: 26px; height: 26px; flex: none; border-radius: 999px;
+  border: 1px solid var(--edge); background: var(--plate);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rows__play::after {
+  content: ""; width: 0; height: 0;
+  border-left: 7px solid var(--foreground);
+  border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent;
+  margin-left: 2px;
+}
+.rows__name { font-weight: 500; }
+.rows__sample { flex: 1; font-size: 12.5px; color: var(--secondary-text); }
+.rows__at { color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.rows__note { font-size: 12.5px; color: var(--secondary-text); }
+.rows__note--short { color: var(--signal); }
+.rows__do { font-size: 12.5px; color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+
+/* --- Providers ------------------------------------------------------------- */
+
+/* The same three columns as AI models: the second one is who you connect to. */
+.sources { width: 232px; flex: none; border-right: 1px solid var(--rule); padding: 30px 14px 18px 16px; }
+.sources .kinds__where { padding-left: 12px; }
+.source {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 10px 7px 12px; border-radius: 8px;
+  font-size: 13.5px; color: var(--secondary-text); text-decoration: none;
+}
+.source:hover { background: var(--hover); }
+.source[aria-current] { background: var(--rule); color: var(--foreground); font-weight: 500; }
+.source__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source__note { font-size: 12px; color: var(--signal); white-space: nowrap; }
+
+.head { display: flex; align-items: center; gap: 14px; margin: 2px 0 0; }
+.head__name { margin-left: -2px; }
+.head__name { font-size: 27px; font-weight: 600; letter-spacing: -.035em; line-height: 1; margin: 0; }
+.head__does { font-size: 13px; color: var(--secondary-text); flex: 1; }
+.head__does { font-size: 13px; color: var(--secondary-text); flex: 1; }
+.head__state { font-size: 13px; color: var(--secondary-text); }
+
+.facts { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 820px; }
+.fact { display: flex; align-items: baseline; gap: 14px; font-size: 13.5px; }
+.fact__what { width: 140px; flex: none; color: var(--secondary-text); }
+.fact__is { flex: 1; font-variant-numeric: tabular-nums; }
+/* One row, one value, and the things you can do to it. A button says its verb: an icon alone
+   made the row tidy and the action a guess, and `Test again` is not a glyph anyone knows. The
+   icon is what makes the verb findable at a glance; the word is what makes it certain. */
+.fact__does { display: flex; align-items: center; gap: 8px; flex: none; }
+
+.act {
+  appearance: none; margin: 0; font: inherit;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 11px 5px 9px;
+  border: 1px solid var(--edge); border-radius: 7px;
+  background: var(--plate); color: var(--foreground);
+  font-size: 12.5px; line-height: 1.4;
+  cursor: pointer; white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.act svg { flex: none; color: var(--secondary-text); transition: color 120ms ease; }
+.act:hover { background: var(--hover); border-color: var(--secondary-text); }
+.act:hover svg { color: var(--foreground); }
+.act:focus-visible { outline: 2px solid var(--foreground); outline-offset: 1px; }
+
+/* Destructive stays quiet until you reach for it. The weight belongs on the confirm. */
+.act--danger:hover { color: var(--signal); border-color: var(--signal); background: var(--plate); }
+.act--danger:hover svg { color: var(--signal); }
+
+.aside { margin: 28px 0 0; font-size: 13px; color: var(--secondary-text); }
+.aside a { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+
+.foot {
+  margin-top: auto; padding: 16px 0 18px; border-top: 1px solid var(--rule);
+  display: flex; gap: 20px; font-size: 13px;
+}
+.foot a { color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
+.foot__spring { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
+  .tile:hover { transform: none; }
+}
+</style>
+<script>if (location.search.includes('dark')) document.documentElement.classList.add('dark');</script>
+</head>
+<body>
+<p class="caption">D&#8202;&#183;&#8202;a &nbsp;AI models &#183; a kind is a rail, a provider is a section</p><div class="shot" data-shot="Da"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-.9A6 6 0 0 0 5 11.3 3.5 3.5 0 0 0 6.5 19z"/></svg><span>Cloud</span></div><a class="kind" href="#" aria-current="page"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="20" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span>On this machine</span></div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Images</h2><div class="pane__where">Cloud</div><div class="pane__count">5 of 12 on</div></div><section class="by"><div class="by__head"><span class="mark"><img src="assets/logos/fal.ico" alt=""></span><span class="by__name">fal</span><span class="by__spring"></span><span class="by__state">3 of 4 on</span></div><div class="tiles"><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/art-direction-cinematic.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Nano Banana Pro</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.15 an image</span></div></div></button><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/art-direction-world.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Seedream 4</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.03 an image</span></div></div></button><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/drowned-quarter.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Flux 2 Pro</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.03 a megapixel</span></div></div></button><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/art-direction-illustrated.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Recraft V3</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.04 an image</span></div></div></button></div></section><section class="by"><div class="by__head"><span class="mark mark--letter">O</span><span class="by__name">OpenAI</span><span class="by__spring"></span><a class="by__fix" href="#">Add a key</a></div><div class="tiles"><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/art-direction-animated.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">GPT Image 2</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.20 an image</span></div></div></button><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/char-odile.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">GPT Image 2 mini</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.06 an image</span></div></div></button></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;b &nbsp;On this machine &#183; the same shape, and what a local model says instead of a price</p><div class="shot" data-shot="Db"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-.9A6 6 0 0 0 5 11.3 3.5 3.5 0 0 0 6.5 19z"/></svg><span>Cloud</span></div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="20" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span>On this machine</span></div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#" aria-current="page"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Video</h2><div class="pane__where">On this machine</div><div class="pane__count">2 of 3 ready</div></div><section class="by"><div class="by__head"><span class="mark"><img src="assets/logos/comfyui.ico" alt=""></span><span class="by__name">ComfyUI</span><span class="by__spring"></span><span class="by__state">55 GB on disk</span></div><div class="tiles"><button class="tile" type="button"><img class="tile__pic" src="assets/scene4-shot14.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Draft Video</span></div><div class="tile__meta"><span class="tile__at">14.2 GB</span><span class="tile__spring"></span><span class="tile__note">Ready, first pick</span></div></div></button><button class="tile" type="button"><span class="tile__pic-wrap"><img class="tile__pic" src="assets/saltlight-shot15.png" alt=""><span class="tile__bar"><i style="width:26%"></i></span></span><div class="tile__body"><div class="tile__row"><span class="tile__name">H3 Video</span></div><div class="tile__meta"><span class="tile__at">34 GB</span><span class="tile__spring"></span><span class="tile__note">9 of 34 GB</span><a class="tile__do" href="#">Pause</a></div></div></button><button class="tile tile--out" type="button"><img class="tile__pic" src="assets/scene4-shot14b.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">H3 Video 720p</span></div><div class="tile__meta"><span class="tile__at">18 GB</span><span class="tile__spring"></span><span class="tile__note tile__note--short">Wants 20 GB, this card has 12</span></div></div></button></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;c &nbsp;A kind with nothing to show &#183; rows, and a sample you can hear</p><div class="shot" data-shot="Dc"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-.9A6 6 0 0 0 5 11.3 3.5 3.5 0 0 0 6.5 19z"/></svg><span>Cloud</span></div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#" aria-current="page"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="20" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span>On this machine</span></div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Text-to-Speech</h2><div class="pane__where">Cloud</div><div class="pane__count">1 of 3 on</div></div><section class="by"><div class="by__head"><span class="mark"><img src="assets/logos/elevenlabs.ico" alt=""></span><span class="by__name">ElevenLabs</span><span class="by__spring"></span><span class="by__state">1 of 2 on</span></div><div class="rows"><div class="rows__row"><span class="rows__play" aria-hidden="true"></span><span class="rows__name">Eleven v3</span><span class="rows__sample">&#8220;The tide came in over the sill.&#8221;</span><span class="rows__at">$0.30 a minute</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="rows__row"><span class="rows__play" aria-hidden="true"></span><span class="rows__name">Eleven Turbo</span><span class="rows__sample">&#8220;The tide came in over the sill.&#8221;</span><span class="rows__at">$0.12 a minute</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div></div></section><section class="by"><div class="by__head"><span class="mark mark--letter">O</span><span class="by__name">OpenAI</span><span class="by__spring"></span><a class="by__fix" href="#">Add a key</a></div><div class="rows"><div class="rows__row"><span class="rows__play--none" aria-hidden="true"></span><span class="rows__name">GPT Realtime Voice</span><span class="rows__sample">No sample without a key</span><span class="rows__at">$0.24 a minute</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;d &nbsp;Providers &#183; who you connect to, and the credential that reaches them</p><div class="shot" data-shot="Dd"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#" aria-current="page">Providers</a><a href="#">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="sources"><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-.9A6 6 0 0 0 5 11.3 3.5 3.5 0 0 0 6.5 19z"/></svg><span>Services you connect</span></div><a class="source" href="#" aria-current="page"><span class="mark"><img src="assets/logos/fal.ico" alt=""></span><span class="source__name">fal</span></a><a class="source" href="#"><span class="mark mark--letter">O</span><span class="source__name">OpenAI</span><span class="source__note">no key</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/anthropic.ico" alt=""></span><span class="source__name">Anthropic</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/elevenlabs.ico" alt=""></span><span class="source__name">ElevenLabs</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/higgsfield.ico" alt=""></span><span class="source__name">Higgsfield</span><span class="source__note">not signed in</span></a><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="20" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span>Engines you run</span></div><a class="source" href="#"><span class="mark"><img src="assets/logos/comfyui.ico" alt=""></span><span class="source__name">ComfyUI</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/ollama.png" alt=""></span><span class="source__name">Ollama</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/arke.ico" alt=""></span><span class="source__name">Voxa</span></a></nav><div class="pane"><div class="head"><span class="mark mark--lg"><img src="assets/logos/fal.ico" alt=""></span><h2 class="head__name">fal</h2><div class="head__does">Images, video, music</div><div class="head__state">Connected</div></div><div class="facts"><div class="fact"><div class="fact__what">Key</div><div class="fact__is">fal-&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;1C7D</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Replace</span></button><button class="act act--danger" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M10 11v6"/><path d="M14 11v6"/></svg><span>Remove</span></button></div></div><div class="fact"><div class="fact__what">Last tested</div><div class="fact__is">Today at 09:14, images and video answered</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Test again</span></button></div></div><div class="fact"><div class="fact__what">Bills to</div><div class="fact__is">Salt Light Pictures, team plan</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3-4 4 4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></svg><span>Switch account</span></button></div></div></div><p class="aside">8 fal models, 5 of them on. <a href="#">AI models</a></p></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;e &nbsp;Providers &#183; an engine, and the same actions as icons</p><div class="shot" data-shot="De"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#" aria-current="page">Providers</a><a href="#">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="sources"><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19a4.5 4.5 0 0 0 0-9h-.9A6 6 0 0 0 5 11.3 3.5 3.5 0 0 0 6.5 19z"/></svg><span>Services you connect</span></div><a class="source" href="#"><span class="mark"><img src="assets/logos/fal.ico" alt=""></span><span class="source__name">fal</span></a><a class="source" href="#"><span class="mark mark--letter">O</span><span class="source__name">OpenAI</span><span class="source__note">no key</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/anthropic.ico" alt=""></span><span class="source__name">Anthropic</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/elevenlabs.ico" alt=""></span><span class="source__name">ElevenLabs</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/higgsfield.ico" alt=""></span><span class="source__name">Higgsfield</span><span class="source__note">not signed in</span></a><div class="kinds__where"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3.5" width="20" height="13" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></svg><span>Engines you run</span></div><a class="source" href="#" aria-current="page"><span class="mark"><img src="assets/logos/comfyui.ico" alt=""></span><span class="source__name">ComfyUI</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/ollama.png" alt=""></span><span class="source__name">Ollama</span></a><a class="source" href="#"><span class="mark"><img src="assets/logos/arke.ico" alt=""></span><span class="source__name">Voxa</span></a></nav><div class="pane"><div class="head"><span class="mark mark--lg"><img src="assets/logos/comfyui.ico" alt=""></span><h2 class="head__name">ComfyUI</h2><div class="head__does">Images, video, voice clone</div><div class="head__state">Running</div></div><div class="facts"><div class="fact"><div class="fact__what">Source</div><div class="fact__is">Arke-managed, version 0.3.48</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg><span>Change</span></button><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg><span>Use a URL</span></button></div></div><div class="fact"><div class="fact__what">Address</div><div class="fact__is">127.0.0.1:8188</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg><span>Test</span></button></div></div><div class="fact"><div class="fact__what">Models folder</div><div class="fact__is">D:\ai\models</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2Z"/></svg><span>Change</span></button></div></div><div class="fact"><div class="fact__what">Weights on disk</div><div class="fact__is">55 GB here, 480 GB free</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg><span>Downloads</span></button></div></div><div class="fact"><div class="fact__what">Process</div><div class="fact__is">Started 2 hours ago</div><div class="fact__does"><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg><span>Restart</span></button><button class="act" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/><path d="M9 13h6"/><path d="M9 17h4"/></svg><span>Logs</span></button></div></div></div><p class="aside">4 ComfyUI models, 3 of them ready. <a href="#">AI models</a></p></div></div></div>
+</body>
+</html>

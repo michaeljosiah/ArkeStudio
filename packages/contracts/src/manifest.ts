@@ -327,6 +327,14 @@ export const ManifestModelSchema = z
      */
     speechVideo: z.enum(["verified", "untested"]).optional(),
     /**
+     * A shipped sample of what this model makes (SPEC-042 R-17): a poster, and optionally a
+     * clip whose first frame the poster is. Paths into the bundled samples directory, keyed by
+     * model id. Optional on purpose — a tile with none draws a plain plate and loses nothing
+     * else, so a model ships the day it is routed and a sample is an asset task rather than a
+     * code change. No shipped row carries one yet.
+     */
+    sample: z.object({ poster: z.string().min(1), clip: z.string().min(1).optional() }).strict().optional(),
+    /**
      * What this model needs of the machine it runs on. Two kinds of requirement, and they
      * produce different verdicts (SPEC-033 R-18, R-19).
      *

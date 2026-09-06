@@ -48,13 +48,13 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (58 screens)", () => {
+  it("covers the full screen inventory (59 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
     // exactly that, and this is where it surfaced.
-    assert.equal(SCREENS.length, 58);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 58, "screen ids are unique");
+    assert.equal(SCREENS.length, 59);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 59, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -742,7 +742,7 @@ describe("the dispatch bar (design-system turn 39)", () => {
     }
   });
 
-  it("a model switched off in Providers is not offered at all", () => {
+  it("a model switched off in AI models is not offered at all", () => {
     withModels([tiered, unverified], tiered.id, [unverified.id]);
     try {
       const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/main-photo`);

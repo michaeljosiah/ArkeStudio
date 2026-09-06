@@ -1097,7 +1097,7 @@ describe("a per-generation model and size (SPEC-008, design turn 39)", () => {
 
   it("refuses a routed default that was switched off, for callers that pass no model at all", () => {
     // World key art, establish looks and missing tiles never pass an id — they went straight to
-    // routing, so a model switched off in Providers kept taking paid work. Refused, not
+    // routing, so a model switched off in AI models kept taking paid work. Refused, not
     // replaced: choosing the substitute is the user's, and the fault is already named in
     // Who does what with both repairs.
     const off = {

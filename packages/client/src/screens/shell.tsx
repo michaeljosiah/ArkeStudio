@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
 import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle, X } from "../components/icons.js";
+import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
   CAPABILITY_LABEL,
@@ -13,21 +13,9 @@ import {
   RuntimeHead,
   RuntimeSection,
   TONE_CLASS,
-  type RuntimeTone,
 } from "./settings-parts.js";
 // Providers absorbed both surfaces (SPEC-034 R-5), so its pane draws their parts: the engine
 // details unabridged, and one engine's models grouped by the provider that owns them.
-import {
-  ComfyUiDetail,
-  OllamaDetail,
-  OtherComponentsDetail,
-  VoxaDetail,
-  componentsFor,
-  componentsTone,
-  comfyUiTone,
-  processTone,
-} from "./engine-panes.js";
-import { EngineModelGroups, MachineRow } from "./local-models.js";
 import { eligibilityInputs, strandReason } from "../components/dispatch-bar.js";
 import { AppChrome } from "../components/chrome.js";
 import type { StartupState } from "../arke-bridge.js";
@@ -42,8 +30,6 @@ import {
   cancelExport as cancelExportMsg,
   cancelJob,
   checkUpdates,
-  cancelProviderToolSignIn,
-  clearCredential,
   attachHostFiles,
   attachHostText,
   archiveWorld,
@@ -74,7 +60,6 @@ import {
   resolveHeldJob,
   retryJobFinalization,
   resumeQueue,
-  refreshProviderTool,
   refreshVendorAuth,
   beginVendorSignIn,
   submitVendorSignInCode,
@@ -82,11 +67,7 @@ import {
   cancelVendorSignIn,
   removeVendorConnection,
   listHarnessModels,
-  selectProviderWorkspace,
-  setCredential,
-  signInProviderTool,
   setBackgroundNotifications,
-  setModelEnabled,
   setRoutingDefault,
   setHarnessEngine,
   setSpendThreshold,
@@ -99,12 +80,10 @@ import {
   useExports as useExportsState,
   useGenesis,
   useSetup,
-  setupRetry,
   useReconcileReport,
   useStore,
   useUpdateStatus,
   useVoiceSidecar as useVoiceSidecarState,
-  validateProvider,
   setNarrator,
   type ReadingVoice,
 } from "../lib/store.js";
@@ -113,12 +92,10 @@ import { seedFrom } from "../lib/art-styles.js";
 import {
   computeNeedsYou,
   computeRunning,
-  deriveCapabilityAvailability,
   formatMicroUsd,
   jobActions,
   jobOrigin,
   modelCapabilityCopy,
-  modelPriceCopy,
   PROVIDERS as PROVIDER_TABLE,
   spendSummary,
   type Capability,
@@ -130,9 +107,6 @@ import {
   type ManifestModel,
   type ProviderId,
   type ProviderCallRecord,
-  type ProviderStatus,
-  type SetupComponent,
-  type ProviderWorkspace,
   type VendorAuthMethod,
   type VendorIntegration,
   type VendorSignIn,
@@ -146,10 +120,6 @@ import {
   ulid,
   ENGINE_LABEL,
   engineOfProvider,
-  ENGINE_PROVIDERS,
-  activationFor,
-  comfyUiWeightsRecipeId,
-  type EngineId,
   modelEligible,
 } from "@arke-studio/contracts";
 
@@ -1560,741 +1530,57 @@ export function NewWorldScreen() {
 
 export function SettingsLayout() {
   const { connection, state } = useStore();
-  const navigate = useNavigate();
-  const firstWorld = state?.worlds[0] ?? null;
   return (
     <div className="fy-app" data-screen="settings">
-      {/* The scrim used to start at the top of the window and swallow the bar with it. It now
-          sits under the chrome: the blurred world art is atmosphere, not a reason to lose the
-          only fixed thing on screen. The panel keeps its own close — that is an exit, not a
-          destination, and the two read differently. */}
-      <AppChrome current="settings" divided={false} />
-      <div className="fy-content">
-      <div className="fy-scrim">
-        {firstWorld && (
-          <div className="fy-scrim__art">
-            <Portrait worldSlug={firstWorld.slug} path={firstWorld.keyArt ?? ""} label="" radius={0} />
-          </div>
-        )}
-        <div className="fy-scrim__wash" />
-        <div className="fy-scrim__center fy-scrim__center--flush">
-          <div className="fy-settings">
-            <div className="fy-settings__head">
-              <div style={{ flex: 1 }}>
-                <div className="fy-settings__title">Settings</div>
-                <div className="fy-settings__sub">
-                  providers &amp; runtime · one key per provider, however many jobs it does
-                </div>
-              </div>
-              <button type="button" className="fy-settings__close" onClick={() => navigate("/worlds")}>
-                <X size={14} />
-              </button>
-            </div>
-            <div className="fy-settings__body">
-              <div className="fy-settings__rail">
-                {(
-                  [
-                    ["providers", "Providers"],
-                    ["general", "General"],
-                    ["harness", "Harness"],
-                    ["appearance", "Appearance"],
-                    ["notifications", "Notifications"],
-                    ["sign-in", "Sign-in"],
-                    ["sample-world", "Sample world"],
-                    ["diagnostics", "Diagnostics"],
-                    ["about", "About"],
-                  ] as const
-                ).map(([slug, label]) => (
-                  <NavLink
-                    key={slug}
-                    to={`/settings/${slug}`}
-                    className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
-                  >
-                    {label}
-                  </NavLink>
-                ))}
-                <div style={{ flex: 1 }} />
-                <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
-              </div>
-              <div className="fy-settings__pane">
-                {/* Most panes in here draw from the coordinator's snapshot, and with no
-                    snapshot they draw the same thing they draw when a provider has nothing to
-                    offer: `—` in the capability rows, `not measured` in the machine header. A
-                    dev coordinator that died at import produces exactly that screen, which
-                    reads as a data bug in whatever you last changed (issue 599). */}
-                {connection === "closed" && <WaitingForCoordinator />}
-                <Outlet />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The providers configured here, in the rail's order. Most take a key; Higgsfield takes a
- * sign-in through its own CLI instead (issue 137), which is a different row but the same
- * pane — it is still a credential and a list of models. What each one does is not a
- * hand-written note beside it: the pane reads the capabilities off the models that credential
- * reaches, so a manifest change cannot leave the description behind.
- */
-const KEYED_PROVIDERS: Array<{ id: ProviderId }> = [
-  { id: "fal" },
-  { id: "higgsfield" },
-  { id: "elevenlabs" },
-  { id: "openai" },
-  { id: "anthropic" },
-];
-
-/**
- * What the last validation actually proved, per capability. A key that authenticates but cannot
- * do video says so here rather than at the end of composing a scene (SPEC-008 R-3).
- */
-function ProbeChips({ status }: { status: ProviderStatus | undefined }) {
-  if (!status || status.probes.length === 0) return null;
-  const short = status.probes.filter((p) => !p.available);
-  return (
-    <div className="fy-set__why">
-      <span className={cx("fy-set__dot", short.length === 0 ? "fy-set__dot--ok" : "fy-set__dot--warn")} />
-      <span>
-        {short.length === 0
-          ? `tested: ${status.probes.map((p) => p.capability).join(" · ")}`
-          : short.map((p) => `${p.capability} — ${p.reason ?? "unavailable"}`).join(" · ")}
-      </span>
-    </div>
-  );
-}
-
-/**
- * A provider whose credential is not ours to hold (issue 137). There is no key to paste: the
- * tool signs itself in, and the only questions the app can answer are whether it is here and
- * whether it is signed in. So the row is a state and the one action that changes it — plus the
- * command to type, always visible rather than revealed by a failure, because the in-app button
- * cannot serve every machine and finding that out at the moment it fails is too late.
- */
-/**
- * Which setup component fetches this provider's tool, from the component's own declaration.
- *
- * The app can install these itself, so "not installed" is a state with an action rather than
- * only an instruction. Read rather than hand-listed: the component names the provider that owns
- * it, and that one declaration is what keeps Engines from restating the same row with the same
- * button (SPEC-033 R-1).
- */
-function toolComponentFor(components: readonly SetupComponent[], provider: ProviderId): string | undefined {
-  return components.find((c) => c.provider === provider)?.id;
-}
-
-/** A personal account has no name; saying so beats printing a UUID at somebody. */
-function workspaceLabel(workspace: ProviderWorkspace): string {
-  const name = workspace.name ?? "Personal account";
-  const parts = [name];
-  if (workspace.plan) parts.push(workspace.plan);
-  if (workspace.credits !== null) {
-    // The provider's own unit. Converting to money would mean inventing a rate we do not know.
-    parts.push(`${workspace.credits} credit${workspace.credits === 1 ? "" : "s"}`);
-  }
-  return parts.join(" · ");
-}
-
-/**
- * Which account pays. One credential can reach several, and a generation billed to the wrong
- * one is not recoverable — so the choice is made here, in advance, rather than discovered on an
- * invoice. With a single account there is nothing to choose and the row just names it, because
- * "which account paid for that" should never need asking afterwards.
- */
-function ProviderWorkspaceLine({
-  id,
-  workspaces,
-}: {
-  id: ProviderId;
-  workspaces: readonly ProviderWorkspace[];
-}) {
-  if (workspaces.length === 0) return null;
-  const selected = workspaces.find((w) => w.selected) ?? null;
-  return (
-    <>
-      <div className="fy-prov__keyline">
-        <div className="fy-prov__eyebrow">BILLS TO</div>
-        {workspaces.length === 1 ? (
-          <div className="fy-set__field">
-            <span style={{ flex: 1 }}>{workspaceLabel(workspaces[0]!)}</span>
-          </div>
-        ) : (
-          <div className="fy-set__field">
-            <select
-              className="fy-set__input"
-              aria-label="Billing account"
-              value={selected?.id ?? ""}
-              onChange={(e) => selectProviderWorkspace(id, e.target.value === "" ? null : e.target.value)}
-            >
-              {/* An explicit entry for "no workspace", because `workspace unset` is a real
-                  choice — it returns billing to the personal account rather than clearing it. */}
-              <option value="">Personal account</option>
-              {workspaces
-                .filter((w) => w.name !== null)
-                .map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {workspaceLabel(w)}
-                  </option>
-                ))}
-            </select>
-          </div>
-        )}
-      </div>
-      {workspaces.length > 1 && selected === null && (
-        <div className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          <span>This sign-in reaches {workspaces.length} accounts and none is selected — choose which one pays.</span>
-        </div>
-      )}
-    </>
-  );
-}
-
-function ProviderToolLine({ id }: { id: ProviderId }) {
-  const { state } = useStore();
-  const setup = useSetup();
-  const [copied, setCopied] = useState(false);
-  const componentId = toolComponentFor(setup?.components ?? [], id);
-  const component = setup?.components.find((c) => c.id === componentId);
-  const fetching = component?.state === "downloading" || component?.state === "paused" || component?.state === "installing" || component?.state === "queued";
-  const arrived = component?.state === "ready" || component?.state === "present";
-  // The download finishing is not the row changing: discovery is what decides where the tool
-  // is, so ask again rather than leaving "not installed" beside a tool that just landed.
-  const published = state?.app.providerTools.find((t) => t.provider === id)?.state;
-  useEffect(() => {
-    if (arrived && published === "absent") refreshProviderTool(id);
-  }, [arrived, published, id]);
-  // No published status means discovery has not reported — a build with no probe wired, or the
-  // moment before the first one lands. That is "we have not looked", which still owes the user
-  // a row and a command; rendering nothing would leave the pane with no credential line at all.
-  const tool = state?.app.providerTools.find((t) => t.provider === id) ?? {
-    provider: id,
-    state: "absent" as const,
-    executableName: null,
-    source: null,
-    version: null,
-    account: null,
-    workspaces: [],
-    detail: "the Higgsfield CLI has not been found on this machine",
-    signInCommand: "higgsfield auth login",
-  };
-  const label =
-    tool.state === "ready"
-      ? (tool.account ?? "signed in")
-      : tool.state === "signing-in"
-        ? "waiting for the browser…"
-        : tool.state === "absent"
-          ? "not installed"
-          : "signed out";
-  const copy = () => {
-    void navigator.clipboard?.writeText(tool.signInCommand);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
-  return (
-    <>
-      <div className="fy-prov__keyline">
-        <div className="fy-prov__eyebrow">SIGN-IN</div>
-        <div className="fy-set__field">
-          <span style={{ flex: 1 }}>{label}</span>
-          {tool.state === "absent" && component !== undefined &&
-            (component.state === "downloading" || component.state === "paused") ? (
-            <SetupTransferControl component={component} />
-          ) : tool.state === "absent" ? (
-            <button
-              type="button"
-              className="fy-set__link"
-              disabled={fetching}
-              onClick={() => componentId !== undefined && setupRetry(componentId)}
-            >
-              {fetching ? "installing…" : `Install${component ? ` · ${component.sizeMb} MB` : ""}`}
-            </button>
-          ) : null}
-          {tool.state === "signing-in" ? (
-            <button type="button" className="fy-set__link" onClick={() => cancelProviderToolSignIn(id)}>
-              Stop waiting
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="fy-set__link"
-              disabled={tool.state === "absent"}
-              onClick={() => signInProviderTool(id)}
-            >
-              {tool.state === "ready" ? "Sign in again" : "Sign in"}
-            </button>
-          )}
-          <button type="button" className="fy-set__link" onClick={() => refreshProviderTool(id)}>
-            Re-check
-          </button>
-        </div>
-      </div>
-      <div className="fy-set__why">
-        <span
-          className={cx(
-            "fy-set__dot",
-            tool.state === "ready" ? "fy-set__dot--ok" : tool.state === "signing-in" ? "" : "fy-set__dot--warn",
-          )}
-        />
-        <span>
-          {tool.detail ??
-            (tool.state === "ready"
-              ? `${tool.executableName ?? "the CLI"}${tool.version ? ` ${tool.version}` : ""}${
-                  tool.source === "bundled" ? " · fetched by Arke Studio" : " · found on this machine"
-                }`
-              : "")}
-        </span>
-      </div>
-      <ProviderWorkspaceLine id={id} workspaces={tool.workspaces} />
-      <div className="fy-set__note">
-        {tool.state === "absent" ? "Install it, then sign in: " : "Or sign in from a terminal: "}
-        <code>{tool.signInCommand}</code>{" "}
-        <button type="button" className="fy-set__link" onClick={copy}>
-          {copied ? "copied" : "Copy"}
-        </button>
-        {" · we will notice when it works."}
-      </div>
-    </>
-  );
-}
-
-/**
- * One provider's key, on one line under its name (design turn 40a). The name is the pane's own
- * heading here, so the row carries the label KEY and nothing else: a provider is a key and a list
- * of models, and repeating the provider's name beside its key was the clutter the flat list had.
- */
-function ProviderKeyLine({ id }: { id: ProviderId }) {
-  const { state } = useStore();
-  const [draft, setDraft] = useState("");
-  const [replacing, setReplacing] = useState(false);
-  const status = state?.app.providers.find((p) => p.id === id);
-  const info = PROVIDER_TABLE[id];
-  const stored = status?.configured === true;
-  const save = () => {
-    if (draft.trim().length === 0) return;
-    setCredential(id, draft.trim());
-    setDraft("");
-    setReplacing(false);
-  };
-  return (
-    <>
-      <div className="fy-prov__keyline">
-        <div className="fy-prov__eyebrow">KEY</div>
-        {stored && !replacing ? (
-          <div className="fy-set__field">
-            {/* No last-four: the key never comes back over the bridge, and inventing a tail
-                would be a picture of a secret rather than the secret's state (R-10). */}
-            <span style={{ flex: 1 }}>•••••••••••• stored</span>
-            <button type="button" className="fy-set__link" onClick={() => setReplacing(true)}>
-              Replace
-            </button>
-            <button
-              type="button"
-              className="fy-set__link"
-              disabled={status?.validation === "testing"}
-              onClick={() => validateProvider(id)}
-            >
-              {status?.validation === "testing" ? "testing…" : "Test"}
-            </button>
-            <button type="button" className="fy-set__link" onClick={() => clearCredential(id)}>
-              Remove
-            </button>
-          </div>
-        ) : (
-          <div className={cx("fy-set__field", draft.length === 0 && "fy-set__field--empty")}>
-            <input
-              className="fy-set__input"
-              type="password"
-              aria-label={`${info.displayName} API key`}
-              placeholder={info.keyHint ?? "Paste API key…"}
-              value={draft}
-              autoFocus={replacing}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") save();
-                if (e.key === "Escape" && replacing) {
-                  setDraft("");
-                  setReplacing(false);
-                }
-              }}
-            />
-            <button type="button" className="fy-set__link" disabled={draft.trim().length === 0} onClick={save}>
-              Save
-            </button>
-            {replacing && (
-              <button
-                type="button"
-                className="fy-set__link"
-                onClick={() => {
-                  setDraft("");
-                  setReplacing(false);
-                }}
+      {/* A page, not a panel (SPEC-042 R-5). It was 90% of the window over a blurred scrim, with a
+          close of its own that went to /worlds from wherever it was opened. At that size the
+          modal framing bought nothing but a narrower pane, and the one thing a modal promises —
+          to put you back where you were — it never did. The chrome's gear is the way out now,
+          and it goes back to where it was pressed (R-6). */}
+      <AppChrome current="settings" divided />
+      <div className="fy-content fy-content--fixed">
+        <div className="fy-settings">
+          <nav className="fy-settings__rail" aria-label="Settings">
+            <div className="fy-settings__title">Settings</div>
+            {(
+              [
+                ["providers", "Providers"],
+                ["models", "AI models"],
+                ["general", "General"],
+                ["harness", "Harness"],
+                ["appearance", "Appearance"],
+                ["notifications", "Notifications"],
+                ["sign-in", "Sign-in"],
+                ["sample-world", "Sample world"],
+                ["diagnostics", "Diagnostics"],
+                ["about", "About"],
+              ] as const
+            ).map(([slug, label]) => (
+              <NavLink
+                key={slug}
+                to={`/settings/${slug}`}
+                className={({ isActive }) => cx("fy-settings__tab", isActive && "fy-settings__tab--active")}
               >
-                Cancel
-              </button>
+                {label}
+              </NavLink>
+            ))}
+            <div style={{ flex: 1 }} />
+            <div className="fy-settings__version">v{state?.app.version ?? "0.1.0"}</div>
+          </nav>
+          <div className="fy-settings__pane">
+            {/* Most panes in here draw from the coordinator's snapshot, and with no snapshot they
+                draw the same thing they draw when a provider has nothing to offer: `—` in the
+                capability rows, `not measured` in the machine header. A dev coordinator that died
+                at import produces exactly that screen, which reads as a data bug in whatever you
+                last changed (issue 599). */}
+            {connection === "closed" && (
+              <div className="fy-settings__waiting">
+                <WaitingForCoordinator />
+              </div>
             )}
+            <Outlet />
           </div>
-        )}
-      </div>
-      {status?.fault && (
-        <div className="fy-set__why">
-          <span className="fy-set__dot fy-set__dot--warn" />
-          {/* The reassurance is only true while a key is stored: then a fault is that key
-              failing in use, and the generation it interrupted was not at fault. With nothing
-              stored the fault is about the store itself (issue 227), and pointing at the
-              credential would send the user to try a different key. */}
-          <span>{status.fault}{stored ? " — the work was not the problem; the credential was." : ""}</span>
         </div>
-      )}
-      <ProbeChips status={status} />
-    </>
-  );
-}
-
-/** A model this studio offers, or does not. The switch is the whole row's control. */
-function ProviderModelRow({
-  model,
-  enabled,
-  usable,
-}: {
-  model: ManifestModel;
-  enabled: boolean;
-  usable: boolean;
-}) {
-  return (
-    <div className={cx("fy-prov__model", !usable && "fy-prov__model--off")}>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label={model.displayName}
-        disabled={!usable}
-        className={cx("fy-prov__switch", enabled && "is-on")}
-        onClick={() => setModelEnabled(model.id, !enabled)}
-      >
-        <span />
-      </button>
-      <span className="fy-prov__modelname">{model.displayName}</span>
-      {model.unverified === true && <em className="fy-prov__unverified">UNVERIFIED</em>}
-      <span style={{ flex: 1 }} />
-      <span className="fy-prov__price">
-        {model.capability} · {modelPriceCopy(model)}
-      </span>
-    </div>
-  );
-}
-
-/**
- * One provider: its key, then every model that key can reach, each with a switch (turn 40a).
- * Availability is per provider, per model — a model switched off appears in no picker and cannot
- * be a routing default — and the count says how many of how many, because "4 on" beside a
- * provider is the only number that answers what this key currently offers.
- */
-function ProviderPane({ id }: { id: ProviderId }) {
-  const { state } = useStore();
-  const info = PROVIDER_TABLE[id];
-  const status = state?.app.providers.find((p) => p.id === id);
-  const configured = status?.configured === true;
-  const troubled = Boolean(status?.fault) || status?.validation === "invalid";
-  const models = (state?.app.manifest?.models ?? []).filter((m) => m.provider === id);
-  const disabled = new Set(state?.app.models.disabled ?? []);
-  // What this key actually unlocks, capability by capability — the same question the generation
-  // pickers ask. A key can authenticate and still not do images, and this pane used to count
-  // those image rows as ON and let them be switched while no picker would ever list them.
-  const unlocked = new Set(
-    deriveCapabilityAvailability(state?.app.providers ?? [])
-      .filter((a) => a.via.includes(id))
-      .map((a) => a.capability),
-  );
-  const reaches = (model: ManifestModel): boolean => unlocked.has(model.capability);
-  const on = models.filter((m) => reaches(m) && !disabled.has(m.id)).length;
-  const capabilities = [...new Set(models.map((m) => m.capability))];
-  return (
-    <div className="fy-prov__pane">
-      <div className="fy-prov__head">
-        <span className="fy-prov__title">{info.displayName}</span>
-        <span className="fy-prov__caps">{capabilities.join(" · ").toUpperCase()}</span>
-        <span style={{ flex: 1 }} />
-        <span className={cx("fy-set__dot", troubled ? "fy-set__dot--warn" : configured && "fy-set__dot--ok")} />
-        <span className="fy-set__state">
-          {info.credential === "external"
-            ? troubled
-              ? "sign-in needed"
-              : configured
-                ? "connected"
-                : "not signed in"
-            : troubled
-              ? "key rejected"
-              : configured
-                ? "connected"
-                : "no key"}
-        </span>
-      </div>
-      {/* A provider is a credential and a list of models — but whose credential differs, and
-          the two need different rows: one takes a key, the other cannot be given one. */}
-      {info.credential === "external" ? <ProviderToolLine id={id} /> : <ProviderKeyLine id={id} />}
-      <div className="fy-prov__modelshead">
-        <div className="fy-prov__eyebrow">MODELS</div>
-        <span style={{ flex: 1 }} />
-        <span className="fy-prov__count">
-          {/* Without a key nothing here is on, whatever the switches say — the rail already uses
-              an em dash for this state and the pane must not contradict it two inches away. */}
-          {models.length === 0
-            ? "NONE IN THE MANIFEST"
-            : unlocked.size === 0
-              ? `${models.length} UNAVAILABLE`
-              : `${on} OF ${models.length} ON`}
-        </span>
-      </div>
-      <div className="fy-prov__models">
-        {models.map((model) => (
-          // Switchable only once the key is stored: a model this studio cannot reach is not a
-          // choice, and letting it be switched on would put it in pickers that must then refuse it.
-          <ProviderModelRow
-            key={model.id}
-            model={model}
-            enabled={reaches(model) && !disabled.has(model.id)}
-            usable={reaches(model)}
-          />
-        ))}
-      </div>
-      <div className="fy-set__note">
-        {models.length === 0
-          ? `nothing in the shipped manifest routes to ${info.displayName} yet`
-          : unlocked.size === 0
-            ? configured
-              ? `this key does not unlock ${info.displayName}'s capabilities — test it above, or replace it`
-              : `add a key above — ${info.displayName}'s models become switchable once it is connected`
-            : "a model switched off appears in no picker and cannot be a routing default · a default already pointing at one is flagged in General, never re-routed for you"}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Settings · Providers (SPEC-034 R-1). What can I reach, and what is on this machine.
- *
- * One rail in two bands. It absorbs Engines and Local AI, which were separate surfaces until a
- * model's on/off switch and the credential that unlocks it turned out to live on different tabs:
- * Cloud AI filtered its options by a switch it could not reach and shipped an `Open Providers`
- * button to compensate, which is SPEC-033 R-7 met by giving up.
- *
- * **The bands are named for how a source is reached, never for where its work runs** (R-3).
- * `PROVIDERS.comfyui.local` is `true` while the resolved engine may be a non-loopback URL, so a
- * heading saying `Local` over that row is a heading that can lie. And `connect` rather than
- * `keyed`, because Higgsfield's credential is `external` — an OAuth held by its own CLI.
- *
- * **The rail item is the engine; its providers are groups inside the pane** (R-7). Voxa hosts
- * Kokoro and whisper.cpp: one executable, one port, one restart, two named groups. Listing four
- * providers would state Voxa's machinery twice, which is the duplication `statedElsewhere` was
- * invented to hide; calling three engines providers would put a word in the rail that no
- * manifest row, ledger entry or finding uses.
- */
-export function SettingsProvidersScreen() {
-  const { state } = useStore();
-  const setup = useSetup();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const availability = deriveCapabilityAvailability(state?.app.providers ?? []);
-  const disabledModels = new Set(state?.app.models.disabled ?? []);
-  const manifestModels = state?.app.manifest?.models ?? [];
-  const providerStatus = state?.app.providers ?? [];
-  const all = setup?.components ?? [];
-  const comfyui = state?.app.comfyui ?? null;
-  const voiceRuntime = state?.app.voiceRuntime ?? null;
-  const unowned = componentsFor(all, null);
-  /**
-   * An engine's own supporting pieces, which is what its COMPONENTS band is for now that the
-   * models are drawn as models. A component that provides one is that model — listing it twice
-   * put two Downloads for one fetch on one pane, which is the duplication `statedElsewhere` was
-   * invented to hide and SPEC-033 R-6 deletes. ComfyUI's pane already omitted its band for
-   * exactly this reason; the other two had not caught up.
-   */
-  const supporting = (engine: EngineId): SetupComponent[] =>
-    componentsFor(all, engine).filter((c) => (c.provides ?? []).length === 0);
-
-  /** How many of a keyed service's models are on, counted the way the pickers decide. */
-  const onFor = (id: ProviderId): number => {
-    const unlocked = new Set(availability.filter((a) => a.via.includes(id)).map((a) => a.capability));
-    return manifestModels.filter(
-      (m) => m.provider === id && unlocked.has(m.capability) && !disabledModels.has(m.id),
-    ).length;
-  };
-
-  /**
-   * How many of an engine's models are installed here — and `elsewhere` in place of the count
-   * where the engine is not here at all (R-9). For a machine down the hall, *how many of its
-   * models are installed on this one* is not a question with an answer, so the column says the
-   * thing that is true rather than a number that is not.
-   */
-  const engineCount = (engine: EngineId): string => {
-    if (engine === "comfyui" && comfyui?.engine.locality === "remote") return "elsewhere";
-    const providers = ENGINE_PROVIDERS[engine];
-    const installed = manifestModels.filter(
-      (m) =>
-        providers.includes(m.provider) &&
-        activationFor(m.provider, m.id, {
-          components: all,
-          ...(comfyui?.engine.state !== undefined ? { comfyUiEngineState: comfyui.engine.state } : {}),
-        }) === "ready",
-    ).length;
-    return `${installed} on`;
-  };
-
-  type Row = { id: string; label: string; tone: RuntimeTone; count: string; kind: "service" | "engine" | "other" };
-  const services: Row[] = KEYED_PROVIDERS.map((p) => {
-    const connected = providerStatus.some((s) => s.id === p.id && s.configured);
-    return {
-      id: p.id,
-      label: PROVIDER_TABLE[p.id].displayName,
-      tone: connected ? "ok" : "idle",
-      // An em dash, not "0 on": without a credential the question of how many models are on does
-      // not arise, and a zero would read as a choice someone made.
-      count: connected ? `${onFor(p.id)} on` : "—",
-      kind: "service",
-    };
-  });
-  const engines: Row[] = [
-    {
-      id: "comfyui",
-      label: ENGINE_LABEL.comfyui,
-      tone: comfyUiTone(comfyui?.engine ?? null),
-      count: engineCount("comfyui"),
-      kind: "engine",
-    },
-    {
-      id: "ollama",
-      label: ENGINE_LABEL.ollama,
-      // The same derivation the pane uses. Anything that is not `valid` reading as merely
-      // unmeasured made a stopped Ollama show a neutral dot on the rail — the half you scan to
-      // find what is broken — beside a pane that warned about it in red.
-      tone: processTone(providerStatus.find((p) => p.id === "ollama")?.validation),
-      count: engineCount("ollama"),
-      kind: "engine",
-    },
-    {
-      id: "voxa",
-      label: ENGINE_LABEL.voxa,
-      tone: processTone(voiceRuntime?.processState),
-      count: engineCount("voxa"),
-      kind: "engine",
-    },
-  ];
-  // A component required by neither an engine nor a provider keeps a place, and that place is
-  // drawn only where such a component exists (R-8). Every entry in today's catalogue declares one
-  // or the other, so this is a row nobody sees — and an always-drawn one is a heading over
-  // nothing.
-  const other: Row[] =
-    unowned.length === 0
-      ? []
-      : [
-          {
-            id: "other",
-            label: "Other components",
-            tone: componentsTone(unowned),
-            count: `${unowned.length}`,
-            kind: "other",
-          },
-        ];
-  const rows = [...services, ...engines, ...other];
-
-  // First run has no key anywhere, so opening on the first provider is not a preference — it is
-  // the only pane there is. Once something is connected, that is the one worth landing on.
-  const firstConnected = KEYED_PROVIDERS.find((p) => providerStatus.some((s) => s.id === p.id && s.configured));
-  const asked = searchParams.get("provider");
-  // A diagnostics remedy addresses a component rather than a pane (SPEC-034 R-24): one registry
-  // entry serves components across all three engines, so its route cannot name one and its single
-  // targetParam is spent on the component id. The component declares its owner, so resolve it
-  // from there — recipe weights carry no engine field because their id is derived from the
-  // catalogue, so they resolve by that instead.
-  const askedComponent = searchParams.get("component");
-  const askedEntry = askedComponent === null ? null : (all.find((c) => c.id === askedComponent) ?? null);
-  const owning =
-    askedComponent === null
-      ? null
-      : (askedEntry?.provider ??
-        askedEntry?.engine ??
-        (comfyUiWeightsRecipeId(askedComponent) !== null ? "comfyui" : null));
-  const current =
-    (asked !== null && rows.some((r) => r.id === asked) ? asked : null) ??
-    (owning !== null && rows.some((r) => r.id === owning) ? owning : null) ??
-    firstConnected?.id ??
-    rows[0]!.id;
-  const currentRow = rows.find((r) => r.id === current) ?? rows[0]!;
-  const setSelected = (id: string) => setSearchParams({ provider: id }, { replace: true });
-  const remote = current === "comfyui" && comfyui?.engine.locality === "remote";
-
-  const band = (label: string, items: Row[]) =>
-    items.length === 0 ? null : (
-      <Fragment key={label}>
-        {label !== "" && <div className="fy-prov__band">{label}</div>}
-        {items.map((r) => (
-          <button
-            type="button"
-            key={r.id}
-            role="tab"
-            aria-selected={r.id === current}
-            className={cx("fy-prov__railitem", r.id === current && "is-current")}
-            onClick={() => setSelected(r.id)}
-          >
-            <span className={cx("fy-set__dot", TONE_CLASS[r.tone])} />
-            <span>{r.label}</span>
-            <span style={{ flex: 1 }} />
-            <span className="fy-prov__count">{r.count}</span>
-          </button>
-        ))}
-      </Fragment>
-    );
-
-  return (
-    <div data-screen="settings-providers" className="fy-set fy-set--providers">
-      <div className="fy-prov">
-        <div className="fy-prov__rail" role="tablist" aria-label="Providers">
-          {band("SERVICES YOU CONNECT", services)}
-          {band("ENGINES YOU RUN", engines)}
-          {band("", other)}
-        </div>
-        {currentRow.kind === "service" ? (
-          <ProviderPane id={current as ProviderId} />
-        ) : (
-          <div className="fy-prov__pane">
-            {currentRow.kind === "other" ? (
-              <OtherComponentsDetail components={unowned} />
-            ) : (
-              <>
-                {current === "comfyui" && <ComfyUiDetail />}
-                {current === "ollama" && <OllamaDetail components={supporting("ollama")} />}
-                {current === "voxa" && (
-                  <VoxaDetail
-                    voiceRuntime={voiceRuntime}
-                    health={state?.app.health.voice}
-                    components={supporting("voxa")}
-                  />
-                )}
-                {/* The figures every fit verdict turns on, once per pane rather than once per
-                    row — after the head, because the pane says what it is before it says what
-                    this machine can do under it. Absent where fit is not a question at all: a
-                    remote engine has no verdict for them to explain (R-13, R-15). */}
-                {!remote && <MachineRow />}
-                <EngineModelGroups engine={current as EngineId} />
-              </>
-            )}
-            <div className="fy-rt__actions">
-              <span style={{ flex: 1 }} />
-              {/* Unconditional (R-25). Downloads has no tab, and a link that appears only while
-                  something is transferring leaves no way to reach the surface that reports what
-                  a failed or cancelled fetch left behind — which is what SPEC-033 R-85 sends a
-                  reader there for. */}
-              <Button variant="secondary" onClick={() => navigate("/settings/downloads")}>
-                {setup?.running === true ? "Downloads · running" : "Downloads"}
-              </Button>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

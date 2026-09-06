@@ -879,7 +879,7 @@ describe("presets (issue 305 §3)", () => {
     const gone = presetFault({ ...preset, model: "left" }, { models: [MODEL] }, []);
     assert.ok(!gone.ok && /no longer in the manifest/.test(gone.reason));
     const off = presetFault(preset, { models: [MODEL] }, ["test-image"]);
-    assert.ok(!off.ok && /switched off in Providers/.test(off.reason));
+    assert.ok(!off.ok && /switched off in AI models/.test(off.reason));
   });
 });
 

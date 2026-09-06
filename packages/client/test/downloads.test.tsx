@@ -116,7 +116,8 @@ const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<
  * The Ollama pane holding the language models. Providers' rail draws one source at a time, so a
  * test about a model row has to name the row rather than land on whichever opens first.
  */
-const LANGUAGE_ROW = "/settings/providers?provider=ollama";
+// The model's row is on AI models now, under the kind it makes (SPEC-042 R-12).
+const LANGUAGE_ROW = "/settings/models?half=local&kind=llm";
 
 describe("the row states the whole chain's size, and only the count of the rest (R-40, R-41)", () => {
   it("quotes the closure, not the model's own weights", () => {
