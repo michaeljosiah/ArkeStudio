@@ -105,6 +105,7 @@ export function editSheetContent(input: {
       name: input.name ?? sheet.name,
       ...(role !== undefined ? { role } : {}),
       ...(billing !== undefined ? { billing } : {}),
+      ...(sheet.neverDepicted !== undefined ? { neverDepicted: sheet.neverDepicted } : {}),
       ...(region !== undefined ? { region } : {}),
       // The live version, not 1: the committer stamps the real one either way, and restating what
       // the sheet actually says keeps the staged file readable as the thing it is a version of.

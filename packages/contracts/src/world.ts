@@ -117,6 +117,8 @@ export const SheetSchema = z
     role: z.string().optional(),
     /** Characters: e.g. "lead" | "support". Display vocabulary, not an enum the gate owns. */
     billing: z.string().optional(),
+    /** Characters whose identity must never be pictured (#905). Absence permits depiction. */
+    neverDepicted: z.boolean().optional(),
     /** Locations only. */
     region: z.string().optional(),
     /** Own monotonic version, independent of canon and of every other sheet (§2.4). */

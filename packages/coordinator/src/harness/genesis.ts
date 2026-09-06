@@ -109,6 +109,10 @@ name inside it can change freely. A character file:
  "brief": {"apparentAge": "...", "build": "...", "colouring": "...", "hair": "...",
   "wardrobe": "...", "bearing": "...", "defaultExpression": "..."}}
 
+When the author says a character is unseen, never shown, or must never be pictured, set
+"neverDepicted": true on that character's file. This is a rule, not an appearance description:
+the build keeps the character's sheet and skips both their main photo and character-sheet image.
+Do not name them as a visible subject in key art or other visual briefs.
 A location's brief instead holds {"establishingView": "what one establishing view of it holds",
 "hour": "...", "weather": "...", "season": "..."}. A faction file has no brief. A brief holds
 subject facts only — who or what would be in a picture. Never style, medium, lens or anything

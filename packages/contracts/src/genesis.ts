@@ -172,7 +172,7 @@ const entityFileBase = {
 };
 
 export const GenesisCharacterFileSchema = z
-  .object({ ...entityFileBase, brief: GenesisCharacterBriefSchema.optional() })
+  .object({ ...entityFileBase, neverDepicted: z.boolean().optional(), brief: GenesisCharacterBriefSchema.optional() })
   .strip();
 export type GenesisCharacterFile = z.infer<typeof GenesisCharacterFileSchema>;
 
@@ -195,6 +195,7 @@ export const BlueprintCharacterSchema = z
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
     description: z.string().min(1).max(4000).optional(),
+    neverDepicted: z.boolean().optional(),
     brief: GenesisCharacterBriefSchema.optional(),
   })
   .strict();

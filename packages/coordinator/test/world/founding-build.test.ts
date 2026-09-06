@@ -15,6 +15,8 @@ import {
   type ModelManifest,
   type QueueStatus,
 } from "@arke-studio/contracts";
+import { editSheetContent } from "../../src/sheets/authoring.js";
+import { MarkdownFile } from "../../src/world/text-files.js";
 import { tempDir } from "../tmp.js";
 import { until } from "../wait.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -701,4 +703,35 @@ describe("the founding build (SPEC-031)", () => {
       "what was never dispatched is not dispatched",
     );
   });
+});
+
+
+it("never-depicted characters keep their sheet but never enter either image wave (#905)", async (t) => {
+  const h = await makeHarness(t, { harnessReady: () => true, authorSheet: async () => {
+    throw new Error("drafting unavailable");
+  } });
+  const sandbox = await makeSandbox(h.root, "gen-unseen");
+  const characterPath = join(sandbox, "draft", "characters", "maren-kest.json");
+  const character = JSON.parse(await readFile(characterPath, "utf8"));
+  await writeFile(characterPath, JSON.stringify({ ...character, neverDepicted: true }));
+  await h.service.plan("gen-unseen", ulid());
+  const plan = lastPlan(h);
+  assert.ok(plan.notes.includes("Maren Kest — never depicted"));
+  assert.ok(plan.notes.some((note) => note.startsWith("Key art names")));
+  assert.equal(plan.generations, 3, "only the other character's two images and the location");
+  await h.service.begin("gen-unseen", ulid());
+  await until(() => h.lastState()?.status === "completed", "unseen build", BUILD_MS);
+  const store = h.provider.openStore()!;
+  const sheet = store.getBundle().sheets.find((s) => s.name === "Maren Kest")!;
+  assert.equal(sheet.neverDepicted, true, "the seed keeps the rule even when authoring fails");
+  const disk = MarkdownFile.parse(await readFile(join(store.dir, "characters", `${sheet.id}.md`), "utf8"));
+  assert.equal(disk.data["neverDepicted"], true);
+  const edited = editSheetContent({ sheet, sections: { Essence: "Still heard, never seen." }, date: "2026-09-07" });
+  assert.equal(MarkdownFile.parse(edited).data["neverDepicted"], true, "prose editing preserves the rule");
+  assert.equal(h.lastState()?.items.some((item) => item.subject === "maren-kest" &&
+    (item.kind === "main-photo" || item.kind === "sheet-image")), false);
+  const before = h.queue.jobs.size;
+  await h.service.runItems(h.worldId());
+  assert.equal(h.queue.jobs.size, before, "Run remaining work cannot resurrect omitted portraits");
+  assert.equal((await readKit(store, sheet.id))?.kit.mainPhoto, undefined);
 });
