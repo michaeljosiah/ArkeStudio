@@ -97,7 +97,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
  * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 12;
+// Thirteen is a chapter's `source` (turn 131): an imported chapter's strict frontmatter names
+// the file it came from, and a build without the field would drop the chapter on scan.
+export const SUPPORTED_SCHEMA_VERSION = 13;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -544,6 +546,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ...(fm.when !== undefined ? { when: fm.when } : {}),
       ...(fm.implies !== undefined ? { implies: fm.implies } : {}),
       ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
+      ...(fm.source !== undefined ? { source: fm.source } : {}),
     }));
 
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties

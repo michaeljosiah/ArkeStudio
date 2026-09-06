@@ -714,7 +714,7 @@ export async function createChapter(
 }
 
 /** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
-async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
+export async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
   let highest = 0;
   for (const file of files) {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
@@ -743,6 +743,8 @@ export async function saveChapter(
   // `words` (the chapter tree, the story dashboard) would otherwise report the count the
   // chapter had when it was last stamped by hand, indefinitely.
   doc.setData({ words: countWords(body) });
+  // An imported chapter is the author's from its first save (turn 131): the mark comes off.
+  doc.dropData("source");
   // The base is the file the editor read when the caller says so (turn 126), not the file as
   // it is now: hashing the live bytes here would make every save pass, including one written
   // over an accepted draft the editor never saw. The committer refuses a moved base.

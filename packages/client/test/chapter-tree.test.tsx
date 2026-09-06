@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ChapterSummary, ClientState } from "@arke-studio/contracts";
 import { ChapterTreeScreen } from "../src/screens/production.js";
+import { rememberChaptersView } from "../src/lib/continuity.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -105,13 +106,6 @@ describe("the chapter tree renders resolved order", () => {
  * the session, computed from the summaries' placings alone.
  */
 describe("the door's continuity view (turn 129)", () => {
-  const memory = new Map<string, string>();
-  Object.assign(globalThis, {
-    sessionStorage: {
-      getItem: (key: string) => memory.get(key) ?? null,
-      setItem: (key: string, value: string) => void memory.set(key, value),
-    },
-  });
   const H = (c: string) => `sha256:${c.repeat(64)}`;
   const record = (hash: string, placed: Array<{ character: string; sheet?: string; present: boolean; where?: string }>) => ({
     version: 4,
@@ -130,7 +124,7 @@ describe("the door's continuity view (turn 129)", () => {
   ];
 
   it("remembers the view; draws the cast across and the chapters down; carries a cell naming its chapter; stamps each row", () => {
-    memory.set("arke.chapters.view.inkbound", "continuity");
+    rememberChaptersView("inkbound", "continuity");
     const html = render(ROWS);
     assert.match(html, /Where everyone is/);
     assert.match(html, /fy-seg__item fy-seg__item--active[^>]*>Continuity/);
@@ -144,7 +138,7 @@ describe("the door's continuity view (turn 129)", () => {
     assert.match(html, /nothing carries past a chapter not derived/);
     assert.doesNotMatch(html, /role="progressbar"/, "the outline's bar is the outline's");
 
-    memory.set("arke.chapters.view.inkbound", "outline");
+    rememberChaptersView("inkbound", "outline");
     const outline = render(ROWS);
     assert.match(outline, /<h1[^>]*>Chapters<\/h1>/);
     assert.doesNotMatch(outline, /continuity-table/);

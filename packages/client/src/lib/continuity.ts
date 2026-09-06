@@ -103,19 +103,20 @@ export function continuityStamp(record: ChapterContinuity): string {
 
 export type ChaptersView = "outline" | "continuity";
 
-/** The door remembers which view it was on for the session; storage may be absent or refuse. */
+/*
+ * The door remembers which view it was on for the session — in memory, not in the tab's storage.
+ * The client keeps only the coordinator capability in tab storage, and the credential scan in
+ * tokens.test.ts holds every other file to that (the scan reads the words, so even naming the
+ * storage here would trip it), so the choice lives until the page is left rather than until the
+ * tab is closed. Main's client shard had been red on that scan since the view first remembered
+ * itself through tab storage (turn 129).
+ */
+const rememberedViews = new Map<string, ChaptersView>();
+
 export function rememberedChaptersView(productionId: string | undefined): ChaptersView {
-  try {
-    return sessionStorage.getItem(`arke.chapters.view.${productionId ?? ""}`) === "continuity" ? "continuity" : "outline";
-  } catch {
-    return "outline";
-  }
+  return rememberedViews.get(productionId ?? "") ?? "outline";
 }
 
 export function rememberChaptersView(productionId: string | undefined, view: ChaptersView): void {
-  try {
-    sessionStorage.setItem(`arke.chapters.view.${productionId ?? ""}`, view);
-  } catch {
-    // Nothing to remember with; the choice lives for the mount.
-  }
+  rememberedViews.set(productionId ?? "", view);
 }

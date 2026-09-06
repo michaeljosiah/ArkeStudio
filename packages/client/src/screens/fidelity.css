@@ -7562,6 +7562,16 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-exsheet__status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
 .fy-exsheet__foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 10px; color: var(--muted-foreground); border-top: 1px solid var(--border); }
 
+/* The manuscript sheets (turn 131): mono lines that wrap as the design draws them, a label with no flex basis of its own, and a compact delivered list. */
+.fy-ms__line { font: 400 10.5px/1.7 var(--font-mono); color: var(--neutral-400); white-space: normal; }
+.fy-ms__line--warn { color: var(--warning); }
+.fy-ms__label { font: 600 9.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-ms__delivered { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.fy-ms__row { display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
+.fy-ms__row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px var(--font-sans); }
+.fy-ms__row-mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 10.5px var(--font-mono); }
+.fy-ms__row-meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+
 /* Lanes as the target draws them (SPEC-039 R-13): a mark beside the name, a refusal while a wrong drag hovers, a strip for a new lane. */
 .fy-track__icon { display: inline-flex; align-items: center; color: var(--neutral-400); margin-right: 4px; flex: none; }
 .fy-trackbtns__remove { color: var(--neutral-400); }

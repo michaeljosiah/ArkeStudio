@@ -150,6 +150,7 @@ import { CredentialStore, type Cipher } from "./credentials/store.js";
 import { buildDiagnosticsBundle } from "./diagnostics.js";
 import { DiagnosticsSnapshotHolder } from "./diagnostics-snapshot.js";
 import {
+  highestChapterRank,
   compileBoard,
   composeDispatches,
   createChapter,
@@ -240,6 +241,8 @@ import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachm
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
 import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { exportManuscript, importManuscript, readManuscript } from "./productions/manuscript.js";
+import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { materialiseForContinuation } from "./productions/continuation.js";
@@ -1402,6 +1405,29 @@ export class Coordinator {
     if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
   }
 
+  /** What the import sheet is told of a read (turn 131): the counts, the levels, and where the chapters would go. */
+  private async manuscriptReadAnswer(
+    store: WorldStore,
+    productionId: string,
+    read: Extract<ReturnType<typeof readManuscript>["read"], { ok: true }>,
+  ): Promise<Record<string, unknown>> {
+    const production = store.getBundle().productions.find((entry) => entry.meta.id === productionId);
+    // The rank the import will write after (codex on PR 924): the persisted one, which a legacy
+    // production ranked 10, 20 keeps sparse while the bundle shows it dense.
+    const after = await highestChapterRank(store, productionId, (production?.chapters ?? []).map((chapter) => chapter.file));
+    return {
+      fileName: read.fileName,
+      words: read.words,
+      chapters: read.chapters.map((chapter) => ({ title: chapter.title, words: chapter.words })),
+      ...(read.headingLevel !== null ? { headingLevel: read.headingLevel } : {}),
+      leftOut: read.leftOut,
+      levels: read.levels,
+      notes: read.notes,
+      links: read.links,
+      after,
+    };
+  }
+
   /** Session config builder with the user's agent settings folded in. */
   /** Session input plus whatever Settings currently says — read per call, never captured. */
   private readonly stageConstructor = new StageConstructor();
@@ -1832,6 +1858,17 @@ export class Coordinator {
   private readonly exportReads = new Map<string, ArkeExportReadRecord>();
   /** `worldId:productionId` whose export is being set up or is already running — one at a time. */
   private readonly exportsInFlight = new Set<string>();
+  /** Manuscripts read for import (turn 131), keyed by `worldId/productionId/requestId`, held until imported or cancelled: the document, so a level can be chosen again, and what was read of it. */
+  private readonly manuscriptReads = new Map<
+    string,
+    { fileName: string; document: StructuredDocument; read: Extract<ReturnType<typeof readManuscript>["read"], { ok: true }> }
+  >();
+  /**
+   * Chapter saves in hand (turn 131, codex on PR 916): handlers run concurrently, so an export
+   * pressed the moment an editor was left could read a chapter its last autosave had not yet
+   * landed in. The export waits these out before it reads.
+   */
+  private readonly chapterSaves = new Set<Promise<unknown>>();
   /** A conversation card fixes the export identity before the legacy renderer starts. */
   private readonly requestedExportIds = new Map<string, string>();
   /** Route layout and screen guards may ask for the same world before either receives its snapshot. */
@@ -7217,13 +7254,16 @@ export class Coordinator {
         // rule, turn 126's second binding): the refusal is answered by name when the sender
         // asked to hear back, and the refreshed snapshot below says what the record is now.
         try {
-          const saved = await saveChapter(
+          const saving = saveChapter(
             store,
             msg.productionId,
             msg.chapterFile,
             msg.body,
             msg.baseHash !== undefined ? { baseHash: msg.baseHash } : {},
           );
+          this.chapterSaves.add(saving);
+          void saving.catch(() => {}).finally(() => this.chapterSaves.delete(saving));
+          const saved = await saving;
           answer({ disposition: "saved", ...saved });
         } catch (err) {
           answer({ disposition: "refused", reason: err instanceof Error ? err.message : "the chapter was not saved" });
@@ -10659,6 +10699,176 @@ export class Coordinator {
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.derivingContinuity.delete(key);
+        }
+        return;
+      }
+      case "export-manuscript": {
+        // A manuscript out (turn 131, SPEC-012 R-49): built whole from the saved chapters, after
+        // every save in hand has landed, staged and renamed under exports/ as a cut export is,
+        // and reported through the same progress event so the sheet lists it as a delivery.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const exportId = `ms_${ulid()}`;
+        const progress = (status: "running" | "done" | "cancelled" | "failed", percent: number, output: string | null, error: string | null) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "export.progress",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            exportId,
+            status,
+            percent,
+            output: safeExportOutput(output),
+            error: error === null ? null : scrubAbsolutePaths(this.secrets.scrub(error)),
+          });
+        const control = new AbortController();
+        // The run ends with the world that began it (codex on PR 916): a world closing under a
+        // build, or losing its claim, must not go on to publish.
+        store.closingSignal.addEventListener("abort", () => control.abort(), { once: true });
+        const done = (async () => {
+          progress("running", 0, null, null);
+          try {
+            await Promise.allSettled(this.chapterSaves);
+            if (control.signal.aborted) throw new Error("cancelled");
+            const made = await exportManuscript(store, msg.productionId, msg.format, {
+              exportId,
+              language: msg.language ?? "en",
+              now: () => this.nowIso(),
+              signal: control.signal,
+            });
+            progress("done", 100, made.output, null);
+            return { status: "done" as const, output: made.output };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (control.signal.aborted || message === "cancelled") {
+              progress("cancelled", 0, null, null);
+              return { status: "cancelled" as const };
+            }
+            progress("failed", 0, null, message);
+            return { status: "failed" as const, error: message };
+          } finally {
+            this.exports.delete(exportId);
+          }
+        })();
+        this.exports.set(exportId, { id: exportId, cancel: () => control.abort(), done });
+        await done;
+        return;
+      }
+      case "open-exports-folder": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        this.opts.openPath?.(join(store.dir, "exports"));
+        return;
+      }
+      case "pick-manuscript": {
+        // A manuscript in (turn 131, R-50): the host's picker, the file read structured and
+        // shown, nothing written. The read is held by request for the import press.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const answer = (extra: Record<string, unknown>) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "manuscript.read-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...extra,
+          } as DomainEvent);
+        const production = store.getBundle().productions.find((entry) => entry.meta.id === msg.productionId);
+        if (!production || !productionShape(production.meta).hasChapters) {
+          answer({ reason: "that production has no chapters to add to" });
+          return;
+        }
+        const pick = this.opts.pickFiles;
+        if (!pick) {
+          answer({ reason: "this needs the desktop app — a browser session cannot open the file picker" });
+          return;
+        }
+        const paths = await pick({ accept: ["docx"] }).catch(() => [] as readonly string[]);
+        const sourcePath = paths[0];
+        // Closing the picker is an answer (codex on PR 924): nothing happens, and the sheet is
+        // told so rather than left reading.
+        if (sourcePath === undefined) {
+          answer({ cancelled: true });
+          return;
+        }
+        const fileName = basename(sourcePath);
+        let bytes: Uint8Array;
+        try {
+          bytes = new Uint8Array(await readFile(toExtendedLength(sourcePath)));
+        } catch {
+          answer({ fileName, reason: `${fileName} could not be read` });
+          return;
+        }
+        const { document, read } = readManuscript(bytes, fileName);
+        if (!read.ok || document === null) {
+          answer({ fileName, reason: read.ok ? `${fileName} could not be read` : read.reason });
+          return;
+        }
+        this.manuscriptReads.set(`${msg.worldId}/${msg.productionId}/${msg.requestId}`, { fileName, document, read });
+        answer(await this.manuscriptReadAnswer(store, msg.productionId, read));
+        return;
+      }
+      case "reread-manuscript": {
+        // The same file at the level the person chose (turn 131): the held document read again,
+        // nothing written, the same answer.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const key = `${msg.worldId}/${msg.productionId}/${msg.requestId}`;
+        const held = this.manuscriptReads.get(key);
+        const answer = (extra: Record<string, unknown>) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "manuscript.read-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...extra,
+          } as DomainEvent);
+        if (held === undefined) {
+          answer({ reason: "that manuscript is no longer waiting — pick it again" });
+          return;
+        }
+        const read = manuscriptChapters(held.document, held.fileName, msg.headingLevel);
+        if (!read.ok) {
+          answer({ fileName: held.fileName, reason: read.reason });
+          return;
+        }
+        this.manuscriptReads.set(key, { ...held, read });
+        answer(await this.manuscriptReadAnswer(store, msg.productionId, read));
+        return;
+      }
+      case "import-manuscript": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const key = `${msg.worldId}/${msg.productionId}/${msg.requestId}`;
+        const answer = (extra: Record<string, unknown>) =>
+          this.emit({
+            at: this.nowIso(),
+            type: "manuscript.import-result",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            ...extra,
+          } as DomainEvent);
+        const held = this.manuscriptReads.get(key);
+        if (held === undefined) {
+          answer({ reason: "that manuscript is no longer waiting — pick it again" });
+          return;
+        }
+        try {
+          const made = await importManuscript(store, msg.productionId, held.read, () => this.nowIso());
+          this.manuscriptReads.delete(key);
+          answer({ created: made.created.length, after: made.after });
+        } catch (error) {
+          answer({ reason: error instanceof Error ? error.message : "the manuscript was not imported" });
+        }
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
+      case "cancel-manuscript": {
+        for (const key of this.manuscriptReads.keys()) {
+          if (key.startsWith(`${msg.worldId}/`) && key.endsWith(`/${msg.requestId}`)) this.manuscriptReads.delete(key);
         }
         return;
       }
