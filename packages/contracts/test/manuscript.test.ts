@@ -53,7 +53,7 @@ const para = (text: string, flags: { italic?: true; bold?: true } = {}) => ({ ru
 
 describe("the language an EPUB is marked with (R-52)", () => {
   it("is the subtitles' tag rule, with no subtag said twice (codex on PR 924)", () => {
-    for (const tag of ["en", "en-GB", "pt-BR", "sr-Latn-RS", "zh-yue-Hant-HK", "en-GB-oed"]) assert.ok(isManuscriptLanguage(tag), tag);
+    for (const tag of ["en", "en-GB", "pt-BR", "sr-Latn-RS", "zh-yue-Hant-HK", "en-GB-oed", "de-DE", "fr-FR", "es-ES"]) assert.ok(isManuscriptLanguage(tag), tag);
     for (const tag of ["English", "en-US-US", "e", ""]) assert.equal(isManuscriptLanguage(tag), false, tag);
   });
 });

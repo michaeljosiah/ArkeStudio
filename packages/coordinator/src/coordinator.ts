@@ -10878,13 +10878,17 @@ export class Coordinator {
           answer({ reason: "that manuscript is no longer waiting — pick it again" });
           return;
         }
+        // Taken the moment its import is queued (codex on PR 927): a second press before the
+        // first run finishes finds nothing waiting, rather than appending the chapters twice.
+        this.manuscriptReads.delete(key);
         try {
           const run = this.importLane.then(() => importManuscript(store, msg.productionId, held.read, () => this.nowIso()));
           this.importLane = run.catch(() => {});
           const made = await run;
-          this.manuscriptReads.delete(key);
           answer({ created: made.created.length, after: made.after });
         } catch (error) {
+          // Held again, so a refusal can be retried from the same sheet.
+          this.manuscriptReads.set(key, held);
           answer({ reason: error instanceof Error ? error.message : "the manuscript was not imported" });
         }
         await this.refreshWorldSnapshot(msg.worldId);
