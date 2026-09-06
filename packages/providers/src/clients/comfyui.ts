@@ -143,6 +143,15 @@ const INTERNAL_PARAMS = new Set([
   "taskMode",
   "route",
   "framesField",
+  /*
+   * What a first-frame dispatch carries beside its one picture (issue 845): the durable identity
+   * of the still the take opened on, which arrival records and the fal client strips. The frame
+   * itself arrives as `references`/`imageReferences` like any other picture and is bound below;
+   * these two are its audit trail, and a refusal here would have failed every framed shot on the
+   * row the moment it declared the mode.
+   */
+  "startFrame",
+  "frameArtifact",
   "sound",
   /*
    * What the character speaking sample carries beyond the prompt (issue 863): the words it asked
