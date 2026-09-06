@@ -12,6 +12,7 @@ import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { freemem } from "node:os";
 import { join, resolve } from "node:path";
 import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
@@ -692,11 +693,29 @@ async function initialize(): Promise<{ port: number }> {
       );
     });
 
+  /*
+   * How much system memory is free right now, in MB (issue 846).
+   *
+   * The resource a streaming video recipe actually spends: H3's verified runs bottomed under a
+   * gigabyte free of 32, and the start-up probe only ever reads the total. `os.freemem` is the
+   * OS's own available figure — what Task Manager shows — and it is what the walkthrough author's
+   * "free up RAM" button was watching. Async and nullable for the same reasons as the card probe:
+   * the readers treat unknown as dispatchable (SPEC-021 D15), and a remote engine gets null.
+   */
+  const freeMemMb = async (): Promise<number | null> => {
+    try {
+      return Math.floor(freemem() / (1024 * 1024));
+    } catch {
+      return null;
+    }
+  };
+
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
   const comfyUiEngine = new ComfyUiEngineService({
     freeVramMb,
+    freeMemMb,
     appRoot,
     recipes: COMFYUI_RECIPES.map((recipe) => ({
       id: recipe.id,
@@ -708,6 +727,7 @@ async function initialize(): Promise<{ port: number }> {
       minVramMb: recipe.hardware.minVramMb,
       minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
+      ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),
       recommendedVramMb: recipe.hardware.recommendedVramMb,
       checkpoints: recipe.requires.checkpoints,
       customNodes: recipe.requires.customNodes,
@@ -781,6 +801,7 @@ async function initialize(): Promise<{ port: number }> {
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
       // dependency on a socket library for one optional figure.
       freeVramMb,
+      freeMemMb,
       openSocket: (url) => {
         const socket = new WebSocket(url);
         const adapter = {

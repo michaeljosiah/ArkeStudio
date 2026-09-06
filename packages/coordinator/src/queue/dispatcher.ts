@@ -97,6 +97,8 @@ export interface DispatchClient {
   }>;
   fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
+  /** The lane has drained after `model`'s job settled: a local engine may put down what it loaded (issue 846). */
+  release?(model: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** Reconciliation strategy A (SPEC-008 declarations): found → adopt; null → provably absent. */
   lookupByKey?(key: string, idempotencyKey: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<{ remoteId: string } | null>;
   /** Reconciliation strategy B: recent jobs, newest first, carrying the caller's key. */
@@ -567,6 +569,24 @@ export class JobQueue {
     return job;
   }
 
+  /**
+   * The last job in a run has settled and nothing is behind it: ask the engine to put down what
+   * it loaded (issue 846).
+   *
+   * Between two queued jobs the cache is worth keeping — the second would only reload it, a cold
+   * start per line — which is why this reads the lane rather than the job. After the last job the
+   * unload costs nothing extra, because the next run reloads after the idle gap anyway, and what
+   * it gives back is the system memory a long session otherwise never sees again. Fired and
+   * forgotten: the reclaim is a courtesy to the next run, never something a terminal row waits
+   * on, and a failure to ask changes nothing the queue can see.
+   */
+  private releaseLane(lane: Lane, last: Job): void {
+    if (this.disposed) return;
+    const client = this.opts.clients[lane.provider];
+    if (!client?.release) return;
+    void client.release(last.model, { jobId: last.id, attempt: last.attempt, model: last.model }).catch(() => undefined);
+  }
+
   private pump(provider: string): void {
     if (this.disposed) return;
     const lane = this.lane(provider);
@@ -589,6 +609,12 @@ export class JobQueue {
         const current = this.jobs.get(job.id);
         if (current?.status === "queued" && !lane.fifo.includes(job.id)) lane.fifo.push(job.id);
         this.pump(provider);
+        // Read after the pump, not before: a job the pump just started is in flight, and a retry
+        // sitting out its backoff is still in the FIFO. Only a lane with nothing running and
+        // nothing waiting has drained.
+        if (current !== undefined && TERMINAL.has(current.status) && lane.inFlight.size === 0 && lane.fifo.length === 0) {
+          this.releaseLane(lane, current);
+        }
         this.activeRuns.delete(run);
       });
       this.activeRuns.add(run);

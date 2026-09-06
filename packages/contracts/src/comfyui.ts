@@ -182,6 +182,8 @@ export const RecipeReasonKindSchema = z.enum([
   "vram-busy",
   /** System memory is under the recipe's measured floor — the resource offloading spends. */
   "memory",
+  /** The machine clears the memory floor and too little of it is free right now (issue 846). */
+  "memory-busy",
 ]);
 export type RecipeReasonKind = z.infer<typeof RecipeReasonKindSchema>;
 
