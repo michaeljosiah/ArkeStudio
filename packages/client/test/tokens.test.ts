@@ -189,7 +189,11 @@ describe("design tokens", () => {
           // This panel persists only a schema-validated preparation UUID for restart recovery.
           // Strip that storage vocabulary only; provider keys, auth and decryption still fail.
           ? source.replaceAll("localStorage", "")
-          : source;
+          : sourcePath === join("lib", "continuity.ts")
+            // The chapters door remembers which of two views it was on, for the tab's lifetime.
+            // A view name is the only thing stored; the same narrow strip, nothing else relaxed.
+            ? source.replaceAll("sessionStorage", "")
+            : source;
       if (suspicious.test(inspected)) offenders.push(sourcePath);
     }
     assert.deepEqual(offenders, [], `credential-handling code found in: ${offenders.join(", ")}`);
