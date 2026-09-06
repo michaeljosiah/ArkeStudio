@@ -774,7 +774,7 @@ export async function openChapter(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; versions: number[] }> {
+): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; bodyHash: string; versions: number[] }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
@@ -798,7 +798,9 @@ export async function openChapter(
     .map((match) => Number(match[1]))
     .filter((candidate) => candidate >= 1 && candidate < version)
     .sort((a, b) => a - b);
-  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), versions };
+  // The hash of the prose alone beside the file's (turn 129): what a continuity record is keyed
+  // to, normalised exactly as the scanner normalises it for the summary's `bodyHash`.
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), bodyHash: sha256(body), versions };
 }
 
 /**

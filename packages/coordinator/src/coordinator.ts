@@ -238,6 +238,8 @@ import {
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
+import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
+import type { ChapterContinuity } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { materialiseForContinuation } from "./productions/continuation.js";
 
@@ -807,6 +809,8 @@ export interface CoordinatorOptions {
   };
   /** SPEC-015: the extraction model seam; every candidate is re-verified regardless (R-13). */
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
+  /** Turn 129: the continuity model seam; every line and placing is re-verified regardless (SPEC-012 R-40). */
+  continuityDeriver?: ContinuityDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1004,6 +1008,8 @@ export class Coordinator {
   private readonly benchDispatchActions = new Map<string, Promise<void>>();
   /** Documents being read for facts right now, so the reading can be stopped (SPEC-015 §2). */
   private readonly reading = new Map<string, AbortController>();
+  /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
+  private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
    *
@@ -1894,6 +1900,11 @@ export class Coordinator {
         const findings = this.diagnosticsSnapshot?.currentSnapshot();
         if (findings !== undefined) {
           replayed.push({ at: new Date().toISOString(), type: "diagnostics.snapshot", snapshot: findings });
+        }
+        // A run still going when a renderer connects (turn 129, codex on PR 907): replayed as
+        // started, so a reload never hides a paid run from the press that could stop it.
+        for (const run of this.derivingContinuity.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "continuity.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
         return replayed;
       },
@@ -6871,7 +6882,7 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const answer = (
           result:
-            | { disposition: "opened"; body: string; version: number; hash: string; versions: number[] }
+            | { disposition: "opened"; body: string; version: number; hash: string; versions: number[]; continuity?: ChapterContinuity; continuityUnreadable?: true }
             | { disposition: "failed"; reason: string },
         ) =>
           this.emit({
@@ -6889,7 +6900,17 @@ export class Coordinator {
         }
         try {
           const chapter = await openChapter(store, msg.productionId, msg.chapterId);
-          answer({ disposition: "opened", body: chapter.body, version: chapter.version, hash: chapter.hash, versions: chapter.versions });
+          // The lines come with the chapter (turn 129, SPEC-012 R-42); the bundle's summary
+          // carries only the record's stamp and placings.
+          const continuity = await readContinuity(store, msg.productionId, chapter.file);
+          answer({
+            disposition: "opened",
+            body: chapter.body,
+            version: chapter.version,
+            hash: chapter.hash,
+            versions: chapter.versions,
+            ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
+          });
         } catch (err) {
           answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
         }
@@ -10282,6 +10303,88 @@ export class Coordinator {
           finished("failed", 0, 0, err instanceof Error ? err.message.slice(0, 200) : String(err));
         } finally {
           this.reading.delete(msg.artifactId);
+        }
+        return;
+      }
+      case "stop-continuity": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.derivingContinuity.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "derive-continuity": {
+        // Continuity after a chapter (turn 129, SPEC-012 §2.4.1): derived by this press and never
+        // by a save, one run per chapter at a time, stoppable the way extraction is, and every
+        // ending short of derived leaves the last record standing.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        // By world as well as chapter (codex on PR 907): two worlds can share a production and a
+        // file stem, and a run left in one must not shadow the press in the other.
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        // A second press while one runs is a double-click, not a second run.
+        if (this.derivingContinuity.has(key)) return;
+        const control = new AbortController();
+        this.derivingContinuity.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        // A run ends with the world that began it (codex on PR 907): closing the world aborts the
+        // passes still to come, rather than letting them spend on a world nobody is in.
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const finished = (
+          outcome: "derived" | "stopped" | "unavailable" | "failed",
+          counts: { placed: number; dropped: number; omitted: number; cut: number },
+          extra: { reason?: string; record?: ChapterContinuity } = {},
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "continuity.finished",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterId: chapter.id,
+            outcome,
+            ...counts,
+            ...(extra.record !== undefined ? { record: extra.record } : {}),
+            ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
+          });
+        this.emit({
+          at: new Date().toISOString(),
+          type: "continuity.started",
+          worldId: msg.worldId,
+          productionId: msg.productionId,
+          chapterId: chapter.id,
+        });
+        const none = { placed: 0, dropped: 0, omitted: 0, cut: 0 };
+        try {
+          // The seam wins; else the built-in runner when the harness is up, as extraction does.
+          let deriver = this.opts.continuityDeriver ?? null;
+          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            deriver = makeAdapterContinuityDeriver(
+              this.opts.adapter,
+              this.sessionInput,
+              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+            );
+          }
+          if (!deriver) {
+            void this.appLog?.append({ kind: "continuity.unavailable", chapter: chapter.file, reason: "deriving needs the authoring harness running" });
+            finished("unavailable", none, { reason: "the writing service is not running" });
+            return;
+          }
+          const derived = await deriveContinuity(store, msg.productionId, chapter.id, deriver, control.signal);
+          // Published only into a world still open (codex on PR 907): refreshing by id would
+          // reopen the world this run began in over the one the author has since moved to.
+          this.refreshIfStillOpen(store);
+          finished("derived", { placed: derived.placed, dropped: derived.dropped, omitted: derived.omitted, cut: derived.record.cut }, { record: derived.record });
+        } catch (err) {
+          if (control.signal.aborted) {
+            finished("stopped", none);
+            return;
+          }
+          void this.appLog?.append({ kind: "continuity.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          finished("failed", none, { reason: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.derivingContinuity.delete(key);
         }
         return;
       }
@@ -14204,6 +14307,11 @@ export class Coordinator {
           return null;
         }
       },
+      // The record beside a chapter (turn 129), for get_chapter: the bundle has only its stamp.
+      getChapterContinuity: async (productionId, chapterFile) => {
+        const record = await readContinuity(store, productionId, chapterFile);
+        return record === "unreadable" ? null : record;
+      },
       attachments,
       findAttachment: async (lease, id) => {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
@@ -14746,6 +14854,9 @@ export class Coordinator {
       // A sign-in poll racing shutdown would dial a harness the supervisor is stopping.
       this.vendorAuth.stop();
       for (const controller of this.reading.values()) controller.abort();
+      // A continuity run is passes of two-minute turns (turn 129): shutdown aborts it rather
+      // than waiting on every pass (codex on PR 907), and the last record stands.
+      for (const run of this.derivingContinuity.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.

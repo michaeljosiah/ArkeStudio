@@ -180,6 +180,25 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * Deriving continuity for a chapter (turn 129), keyed by `worldId/productionId/chapterId` —
+   * the world too, because two worlds can share a production and a chapter slug and a record
+   * finished in one must never be shown in the other (codex on PR 907). What the panel shows
+   * while one runs and how it ended; the record a run finished with rides here as well.
+   */
+  deriving: Record<
+    string,
+    {
+      state: "deriving" | "derived" | "stopped" | "unavailable" | "failed";
+      placed: number;
+      dropped: number;
+      omitted: number;
+      cut: number;
+      /** The record a derivation finished with, so the open panel has the lines without a second read. */
+      record?: import("@arke-studio/contracts").ChapterContinuity;
+      reason?: string;
+    }
+  >;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -306,6 +325,7 @@ let current: StoreState = {
   setupStatus: null,
   diagnostics: null,
   reading: {},
+  deriving: {},
   archiveNote: null,
   permissions: {},
   askResults: {},
@@ -941,6 +961,7 @@ function handleFrame(json: string): void {
     let buildPlans = current.buildPlans;
     let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
+    let deriving = current.deriving;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
@@ -1193,6 +1214,24 @@ function handleFrame(json: string): void {
           state: event.outcome === "found" ? "found" : event.outcome,
           found: event.found,
           dropped: event.dropped,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "continuity.started") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
+      };
+    } else if (event.type === "continuity.finished") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          placed: event.placed,
+          dropped: event.dropped,
+          omitted: event.omitted,
+          cut: event.cut,
+          ...(event.record !== undefined ? { record: event.record } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
@@ -1483,6 +1522,7 @@ function handleFrame(json: string): void {
       keyArtPlans,
       setupStatus,
       reading,
+      deriving,
       archiveNote,
       permissions,
       askResults,
@@ -3780,6 +3820,20 @@ export function importFolder(worldId: string, sourcePath: string): void {
   send({ kind: "import-folder", worldId, sourcePath });
 }
 
+/** Derive continuity for one chapter (turn 129): a press, never a save. */
+export function deriveContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "derive-continuity", worldId, productionId, chapterFile });
+}
+
+export function stopContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-continuity", worldId, productionId, chapterFile });
+}
+
+/** How each chapter's derivation is going, keyed by `worldId/productionId/chapterId` — the panel reads this. */
+export function useDeriving(): StoreState["deriving"] {
+  return useStore().deriving;
+}
+
 export function extractArtifact(worldId: string, artifactId: string): void {
   send({ kind: "extract-artifact", worldId, artifactId });
 }
@@ -3954,6 +4008,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     setupStatus: null,
     diagnostics: null,
     reading: {},
+  deriving: {},
     archiveNote: null,
     permissions: {},
     askResults: {},

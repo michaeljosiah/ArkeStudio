@@ -444,6 +444,10 @@ const CLIENT_COMMAND_METADATA = {
   "import-folder": action("world", "host-action", "artifact-store", "host-file-access", ["artifacts"], { preparation: ARTIFACT_SOURCE }),
   "extract-artifact": action("world", "generation", "extraction", "external-network-action", ["artifacts", "canon", "sheets"]),
   "stop-extraction": action("world", "command", "extraction", "external-network-action", ["artifacts", "jobs"]),
+  // Continuity (turn 129): a derivation over a chapter's prose in extraction's discipline, kept
+  // beside the chapter and never written into the world's authored files.
+  "derive-continuity": action("production", "generation", "extraction", "external-network-action", ["chapters", "sheets"]),
+  "stop-continuity": action("production", "command", "extraction", "external-network-action", ["chapters"]),
   "resolve-extraction": action("world", "take-review", "proposal-manager", "authored-change", ["artifacts", "canon", "sheets"]),
   "check-updates": readOnly(QUERY),
   "download-update": globalOnly(GLOBAL_OPERATION),

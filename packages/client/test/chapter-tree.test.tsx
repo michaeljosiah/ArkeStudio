@@ -99,3 +99,55 @@ describe("the chapter tree renders resolved order", () => {
     assert.match(html, /3,120 words/, "a drafted chapter shows its words, formatted");
   });
 });
+
+/**
+ * Where everyone is (design turn 129, SPEC-012 R-43): the door's second view, remembered for
+ * the session, computed from the summaries' placings alone.
+ */
+describe("the door's continuity view (turn 129)", () => {
+  const memory = new Map<string, string>();
+  Object.assign(globalThis, {
+    sessionStorage: {
+      getItem: (key: string) => memory.get(key) ?? null,
+      setItem: (key: string, value: string) => void memory.set(key, value),
+    },
+  });
+  const H = (c: string) => `sha256:${c.repeat(64)}`;
+  const record = (hash: string, placed: Array<{ character: string; sheet?: string; present: boolean; where?: string }>) => ({
+    version: 4,
+    hash,
+    derivedAt: "2026-09-06T12:00:00.000Z",
+    passes: 1,
+    dropped: 0,
+    omitted: 0,
+    cut: 0,
+    placed,
+  });
+  const ROWS: ChapterSummary[] = [
+    { ...CHAPTERS[0]!, order: 1, bodyHash: H("a"), continuity: record(H("a"), [{ character: "Maren Kest", sheet: "maren-kest", present: true, where: "The Vigil" }]) },
+    { ...CHAPTERS[1]!, order: 2, bodyHash: H("b"), continuity: record(H("c"), []) },
+    { ...CHAPTERS[2]!, order: 3, bodyHash: H("d") },
+  ];
+
+  it("remembers the view; draws the cast across and the chapters down; carries a cell naming its chapter; stamps each row", () => {
+    memory.set("arke.chapters.view.inkbound", "continuity");
+    const html = render(ROWS);
+    assert.match(html, /Where everyone is/);
+    assert.match(html, /fy-seg__item fy-seg__item--active[^>]*>Continuity/);
+    assert.match(html, /<th[^>]*>Maren Kest<\/th>/, "the cast across");
+    assert.match(html, /The Vigil/);
+    assert.match(html, /since 01/, "carried from the chapter that placed it, naming it");
+    assert.match(html, /derived · v4/);
+    assert.match(html, /chapter moved · derived against v4/);
+    assert.match(html, /not derived/);
+    assert.match(html, /3 chapters, 2 derived/);
+    assert.match(html, /nothing carries past a chapter not derived/);
+    assert.doesNotMatch(html, /role="progressbar"/, "the outline's bar is the outline's");
+
+    memory.set("arke.chapters.view.inkbound", "outline");
+    const outline = render(ROWS);
+    assert.match(outline, /<h1[^>]*>Chapters<\/h1>/);
+    assert.doesNotMatch(outline, /continuity-table/);
+    assert.match(outline, /fy-seg__item fy-seg__item--active[^>]*>Outline/);
+  });
+});

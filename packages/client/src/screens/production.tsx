@@ -212,6 +212,7 @@ import {
   createChapter,
   subscribeChapterCreateResults,
 } from "../lib/store.js";
+import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
 
@@ -2276,16 +2277,48 @@ export function ChapterTreeScreen() {
   const target = targetWords(production?.story?.targetLength);
   // The same "in hand" the dashboard derives: the first chapter with no words yet.
   const inHand = chapters.find((c) => !c.words) ?? null;
+  /*
+   * The door's two views (turn 129): Outline is turn 127's; Continuity is where everyone is,
+   * chapters down and the cast across, computed from the summaries' placings alone. The view
+   * remembers itself for the session.
+   */
+  const [view, setView] = useState<ChaptersView>(() => rememberedChaptersView(prodId));
+  // The screen stays mounted when only the production changes (codex on PR 907): the view is
+  // the production's own, so it is read again for the next one.
+  useEffect(() => {
+    setView(rememberedChaptersView(prodId));
+  }, [prodId]);
+  const choose = (next: ChaptersView) => {
+    setView(next);
+    rememberChaptersView(prodId, next);
+  };
+  const cast = (world?.sheets ?? []).filter(
+    (sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId),
+  );
+  const rows = view === "continuity" ? continuityRows(chapters, cast.map((sheet) => sheet.id)) : [];
+  const derivedCount = chapters.filter((c) => c.continuity !== undefined && !("unreadable" in c.continuity)).length;
+  const placeName = (id: string) => world?.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const pad = (order: number) => String(order).padStart(2, "0");
   return (
     <div className="fy-prodmain" data-screen="chapter-tree">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Chapters</h1>
+        <h1 className="fy-h1">{view === "continuity" ? "Where everyone is" : "Chapters"}</h1>
         <span className="fy-h1row__meta">
           {chapters.length} chapter{chapters.length === 1 ? "" : "s"} · {drafted} drafted ·{" "}
           {target === null
             ? `${bookWords.toLocaleString()} words`
             : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
         </span>
+        {isStory && (
+          <nav className="fy-seg" aria-label="Chapters view">
+            <button type="button" className={cx("fy-seg__item", view === "outline" && "fy-seg__item--active")} onClick={() => choose("outline")}>
+              Outline
+            </button>
+            <button type="button" className={cx("fy-seg__item", view === "continuity" && "fy-seg__item--active")} onClick={() => choose("continuity")}>
+              Continuity
+            </button>
+          </nav>
+        )}
         <span className="fy-h1row__push" />
         {isStory && (
           <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
@@ -2293,12 +2326,83 @@ export function ChapterTreeScreen() {
           </Button>
         )}
       </div>
-      {target !== null && (
+      {view === "outline" && target !== null && (
         <div className="fy-ch__target fy-ch__target--page" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
         </div>
       )}
-      {production && chapters.length > 0 ? (
+      {view === "continuity" && (
+        <div className="fy-cont__meta">
+          after each chapter · derived from the prose, never written into the world · {chapters.length} chapter{chapters.length === 1 ? "" : "s"}, {derivedCount} derived · a
+          quiet cell is carried from the chapter it names · nothing carries past a chapter not derived
+        </div>
+      )}
+      {production && chapters.length > 0 && view === "continuity" ? (
+        <div className="fy-cont" data-testid="continuity-table">
+          <table className="fy-cont__table">
+            <thead>
+              <tr>
+                <th className="fy-cont__th fy-cont__th--chapter">Chapter</th>
+                {cast.map((sheet) => (
+                  <th key={sheet.id} className="fy-cont__th">
+                    {sheet.name}
+                  </th>
+                ))}
+                <th className="fy-cont__th" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const open = () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapter.id)}`);
+                const warn = row.stamp.kind === "stale";
+                return (
+                  <tr
+                    key={row.chapter.id}
+                    className={cx("fy-cont__row", warn && "fy-cont__row--warn")}
+                    role="button"
+                    tabIndex={0}
+                    data-stamp={row.stamp.kind}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        open();
+                      }
+                    }}
+                  >
+                    <td className="fy-cont__chapter">
+                      <span className="fy-mono">{pad(row.chapter.order)}</span>
+                      <span className="fy-cont__title">{row.chapter.title}</span>
+                      <span className="fy-mono">v{row.chapter.version}</span>
+                    </td>
+                    {row.cells.map((cell, i) =>
+                      cell === null || cell.gone || cell.unsure ? (
+                        <td
+                          key={cast[i]!.id}
+                          className={cx("fy-cont__cell fy-cont__cell--none", cell?.warn && "fy-cont__cell--warn")}
+                          {...(cell?.gone
+                            ? { title: `gone since ${pad(cell.since!)}${cell.warn ? " · that chapter moved" : ""}` }
+                            : cell?.unsure
+                              ? { title: "place dropped · the chapter said they moved and could not prove where" }
+                              : {})}
+                        >
+                          —
+                        </td>
+                      ) : (
+                        <td key={cast[i]!.id} className={cx("fy-cont__cell", cell.since !== undefined && "fy-cont__cell--carried", cell.warn && "fy-cont__cell--warn")}>
+                          {placeName(cell.where ?? "")}
+                          {cell.since !== undefined && <span className="fy-cont__since fy-mono">since {pad(cell.since)}</span>}
+                        </td>
+                      ),
+                    )}
+                    <td className={cx("fy-cont__stamp fy-mono", warn && "fy-cont__stamp--warn")}>{continuityRowStamp(row.stamp)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : production && chapters.length > 0 ? (
         <div className="fy-ledger">
           {chapters.map((c) => {
             // The outline (turn 127): the plan under the title, and the overview having moved.

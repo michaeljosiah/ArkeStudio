@@ -7,6 +7,7 @@ import {
   passageOf,
   targetWords,
   type ChangedSpan,
+  type ChapterContinuity,
   type ChapterSummary,
   type ProductionBundle,
   type ProseReadSource,
@@ -17,10 +18,11 @@ import {
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Pin } from "../components/icons.js";
+import { Pin, RotateCcw } from "../components/icons.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { EmptyState, Screen } from "../components/layout.js";
 import { Button } from "../components/ui.js";
+import { continuityStamp } from "../lib/continuity.js";
 import { useProduction } from "../lib/selectors.js";
 import { EditableText, SceneTitle } from "./storyboard.js";
 import {
@@ -33,6 +35,9 @@ import {
   type ChapterSaveResult,
   useStore,
   editChapterPlan,
+  deriveContinuity,
+  stopContinuity,
+  useDeriving,
 } from "../lib/store.js";
 
 /**
@@ -61,7 +66,14 @@ const AUTOSAVE_MS = 1200;
 /** What an empty chapter says. */
 const PLACEHOLDER = "Start here. It saves as you go.";
 
-type OpenedRecord = { body: string; version: number; hash: string; versions: number[] };
+type OpenedRecord = {
+  body: string;
+  version: number;
+  hash: string;
+  versions: number[];
+  /** The continuity record beside the chapter (turn 129), read with it; "unreadable" when one is there but cannot be read. */
+  continuity: ChapterContinuity | "unreadable" | null;
+};
 
 /**
  * A save that must follow one still in flight after the screen is gone (codex, PR 879): the
@@ -244,6 +256,13 @@ export function ChapterWorkspace({
    * `chapter.save-result` with the new hash instead.
    */
   const [record, setRecord] = useState<OpenedRecord | null>(null);
+  /**
+   * The continuity record a derivation finished with (turn 129), held rather than read back off
+   * the store each render: a rerun that fails replaces the store's last word, and the last
+   * record must still stand. A fresh open replaces it (codex on PR 907): what the disk holds now
+   * is the record, whether that is a newer one, none, or one that cannot be read.
+   */
+  const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const [reopen, setReopen] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
@@ -267,6 +286,8 @@ export function ChapterWorkspace({
   const savedText = useRef<string | null>(null);
   /** A read asked for while a save was pending; begun once the save lands (turn 126's fourth rule). */
   const readAfterSave = useRef(false);
+  /** A derivation asked for while a save was pending; sent once the save lands (turn 129, SPEC-012 R-41). */
+  const deriveAfterSave = useRef(false);
   /*
    * The latest record and draft, for callbacks that outlive the render that made them: the
    * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
@@ -295,10 +316,17 @@ export function ChapterWorkspace({
     return subscribeChapterOpenResults((result: ChapterOpenResult) => {
       if (result.requestId !== requestId) return;
       if (result.disposition === "opened" && result.body !== undefined && result.version !== undefined && result.hash !== undefined) {
-        const opened = { body: result.body, version: result.version, hash: result.hash, versions: result.versions ?? [] };
+        const opened: OpenedRecord = {
+          body: result.body,
+          version: result.version,
+          hash: result.hash,
+          versions: result.versions ?? [],
+          continuity: result.continuityUnreadable === true ? "unreadable" : (result.continuity ?? null),
+        };
         const previous = recordRef.current;
         recordRef.current = opened;
         setRecord(opened);
+        setFinishedRecord(null);
         setOpenFailure(null);
         // A draft the transport could not carry goes out now, against the base just read —
         // unless the record moved while it waited, in which case the disk text is the text and
@@ -389,6 +417,9 @@ export function ChapterWorkspace({
           version: result.version,
           hash: result.hash,
           versions: recordRef.current?.versions ?? [],
+          // The record beside the chapter is untouched by a save; the summary's hash moving past
+          // it is what makes it stale (turn 129).
+          continuity: recordRef.current?.continuity ?? null,
         };
         recordRef.current = saved;
         setRecord(saved);
@@ -408,6 +439,12 @@ export function ChapterWorkspace({
           readAfterSave.current = false;
           setReadNow(true);
         }
+        // The press waited for the words to land, so the run reads what landed and never pays
+        // for a record against words the screen had already left behind.
+        if (deriveAfterSave.current) {
+          deriveAfterSave.current = false;
+          deriveContinuity(worldId, prodId, chapter.file);
+        }
       } else {
         // Refused: the file moved underneath the editor. The draft is not merged over it; the
         // chapter is re-read and the disk text adopted, which is what the Bible does on the
@@ -415,6 +452,7 @@ export function ChapterWorkspace({
         setSaving(false);
         queuedDraft.current = null;
         readAfterSave.current = false;
+        deriveAfterSave.current = false;
         setSaveRefusal("the chapter moved · reloaded from disk");
         setReopen((n) => n + 1);
       }
@@ -577,6 +615,58 @@ export function ChapterWorkspace({
   const chapterLabel = `chapter ${String(chapter.order).padStart(2, "0")}`;
   /* The style the book is written in (turn 128), said in one line beside the manuscript. */
   const style = production.proseStyle ?? null;
+
+  /*
+   * After this chapter (turn 129, SPEC-012 §2.4.1): the record beside the chapter, read with it,
+   * and replaced by the one a derivation finishes with, so the lines are here without a second
+   * read. Stale when the summary's hash has moved past the record's — a direct save keeps the
+   * version, so the hash decides. The press flushes the editor first and waits for its save to
+   * land, as Read the chapter does, so a record is never paid for against words the screen had
+   * left behind; a second press while one runs does nothing, and every ending short of derived
+   * leaves the last record standing and says so.
+   */
+  const derivingState = useDeriving()[`${worldId}/${prodId}/${chapter.id}`];
+  useEffect(() => {
+    if (derivingState?.state === "derived" && derivingState.record !== undefined) setFinishedRecord(derivingState.record);
+  }, [derivingState]);
+  const continuity = useMemo((): ChapterContinuity | "unreadable" | null => {
+    const opened = record?.continuity ?? null;
+    if (finishedRecord === null) return opened;
+    if (opened === null || opened === "unreadable" || finishedRecord.derivedAt >= opened.derivedAt) return finishedRecord;
+    return opened;
+  }, [record?.continuity, finishedRecord]);
+  const derivingNow = derivingState?.state === "deriving";
+  const continuityRecord = continuity === "unreadable" ? null : continuity;
+  // The record is keyed to the prose, and the summary carries the prose's own hash (R-39).
+  const continuityStale = continuityRecord !== null && chapter.bodyHash !== undefined && chapter.bodyHash !== continuityRecord.hash;
+  // Every ending short of derived is said where chapter moved is said (codex on PR 907): a
+  // stop as much as a failure, so a press that ended a run sees that it ended.
+  const deriveNote =
+    derivingState?.state === "unavailable" || derivingState?.state === "failed"
+      ? `could not derive · ${derivingState.reason ?? "the run failed"}`
+      : derivingState?.state === "stopped"
+        ? "stopped · the last record stands"
+        : null;
+  const derive = () => {
+    // A record is derived from the saved chapter, never from a draft standing in its place
+    // (codex on PR 907): while one waits the press is disabled, as Read the chapter is.
+    if (derivingNow || locked) return;
+    if (draft !== null && draft !== live) {
+      deriveAfterSave.current = true;
+      flushSave(draft);
+      return;
+    }
+    deriveContinuity(worldId, prodId, chapter.file);
+  };
+  const sheetName = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  // A name the cast did not know when the record was read, and knows now (codex on turn 129):
+  // the record is not stale, and Derive again is how the name becomes a column.
+  const sheetNow = (who: { character: string; sheet?: string }) =>
+    who.sheet === undefined &&
+    world.sheets.some((sheet) => sheet.type === "character" && !sheet.retired && sheet.name.trim().toLowerCase() === who.character.trim().toLowerCase());
+  const named = (who: { character: string; sheet?: string }) => sheetName(who.sheet ?? who.character);
+  const placedFirst = continuityRecord?.characters[0];
+  const placedSecond = continuityRecord?.characters[1] ?? placedFirst;
 
   /*
    * The passage selected (turn 128): the words, which become the dock's subject, and where they
@@ -811,6 +901,75 @@ export function ChapterWorkspace({
             </section>
 
             {/* The style, in one line (turn 128); the cards are on the Overview, where it was settled. */}
+            <section className="fy-bible__panel" data-testid="chapter-continuity">
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                After this chapter
+                <span className="fy-ch__panelpush" />
+                {derivingNow ? (
+                  <span className="fy-ch__deriving">
+                    <span className="fy-mono">deriving…</span>
+                    {/* Stop stands where the press stood (codex on PR 907): a slow or mistaken run
+                        is the author's to end, and a stop leaves the last record standing. */}
+                    <button type="button" className="fy-ch__derive" onClick={() => stopContinuity(worldId, prodId, chapter.file)}>
+                      Stop
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="fy-ch__derive" disabled={locked} onClick={derive}>
+                    <RotateCcw size={11} />
+                    {continuity === null ? "Derive" : "Derive again"}
+                  </button>
+                )}
+              </h2>
+              <p className="fy-ch__scope fy-mono">where they end up · what they learn here</p>
+              {continuity === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Derive again replaces it</div>}
+              {continuityStale && continuityRecord !== null && (
+                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · derived against v{continuityRecord.version}</div>
+              )}
+              {deriveNote !== null && !derivingNow && <div className="fy-ch__moved fy-ch__moved--line">{deriveNote}</div>}
+              {continuityRecord === null ? (
+                continuity === "unreadable" ? null : <p className="fy-bible__empty">Not derived yet.</p>
+              ) : continuityRecord.characters.length === 0 ? (
+                <p className="fy-bible__empty">Nothing placed yet.</p>
+              ) : (
+                <ul className="fy-ch__who">
+                  {continuityRecord.characters.map((who) => (
+                    <li key={who.sheet ?? who.character}>
+                      <div className="fy-ch__who-head">
+                        <span className="fy-ch__who-name">{named(who)}</span>
+                        {who.where !== undefined && (
+                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
+                            <Pin size={10} />
+                            {sheetName(who.where)}
+                          </span>
+                        )}
+                        {!who.present && (
+                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
+                            gone
+                          </span>
+                        )}
+                        {who.unsure && (
+                          <span className="fy-ch__who-where fy-mono" title="the chapter said they moved and could not prove where">
+                            place dropped
+                          </span>
+                        )}
+                        {sheetNow(who) && (
+                          <span className="fy-ch__who-where fy-mono" title="Derive again to make them a column">
+                            has a sheet now
+                          </span>
+                        )}
+                      </div>
+                      {who.knows.slice(0, 3).map((line) => (
+                        <div key={line} className="fy-ch__line">“{line}”</div>
+                      ))}
+                      {who.knows.length > 3 && <div className="fy-ch__line fy-ch__line--more">and {who.knows.length - 3} more</div>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {continuityRecord !== null && <p className="fy-ch__stamp fy-mono">{continuityStamp(continuityRecord)}</p>}
+            </section>
+
             {style !== null && (
               <section className="fy-bible__panel" data-testid="chapter-style">
                 <h2 className="fy-bible__paneltitle">Style</h2>
@@ -957,9 +1116,15 @@ export function ChapterWorkspace({
             // are a revision's (turn 128), and the passage is the subject.
             // Holding against the style is a reply and nothing else: the send says so, and the
             // coordinator refuses any action the turn comes back with.
+            // Under a derived chapter the prompts are questions the record can answer (turn 129);
+            // under a stale one, the press that reads again and a question the prose answers.
             prompts: passage !== null
               ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
-              : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
+              : continuityRecord !== null && continuityStale
+                ? [{ label: "Derive again", press: derive }, "Who is in this chapter?"]
+                : continuityRecord !== null && placedFirst !== undefined
+                  ? [`What does ${named(placedFirst)} learn here?`, `Where is ${named(placedSecond ?? placedFirst)} now?`]
+                  : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.
             subjectPrefix: passage !== null

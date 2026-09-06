@@ -552,6 +552,120 @@ export type ChapterFrontmatter = z.infer<typeof ChapterFrontmatterSchema>;
  * not have to match it (fixture chapters are `01-neap.md` with `id: neap`). Prose is the body and
  * is not carried on the summary.
  */
+/**
+ * Continuity after a chapter (design turn 129, SPEC-012 §2.4.1): who is where and what they
+ * learn, derived from the prose in SPEC-015's extraction discipline and never authored. Each
+ * `knows` entry, and each `placed`, is a span of the chapter verified character for character
+ * — the quote is the line, so what the panel shows is what the check proved (R-40). Keyed to
+ * the chapter's `version` and body `hash`; the hash decides staleness, because a direct save
+ * keeps the version (R-39). The read schema bounds nothing; the derivation enforces the sizes
+ * turn 129 fixes (12 characters, 6 lines of 300) and counts what it cut.
+ */
+export const ChapterContinuityCharacterSchema = z
+  .object({
+    /** The name as the chapter gives it. */
+    character: z.string().min(1),
+    /** The cast's sheet, when one matches by id or name; a slug-shaped name is never mistaken for one. */
+    sheet: SlugSchema.optional(),
+    /** False only when the chapter says they have gone, evidenced by `placed` like a placing, with no `where`. */
+    present: z.boolean(),
+    /** A placing or a departure the check dropped: the chapter said they moved and could not prove where. Carried as nothing. */
+    unsure: z.literal(true).optional(),
+    /** A location slug, or the chapter's own words. */
+    where: z.string().optional(),
+    /** The span of the chapter that puts them where `where` says, or that says they have gone; without one, the claim is dropped. */
+    placed: z.string().optional(),
+    knows: z.array(z.string().min(1)),
+  })
+  .strict()
+  // A place, or a departure, with no words of the chapter behind it is no record of either,
+  // and a departure has no place (codex on PR 907): a file that claims otherwise is unreadable,
+  // not a source for the table.
+  .refine(
+    (entry) =>
+      entry.unsure
+        ? entry.present && entry.where === undefined && entry.placed === undefined
+        : entry.present
+          ? entry.where === undefined || (entry.placed !== undefined && entry.placed.length > 0)
+          : entry.where === undefined && entry.placed !== undefined && entry.placed.length > 0,
+    { message: "a placing or a departure needs the span of the chapter behind it; a departure has no place, and neither does an unsure entry" },
+  );
+export const ChapterContinuitySchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** The hash of the prose read — the body, not the file — compared with the summary's `bodyHash` (R-39). */
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    /** Passes the chapter was read in (R-41): one, unless it was longer than the model's window. */
+    passes: z.number().int().min(1),
+    /** Lines and placings the check dropped for not being in the chapter, counted so the stamp can say so. */
+    dropped: z.number().int().min(0),
+    /** Characters beyond the cap, counted rather than silently cut (R-40). */
+    omitted: z.number().int().min(0),
+    /** Lines beyond a character's sixth, verified or not, counted rather than silently cut (R-40). */
+    cut: z.number().int().min(0),
+    characters: z.array(ChapterContinuityCharacterSchema),
+  })
+  .strict();
+export type ChapterContinuity = z.infer<typeof ChapterContinuitySchema>;
+export type ChapterContinuityCharacter = z.infer<typeof ChapterContinuityCharacterSchema>;
+
+/**
+ * The stamp and the placings, which is all the bundle carries (R-42): what the continuity table
+ * needs, and nothing a snapshot broadcast after every autosave should carry a book's worth of.
+ * The lines travel with the chapter on open and on the finished event.
+ */
+export const ChapterContinuitySummarySchema = z
+  .object({
+    version: z.number().int().min(1),
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    dropped: z.number().int().min(0),
+    omitted: z.number().int().min(0),
+    cut: z.number().int().min(0),
+    placed: z.array(
+      z
+        .object({
+          character: z.string().min(1),
+          sheet: SlugSchema.optional(),
+          present: z.boolean(),
+          unsure: z.literal(true).optional(),
+          where: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ChapterContinuitySummary = z.infer<typeof ChapterContinuitySummarySchema>;
+
+/**
+ * A record on disk that cannot be read — cut short, hand-edited, or written by a newer build —
+ * is not no record: it is a paid run the author may want to keep, so the summary says so and
+ * only a derivation replaces it. Nothing deletes it.
+ */
+export const ChapterContinuityStateSchema = z.union([ChapterContinuitySummarySchema, z.object({ unreadable: z.literal(true) }).strict()]);
+export type ChapterContinuityState = z.infer<typeof ChapterContinuityStateSchema>;
+
+export function summariseContinuity(record: ChapterContinuity): ChapterContinuitySummary {
+  return {
+    version: record.version,
+    hash: record.hash,
+    derivedAt: record.derivedAt,
+    passes: record.passes,
+    dropped: record.dropped,
+    omitted: record.omitted,
+    cut: record.cut,
+    placed: record.characters.map((entry) => ({
+      character: entry.character,
+      ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}),
+      present: entry.present,
+      ...(entry.unsure ? { unsure: true as const } : {}),
+      ...(entry.where !== undefined ? { where: entry.where } : {}),
+    })),
+  };
+}
+
 export const ChapterSummarySchema = z
   .object({
     id: SlugSchema,
@@ -566,6 +680,13 @@ export const ChapterSummarySchema = z
      * and what says a direct save moved the chapter while its version stayed.
      */
     hash: z.string().optional(),
+    /**
+     * The hash of the prose alone (turn 129, SPEC-012 R-39): what a continuity record is keyed
+     * to, so a plan typed into the frontmatter moves the file's hash and not this one.
+     */
+    bodyHash: z.string().optional(),
+    /** The stamp and the placings of the continuity record beside the chapter (turn 129), when one has been derived — or that the one there cannot be read. */
+    continuity: ChapterContinuityStateSchema.optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({
