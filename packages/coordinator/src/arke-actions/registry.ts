@@ -770,7 +770,7 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-chapter": {
     kind: "world-chat-production-chapter",
     schema: WorldChatProductionChapterActionSchema,
-    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters"]),
+    ...action("production", "authored-diff", "proposal-manager", "authored-change", ["chapters", "story"]),
   },
   "world-chat-production-scene": {
     kind: "world-chat-production-scene",

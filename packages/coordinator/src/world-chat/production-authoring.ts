@@ -75,9 +75,15 @@ export function replacePassage(
 ): string {
   if (passage.paragraph !== undefined) {
     const span = paragraphSpans(body)[passage.paragraph - 1];
-    const within = span === undefined ? -1 : body.slice(span.start, span.end).indexOf(passage.find);
+    const paragraph = span === undefined ? "" : body.slice(span.start, span.end);
+    const within = paragraph.indexOf(passage.find);
     if (span === undefined || within < 0) {
       throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+    }
+    // Still exactly once inside the paragraph (codex, round two): a twin left standing after
+    // the selected copy was typed over is exactly the wrong one to change.
+    if (paragraph.indexOf(passage.find, within + passage.find.length) >= 0) {
+      throw new Error(`that passage occurs more than once in paragraph ${passage.paragraph} of ${label} · quote more of it`);
     }
     const at = span.start + within;
     return body.slice(0, at) + passage.with + body.slice(at + passage.find.length);

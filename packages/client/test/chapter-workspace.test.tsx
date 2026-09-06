@@ -380,6 +380,8 @@ describe("the craft loop (turn 128)", () => {
     assert.equal(passageSubject("one two"), null, "under three words");
     assert.equal(passageSubject("  one two three  "), "one two three");
     assert.equal(passageSubject(`one two ${"x".repeat(1_200)}`), null, "over 1,200 characters");
+    assert.equal(passageSubject("one two\n\nthree four"), null, "across a paragraph: it could never be found where it will be looked for");
+    assert.equal(passageSubject("one two\nthree four"), "one two\nthree four", "a line break inside a paragraph is still one paragraph");
     assert.deepEqual(paragraphSpans("A b.\n\nC d."), [
       { text: "A b.", start: 0, end: 4 },
       { text: "C d.", start: 6, end: 10 },

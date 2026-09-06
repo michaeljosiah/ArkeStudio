@@ -181,12 +181,15 @@ export function stagedChapterDraft(
 const PASSAGE_MAX = 1_200;
 
 /**
- * The selection as a subject, or null when it is not one (turn 128): three words or more and at
- * most 1,200 characters. Under or over, nothing is offered, and the reason is not on the screen.
+ * The selection as a subject, or null when it is not one (turn 128): three words or more, at
+ * most 1,200 characters, and inside one paragraph — that is where the coordinator will look for
+ * it, so a selection across a blank line could never be found. Under, over or across, nothing is
+ * offered, and the reason is not on the screen.
  */
 export function passageSubject(text: string | null): string | null {
   const trimmed = text?.trim() ?? "";
   if (trimmed === "" || countWords(trimmed) < 3 || trimmed.length > PASSAGE_MAX) return null;
+  if (/\r?\n[ \t]*\r?\n/.test(trimmed)) return null;
   return trimmed;
 }
 
@@ -587,7 +590,11 @@ export function ChapterWorkspace({
   const onSelect = useCallback((text: string | null, paragraph: number | null = null) => {
     const subject = passageSubject(text);
     setSelection(subject === null ? null : { text: subject, paragraph, ...askAt(manuscriptRef.current) });
-  }, []);
+    // A subject flushes the pending autosave, as Read the chapter does (codex on turn 128): the
+    // words the thread hears must be the words the coordinator will find, and an ask sent inside
+    // the autosave window would otherwise quote prose the file does not hold yet.
+    if (subject !== null && timer.current !== null && draftRef.current !== null) flushSave(draftRef.current);
+  }, [flushSave]);
   // The words come from the text the editor holds, not the element's value: the two are the same
   // string in a browser, and only the first is there under test.
   const onTextareaSelect = (e: { currentTarget: HTMLTextAreaElement }) => {

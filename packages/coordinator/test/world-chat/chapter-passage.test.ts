@@ -98,6 +98,10 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
     assert.equal(replacePassage(body, { find: "Maren", with: "Ines", paragraph: 3 }, "chapter 01"), body.replace("Maren is not", "Ines is not"), "the third paragraph's occurrence, not the second's");
     assert.throws(() => replacePassage(body, { find: "Maren", with: "Ines", paragraph: 1 }, "chapter 01"), /that passage is not in paragraph 1 of chapter 01 as it stands/);
     assert.throws(() => replacePassage(body, { find: "Maren", with: "Ines", paragraph: 9 }, "chapter 01"), /not in paragraph 9 of chapter 01/, "a paragraph the chapter no longer has");
+    // Still exactly once inside the paragraph (codex, round two): a twin is never the one selected.
+    const twins = "Maren looked at Maren in the glass.\n\nThe tide came.";
+    assert.throws(() => replacePassage(twins, { find: "Maren", with: "Ines", paragraph: 1 }, "chapter 01"), /occurs more than once in paragraph 1 of chapter 01 · quote more of it/);
+    assert.equal(replacePassage(twins, { find: "at Maren", with: "at Ines", paragraph: 1 }, "chapter 01"), "Maren looked at Ines in the glass.\n\nThe tide came.");
     const proposal = await anchored(2);
     assert.match(proposal.summary, /^Revise a passage/);
     await assert.rejects(() => anchored(1), /not in paragraph 1 of chapter 01 as it stands · read the chapter again/);

@@ -423,7 +423,9 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-prose-style": ["story"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
-  "production-chapter": ["chapters"],
+  // The story read carries the prose style (turn 128): a draft or a revision that never saw it
+  // cannot be said to hold to it, so the read is required, not hoped for.
+  "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "production-chapter-order": ["chapters"],
@@ -571,6 +573,7 @@ function productionActionTargets(
       const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
       return [
         { requirement: "chapters", target: action.productionId },
+        { requirement: "story", target: action.productionId },
         ...(draws
           ? [
               { requirement: "sheets" as const, target: worldId },

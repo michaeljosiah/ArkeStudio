@@ -2069,7 +2069,7 @@ function OverviewStoryScreen() {
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
           </div>
-          <h1 className="fy-story__h1">{story ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
               there is more than one — a page read of a lone logline is that card's own press. */}
           {pageBlocks.length > 1 && (
@@ -2079,7 +2079,9 @@ function OverviewStoryScreen() {
           )}
         </div>
         <div className="fy-story__log">
-          {story ? (
+          {/* A style can be settled before an overview is (codex on turn 128): either is enough
+              for the page to have something to draw. */}
+          {story || style ? (
             <div style={{ display: "grid", gap: 14 }}>
               {/*
                 The overview is one document, and its cards are the blocks it is read in
@@ -2087,15 +2089,17 @@ function OverviewStoryScreen() {
                 a logline and a treatment are not the same length of listen, and the press should
                 say which of them it is starting.
               */}
-              <div className="fy-draftcard fy-texthost">
-                <div className="fy-eyebrow-sm">LOGLINE</div>
-                <div className="fy-draftcard__logline">“{story.logline}”</div>
-                <ReadAloud
-                  source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
-                  title={`${production?.meta.title ?? "Overview"} · logline`}
-                  text={story.logline ?? ""}
-                />
-              </div>
+              {story && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">LOGLINE</div>
+                  <div className="fy-draftcard__logline">“{story.logline}”</div>
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
+                    title={`${production?.meta.title ?? "Overview"} · logline`}
+                    text={story.logline ?? ""}
+                  />
+                </div>
+              )}
               {spineLines.length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">SPINE</div>
@@ -2107,14 +2111,14 @@ function OverviewStoryScreen() {
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "spine" }}
                     title={`${production?.meta.title ?? "Overview"} · spine`}
-                    text={story.spine ?? ""}
+                    text={story?.spine ?? ""}
                   />
                 </div>
               )}
-              {(story.acts ?? []).length > 0 && (
+              {(story?.acts ?? []).length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">ACTS</div>
-                  {(story.acts ?? []).map((act, i) => (
+                  {(story?.acts ?? []).map((act, i) => (
                     <div key={act.title} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
                       {i + 1}. {act.title}
                       {act.summary ? ` — ${act.summary}` : ""}
@@ -2123,7 +2127,7 @@ function OverviewStoryScreen() {
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "acts" }}
                     title={`${production?.meta.title ?? "Overview"} · acts`}
-                    text={(story.acts ?? [])
+                    text={(story?.acts ?? [])
                       .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
                       .join(" ")}
                   />
