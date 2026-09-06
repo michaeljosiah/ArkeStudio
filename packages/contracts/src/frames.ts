@@ -181,6 +181,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
+  /**
+   * The same, read as a page (issue 859).
+   *
+   * A production overview is one document whose cards are its blocks, and a season record is
+   * three answers on one line — read through, they are a listen rather than four or three
+   * presses. The list is the screen's, in the order the screen draws it: nothing here works out
+   * what a page contains, because a page's shape is the thing only the screen knows.
+   *
+   * One frame carrying the ordered list, for the reasons `read-sheet-page` gives: several local
+   * syntheses started in the same tick fell the one on-device model, and a page's price can only
+   * be stated once if the whole page is asked for at once.
+   */
+  z
+    .object({
+      kind: z.literal("read-prose-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      /** Addresses, never words — the same rule one source at a time already follows. */
+      sources: z.array(ProseReadSourceSchema).min(1).max(12),
+      confirmationToken: z.string().min(1).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("read-bible-section"),

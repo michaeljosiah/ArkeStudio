@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import type { ClientMessage, ClientState, DomainEvent } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -60,7 +60,7 @@ interface Screen {
   sent: ClientMessage[];
 }
 
-async function openSheet(): Promise<Screen> {
+async function open(path: string, state: ClientState = FIXTURE_STATE): Promise<Screen> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({
     appVersion: "test",
@@ -69,14 +69,14 @@ async function openSheet(): Promise<Screen> {
     subscribe: () => {},
     send: (json: string) => sent.push(JSON.parse(json) as ClientMessage),
   } as unknown as ArkeBridge);
-  __setStateForTest(FIXTURE_STATE);
+  __setStateForTest(state);
   setAudioFactoryForTest(() => fakeAudio() as never);
   const container = dom.document.createElement("div");
   dom.document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
     root.render(
-      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/${SHEET}`]}>
+      <MemoryRouter initialEntries={[path]}>
         <App />
       </MemoryRouter>,
     );
@@ -136,7 +136,7 @@ function block(requestId: string, part: number, heading: string): DomainEvent {
 
 describe("a character sheet reads at two scales", () => {
   it("reads the declared blocks in order, states the position, and stops when the page is left", async () => {
-    const screen = await openSheet();
+    const screen = await open(`/w/${FIXTURE_WORLD_ID}/cast/${SHEET}`);
     try {
       await press(screen, "Read the sheet");
       const asked = screen.sent.at(-1) as { kind: string; sheetId: string; sections: string[]; requestId: string };
@@ -161,7 +161,7 @@ describe("a character sheet reads at two scales", () => {
   });
 
   it("states the page's price once before any of it sounds, and takes one answer", async () => {
-    const screen = await openSheet();
+    const screen = await open(`/w/${FIXTURE_WORLD_ID}/cast/${SHEET}`);
     try {
       await press(screen, "Read the sheet");
       const asked = screen.sent.at(-1) as { requestId: string };
@@ -204,6 +204,48 @@ describe("a character sheet reads at two scales", () => {
           node.textContent?.startsWith("Confirm "),
         ),
         false,
+      );
+    } finally {
+      await close(screen);
+    }
+  });
+});
+
+/** The fixture production settles nothing, so the overview needs a story to be one document. */
+function withStory(): ClientState {
+  const world = FIXTURE_STATE.world!;
+  const production = world.productions[0]!;
+  return {
+    ...FIXTURE_STATE,
+    world: {
+      ...world,
+      productions: [
+        {
+          ...production,
+          story: {
+            version: 2,
+            logline: "One night on the Vigil, the verse rises early.",
+            spine: "A tide-caller takes an ordinary watch and finds the water a hand-span wrong.",
+            acts: [{ title: "Dusk · the watch", summary: "Maren alone on the rail." }],
+            targetLength: "short film · 11 minutes",
+          },
+        },
+        ...world.productions.slice(1),
+      ],
+    },
+  } as ClientState;
+}
+
+describe("the overview reads as one document", () => {
+  it("asks for its cards in the order it draws them, and leaves out what is not settled", async () => {
+    const screen = await open(`/w/${FIXTURE_WORLD_ID}/p/saltlight/overview`, withStory());
+    try {
+      await press(screen, "Read the overview");
+      const asked = screen.sent.at(-1) as { kind: string; sources: { of: string; field?: string }[] };
+      assert.equal(asked.kind, "read-prose-page");
+      assert.deepEqual(
+        asked.sources.map((source) => `${source.of}:${source.field}`),
+        ["story:logline", "story:spine", "story:acts", "story:treatment"],
       );
     } finally {
       await close(screen);

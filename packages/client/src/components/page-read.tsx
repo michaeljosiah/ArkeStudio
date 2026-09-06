@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { formatMicroUsd } from "@arke-studio/contracts";
+import { DEFAULT_NARRATOR, formatMicroUsd, supportsVoiceUse, type ProseReadSource } from "@arke-studio/contracts";
 import {
   clearQueue,
   dismissPlayback,
@@ -8,7 +8,7 @@ import {
   playbackSnapshot,
   useQueueAt,
 } from "../lib/audio.js";
-import { useVoiceAudio, useVoiceParts } from "../lib/store.js";
+import { readProsePage, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { Button } from "./ui.js";
 
@@ -148,6 +148,44 @@ export function usePageRead(input: {
       if (at !== null) jumpQueue(at + direction);
     },
   };
+}
+
+/**
+ * The page read for a screen whose blocks are prose addresses rather than sheet sections.
+ *
+ * An overview's cards and a season's answers already carry a speaker each (issue 857); this is
+ * the same list read through. The screen declares the blocks and their order and nothing else —
+ * the narrator's name, the world it belongs to and the queueing are the same everywhere.
+ */
+export function useProsePageRead(input: {
+  pageId: string | undefined;
+  /** What the dock calls the read; the block's own heading is added to it. */
+  title: string;
+  blocks: readonly (PageReadBlock & { source: ProseReadSource })[];
+}): PageRead {
+  const { state } = useStore();
+  const world = state?.world ?? null;
+  // Never a cloned voice: the app's reading voice is not somebody's cloned identity, and a
+  // narrator that fails that rule falls back to the shipped local one rather than being named.
+  const narrator = state?.app.narrator ?? null;
+  const narratorLabel =
+    narrator && !supportsVoiceUse(narrator, "narration")
+      ? DEFAULT_NARRATOR.label
+      : (narrator?.label ?? narrator?.voiceId ?? DEFAULT_NARRATOR.label);
+  return usePageRead({
+    pageId: input.pageId,
+    title: input.title,
+    narratorLabel,
+    worldSlug: world?.meta.slug,
+    blocks: input.blocks,
+    start: (requestId, confirmationToken) =>
+      readProsePage(
+        world?.meta.worldId ?? "",
+        input.blocks.map((block) => block.source),
+        requestId,
+        confirmationToken,
+      ),
+  });
 }
 
 const ROW = { display: "inline-flex", alignItems: "center", gap: "var(--space-2)" } as const;

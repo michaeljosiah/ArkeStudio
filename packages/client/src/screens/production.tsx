@@ -1,5 +1,5 @@
 import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
-import { resolvedAuthoredDuration } from "@arke-studio/contracts";
+import { resolvedAuthoredDuration, type ProseReadSource } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
@@ -122,6 +122,7 @@ import { AppChrome } from "../components/chrome.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { Composer } from "../components/composer.js";
 import { ReadAloud } from "../components/read-aloud.js";
+import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { productionModel } from "../components/dispatch-bar.js";
@@ -1955,6 +1956,32 @@ function OverviewStoryScreen() {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
+  /*
+   * The overview is one document, so it is also one listen (issue 859).
+   *
+   * The cards below each carry their own speaker; this reads them through in the order they are
+   * drawn. Declared here rather than taken from the page, because the page is cards, headings
+   * and a composer, and only this list says which of it is the document.
+   */
+  const actsSpoken = (story?.acts ?? [])
+    .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
+    .join(" ");
+  const overviewTitle = production?.meta.title ?? "Overview";
+  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = (
+    [
+      ["logline", "Logline", story?.logline ?? ""],
+      ["spine", "Spine", story?.spine ?? ""],
+      ["acts", "Acts", actsSpoken],
+      ["treatment", "Treatment", production?.treatment ?? ""],
+    ] as const
+  )
+    .filter(([, , body]) => body.trim() !== "")
+    .map(([field, heading, body]) => ({
+      heading,
+      body,
+      source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
+    }));
+  const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
   return (
     <div className="fy-story" data-screen="story-overview">
       {/* The details, not a conversation (turn 88): what the thread settled, read and worked
@@ -1965,6 +1992,13 @@ function OverviewStoryScreen() {
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
           </div>
           <h1 className="fy-story__h1">{story ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
+              there is more than one — a page read of a lone logline is that card's own press. */}
+          {pageBlocks.length > 1 && (
+            <div style={{ marginTop: 10 }}>
+              <PageReadControl read={pageRead} label="Read the overview" />
+            </div>
+          )}
         </div>
         <div className="fy-story__log">
           {story ? (

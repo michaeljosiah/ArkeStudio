@@ -2872,6 +2872,28 @@ export function readProse(
   return requestId;
 }
 
+/**
+ * The same prose, read as a page (issue 859) — the screen's ordered list in one frame.
+ *
+ * One frame rather than one per block: handlers run concurrently, so a loop of sends would start
+ * several local syntheses at once, and the page's price could only be stated a block at a time.
+ */
+export function readProsePage(
+  worldId: string,
+  sources: readonly ProseReadSource[],
+  requestId = queueRequest("read-prose-page"),
+  confirmationToken?: string,
+): string {
+  send({
+    kind: "read-prose-page",
+    worldId,
+    sources: [...sources],
+    requestId,
+    ...(confirmationToken ? { confirmationToken } : {}),
+  });
+  return requestId;
+}
+
 export function transcribeDictation(requestId: string, audioBase64: string, contentType: string): void {
   send({ kind: "transcribe-dictation", requestId, audioBase64, contentType });
 }

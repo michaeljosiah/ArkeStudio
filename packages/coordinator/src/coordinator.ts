@@ -87,6 +87,7 @@ import {
   type FrameRunQuote,
   type FrameRunState,
   voiceJobFormat,
+  type ProseReadSource,
   voiceJobReadIdentity,
   voiceJobPart,
   voiceJobIsCandidatePreview,
@@ -1065,6 +1066,28 @@ export class Coordinator {
    * meant two copies of a confirmation-token path that decides whether money is spent, and the
    * second copy would have drifted.
    */
+  /**
+   * The words behind one prose address (issue 857), for a single read and for a page of them.
+   *
+   * Every arm but one is a pure function of the bundle. A conversation is an event log rather
+   * than part of it, so `reply` loads: the window is the default one the screen was drawn from,
+   * and a reply that has paged out of it refuses rather than reading a different message,
+   * because the id is the only thing that says which reply was asked for.
+   */
+  private async resolveProse(
+    store: WorldStore,
+    source: ProseReadSource,
+  ): Promise<{ text: string; heading: string; version: number; subjectId: string }> {
+    if (source.of !== "reply") return authoritativeProseSpeech(store.getBundle(), source);
+    const loaded = await new WorldChatService(store.dir).load(source.conversationId);
+    const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
+    if (!message) throw new Error("That reply is no longer in this conversation.");
+    if (message.role !== "studio") throw new Error("Only Arke's replies are read aloud.");
+    const text = normalizeSpeechText(message.text);
+    if (!text) throw new Error("Nothing to read yet.");
+    return { text, heading: "Arke", version: 1, subjectId: source.messageId };
+  }
+
   private async narrateSection(input: {
     store: WorldStore;
     /** The frame that asked, for the enqueue record. */
@@ -1080,7 +1103,7 @@ export class Coordinator {
      * is a position in the page rather than in a synthesis it cannot see. One block is the
      * per-block read, unchanged in every respect.
      */
-    blocks: readonly { heading: string; text: string }[];
+    blocks: readonly { heading: string; text: string; subjectId?: string }[];
     purpose: "sheet-section" | "sheet-page" | "bible-section" | "prose";
     /** What is being read, for the cache key and the queue target. `bible` for the bible. */
     subject: { id: string; version: number };
@@ -1240,7 +1263,7 @@ export class Coordinator {
         kind: "voice-preview",
         // The heading keeps a page's blocks apart. They differ only in their words, and one
         // target for all of them would be one job for all of them.
-        id: `${subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
+        id: `${blocks[index]!.subjectId ?? subject.id}/${model.provider}/${model.id}/${speaking.voiceId}${page ? `/${blocks[index]!.heading}` : ""}`,
       },
       capability: "voice-tts",
       provider: model.provider,
@@ -10593,26 +10616,9 @@ export class Coordinator {
             estimatedMicroUsd: 0,
             error,
           } as DomainEvent);
-        const source = msg.source;
         let resolved: { text: string; heading: string; version: number; subjectId: string };
         try {
-          if (source.of === "reply") {
-            /*
-             * A conversation is an event log, not part of the world bundle, so this one arm
-             * loads. The window is the default one the screen was drawn from; a reply that has
-             * paged out of it refuses rather than reading a different message, because the id
-             * is the only thing that says which reply was asked for.
-             */
-            const loaded = await new WorldChatService(store.dir).load(source.conversationId);
-            const message = loaded?.messages.find((candidate) => candidate.id === source.messageId);
-            if (!message) throw new Error("That reply is no longer in this conversation.");
-            if (message.role !== "studio") throw new Error("Only Arke's replies are read aloud.");
-            const text = normalizeSpeechText(message.text);
-            if (!text) throw new Error("Nothing to read yet.");
-            resolved = { text, heading: "Arke", version: 1, subjectId: source.messageId };
-          } else {
-            resolved = authoritativeProseSpeech(store.getBundle(), source);
-          }
+          resolved = await this.resolveProse(store, msg.source);
         } catch (error) {
           failProse(error instanceof Error ? error.message : "Read aloud is unavailable.");
           return;
@@ -10627,6 +10633,71 @@ export class Coordinator {
           purpose: "prose",
           subject: { id: resolved.subjectId, version: resolved.version },
           fail: (error, characters) => failProse(error, characters, resolved.heading),
+        });
+        return;
+      }
+      case "read-prose-page": {
+        /*
+         * A page of prose, read in the order the screen declared (issue 859).
+         *
+         * An overview's cards and a season's answers are one document each; read through, they
+         * are a listen rather than four presses. Each source resolves the same way a single
+         * prose read does — the words never travel — and one that no longer resolves drops out
+         * rather than refusing the page, because a season with no ending written yet still has
+         * a question worth hearing.
+         */
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId || !this.voiceService) return;
+        const failPage = (error: string, characters = 0) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voice.audio",
+            requestId: msg.requestId,
+            worldId: msg.worldId,
+            sheetVersion: 1,
+            purpose: "prose",
+            provider: "kokoro",
+            model: "kokoro-82m",
+            voiceId: "unassigned",
+            format: "wav",
+            status: "failed",
+            file: null,
+            cached: false,
+            characterCount: characters,
+            estimatedMicroUsd: 0,
+            error,
+          } as DomainEvent);
+        const blocks: { heading: string; text: string; subjectId: string }[] = [];
+        let version = 1;
+        for (const source of msg.sources) {
+          try {
+            const one = await this.resolveProse(store, source);
+            blocks.push({ heading: one.heading, text: one.text, subjectId: one.subjectId });
+            version = Math.max(version, one.version);
+          } catch {
+            /* not part of the page */
+          }
+        }
+        if (blocks.length === 0) {
+          failPage("Nothing to read yet.");
+          return;
+        }
+        await this.narrateSection({
+          store,
+          frameKind: msg.kind,
+          worldId: msg.worldId,
+          requestId: msg.requestId,
+          ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+          blocks,
+          purpose: "prose",
+          /*
+           * The page is named by its first block and the newest version any of them carries.
+           * That is only what the approval token is hashed over, and the token also covers every
+           * file the page would synthesise — so two pages sharing an opening block still ask
+           * separately. Each block keeps its own subject for its own queue row.
+           */
+          subject: { id: blocks[0]!.subjectId, version },
+          fail: failPage,
         });
         return;
       }

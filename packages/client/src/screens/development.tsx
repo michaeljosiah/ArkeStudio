@@ -10,12 +10,14 @@ import {
   type ProductionBundle,
   type SceneRecord,
   type SeasonFinding,
+  type ProseReadSource,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../lib/media.js";
 import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
 import { ReadAloud } from "../components/read-aloud.js";
+import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
@@ -208,6 +210,40 @@ function SeasonTile({
 export function DevelopmentWorkspace() {
   const { worldId, prodId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
+  const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
+  /*
+   * The season record is one document — the question, the ending, and the engine it inherits —
+   * so it is also one listen (issue 859). The order is the row's, left to right; an answer
+   * nobody has written yet never enters, so the page cannot announce a heading and then say
+   * "not settled yet". Declared above the guard below because it is a hook, and a hook that
+   * runs only for a production that has opened would run on some renders and not others.
+   */
+  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = [
+    {
+      heading: "The question it answers",
+      body: production?.season?.question ?? "",
+      source: { of: "season", productionId: prodId ?? "", field: "question" } as ProseReadSource,
+    },
+    {
+      heading: "How it ends",
+      body: production?.season?.ending ?? "",
+      source: { of: "season", productionId: prodId ?? "", field: "ending" } as ProseReadSource,
+    },
+    ...(series
+      ? [
+          {
+            heading: "Series engine",
+            body: series.engine ?? "",
+            source: { of: "series", seriesId: series.id } as ProseReadSource,
+          },
+        ]
+      : []),
+  ].filter((block) => block.body.trim() !== "");
+  const pageRead = useProsePageRead({
+    pageId: prodId,
+    title: production?.meta.title ?? "Season",
+    blocks: pageBlocks,
+  });
   if (!production) {
     return (
       <div className="fy-prodmain" data-screen="development">
@@ -222,7 +258,6 @@ export function DevelopmentWorkspace() {
   // that many wide from the start — never however many happen to exist.
   const declared = Math.max(defaults?.episodeCount ?? 0, episodes.length);
   const written = episodes.filter((e) => e.promise?.opens || e.promise?.closes).length;
-  const series = world?.series.find((s) => prodId !== undefined && s.seasons.includes(prodId)) ?? null;
   return (
     <div className="fy-arkewrap">
     <div className="fy-prodmain" data-screen="development">
@@ -233,6 +268,9 @@ export function DevelopmentWorkspace() {
       */}
       <div className="fy-h1row">
         <h1 className="fy-h1">{production.meta.title}</h1>
+        {/* Page scale (issue 859): the three cards below read through, in the order drawn. The
+            speaker on each of them still reads that one alone. */}
+        {pageBlocks.length > 1 && <PageReadControl read={pageRead} label="Read the season" />}
         <span style={{ flex: 1 }} />
         <span style={{ textAlign: "right" }}>
           <span className="fy-seasonmeter" aria-hidden="true">

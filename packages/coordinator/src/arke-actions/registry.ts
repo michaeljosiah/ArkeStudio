@@ -184,6 +184,7 @@ const CLIENT_COMMAND_METADATA = {
   "read-sheet-page": readOnly(QUERY),
   "read-bible-section": readOnly(QUERY),
   "read-prose": readOnly(QUERY),
+  "read-prose-page": readOnly(QUERY),
   "generate-world-image": action("world", "generation", "job-queue", "spend-and-compute", ["world-metadata", "art-direction"], { preparation: GENERATION_QUOTE }),
   "upload-world-image": action("world", "host-action", "host", "host-file-access", ["world-metadata"]),
   "use-world-image": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata", "references"], { preparation: MEDIA_TARGET }),

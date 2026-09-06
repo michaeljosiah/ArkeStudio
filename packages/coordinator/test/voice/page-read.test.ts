@@ -122,3 +122,36 @@ describe("reading a sheet as a page", () => {
     }
   });
 });
+
+describe("reading a production overview as a page", () => {
+  it("reads the cards the screen declared, in that order, and drops one that has no record", async () => {
+    const h = await harness();
+    try {
+      await h.send({
+        kind: "read-prose-page",
+        worldId: WORLD_ID,
+        requestId: "01J8F3K2QW9VZX4N7M0RTYB6P3",
+        sources: [
+          { of: "story", productionId: "saltlight", field: "logline" },
+          // No season record on this production: the page carries on without it rather than
+          // refusing, the same way an unwritten sheet block drops out.
+          { of: "season", productionId: "saltlight", field: "ending" },
+          { of: "story", productionId: "saltlight", field: "treatment" },
+        ],
+      });
+
+      const ready = reads(h.events).filter((event) => event.status === "ready");
+      assert.deepEqual(
+        ready.map((event) => [event.sectionHeading, event.part, event.parts]),
+        [
+          ["Logline", 0, 2],
+          ["Treatment", 1, 2],
+        ],
+      );
+      assert.equal(ready[0]!.purpose, "prose");
+      assert.ok(h.spoken[0]?.startsWith("One night on the Vigil"));
+    } finally {
+      await h.provider.close();
+    }
+  });
+});
