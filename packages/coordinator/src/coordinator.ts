@@ -1863,6 +1863,13 @@ export class Coordinator {
     string,
     { fileName: string; document: StructuredDocument; read: Extract<ReturnType<typeof readManuscript>["read"], { ok: true }> }
   >();
+  /** The worlds whose held reads are already tied to their closing (codex on PR 924): one listener a world, not one a read. */
+  private readonly manuscriptReadsBound = new WeakSet<WorldStore>();
+  /**
+   * Imports planned one at a time (codex on PR 924): two at once would read the same stems and
+   * the same highest rank before either committed, and collide or interleave.
+   */
+  private importLane: Promise<unknown> = Promise.resolve();
   /**
    * Chapter saves in hand (turn 131, codex on PR 916): handlers run concurrently, so an export
    * pressed the moment an editor was left could read a chapter its last autosave had not yet
@@ -10723,8 +10730,10 @@ export class Coordinator {
           });
         const control = new AbortController();
         // The run ends with the world that began it (codex on PR 916): a world closing under a
-        // build, or losing its claim, must not go on to publish.
-        store.closingSignal.addEventListener("abort", () => control.abort(), { once: true });
+        // build, or losing its claim, must not go on to publish. The listener comes off when the
+        // run does (codex on PR 924), so a world that exports all evening keeps one, not one each.
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
         const done = (async () => {
           progress("running", 0, null, null);
           try {
@@ -10748,6 +10757,7 @@ export class Coordinator {
             return { status: "failed" as const, error: message };
           } finally {
             this.exports.delete(exportId);
+            store.closingSignal.removeEventListener("abort", onClose);
           }
         })();
         this.exports.set(exportId, { id: exportId, cancel: () => control.abort(), done });
@@ -10806,6 +10816,18 @@ export class Coordinator {
           return;
         }
         this.manuscriptReads.set(`${msg.worldId}/${msg.productionId}/${msg.requestId}`, { fileName, document, read });
+        // A held document goes with its world (codex on PR 924): a renderer that reloads loses
+        // the request id and can never cancel, and a document is tens of megabytes at most.
+        if (!this.manuscriptReadsBound.has(store)) {
+          this.manuscriptReadsBound.add(store);
+          store.closingSignal.addEventListener(
+            "abort",
+            () => {
+              for (const key of this.manuscriptReads.keys()) if (key.startsWith(`${store.worldId}/`)) this.manuscriptReads.delete(key);
+            },
+            { once: true },
+          );
+        }
         answer(await this.manuscriptReadAnswer(store, msg.productionId, read));
         return;
       }
@@ -10857,7 +10879,9 @@ export class Coordinator {
           return;
         }
         try {
-          const made = await importManuscript(store, msg.productionId, held.read, () => this.nowIso());
+          const run = this.importLane.then(() => importManuscript(store, msg.productionId, held.read, () => this.nowIso()));
+          this.importLane = run.catch(() => {});
+          const made = await run;
           this.manuscriptReads.delete(key);
           answer({ created: made.created.length, after: made.after });
         } catch (error) {

@@ -1,4 +1,4 @@
-import { MANUSCRIPT_LANGUAGE } from "./manuscript.js";
+import { isManuscriptLanguage } from "./manuscript.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -2788,7 +2788,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       format: z.enum(["docx", "epub"]),
       /** The EPUB's language, as the sheet named it — a BCP 47 tag in full shape (codex on PR 916); the world records none. */
-      language: z.string().regex(MANUSCRIPT_LANGUAGE, "expected a BCP-47 language tag").optional(),
+      language: z.string().refine(isManuscriptLanguage, "expected a BCP-47 language tag").optional(),
     })
     .strict(),
   z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
