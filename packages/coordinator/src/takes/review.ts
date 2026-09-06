@@ -422,6 +422,9 @@ export async function splitOverlayAudio(
     const lane = Math.max(0, (found.lane ?? 0) - 1);
     sound = CutOverlaySchema.parse({ ...found, id: newId("ov"), lane, audio: "only" });
     return [...current.map((o) => (o.id === overlayId ? { ...o, audio: "mute" as const } : o)), sound];
+  }, () => {
+    const resolved = resolveProductionArtifact(store.getBundle().artifacts, sound!.artifactId, productionId);
+    return resolved.ok ? null : `${overlayId} cites ${resolved.reason}`;
   });
   return sound!;
 }

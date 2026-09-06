@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { buildRenderPlan, storyTimelineFingerprint, type ProductionBundle } from "@arke-studio/contracts";
+import { buildRenderPlan, spineTimelineFingerprint, storyTimelineFingerprint, type ProductionBundle } from "@arke-studio/contracts";
 import { fileArtifact, setOwner } from "../../src/artifacts/filing.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
-import { placeOverlay } from "../../src/takes/review.js";
+import { placeOverlay, removeOverlay, splitOverlayAudio } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 
@@ -70,6 +70,35 @@ it("keeps an existing scoped clip removable but refuses detachment and delivery 
   });
   const after = productionOf(store); assert.ok(after.timeline?.status === "ready");
   assert.equal(after.timeline.timeline.tracks.flatMap(track => track.clips).length, 0);
+});
+
+it("refuses legacy audio splits after an overlay's ownership changes (#895)", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const source = join(store.dir, "split-scope.mp4"); await writeFile(source, "legacy split scope fixture");
+  const filed = await fileArtifact(store, { sourcePath: source, mediaProbe: probe, production: PRODUCTION });
+  assert.ok(filed.outcome === "filed");
+  const overlay = await placeOverlay(store, PRODUCTION, { artifactId: filed.artifact.id, startSec: 0, endSec: 2 });
+  await setOwner(store, filed.artifact, "another-production");
+  const cutPath = join(store.dir, "productions", PRODUCTION, "cut.json"), before = await readFile(cutPath, "utf8");
+  await assert.rejects(splitOverlayAudio(store, PRODUCTION, overlay.id), /belongs to another production.*Import the file/);
+  assert.equal(await readFile(cutPath, "utf8"), before);
+  await removeOverlay(store, PRODUCTION, overlay.id);
+  assert.equal(productionOf(store).cut.overlays.length, 0);
+});
+
+it("refuses a foreign master before creating its first timeline (#895)", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const source = join(store.dir, "master-scope.wav"); await writeFile(source, "master scope fixture");
+  const filed = await fileArtifact(store, { sourcePath: source, mediaProbe: probe, production: "another-production" });
+  assert.ok(filed.outcome === "filed");
+  await store.commit({ kind: "test-spine", source: "test", files: [{ path: `productions/${PRODUCTION}/spine.json`, action: "create", baseHash: null,
+    content: JSON.stringify({ schemaVersion: 1, revision: 1, trackArtifactId: filed.artifact.id, markers: [], anchors: {}, updatedAt: store.now() }) + "\n",
+  }] });
+  const p = productionOf(store); assert.ok(p.spine);
+  await assert.rejects(applyTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: null,
+    sourceFingerprint: spineTimelineFingerprint(p, p.spine, 3), commands: [],
+  }), /Master track cites artifact .*belongs to another production.*Import the file/);
+  await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
 });
 
 it("the suggested import recovery makes a scoped file available and places it (#895)", async t => {

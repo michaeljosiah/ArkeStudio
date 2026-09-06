@@ -49,6 +49,9 @@ it("distinguishes unavailable ownership from missing media and keeps the clip re
     assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
     assert.equal(screen.container.querySelector("[data-library-item^='artifact:']"), null, "the picker still hides another production's material");
     await act(async () => screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!.click());
+    assert.equal(screen.button("Detach audio").disabled, true);
+    assert.match(screen.container.querySelector(".fy-cutinspect__note")!.textContent!, /belongs to another production.*Import the file/);
+    assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
     assert.equal(screen.button("Delete").disabled, false);
     await act(async () => screen.button("Delete").click());
     const batch = screen.sent.find(message => message.kind === "timeline-command");

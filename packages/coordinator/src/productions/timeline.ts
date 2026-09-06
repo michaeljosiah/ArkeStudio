@@ -227,7 +227,9 @@ export async function applyTimelineCommand(
          * against the master as measured. The measurement recorded when the track was assigned
          * is the one answer to how long the song is; without it there is no first assembly.
          */
-        const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
+        const master = resolveProductionArtifact(store.getBundle().artifacts, spine.trackArtifactId, productionId);
+        if (!master.ok) throw new TimelineCommandRefused(`Master track cites ${master.reason}`);
+        const measured = master.artifact.mediaInfo?.durationSec ?? null;
         if (measured === null) throw new TimelineCommandRefused("measure the master track before editing a music-timed timeline");
         if (spineTimelineFingerprint(production, spine, measured) !== command.sourceFingerprint) {
           throw new TimelineCommandRefused("the spine changed while this edit was being made");

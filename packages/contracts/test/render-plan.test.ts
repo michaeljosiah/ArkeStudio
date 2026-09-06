@@ -81,14 +81,21 @@ describe("production-owned media in render plans and migration (#895)", () => {
     assert.equal(migrated.timeline.tracks.flatMap(track => track.clips).length, 0);
   });
 
-  it("refuses a scoped legacy audio entry even with no overlay or saved timeline", () => {
-    const value = production({ cut: { overlays: [], audio: [{ kind: "score", label: "Legacy score", entries: [{ artifactId: BELLS, offsetSec: 0 }] }] } });
+  for (const entry of [{ artifactId: BELLS, offsetSec: 0 }, { source: { kind: "artifact" as const, artifactId: BELLS }, offsetSec: 0 }]) {
+  it(`resolves ${"source" in entry ? "typed" : "compatibility"} legacy audio ownership before planning or migration`, () => {
+    const value = production({ cut: { overlays: [], audio: [{ kind: "score", label: "Legacy score", entries: [entry] }] } });
     const catalog = artifacts.map(artifact => ({ ...artifact, production: "another-production" }));
     for (const timeline of [{ status: "absent" as const }, { status: "ready" as const, timeline: seedEmptyPictureTimeline(value) }]) {
       const plan = buildRenderPlan({ production: value, artifacts: catalog, timeline, scope: { kind: "production" }, preset: "review-cut" });
       assert.ok(!plan.ok); assert.match(plan.reason, /Legacy score entry 1.*belongs to another production.*Import the file/);
     }
+    const refused = migrateLegacyCut(seedEmptyPictureTimeline(value), value, catalog);
+    assert.match(refused.dropped[0]!, /Legacy score entry 1.*belongs to another production.*Import the file/);
+    const allowed = migrateLegacyCut(seedEmptyPictureTimeline(value), value, artifacts);
+    assert.deepEqual(allowed.dropped, []);
+    assert.equal(allowed.timeline.tracks.flatMap(track => track.clips).filter(clip => clip.source.kind === "artifact" && clip.source.artifactId === BELLS).length, 1);
   });
+  }
 });
 
 function scene(id: string, order: number, shots: Array<{ id: string; durationSec?: number }>): Scene {

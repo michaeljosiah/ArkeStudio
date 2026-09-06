@@ -1,6 +1,6 @@
 import type { ProductionBundle } from "./client-state.js";
 import { resolveProductionArtifact } from "./artifact-access.js";
-import type { AudioTrack, CutOverlay } from "./cut.js";
+import { audioSourceOf, type AudioTrack, type CutOverlay } from "./cut.js";
 import {
   AUDIO_TRACK_KINDS,
   basePictureTrack,
@@ -201,15 +201,16 @@ export function migrateLegacyCut(
       }
       const startFrame = anchored + frames(entry.offsetSec, frameRate);
       const id: TimelineClipId = `cl_audio-${trackIndex}-${entryIndex}`;
-      if (entry.takeId !== undefined) {
-        const take = takesById.get(entry.takeId);
+      const audioSource = audioSourceOf(entry);
+      if (audioSource?.kind === "take") {
+        const take = takesById.get(audioSource.takeId);
         // A pass segment has no media of its own: it is a window onto its pass (SPEC-013 R-3).
         // The clip cites the pass and carries the window as its in-point and length, which is
         // how the legacy renderer played it (round six).
         const segment = take?.segment;
         const source = segment === undefined ? take : takesById.get(segment.passTakeId);
         if (take === undefined || source?.media === undefined || (segment !== undefined && segment.outSec <= segment.inSec)) {
-          dropped.push(`${legacy.label} entry ${entryIndex + 1} cites take ${entry.takeId}, which has no media`);
+          dropped.push(`${legacy.label} entry ${entryIndex + 1} cites take ${audioSource.takeId}, which has no media`);
           return;
         }
         const measured = segment !== undefined ? segment.outSec - segment.inSec : production.takeMediaInfo[take.id]?.mediaInfo.durationSec;
@@ -229,8 +230,8 @@ export function migrateLegacyCut(
         });
         return;
       }
-      if (entry.artifactId !== undefined) {
-        const resolved = resolveProductionArtifact(artifacts, entry.artifactId, production.meta.id);
+      if (audioSource?.kind === "artifact") {
+        const resolved = resolveProductionArtifact(artifacts, audioSource.artifactId, production.meta.id);
         if (!resolved.ok) {
           dropped.push(`${legacy.label} entry ${entryIndex + 1} cites ${resolved.reason}`);
           return;

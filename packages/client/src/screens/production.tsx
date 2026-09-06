@@ -6997,7 +6997,7 @@ export function CutScreen() {
               production={production}
               cut={cut}
               spineCut={spineCut}
-              artifacts={artifacts}
+              artifacts={world?.artifacts ?? []}
               selection={activeSelection}
               selectedClip={selectedAny?.clip ?? null}
               selectedTrack={selectedAny?.track ?? null}

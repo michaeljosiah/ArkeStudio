@@ -1,7 +1,8 @@
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, type DialogueTiming } from "./dialogue-timing.js";
-import { legacyArtifactScopeRefusal, resolveProductionArtifact } from "./artifact-access.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import type { ProductionBundle } from "./client-state.js";
 import {
+  audioSourceOf,
   buildExportPlan,
   deriveCut,
   deriveEpisodeCut,
@@ -364,6 +365,25 @@ function audioFromTimeline(
   const problems = dialogueTimingProblems(timings,slots,Math.max(0,...slots.map(s=>s.endSec)));
   if (problems.length) return {ok:false,reason:problems.join(" ")};
   return { ok: true, audio, speech: mergeRegions(speech) };
+}
+
+/** Legacy clocks still need scope checks even where they bypass the saved-timeline planner. */
+export function legacyArtifactScopeRefusal(production: ProductionBundle,
+  artifacts: readonly { id: string; production?: string | null }[], timeline: TimelineState | undefined = production.timeline): string | null {
+  const references: Array<{ label: string; id: string }> = [];
+  if (timeline?.status !== "ready" && production.spine) references.push({ label: "Master track", id: production.spine.trackArtifactId });
+  if (timeline?.status !== "ready" || timeline.timeline.migratedCut !== true) {
+    for (const overlay of production.cut.overlays) references.push({ label: overlay.id, id: overlay.artifactId });
+    for (const track of production.cut.audio) for (const [index, entry] of track.entries.entries()) {
+      const source = audioSourceOf(entry);
+      if (source?.kind === "artifact") references.push({ label: `${track.label} entry ${index + 1}`, id: source.artifactId });
+    }
+  }
+  for (const reference of references) {
+    const resolved = resolveProductionArtifact(artifacts, reference.id, production.meta.id);
+    if (!resolved.ok && resolved.code === "other-production") return `${reference.label} cites ${resolved.reason}`;
+  }
+  return null;
 }
 
 /**
