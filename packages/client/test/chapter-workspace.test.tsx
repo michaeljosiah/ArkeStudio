@@ -4,8 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { ChapterSummary, ClientMessage, ClientState, StagedProposal } from "@arke-studio/contracts";
-import { ChapterScreen, firstPrompt, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
+import { paragraphSpans, type ChapterSummary, type ClientMessage, type ClientState, type ProseStyle, type StagedProposal, type WorldChatSummary } from "@arke-studio/contracts";
+import { ChapterScreen, firstPrompt, paragraphAt, passageSubject, stagedChapterDraft } from "../src/screens/chapter-workspace.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -96,7 +96,7 @@ const DRAFT: StagedProposal = {
   },
 };
 
-function inkbound(proposals: StagedProposal[] = []): ClientState {
+function inkbound(proposals: StagedProposal[] = [], proseStyle: ProseStyle | null = null): ClientState {
   const world = FIXTURE_STATE.world!;
   const salt = world.productions.find((p) => p.meta.id === "saltlight")!;
   return {
@@ -110,12 +110,50 @@ function inkbound(proposals: StagedProposal[] = []): ClientState {
           ...salt,
           meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" },
           story: { ...(salt.story ?? { version: 1 }), version: 3, targetLength: "80,000 words" },
+          proseStyle,
           chapters: CHAPTERS,
         },
       ],
     },
   };
 }
+
+/** A revision: one span of the body changed, the rest as it was (turn 128). */
+const PASSAGE: StagedProposal = {
+  ...DRAFT,
+  proposal: {
+    ...DRAFT.proposal,
+    id: "pr_01J8H0000000000000000000P9",
+    summary: "Revise a passage: The counting of bells",
+    // The origin's gesture is what says a passage was revised (codex on PR 899).
+    origin: { source: "world-chat-action:act_1", surface: "world-chat", gesture: "passage-revision", conversationId: "cv_01J8H0000000000000000000C1" },
+  },
+  review: {
+    targets: [
+      {
+        path: PATH,
+        label: "The counting of bells",
+        kind: "chapter",
+        action: "amend",
+        fields: [{ field: "Prose", before: BODY, proposed: BODY.replace("Maren counted the bells.", "Maren counted the seven bells.") }],
+      },
+    ],
+  },
+};
+
+const STYLE: ProseStyle = { version: 2, pov: "close third", tense: "past", voice: "Short declaratives." };
+
+/** The production's thread, already open, so a line said goes straight to the send that carries the subject. */
+const THREAD: WorldChatSummary = {
+  id: "cv_01J8F3K2QW9VZX4N7M0RTYB6HC",
+  title: "The counting of bells",
+  status: "open",
+  updatedAt: "2026-09-06T09:00:00.000Z",
+  entryContext: { kind: "production", productionId: "inkbound" },
+  pointCount: 0,
+  openProposalCount: 0,
+  notCarried: [],
+};
 
 interface Mounted {
   container: HTMLElement;
@@ -286,5 +324,107 @@ describe("the chapter, opened (turn 126)", () => {
     assert.equal(found?.staged.proposal.id, DRAFT.proposal.id);
     assert.equal(found?.body, "Drafted anew.\n\nFrom the seventh bell.");
     assert.equal(stagedChapterDraft([elsewhere], PATH), undefined);
+  });
+});
+
+/**
+ * The craft loop (design turn 128, issue 896): the selection is the subject, a revision is a
+ * passage that stands in place with the rest untouched, and the side says the style in a line.
+ */
+describe("the craft loop (turn 128)", () => {
+  const keyup = async (area: HTMLTextAreaElement, start: number, end: number) => {
+    Object.assign(area, { selectionStart: start, selectionEnd: end });
+    // The mouse's release rather than a key's: under linkedom React polyfills input events off
+    // keyup through the focused element, and nothing here is focused.
+    await act(async () => {
+      area.dispatchEvent(new dom.Event("mouseup", { bubbles: true }));
+    });
+  };
+
+  it("a selection of three words or more is the subject: the press beside it, the prompts a revision's, the passage said before what is asked", async () => {
+    const styled = inkbound([], STYLE);
+    const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
+    await answerOpen(m);
+    assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
+    assert.match(text(m), /settled in Develop · read by every draft/);
+    assert.match(text(m), /Hold this against the style/, "with a style settled, holding the chapter against it is offered");
+    assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered before anything is selected");
+
+    const area = q(m, "textarea.fy-ch__source") as HTMLTextAreaElement;
+    await keyup(area, 0, 5);
+    assert.doesNotMatch(text(m), /Ask Arke · /, "one word is not a passage, and no reason is written");
+    await keyup(area, 0, 24);
+    assert.match(text(m), /Ask Arke · 4 words/, "the press beside the selection counts it");
+    assert.match(text(m), /about this passage · 4 words/, "the dock says what the subject is");
+    assert.match(text(m), /Tighten this/, "the prompts are a revision's");
+    assert.doesNotMatch(text(m), /Draft the rest/);
+
+    // What the thread hears: the prompt is said with the passage before it, as a typed line is.
+    const prompt = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "Tighten this") as HTMLElement;
+    await act(async () => {
+      prompt.click();
+    });
+    // The chapter and the paragraph ride with the words (codex on turn 128), so the passage can
+    // be looked for where it was and nowhere else.
+    assert.match(JSON.stringify(m.sent), /About this passage in chapter 02, paragraph 1: «Maren counted the bells.» Tighten this/);
+    // And beside the words, as a structured subject the coordinator holds the revision to.
+    const said = m.sent.find((message) => message.kind === "world-chat-send" || message.kind === "world-chat-create") as { subject?: unknown } | undefined;
+    assert.deepEqual(
+      (m.sent.map((message) => (message as { subject?: unknown }).subject).find((subject) => subject !== undefined)),
+      { kind: "passage", chapterId: "neap", paragraph: 1, text: "Maren counted the bells." },
+      `the selection travels as a subject (${said?.subject === undefined ? "none sent" : "sent"})`,
+    );
+
+    // The style check asks for a reply and nothing else, and the send says so.
+    const hold = [...m.container.querySelectorAll("button.fy-arke__prompt")].find((b) => b.textContent === "Hold this against the style") as HTMLElement;
+    await act(async () => {
+      hold.click();
+    });
+    const sends = m.sent.filter((message) => message.kind === "world-chat-send") as Array<{ text: string; replyOnly?: boolean }>;
+    assert.equal(sends.find((message) => message.text.endsWith("Tighten this"))?.replyOnly, undefined, "a revision may stage");
+    assert.equal(sends.find((message) => message.text.endsWith("Hold this against the style"))?.replyOnly, true, "a check may not");
+
+    await keyup(area, 3, 3);
+    assert.doesNotMatch(text(m), /Ask Arke · /, "the selection collapsed, the press goes");
+    assert.doesNotMatch(text(m), /about this passage/);
+    assert.match(text(m), /Draft the rest/, "and the prompts are the chapter's again");
+  });
+
+  it("a passage waiting stands in place with the rest untouched; the band, the chip, the foot and the card say the span", async () => {
+    const m = await mount(inkbound([PASSAGE]));
+    await answerOpen(m);
+    assert.equal(q(m, "textarea.fy-ch__source"), null, "the editor is put away while the passage waits");
+    // Spans, so the text runs together without the spaces the screen draws between them.
+    assert.match(text(m), /Arke’s passage ?· 1 → 2 words ?· against v4/);
+    assert.match(text(m), /decide in the thread/);
+    assert.match(text(m), /Maren counted the seven bells\./, "the replacement stands in the passage's place");
+    assert.match(text(m), /Six, and the tide/, "and the rest of the chapter is untouched");
+    assert.match(text(m), /passage waiting/);
+    assert.doesNotMatch(text(m), /draft waiting/);
+    assert.match(text(m), /Locked while a passage waits · v4/);
+    assert.match(text(m), /chapter 02 · passage/, "the card names the passage");
+    assert.match(text(m), /Replaces one passage · the rest of the chapter is untouched/);
+    assert.match(text(m), /a passage waits for your yes/);
+    const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
+    assert.deepEqual(marked, ["Maren counted the seven bells."], "only the paragraph the span falls in is marked");
+    assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered on a locked manuscript");
+  });
+
+  it("the selection and the span are decided by two small rules", () => {
+    assert.equal(passageSubject(null), null);
+    assert.equal(passageSubject("one two"), null, "under three words");
+    assert.equal(passageSubject("  one two three  "), "one two three");
+    assert.equal(passageSubject(`one two ${"x".repeat(1_200)}`), null, "over 1,200 characters");
+    assert.equal(passageSubject("one two\n\nthree four"), null, "across a paragraph: it could never be found where it will be looked for");
+    assert.equal(passageSubject("one two\nthree four"), "one two\nthree four", "a line break inside a paragraph is still one paragraph");
+    assert.deepEqual(paragraphSpans("A b.\n\nC d."), [
+      { text: "A b.", start: 0, end: 4 },
+      { text: "C d.", start: 6, end: 10 },
+    ]);
+    assert.deepEqual(paragraphSpans(""), []);
+    assert.equal(paragraphAt("A b.\n\nC d.", 0), 1, "the paragraph is counted from one");
+    assert.equal(paragraphAt("A b.\n\nC d.", 7), 2);
+    assert.equal(paragraphAt("", 0), null, "no paragraph in nothing");
+    assert.equal(stagedChapterDraft([PASSAGE], PATH)?.before, BODY, "the review's before rides with the proposed");
   });
 });

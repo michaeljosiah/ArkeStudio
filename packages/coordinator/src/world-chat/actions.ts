@@ -43,6 +43,8 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
+  type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -248,6 +250,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  chapterFence,
   spineFence,
   timelineFence,
   takesFence,
@@ -285,6 +288,13 @@ export interface WorldChatActionTurn {
   readonly actions: readonly ModelWorldChatAction[];
   /** Present on live runs; absent only on callers created before complete target receipts. */
   readonly receipts?: readonly WorldChatCheckReceipt[];
+  /**
+   * What was selected while the line was said (turn 128): a passage revision the model returns
+   * is held against it, so the action can only aim at the words the author pointed at.
+   */
+  readonly subject?: WorldChatSubject;
+  /** The line asked for a reply and nothing else (turn 128): an action it returns is refused. */
+  readonly replyOnly?: boolean;
   readonly at: string;
 }
 
@@ -419,9 +429,12 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-model": ["production-metadata"],
   "production-series": ["production-metadata", "series"],
   "production-overview": ["story"],
+  "production-prose-style": ["story"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
-  "production-chapter": ["chapters"],
+  // The story read carries the prose style (turn 128): a draft or a revision that never saw it
+  // cannot be said to hold to it, so the read is required, not hoped for.
+  "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "production-chapter-order": ["chapters"],
@@ -482,8 +495,16 @@ function currentWorldObservation(
       return { target: productionId, fence: episodesFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
     }
     case "chapters": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
+      // alone; the bare production id is the list (codex on PR 899).
+      const targetId = target ?? store.worldId;
+      const [productionId, chapterId] = targetId.split(":");
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      if (chapterId) {
+        const canonical = canonicalChapterId(store, productionId!, chapterId);
+        return { target: `${productionId}:${canonical}`, fence: chapterFence(production, canonical) };
+      }
+      return { target: targetId, fence: chaptersFence(production) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -550,7 +571,8 @@ function productionActionTargets(
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
     ];
-    case "production-overview": return [{ requirement: "story", target: action.productionId }];
+    case "production-overview":
+    case "production-prose-style": return [{ requirement: "story", target: action.productionId }];
     case "production-season": return [
       { requirement: "seasons", target: action.productionId },
       ...(action.changes.arcs !== undefined && action.changes.arcs !== null
@@ -566,8 +588,16 @@ function productionActionTargets(
     ];
     case "production-chapter": {
       const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      // A passage is quoted from a read of that chapter (turn 128), so the read is required by
+      // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
+      // sends the model back to read it again rather than to guess.
+      const quotedFrom = action.change.operation === "edit" && action.change.changes.passage !== undefined
+        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.change.chapterId)}` }]
+        : [];
       return [
         { requirement: "chapters", target: action.productionId },
+        ...quotedFrom,
+        { requirement: "story", target: action.productionId },
         ...(draws
           ? [
               { requirement: "sheets" as const, target: worldId },
@@ -740,6 +770,7 @@ function preparedWorldPayload(
     case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
     case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
     case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
+    case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -894,6 +925,39 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
   return undefined;
 }
 
+/**
+ * A chapter's canonical id from either spelling (codex on PR 899): `get_chapter` and the chapter
+ * edit both accept the frontmatter id or the file stem, and a receipt is matched by exact target,
+ * so both sides name the chapter the same way or a current read is refused as missing.
+ */
+function canonicalChapterId(store: WorldStore, productionId: string, chapterId: string): string {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  return production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)?.id ?? chapterId;
+}
+
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection, the chapter and the paragraph exist as a structured subject on the turn, not only
+ * in the words said, so an action that comes back naming another chapter, another paragraph, or
+ * words outside the selection is refused by name rather than staged. Whitespace is folded on both
+ * sides, because the selection is rendered text and the quote is the file's.
+ */
+function heldToPassage(action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
+  if (subject?.kind !== "passage") return;
+  if (action.kind !== "production-chapter" || action.change.operation !== "edit" || action.change.changes.passage === undefined) return;
+  const passage = action.change.changes.passage;
+  if (action.change.chapterId !== subject.chapterId) {
+    throw new Error(`This ask was about a passage in chapter ${subject.chapterId}; the revision names ${action.change.chapterId}.`);
+  }
+  if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${subject.chapterId}; the revision names paragraph ${passage.paragraph}.`);
+  }
+  const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  if (!fold(subject.text).includes(fold(passage.find))) {
+    throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
+  }
+}
+
 function worldActionTargets(
   store: WorldStore,
   action: ModelWorldChatAction,
@@ -996,6 +1060,7 @@ function worldActionTargets(
       label: action.change.operation === "edit" ? action.change.seriesId : action.change.title,
     }];
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
+    case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -1119,11 +1184,17 @@ export function prepareWorldChatActions(
     });
   }
 
+  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
+  // whatever the model returned: `Hold this against the style` stages nothing.
+  if (turn.replyOnly === true && turn.actions.length > 0) {
+    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
   const contextProductionId = productionOfContext(turn.entryContext) ?? undefined;
   const plannedProductionIds = new Set<string>();
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
+    heldToPassage(action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
@@ -4448,6 +4519,14 @@ export function worldChatActionAdapters(
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
     },
   );
+  const productionProseStyle = proposalBacked(
+    "world-chat-production-prose-style",
+    (value) => WorldChatProductionProseStyleActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
   const productionSeason = proposalBacked(
     "world-chat-production-season",
     (value) => WorldChatProductionSeasonActionSchema.parse(value),
@@ -4571,6 +4650,7 @@ export function worldChatActionAdapters(
     artDirectionRestore,
     productionSeries,
     productionOverview,
+    productionProseStyle,
     productionSeason,
     productionEpisode,
     productionChapter,

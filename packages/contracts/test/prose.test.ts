@@ -1,8 +1,50 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ProseReadSourceSchema, chapterParagraphs, countWords, overviewMoved, targetWords } from "../src/prose.js";
-import { ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema } from "../src/world.js";
+import { ProseReadSourceSchema, changedSpan, chapterParagraphs, countWords, overviewMoved, passageOf, targetWords } from "../src/prose.js";
+import { ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ProseStyleSchema } from "../src/world.js";
 import { ClientMessageSchema } from "../src/frames.js";
+
+/**
+ * The craft loop (design turn 128, issue 896): the passage a revision changed is drawn from the
+ * two texts, never carried twice, and the style is a record beside the overview.
+ */
+describe("the passage a revision changed (turn 128)", () => {
+  const body = "Maren counted the bells.\n\nIt did not decide. The seventh bell rang again, not the echo of the sixth. Nobody had called it.\n\nThat is not how it works.";
+
+  it("is the one span two texts differ in, pulled back to word boundaries", () => {
+    const after = body.replace("rang again, not the echo of the sixth", "rang again, its own note this time");
+    const span = changedSpan(body, after);
+    assert.ok(span);
+    assert.equal(span.before, "not the echo of the sixth.");
+    assert.equal(span.after, "its own note this time.");
+    assert.equal(body.slice(0, span.start) + span.after + body.slice(span.start + span.before.length), after, "the span reassembles the after text");
+    assert.equal(changedSpan(body, body), null, "the same text has no span");
+  });
+
+  it("tells a passage from a draft: one span inside an untouched chapter is a passage, a body replaced whole is not", () => {
+    const after = body.replace("Nobody had called it.", "Nobody called it.");
+    const passage = passageOf(body, after);
+    assert.ok(passage);
+    // The span is the words that differ, whole: `had` went, and `called` is the word it sat in
+    // front of, so both sides carry it rather than beginning a span at a word's edge.
+    assert.equal(passage.before, "had called");
+    assert.equal(passage.after, "called");
+    assert.equal(passageOf(body, "Drafted anew.\n\nFrom the seventh bell."), null, "a body replaced whole is a draft");
+    assert.equal(passageOf("", body), null, "a body drafted from nothing is a draft");
+    assert.equal(passageOf(null, body), null, "and so is one whose before the review does not carry");
+    assert.equal(passageOf(body, body), null);
+  });
+
+  it("the style record parses and its two readable pieces are addressable", () => {
+    assert.ok(ProseStyleSchema.safeParse({ version: 2, pov: "close third", tense: "past", voice: "Short declaratives.", samples: ["Six, and the tide not yet called."] }).success);
+    assert.ok(ProseStyleSchema.safeParse({ version: 1 }).success, "a record with nothing settled yet still parses");
+    assert.equal(ProseStyleSchema.safeParse({ version: 1, mood: "dark" }).success, false, "nothing outside the record");
+    for (const field of ["voice", "samples"]) {
+      assert.ok(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field }).success, `${field} reads aloud`);
+    }
+    assert.equal(ProseReadSourceSchema.safeParse({ of: "story", productionId: "inkbound", field: "pov" }).success, false, "point of view is a label, not a listen");
+  });
+});
 
 /**
  * The chapter arm and its helpers (design turn 126, issue 874). The helpers are shared by the

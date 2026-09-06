@@ -2102,3 +2102,50 @@ describe("World Chat authority adapters", () => {
     assert.equal(dispatched, 1);
   });
 });
+
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection travels on the turn as a structured subject, and an action that comes back aimed
+ * elsewhere is refused before anything is staged.
+ */
+describe("a passage revision is held to the selected passage (turn 128)", () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const subject = { kind: "passage" as const, chapterId: "neap", paragraph: 2, text: "Maren has the 1820 volume open on the rail desk" };
+  const revision = (chapterId: string, find: string, paragraph?: number) => ({
+    kind: "production-chapter" as const,
+    productionId: "the-ledger-of-nights",
+    change: { operation: "edit" as const, chapterId, changes: { passage: { find, with: "x", ...(paragraph === undefined ? {} : { paragraph }) } } },
+    checkReceiptIds: [],
+  });
+
+  it("refuses another chapter, another paragraph, and words outside the selection, by name", async () => {
+    const w = await setup(context);
+    const held = (action: ReturnType<typeof revision>) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [action], subject }));
+    assert.throws(() => held(revision("the-same-ink", "the 1820 volume")), /This ask was about a passage in chapter neap; the revision names the-same-ink/);
+    assert.throws(() => held(revision("neap", "the 1820 volume", 3)), /This ask was about paragraph 2 of chapter neap; the revision names paragraph 3/);
+    assert.throws(() => held(revision("neap", "the rail desk under her coat", 2)), /not within the words this ask was about/);
+    // Within the selection, with whitespace folded, the subject holds; the missing read receipt
+    // is the next refusal, which is the proof the passage check came first.
+    assert.throws(() => held(revision("neap", "the  1820\nvolume", 2)), (err: unknown) => !/This ask was about|not within the words/.test(String(err)));
+  });
+
+  it("holds nothing when nothing was selected, or when the action is not a passage", async () => {
+    const w = await setup(context);
+    const bare = turn(w.conversationId, context, { actions: [revision("the-same-ink", "anything")] });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, bare), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "only the read is missing");
+    const whole = turn(w.conversationId, context, {
+      actions: [{ kind: "production-chapter", productionId: "the-ledger-of-nights", change: { operation: "edit", chapterId: "the-same-ink", changes: { body: "Whole." } }, checkReceiptIds: [] }],
+      subject,
+    });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, whole), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "a body is not held to a passage");
+  });
+
+  it("a reply-only ask stages nothing, whatever the model returned (codex, round four)", async () => {
+    const w = await setup(context);
+    const asked = turn(w.conversationId, context, { actions: [revision("neap", "the 1820 volume", 2)], subject, replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, asked), /This ask was for a reply only; nothing is staged from it/);
+    const quiet = turn(w.conversationId, context, { actions: [], replyOnly: true });
+    assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, quiet), [], "a reply with no action is the promise kept");
+  });
+});

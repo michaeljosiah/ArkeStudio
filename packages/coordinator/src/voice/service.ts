@@ -253,6 +253,13 @@ export function authoritativeProseSpeech(
       if (source.field === "treatment") {
         return spoken(found.treatment ?? undefined, "Treatment", story?.version ?? 1, subjectId);
       }
+      // The style's two readable pieces (turn 128) carry the style record's own version.
+      if (source.field === "voice") {
+        return spoken(found.proseStyle?.voice, "Voice", found.proseStyle?.version ?? 1, subjectId);
+      }
+      if (source.field === "samples") {
+        return spoken((found.proseStyle?.samples ?? []).join(" "), "Samples", found.proseStyle?.version ?? 1, subjectId);
+      }
       if (!story) throw new Error("Nothing has been settled about this production yet.");
       if (source.field === "acts") {
         const acts = (story.acts ?? [])

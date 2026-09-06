@@ -700,9 +700,32 @@ const ProductionChapterModelActionSchema = z
               implies: ChapterImpliesWriteSchema.nullable().optional().describe(
                 "Facts about the world this prose implies but the world does not yet hold; listed on the chapter for the author to propose, never written into the world by this action.",
               ),
+              /*
+               * A revision is a passage, never a chapter (turn 128): one span quoted exactly
+               * from the live body and the words that replace it. The coordinator applies it
+               * when the draft is staged and refuses by name unless `find` occurs exactly once,
+               * so the staged file is the whole chapter with one span changed and the card says so.
+               */
+              passage: z
+                .object({
+                  find: z.string().min(1).max(1_200).describe("The passage to replace, quoted exactly as the chapter holds it."),
+                  with: z.string().max(2_400).describe("The words that take its place; empty removes the passage."),
+                  paragraph: z.number().int().min(1).optional().describe(
+                    "The paragraph the passage is in, counted from 1 by blank lines, when the ask named it (About this passage in chapter 07, paragraph 3). The passage is looked for there and only there. Without it the passage must occur exactly once in the chapter.",
+                  ),
+                })
+                .strict()
+                .optional()
+                .describe(
+                  "Replace one passage and nothing else. Use this for any change smaller than the chapter — a sentence tightened, a paragraph recast — instead of resending the body. Never with body.",
+                ),
             })
             .strict()
-            .refine((changes) => Object.keys(changes).length > 0, "a chapter edit must change at least one field"),
+            .refine((changes) => Object.keys(changes).length > 0, "a chapter edit must change at least one field")
+            .refine((changes) => changes.body === undefined || changes.passage === undefined, "a chapter edit carries a body or a passage, never both")
+            // A passage travels alone (codex, round four): the card says only the span is written,
+            // so a status or a synopsis riding beside it would be a change the card did not show.
+            .refine((changes) => changes.passage === undefined || Object.keys(changes).length === 1, "a passage travels alone: an edit that carries one carries nothing else"),
         })
         .strict(),
     ]),
@@ -771,6 +794,28 @@ const ProductionStyleModelActionSchema = z
     kind: z.literal("production-style"),
     productionId: SlugSchema,
     style: z.string().trim().min(1).max(4_000).nullable(),
+    checkReceiptIds: CompleteReadIdsSchema,
+  })
+  .strict();
+
+/**
+ * The style the book is written in (turn 128), settled in Develop the way the overview is and
+ * kept in `prose-style.json` beside it. `production-style` is the look of a filmed production;
+ * this is the prose. Each field clears with null; the sizes are turn 128's.
+ */
+const ProductionProseStyleModelActionSchema = z
+  .object({
+    kind: z.literal("production-prose-style"),
+    productionId: SlugSchema,
+    changes: z
+      .object({
+        pov: z.string().trim().min(1).max(120).nullable().optional().describe("first, close third, omniscient, or the author's own words."),
+        tense: z.string().trim().min(1).max(40).nullable().optional(),
+        voice: z.string().trim().min(1).max(2_000).nullable().optional().describe("How the sentences go: length, what comes before feeling, what a metaphor may draw on, how dialogue behaves."),
+        samples: z.array(z.string().trim().min(1).max(1_200)).max(6).nullable().optional().describe("Passages that sound like the book, quoted from it or written for it."),
+      })
+      .strict()
+      .refine((changes) => Object.keys(changes).length > 0, "a prose style action must change at least one field"),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
@@ -1102,6 +1147,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionSceneDeleteModelActionSchema,
   ProductionSceneRestoreModelActionSchema,
   ProductionStyleModelActionSchema,
+  ProductionProseStyleModelActionSchema,
   ProductionSceneCommandModelActionSchema,
   ProductionBoardCompileModelActionSchema,
   ProductionBoardExportModelActionSchema,
@@ -1186,6 +1232,7 @@ export const WorldChatProductionMetadataActionSchema = preparedAction("world-cha
 export const WorldChatProductionModelActionSchema = preparedAction("world-chat-production-model", ProductionModelModelActionSchema);
 export const WorldChatProductionSeriesActionSchema = preparedAction("world-chat-production-series", ProductionSeriesModelActionSchema);
 export const WorldChatProductionOverviewActionSchema = preparedAction("world-chat-production-overview", ProductionOverviewModelActionSchema);
+export const WorldChatProductionProseStyleActionSchema = preparedAction("world-chat-production-prose-style", ProductionProseStyleModelActionSchema);
 export const WorldChatProductionSeasonActionSchema = preparedAction("world-chat-production-season", ProductionSeasonModelActionSchema);
 export const WorldChatProductionEpisodeActionSchema = preparedAction("world-chat-production-episode", ProductionEpisodeModelActionSchema);
 export const WorldChatProductionChapterActionSchema = preparedAction("world-chat-production-chapter", ProductionChapterModelActionSchema);
@@ -1251,6 +1298,7 @@ export type WorldChatProductionMetadataAction = z.infer<typeof WorldChatProducti
 export type WorldChatProductionModelAction = z.infer<typeof WorldChatProductionModelActionSchema>;
 export type WorldChatProductionSeriesAction = z.infer<typeof WorldChatProductionSeriesActionSchema>;
 export type WorldChatProductionOverviewAction = z.infer<typeof WorldChatProductionOverviewActionSchema>;
+export type WorldChatProductionProseStyleAction = z.infer<typeof WorldChatProductionProseStyleActionSchema>;
 export type WorldChatProductionSeasonAction = z.infer<typeof WorldChatProductionSeasonActionSchema>;
 export type WorldChatProductionEpisodeAction = z.infer<typeof WorldChatProductionEpisodeActionSchema>;
 export type WorldChatProductionChapterAction = z.infer<typeof WorldChatProductionChapterActionSchema>;
@@ -1364,6 +1412,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionModelActionSchema,
   WorldChatProductionSeriesActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
   WorldChatProductionSeasonActionSchema,
   WorldChatProductionEpisodeActionSchema,
   WorldChatProductionChapterActionSchema,

@@ -476,6 +476,23 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, /the gate writes story\.json · nothing else moves/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
   });
+
+  it("the style the book is written in is settled here too, in its own file (turn 128)", () => {
+    const staged = stagedAgainst(
+      "productions/saltlight/prose-style.json",
+      [["Point of view", "close third"], ["Voice", "Short declaratives."]],
+      "Prose style: Saltlight",
+    );
+    const html = render(
+      withProposal(withMicrodrama([]), staged),
+      `/w/${FIXTURE_WORLD_ID}/p/saltlight/story`,
+      <ProductionChatScreen />,
+      "/w/:worldId/p/:prodId/story",
+    );
+    assert.match(html, /the gate writes prose-style\.json · nothing else moves/);
+    assert.match(html, /the style/, "named as what it is");
+    assert.match(html, /close third/);
+  });
 });
 
 describe("an episodic production's front page is its season (design turn 93)", () => {
