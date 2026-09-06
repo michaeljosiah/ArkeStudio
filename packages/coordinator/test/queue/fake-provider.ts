@@ -57,6 +57,9 @@ export class FakeProvider implements DispatchClient {
   readonly submittedKeys: Array<string | undefined> = [];
   submittedReferenceBytes: Uint8Array[] = [];
   submittedVoiceReference: { name: string; contentType: string; data: Uint8Array } | null = null;
+  /** Which wire position the predecessor's clip took (issue 852): the footage extended, or a reference. */
+  submittedVideoSource: { contentType: string; data: Uint8Array } | null = null;
+  submittedVideoReferences: Array<{ contentType: string; data: Uint8Array }> = [];
   inlineArtifacts: DispatchArtifact[] | null = null;
 
   /** Scripting hooks. */
@@ -100,6 +103,8 @@ export class FakeProvider implements DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: Array<{ data: Uint8Array }>;
       voiceReference?: { name: string; contentType: string; data: Uint8Array };
+      videoSource?: { contentType: string; data: Uint8Array };
+      videoReferences?: Array<{ contentType: string; data: Uint8Array }>;
       idempotencyKey?: string;
     },
   ): Promise<{ remoteId: string; artifacts?: DispatchArtifact[] }> {
@@ -108,6 +113,8 @@ export class FakeProvider implements DispatchClient {
     this.submittedKeys.push(request.idempotencyKey);
     this.submittedReferenceBytes = (request.imageReferences ?? []).map((reference) => reference.data);
     this.submittedVoiceReference = request.voiceReference ?? null;
+    this.submittedVideoSource = request.videoSource ?? null;
+    this.submittedVideoReferences = request.videoReferences ?? [];
     this.inFlightNow += 1;
     this.maxObservedConcurrent = Math.max(this.maxObservedConcurrent, this.inFlightNow);
     try {

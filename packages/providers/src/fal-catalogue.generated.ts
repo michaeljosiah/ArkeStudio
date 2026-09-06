@@ -485,6 +485,7 @@ export const FAL_MODELS: readonly ManifestModel[] = [
       "maxReferenceVideoSec": 15,
       "maxReferenceAudioSec": 15,
       "referencesField": "reference_image_urls",
+      "referenceVideoField": "reference_video_urls",
       "maxDurationSec": 15,
       "durationWire": "number",
       "durations": {

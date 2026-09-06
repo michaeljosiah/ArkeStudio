@@ -680,6 +680,63 @@ describe("fal continuation dispatch (SPEC-019 R-50, issues 461 and 629)", () => 
   });
 });
 
+describe("fal motion references ride in the field the row names (issue 852)", () => {
+  const clip = { contentType: "video/mp4" as const, data: new Uint8Array([0, 1, 2, 3]) };
+  const submit = async (over: Partial<Parameters<FalClient["submit"]>[1]> = {}) => {
+    let sent: Record<string, unknown> = {};
+    let endpoint = "";
+    const fetchImpl: FetchLike = async (url, init) => {
+      endpoint = url;
+      sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(JSON.stringify({ request_id: "req-2" }), { status: 200 });
+    };
+    await new FalClient(fetchImpl).submit("k", {
+      model: "minimax-h3",
+      capability: "video",
+      params: { prompt: "the tide turns", references: [], continuedFrom: "tk_01J8F0000000000000000000B2", durationSec: 6 },
+      videoReferences: [clip],
+      ...over,
+    });
+    return { sent, endpoint };
+  };
+
+  it("lands a clip alone on the reference route, in reference_video_urls, with nothing of ours beside it", async () => {
+    const { sent, endpoint } = await submit();
+    assert.match(endpoint, /minimax\/h3\/reference-to-video$/, "a clip alone is still a reference dispatch");
+    assert.deepEqual(sent["reference_video_urls"], ["data:video/mp4;base64,AAECAw=="]);
+    assert.ok(!("video_url" in sent), "not the extend route's field — H3 has no such route");
+    assert.ok(!("reference_image_urls" in sent), "no pictures were sent, so no picture array");
+    assert.ok(!("continuedFrom" in sent) && !("videoReferences" in sent), "the edge and the paths are ours");
+    assert.equal(sent["duration"], 6);
+  });
+
+  it("keeps the pictures in their own array beside the clip", async () => {
+    const { sent } = await submit({
+      params: { prompt: "x", references: ["a.png"], continuedFrom: "tk_01J8F0000000000000000000B2", durationSec: 6 },
+      imageReferences: [{ name: "a.png", contentType: "image/png", data: new Uint8Array([9]) }],
+    });
+    assert.deepEqual(sent["reference_image_urls"], ["data:image/png;base64,CQ=="]);
+    assert.deepEqual(sent["reference_video_urls"], ["data:video/mp4;base64,AAECAw=="]);
+  });
+
+  it("refuses a row that names no video field, and a frame route, rather than dropping the clip", async () => {
+    // Seedance has a reference route and publishes video seconds, but names no field for the
+    // clip — the exact row the budget's field gate exists for.
+    await assert.rejects(
+      () => submit({ model: "seedance-2.0", params: { prompt: "x", references: [], durationSec: 5 } }),
+      /names no field for a video reference/,
+    );
+    await assert.rejects(
+      () =>
+        submit({
+          params: { prompt: "x", references: ["a.png"], taskMode: "first-frame", route: "minimax/h3/image-to-video", durationSec: 6 },
+          imageReferences: [{ name: "a.png", contentType: "image/png", data: new Uint8Array([9]) }],
+        }),
+      /rides on the reference route, not first-frame/,
+    );
+  });
+});
+
 describe("fal submit/poll round-trip carries the endpoint in the remote id", () => {
   it("polls the endpoint-scoped status url", async () => {
     const seen: string[] = [];

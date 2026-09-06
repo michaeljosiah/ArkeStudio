@@ -133,6 +133,7 @@ const NOT_A_SETTING = new Set([
   "shotPlan",
   "startFrame",
   "continuedFrom",
+  "videoReferences",
 ]);
 
 function settingsFrom(params: Job["params"]): Record<string, unknown> {
@@ -280,7 +281,13 @@ export async function recordTakesFromJob(
       coversShots: (job.target.coversShots ?? (job.target.id !== undefined ? [job.target.id] : [])) as Take["coversShots"],
       kind: takeKindFor(job),
       ...(job.target.kind === "board-sheet" ? { boardSheetParent: true as const } : {}),
-      ...(continuedFrom !== undefined ? { continuedFrom } : {}),
+      // The edge, and how it was made (issue 852): `taskMode: "continue"` is what the compiler
+      // writes for an extend route and nothing else, so its absence beside the edge is the carry
+      // — a motion reference on the reference route, which the take must not pass off as an
+      // extension.
+      ...(continuedFrom !== undefined
+        ? { continuedFrom, continuation: job.params["taskMode"] === "continue" ? ("extended" as const) : ("carried" as const) }
+        : {}),
       cost: {
         estimatedMicroUsd: job.estimatedMicroUsd,
         actualMicroUsd,

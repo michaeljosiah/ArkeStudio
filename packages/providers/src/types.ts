@@ -35,6 +35,13 @@ export interface SubmitRequest {
    * which is durable and small — and the bytes are resolved from that at submit time.
    */
   videoSource?: PreparedVideoSource;
+  /**
+   * Clips carried as motion references (issue 852), resolved at submit time like the footage
+   * above and for the same reason: the job journals which files, never their bytes. Sent in the
+   * field the row names for its reference route (`limits.referenceVideoField`), and refused by a
+   * client whose row names none.
+   */
+  videoReferences?: PreparedVideoSource[];
   /** A host-read voice reference, resolved immediately before submission and never journalled. */
   voiceReference?: PreparedVoiceReference;
   /**

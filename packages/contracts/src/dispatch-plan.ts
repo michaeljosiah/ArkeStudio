@@ -112,6 +112,11 @@ export const CompiledPassRecordSchema = z
         mediaTakeId: TakeIdSchema,
         media: z.string().min(1),
         segment: z.object({ inSec: z.number().min(0), outSec: z.number().min(0) }).strict().optional(),
+        /**
+         * Extended on an extend route, or carried as a motion reference where the row has none
+         * (issue 852). Optional because plans written before the distinction were all extensions.
+         */
+        kind: z.enum(["extend", "carry"]).optional(),
       })
       .strict()
       .optional(),

@@ -69,6 +69,17 @@ const REFERENCES_FIELD = new Map(
   ]),
 );
 
+/**
+ * Model id → what its reference route calls the video array (issue 852). No default: a row that
+ * names none takes no clip, and a clip sent to it is refused here rather than dropped.
+ */
+const REFERENCE_VIDEO_FIELD = new Map(
+  FAL_MODELS.filter((model) => model.limits.referenceVideoField !== undefined).map((model) => [
+    model.id,
+    model.limits.referenceVideoField!,
+  ]),
+);
+
 /** The duration field as this route wants it, or nothing when the row declares no lengths. */
 function durationParam(
   model: string,
@@ -183,7 +194,11 @@ export class FalClient implements ProviderClient {
 
   async submit(key: string, request: SubmitRequest): Promise<SubmitResult> {
     const durable = request.params["references"];
-    const withReferences = Array.isArray(durable) && durable.length > 0;
+    const withImages = Array.isArray(durable) && durable.length > 0;
+    // A clip alone is still a reference dispatch (issue 852): the video array lives on the
+    // reference route, so a carried predecessor with no sheet beside it lands there too.
+    const clips = request.videoReferences ?? [];
+    const withReferences = withImages || clips.length > 0;
     const prepared = request.imageReferences ?? [];
     // A task mode is a ROUTE on this provider (SPEC-019 T-1): a dispatch that planned one sends
     // its endpoint in `route`, resolved from the manifest's own mode spec via routeFor. Route
@@ -197,16 +212,16 @@ export class FalClient implements ProviderClient {
     // The durable list is what the job promised; the prepared list is what actually resolved to
     // bytes. A mismatch means a reference went missing between planning and dispatch, and
     // submitting the remainder would quietly generate against a smaller set than was priced.
-    if (withReferences && prepared.length !== durable.length) {
+    if (withImages && prepared.length !== durable.length) {
       throw new Error("fal: not every image reference was prepared");
     }
     const inlineBytes = prepared.reduce((total, reference) => total + reference.data.byteLength, 0);
-    if (withReferences && inlineBytes > MAX_INLINE_REFERENCE_BYTES) {
+    if (withImages && inlineBytes > MAX_INLINE_REFERENCE_BYTES) {
       throw new Error(
         `fal: ${prepared.length} reference images total ${Math.round(inlineBytes / 1024 / 1024)}MB, over the inline limit`,
       );
     }
-    const imageUrls = withReferences ? prepared.map(dataUri) : [];
+    const imageUrls = withImages ? prepared.map(dataUri) : [];
     // The frame task modes name their images differently per route, read from the routes' own
     // schemas: image-to-video takes `image_url` (start, required) and `end_image_url`;
     // reference-to-video takes `image_urls`. The counts are structural — a first-and-last
@@ -243,6 +258,25 @@ export class FalClient implements ProviderClient {
       // `reference_image_urls`. The planner sends the route's own word for it.
       const field = typeof request.params["framesField"] === "string" ? (request.params["framesField"] as string) : "image_urls";
       imagePayload = { [field]: imageUrls };
+    }
+    if (clips.length > 0) {
+      // Motion references (issue 852) go in the array the row names for its reference route, and
+      // only there: a frame or extend route declares no such field, and a row that names none
+      // cannot take a clip at all. Refused here rather than dropped, so a clip the plan carried
+      // never silently fails to reach the wire.
+      const field = REFERENCE_VIDEO_FIELD.get(request.model);
+      if (field === undefined) throw new Error(`fal: ${request.model} names no field for a video reference`);
+      if (taskMode !== "generate") throw new Error(`fal: a video reference rides on the reference route, not ${taskMode}`);
+      const clipBytes = clips.reduce((total, clip) => total + clip.data.byteLength, 0);
+      if (clipBytes > MAX_INLINE_VIDEO_BYTES) {
+        throw new Error(
+          `fal: ${clips.length} reference clip${clips.length === 1 ? "" : "s"} total ${Math.round(clipBytes / 1024 / 1024)}MB, over the inline limit`,
+        );
+      }
+      imagePayload = {
+        ...imagePayload,
+        [field]: clips.map((clip) => `data:${clip.contentType};base64,${Buffer.from(clip.data).toString("base64")}`),
+      };
     }
     const audioPlan = request.params.audioReferences === undefined ? null : CharacterAudioPlanSchema.parse(request.params.audioReferences);
     const audio = request.audioReferences ?? [];
@@ -290,6 +324,8 @@ export class FalClient implements ProviderClient {
       // Ours, not fal's: the immutable predecessor edge recorded on a continued take. The
       // footage itself already travelled as this route's `video_url`.
       "continuedFrom",
+      // Ours too (issue 852): the clips these paths name travelled as the video array above.
+      "videoReferences",
       // Ours, not fal's: the routes that offer the choice spell it `generate_audio`.
       "sound",
       // Ours, not fal's: the length goes as `duration`, in this route's own vocabulary.

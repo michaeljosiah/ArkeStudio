@@ -347,8 +347,13 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       // The plan already refused every continuation the graph or the model could not honour, so
       // a resolved one here is one the compiler commits to. Ahead of the frame route because the
       // plan resolved it that way, and the two must not disagree about which route a shot takes.
-      const continueRoute = entry.continuation !== undefined ? continueDispatchFor(model) : null;
-      const continued = entry.continuation !== undefined && continueRoute !== null;
+      const continueRoute =
+        entry.continuation?.kind === "extend" ? continueDispatchFor(model) : null;
+      const continued = entry.continuation?.kind === "extend" && continueRoute !== null;
+      // A carry is a reference dispatch (issue 852): the clip rides in the reference route's
+      // video array beside the sheets, so the route is the reference sibling whether or not a
+      // sheet was bound — a clip alone still has to land on the route that reads it.
+      const carried = entry.continuation?.kind === "carry";
       const route: CompiledRoute = continued
         ? {
             kind: "continuation",
@@ -357,7 +362,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           }
         : framed
           ? { kind: "frame", mode: frameRoute!.mode, endpoint: frameRoute!.route }
-          : entry.bound.length > 0
+          : entry.bound.length > 0 || carried
             ? { kind: "reference" }
             : { kind: "text" };
       // A frame mode may lock the aspect (issue 389): the picture decides the shape, and
@@ -414,6 +419,14 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
                 // could only ever agree or be wrong.
                 continuedFrom: entry.continuation!.takeId,
               }
+            : carried
+              ? {
+                  // The same edge, on a generate dispatch (issue 852): arrival reads it to record
+                  // the predecessor and names the take carried rather than extended from the
+                  // absence of `taskMode: "continue"` beside it. The clip travels in the reference
+                  // route's video array, resolved from this id at dispatch exactly as above.
+                  continuedFrom: entry.continuation!.takeId,
+                }
             : framed
               ? {
                   taskMode: frameRoute!.mode,
@@ -433,9 +446,10 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
         },
         references: continued || framed ? [] : compiledReferences(entry.bound, world.sheets),
         ...(framed ? { frame: entry.frame! } : {}),
-        ...(continued ? { continuation: entry.continuation! } : {}),
+        ...(continued || carried ? { continuation: entry.continuation! } : {}),
         ...(askedSec !== undefined ? { askedSec } : {}),
         estimatedMicroUsd: entry.estimatedMicroUsd,
+        // A carry sets nothing aside: the sheets ride beside the clip (issue 852).
         dropped: droppedOf(
           entry.budget,
           continued || framed

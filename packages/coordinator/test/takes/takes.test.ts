@@ -859,6 +859,9 @@ describe("take QC at arrival (#248)", () => {
       400000,
     );
     assert.equal(take!.continuedFrom, continuedFrom);
+    // The edge without an extend mode beside it is a carry (issue 852): the predecessor rode as
+    // a motion reference, and the take must not read as the extension it is not.
+    assert.equal(take!.continuation, "carried");
     assert.equal(take!.params["continuedFrom"], undefined, "a dedicated field is not duplicated as a setting");
     const onDisk = JSON.parse(
       await readFile(join(dir, "productions", "saltlight", "takes", take!.id, "take.json"), "utf8"),
@@ -874,6 +877,24 @@ describe("take QC at arrival (#248)", () => {
       continuedFrom,
     );
     await reopened.close();
+  });
+
+  it("names an extension as one, from the extend mode the compiler writes beside the edge (issue 852)", async () => {
+    const { dir, store } = await open();
+    const landed = await landPass(dir);
+    const continuedFrom = "tk_01J8F0000000000000000000B2";
+    const [take] = await recordTakesFromJob(
+      store,
+      {
+        ...shotJob(landed),
+        target: { kind: "shot", id: "sh_13", coversShots: ["sh_13"] },
+        params: { ...shotJob(landed).params, continuedFrom, taskMode: "continue" },
+      },
+      400000,
+    );
+    assert.equal(take!.continuedFrom, continuedFrom);
+    assert.equal(take!.continuation, "extended");
+    await store.close();
   });
 
   it("refuses invalid or non-shot continuation metadata before landed media moves", async () => {

@@ -607,6 +607,21 @@ describe("multimedia admission (issue 305 §5.2)", () => {
     if (!noAudio.ok) assert.equal(noAudio.reason, "this model takes no audio");
   });
 
+  it("video seconds count only where the row names the field the clip goes in (issue 852)", () => {
+    // Seconds a route publishes with nowhere to put the bytes would admit a clip at the tile and
+    // never send it — the failure the budget exists to prevent — so the allowance is nothing
+    // until the field is curated, and the full fifteen seconds once it is.
+    const published = { ...MODEL, limits: { ...MODEL.limits, maxReferenceVideoSec: 15 } };
+    const unmapped = admitReference({ kind: "video", durationSec: 5 }, [], published);
+    assert.equal(unmapped.ok, false);
+    if (!unmapped.ok) assert.equal(unmapped.reason, "this model takes no video");
+    const mapped = { ...published, limits: { ...published.limits, referenceVideoField: "reference_video_urls" } };
+    assert.equal(admitReference({ kind: "video", durationSec: 5 }, [], mapped).ok, true);
+    const over = admitReference({ kind: "video", durationSec: 12 }, [{ kind: "video", durationSec: 5 }], mapped);
+    assert.equal(over.ok, false);
+    if (!over.ok) assert.equal(over.binding, "video-seconds");
+  });
+
   it("an unknown duration refuses; zero is what would make it fit", () => {
     for (const durationSec of [undefined, null] as const) {
       const refusal = admitReference({ kind: "audio", durationSec: durationSec as never }, [], MODEL);

@@ -230,9 +230,29 @@ export function multimediaCapacity(carried: readonly MultimediaReference[], mode
     imagesUsed: images,
     audioCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceAudioSec ?? 0),
     audioUsedSec: audio,
-    videoCeilingSec: model.unverified === true ? 0 : (model.limits.maxReferenceVideoSec ?? 0),
+    // Seconds the route publishes count only where the row names the field the clip goes in
+    // (issue 852): an allowance with nowhere to put the bytes would admit a clip at the tile
+    // and never send it, which is the failure this budget exists to prevent.
+    videoCeilingSec:
+      model.unverified === true || model.limits.referenceVideoField === undefined
+        ? 0
+        : (model.limits.maxReferenceVideoSec ?? 0),
     videoUsedSec: video,
   };
+}
+
+/**
+ * Whether a clip can ride on this row as a reference (issue 852): the provider's transport maps
+ * motion, the row says which field takes it, and the route publishes seconds for it. One
+ * question, asked by the planner's carry, the bench's tile and the gate before enqueue alike.
+ */
+export function carriesVideoReferences(model: ManifestModel, mapped: readonly ReferenceKind[]): boolean {
+  return (
+    mapped.includes("video") &&
+    model.unverified !== true &&
+    model.limits.referenceVideoField !== undefined &&
+    (model.limits.maxReferenceVideoSec ?? 0) > 0
+  );
 }
 
 export type MultimediaRefusal =

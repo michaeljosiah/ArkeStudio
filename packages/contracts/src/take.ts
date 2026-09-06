@@ -190,6 +190,14 @@ export const TakeSchema = z
      */
     continuedFrom: TakeIdSchema.optional(),
     /**
+     * How that predecessor was continued (issue 852): `extended` on a route that reads the
+     * footage and carries on from its last frame, `carried` where the model has no such route and
+     * the take rode as a motion reference instead — a weaker promise (no shared latent, no audio
+     * carried) that the provenance has to name, or a carried take reads as an extension it is not.
+     * Absent on takes older than the distinction, which were all extensions.
+     */
+    continuation: z.enum(["extended", "carried"]).optional(),
+    /**
      * Absent means "not measured" — no analyzer configured, or the measurement could not be
      * made — and never "measured clean". Legacy takes have none and are not backfilled: a take
      * is immutable, and inventing a measurement nobody took would be worse than saying nothing.

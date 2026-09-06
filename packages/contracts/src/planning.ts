@@ -12,11 +12,13 @@ import {
 import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
 import {
   payloadVerdict,
+  carriesVideoReferences,
   referenceBudget,
   type BudgetCandidate,
   type BudgetResult,
   type PayloadVerdict,
 } from "./reference-budget.js";
+import { mappedReferenceKinds } from "./provider.js";
 import {
   aspectSupport,
   continueDispatchFor,
@@ -1293,7 +1295,14 @@ export interface DispatchWarnings {
    * a selected boundary frame is redundant — continuation already carries the motion the frame
    * was a lossy stand-in for.
    */
-  continuedShots: Array<{ shotId: string; number: number; fromTakeId: string; setAside: string[] }>;
+  continuedShots: Array<{
+    shotId: string;
+    number: number;
+    fromTakeId: string;
+    /** Extended on an extend route, or carried as a motion reference where there is none (issue 852). */
+    kind: "extend" | "carry";
+    setAside: string[];
+  }>;
   /**
    * Shots that asked to continue and cannot, each with its reason (R-51, R-52, R-34).
    *
@@ -1651,6 +1660,18 @@ export const CONTINUATION_PREAMBLE =
   "The attached video is the footage immediately before this clip. Continue it from its final frame, holding the motion, framing and light.";
 
 /**
+ * The line a carried continuation adds beneath the binding preamble (issue 852).
+ *
+ * On a row with no extend route the predecessor's take rides as a motion reference instead, in
+ * the video array the reference route reads, cited the way that route cites clips — "Video 1".
+ * The sheets still ride and are still numbered, so this is appended to their preamble rather
+ * than replacing it. A weaker promise than CONTINUATION_PREAMBLE's: the composition is described
+ * rather than pinned, and nothing is shared with the predecessor but what the model sees.
+ */
+export const CARRY_PREAMBLE =
+  "Video 1 is the footage immediately before this clip. Pick up from its final frame, holding its motion, framing and light.";
+
+/**
  * The footage a continuation will actually extend, resolved before anything is priced.
  *
  * Deliberately carries the take ids and the filename rather than a composed path: a segment's
@@ -1673,6 +1694,12 @@ export interface ContinuationPlan {
   media: string;
   /** The range to cut losslessly out of that file before dispatch (R-50, T-32). */
   segment?: { inSec: number; outSec: number };
+  /**
+   * Extended on the model's extend route, or carried as a motion reference where it has none
+   * but its reference route takes video (issue 852). The compiler routes on this, the dispatch
+   * path decides which wire field the bytes become from it, and arrival records it on the take.
+   */
+  kind: "extend" | "carry";
 }
 
 export type ContinuationAvailability =
@@ -1741,6 +1768,12 @@ function resolveContinuations(
   // that predates continuation, and it gets exactly the dispatch it got before.
   if (takes === undefined) return states;
   const route = continueDispatchFor(model);
+  // No extend route is not the end of the question (issue 852). A row whose reference route
+  // takes video can carry the predecessor's take as a motion reference instead: the sheets ride
+  // beside it and the composition is described rather than pinned — a weaker promise than
+  // extension, named as such everywhere downstream, and taken only where a true extend route
+  // does not exist, which stays preferred.
+  const carries = route === null && carriesVideoReferences(model, mappedReferenceKinds(model.provider));
   for (const [shotIndex, shot] of shots.entries()) {
     if (shot.continuity?.continuesPrevious !== true) continue;
     if (mode !== "per-shot") {
@@ -1749,7 +1782,7 @@ function resolveContinuations(
       });
       continue;
     }
-    if (route === null) {
+    if (route === null && !carries) {
       states.set(shot.id, { unavailable: modeUnavailableReason(model, "continue") ?? "no continue route" });
       continue;
     }
@@ -1772,8 +1805,32 @@ function resolveContinuations(
     const mediaTake =
       predecessor.segment === undefined ? predecessor : takes.find((candidate) => candidate.id === mediaTakeId);
     if (mediaTake?.media === undefined) {
-      states.set(shot.id, { unavailable: `shot ${from.number}'s accepted take has no footage to extend` });
+      states.set(shot.id, { unavailable: `shot ${from.number}'s accepted take has no footage to continue from` });
       continue;
+    }
+    if (carries) {
+      // The reference route budgets clips in seconds, so the predecessor has to be a length the
+      // plan can state: a segment is its range, a whole take is the length it was asked for, which
+      // its params kept. Unknown refuses rather than fits — the budget's own rule (issue 305).
+      const clipSec =
+        predecessor.segment !== undefined
+          ? predecessor.segment.outSec - predecessor.segment.inSec
+          : typeof predecessor.params["durationSec"] === "number"
+            ? predecessor.params["durationSec"]
+            : null;
+      const ceiling = model.limits.maxReferenceVideoSec ?? 0;
+      if (clipSec === null) {
+        states.set(shot.id, {
+          unavailable: `shot ${from.number}'s accepted take has no known length, and ${model.displayName} budgets a carried clip in seconds`,
+        });
+        continue;
+      }
+      if (clipSec > ceiling) {
+        states.set(shot.id, {
+          unavailable: `shot ${from.number}'s take runs ${clipSec}s — longer than the ${ceiling}s of video ${model.displayName} reads as a reference`,
+        });
+        continue;
+      }
     }
     states.set(shot.id, {
       continuation: {
@@ -1785,6 +1842,7 @@ function resolveContinuations(
         ...(predecessor.segment !== undefined
           ? { segment: { inSec: predecessor.segment.inSec, outSec: predecessor.segment.outSec } }
           : {}),
+        kind: carries ? "carry" : "extend",
       },
     });
   }
@@ -1929,7 +1987,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   // rather than the capability it stands in for.
   const continuations = resolveContinuations(scene, selections, model, input.takes, mode);
   const taskModeForShot = (shotId: string): TaskMode => {
-    if (continuations.get(shotId)?.continuation !== undefined) return "continue";
+    const continuation = continuations.get(shotId)?.continuation;
+    // A carry is a reference dispatch that happens to carry a clip (issue 852): no mode of its
+    // own on the wire, so it prices and routes as generation with references.
+    if (continuation !== undefined) return continuation.kind === "extend" ? "continue" : "generate";
     if (boundaryFrames.get(shotId)?.frame !== undefined) return frameDispatchFor(model, 1)?.mode ?? "generate";
     return "generate";
   };
@@ -1951,7 +2012,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const frame = continuation !== undefined ? undefined : boundaryFrames.get(shot.id)?.frame;
     // Bound before the duration is priced (issue #390): what actually travels decides which
     // route the provider takes, and the reference route's ceiling can be shorter.
-    const bound = frame !== undefined || continuation !== undefined ? [] : bindReferences(references, sheets);
+    // A carried continuation keeps its sheets (issue 852): the reference route takes the clip
+    // in one array and the pictures in another, so nothing has to step aside for it.
+    const bound =
+      frame !== undefined || continuation?.kind === "extend" ? [] : bindReferences(references, sheets);
     // The length that will actually be asked for. A route takes one of a fixed few lengths, so
     // a 6.5s shot becomes a 7s dispatch — and the estimate has to be the 7, or the figure shown
     // and the figure billed are for two different requests. A shot longer than anything the
@@ -1996,11 +2060,16 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       // time its video sits (R-50); a referenced shot numbers its assets. Never more than one —
       // the route carries a picture, a clip or an array, and no route carries two of them.
       preamble:
-        continuation !== undefined
+        continuation?.kind === "extend"
           ? CONTINUATION_PREAMBLE
-          : frame !== undefined
-            ? START_FRAME_PREAMBLE
-            : bindingPreamble(bound),
+          : continuation?.kind === "carry"
+            // The one exception to "never more than one" (issue 852), and only apparently: the
+            // reference route carries the clip and the pictures in two arrays of its own, so the
+            // clip's line sits beneath the pictures' numbering rather than replacing it.
+            ? [bindingPreamble(bound), CARRY_PREAMBLE].filter(Boolean).join("\n")
+            : frame !== undefined
+              ? START_FRAME_PREAMBLE
+              : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -2251,10 +2320,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
               shotId: entry.shot.id,
               number: entry.shot.number,
               fromTakeId: entry.continuation.takeId,
+              kind: entry.continuation.kind,
               // Deduplicated on the same grounds as `framedShots`, and carrying the boundary
               // frame too where one was selected: it stepped aside as surely as a sheet did.
+              // A carry sets no sheet aside — they ride beside the clip (issue 852) — and only
+              // the frame, which the clip makes redundant.
               setAside: [
-                ...new Set(entry.budget.carried.map((candidate) => candidate.sheetId)),
+                ...(entry.continuation.kind === "extend"
+                  ? new Set(entry.budget.carried.map((candidate) => candidate.sheetId))
+                  : []),
                 ...(boundaryFrames.get(entry.shot.id)?.frame !== undefined ? ["start frame"] : []),
               ],
             },
@@ -2332,7 +2406,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   for (const entry of shots) {
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, taskMode: entry.continuation ? "continue" : entry.frame ? "first-frame" : "generate",
+      imageCount: entry.bound.length, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
       disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences, requiredMasterShots: masterPerformanceShotIds(input.timingProduction) });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
