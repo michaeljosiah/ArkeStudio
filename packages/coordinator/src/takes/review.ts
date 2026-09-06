@@ -481,14 +481,14 @@ export async function saveAudioTracks(store: WorldStore, productionId: string, c
   const existing = await readOr(store, path, "{}");
   const previous = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(existing.raw)));
   const next = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(cutJson)));
-  // Existing unavailable references may be retained while others are removed. A bulk save
-  // must not add another copy; counting sources also permits deletion that shifts entry indices.
+  // Existing unavailable placements may be retained while others are removed. Legacy audio
+  // has no IDs: its normalized source/placement key survives deletion that shifts entry indices.
   const remaining = new Map<string, number>();
-  for (const reference of previous) remaining.set(reference.id, (remaining.get(reference.id) ?? 0) + 1);
+  for (const reference of previous) remaining.set(reference.key, (remaining.get(reference.key) ?? 0) + 1);
   const added = next.filter(reference => {
-    const count = remaining.get(reference.id) ?? 0;
+    const count = remaining.get(reference.key) ?? 0;
     if (count === 0) return true;
-    remaining.set(reference.id, count - 1);
+    remaining.set(reference.key, count - 1);
     return false;
   });
   await store.commit({

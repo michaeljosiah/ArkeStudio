@@ -369,11 +369,14 @@ function audioFromTimeline(
 }
 
 /** Both persisted audio encodings name the same media at legacy read and write boundaries. */
-export function legacyCutArtifactReferences(cut: CutFile): Array<{ label: string; id: string }> {
-  const references = cut.overlays.map(overlay => ({ label: overlay.id, id: overlay.artifactId }));
+export function legacyCutArtifactReferences(cut: CutFile): Array<{ key: string; label: string; id: string }> {
+  const references = cut.overlays.map(overlay => ({ key: `overlay:${overlay.id}:${overlay.artifactId}`, label: overlay.id, id: overlay.artifactId }));
   for (const track of cut.audio) for (const [index, entry] of track.entries.entries()) {
     const source = audioSourceOf(entry);
-    if (source?.kind === "artifact") references.push({ label: `${track.label} entry ${index + 1}`, id: source.artifactId });
+    if (source?.kind === "artifact") references.push({
+      key: `audio:${JSON.stringify({ source, shotId: entry.shotId ?? null, offsetSec: entry.offsetSec, timing: entry.timing ?? null })}`,
+      label: `${track.label} entry ${index + 1}`, id: source.artifactId,
+    });
   }
   return references;
 }
@@ -411,7 +414,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
   const { production, artifacts, timeline, scope, preset, subtitles: subtitleChoice } = input;
   const frameRate = productionFrameRate(production.meta);
   if (timeline?.status === "invalid") return { ok: false, reason: `timeline is invalid: ${timeline.message}` };
-  const legacyRefusal = legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
+  const legacyRefusal = scope.kind === "episode" ? null : legacyArtifactScopeRefusal(production, artifacts, timeline, scope);
   if (legacyRefusal !== null) return { ok: false, reason: legacyRefusal };
   // A music-timed production renders through the spine plan until its timeline is materialised
   // (SPEC-037 R-2); once it is, the song is a Music clip and the picture is the saved order.
@@ -429,9 +432,20 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
        */
       const range = episodeTimelineRange(production, timeline.timeline, scope.episodeId);
       if (!range.ok) return { ok: false, reason: `episode export refused: ${range.reason}` };
-      const whole = buildRenderPlan({ ...input, scope: { kind: "production" } });
+      const startSec = framesToSeconds(range.startFrame, frameRate), endSec = framesToSeconds(range.endFrame, frameRate);
+      // Keep the original clock and track controls, but do not resolve media the requested
+      // window will discard. The original production still supplies dialogue slot authority.
+      const scopedTimeline = { ...timeline.timeline, tracks: timeline.timeline.tracks.map(track => ({ ...track,
+        clips: track.clips.filter(clip => clip.startFrame < range.endFrame && clip.startFrame + clip.durationFrames > range.startFrame),
+      })) };
+      const scopedProduction = { ...production, cut: { ...production.cut,
+        overlays: production.cut.overlays.filter(overlay => overlay.startSec < endSec && overlay.endSec > startSec),
+        // Named legacy audio is migration input; legacy rendering only reads overlay sound.
+        audio: [],
+      } };
+      const whole = buildRenderPlan({ ...input, production: scopedProduction, timeline: { status: "ready", timeline: scopedTimeline }, scope: { kind: "production" } });
       if (!whole.ok) return whole;
-      return { ok: true, plan: windowPlan(whole.plan, framesToSeconds(range.startFrame, frameRate), framesToSeconds(range.endFrame, frameRate), scope) };
+      return { ok: true, plan: windowPlan(whole.plan, startSec, endSec, scope) };
     }
     // The legacy refusals — a spine with no episode authority among them — belong to the legacy
     // cut alone; a saved timeline has its own episode range above (round six).

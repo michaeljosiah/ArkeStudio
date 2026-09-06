@@ -118,6 +118,44 @@ function ok<T extends { ok: boolean }>(result: T): Extract<T, { ok: true }> {
 }
 
 describe("one timeline, three delivery scopes (#682)", () => {
+  for (const lane of ["base", "overlay", "audio"] as const) {
+    it(`ignores unavailable ${lane} media outside an episode, but refuses it inside (#895)`, () => {
+      const value = production();
+      const timeline = seedStoryPictureTimeline(value);
+      timeline.migratedCut = true;
+      const artifactId = lane === "audio" ? BELLS : PLATE;
+      const clip = { id: "cl_scoped" as const, startFrame: 250, durationFrames: 25, sourceInFrames: 0,
+        source: { kind: "artifact" as const, artifactId, label: "Scoped media" } };
+      if (lane === "base") timeline.tracks[0]!.clips.push(clip);
+      else timeline.tracks.push({ id: "tr_scoped", kind: lane === "audio" ? "audio" : "picture", name: "Scoped", order: 10, muted: false, clips: [clip] });
+      const scope = { kind: "episode" as const, episodeId: "ep_one" };
+      const state = { status: "ready" as const, timeline };
+      const expected = ok(buildRenderPlan({ production: value, artifacts, timeline: state, scope, preset: "review-cut" }));
+      const catalogs = [artifacts.filter(artifact => artifact.id !== artifactId),
+        artifacts.map(artifact => artifact.id === artifactId ? { ...artifact, production: "another-production" } : artifact)];
+      for (const catalog of catalogs) {
+        assert.deepEqual(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" }), expected);
+        assert.equal(buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope: { kind: "production" }, preset: "review-cut" }).ok, false);
+      }
+      clip.startFrame = lane === "base" ? 25 : 0;
+      if (lane === "base") timeline.tracks[0]!.clips.find(candidate => candidate.id === "cl_sh-1")!.durationFrames = 25;
+      for (const catalog of catalogs) {
+        const refused = buildRenderPlan({ production: value, artifacts: catalog, timeline: state, scope, preset: "review-cut" });
+        assert.ok(!refused.ok); assert.match(refused.reason, /cl_scoped cites artifact/);
+      }
+    });
+  }
+
+  it("ignores unmigrated legacy overlays outside a saved episode window (#895)", () => {
+    const value = production({ cut: { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000B1", artifactId: PLATE, startSec: 6, endSec: 7, lane: 0, audio: "keep" }] } });
+    const timeline = { status: "ready" as const, timeline: seedStoryPictureTimeline(value) };
+    const scope = { kind: "episode" as const, episodeId: "ep_one" };
+    assert.ok(buildRenderPlan({ production: value, artifacts: [], timeline, scope, preset: "review-cut" }).ok);
+    value.cut.overlays[0]!.startSec = 1;
+    const refused = buildRenderPlan({ production: value, artifacts: [], timeline, scope, preset: "review-cut" });
+    assert.ok(!refused.ok); assert.match(refused.reason, /which this world does not have/);
+  });
+
   it("derives a contiguous episode range and refuses an interleaved one by name", () => {
     const value = production();
     const seeded = seedStoryPictureTimeline(value);
