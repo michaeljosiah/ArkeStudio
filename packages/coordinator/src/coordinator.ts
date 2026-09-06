@@ -1178,9 +1178,13 @@ export class Coordinator {
            * at once is the other way to fell it.
            */
           for (const [index, block] of blocks.entries()) {
+            // A chapter can be a thousand blocks; the Stop control, and the coordinator going
+            // down, end the read at the next boundary rather than after the last synthesis.
+            if (this.stopping || this.stoppedReads.has(requestId)) break;
             const result = await this.voiceService.localSpeech(store, speaking.voiceId, block.text);
             ready(block, result.file, result.cached, { part: index, parts: blocks.length });
           }
+          this.stoppedReads.delete(requestId);
           return;
         }
         /*
@@ -1500,6 +1504,8 @@ export class Coordinator {
   private voiceModelsChanged = false;
   private started = false;
   private stopping = false;
+  /** Page reads told to stop (codex, PR 879): the narration loop checks between blocks. */
+  private readonly stoppedReads = new Set<string>();
   private stopPromise: Promise<void> | null = null;
   /** Request ids whose create-production is still running — redelivery waits, never doubles (#384). */
   private readonly creatingProductions = new Set<string>();
@@ -10710,6 +10716,10 @@ export class Coordinator {
           subject: { id: resolved.subjectId, version: resolved.version },
           fail: (error, characters) => failProse(error, characters, resolved.heading),
         });
+        return;
+      }
+      case "stop-prose-page": {
+        this.stoppedReads.add(msg.requestId);
         return;
       }
       case "read-prose-page": {

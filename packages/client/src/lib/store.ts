@@ -975,6 +975,7 @@ function handleFrame(json: string): void {
     }
     if (event.type === "chapter.create-result") {
       for (const listener of chapterCreateListeners) listener(event);
+      issuedChapterCreates.delete(event.requestId);
     }
     if (event.type === "chapter.open-result") {
       for (const listener of chapterOpenListeners) listener(event);
@@ -3224,7 +3225,19 @@ export function runBibleHelper(input: {
 export function createChapter(worldId: string, productionId: string, title: string, order: number): string | null {
   const requestId = ulid();
   if (!send({ kind: "create-chapter", worldId, productionId, requestId, title, order })) return null;
+  issuedChapterCreates.add(requestId);
   return requestId;
+}
+
+/** The chapter presses this window made and has not heard back on; every window hears every answer. */
+const issuedChapterCreates = new Set<string>();
+export function isOwnChapterCreate(requestId: string): boolean {
+  return issuedChapterCreates.has(requestId);
+}
+
+/** Stop a page read this window started (codex, PR 879); the coordinator stops at the next block. */
+export function stopProsePage(worldId: string, requestId: string): void {
+  send({ kind: "stop-prose-page", worldId, requestId });
 }
 
 /** Ask for a chapter's body (turn 126). The answer is `chapter.open-result`, by requestId. */

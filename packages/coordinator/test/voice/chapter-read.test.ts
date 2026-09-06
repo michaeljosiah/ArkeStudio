@@ -41,6 +41,8 @@ type Harness = {
   events: DomainEvent[];
   spoken: string[];
   send: (message: ClientMessage) => Promise<void>;
+  /** When set, every synthesis waits on it: a read can be caught between blocks. */
+  gate: { hold: Promise<void> | null };
 };
 
 /** Every test closes what it opened: an open WorldStore's watchers keep the runner alive. */
@@ -50,6 +52,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const spoken: string[] = [];
+  const gate: { hold: Promise<void> | null } = { hold: null };
   const coordinator = new Coordinator({
     provider,
     adapter: null,
@@ -62,6 +65,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
         listVoices: async () => [{ id: "bm_george", label: "George", attributes: [] }],
         synthesize: async (input: { voiceId: string; text: string }) => {
           spoken.push(input.text);
+          if (gate.hold) await gate.hold;
           return wav();
         },
         transcribe: async () => ({ text: "" }),
@@ -73,7 +77,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
   const send = (message: ClientMessage) =>
     (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
   try {
-    await run({ worldDir, events, spoken, send });
+    await run({ worldDir, events, spoken, send, gate });
   } finally {
     await provider.close();
   }
@@ -176,6 +180,30 @@ describe("the chapter through the coordinator (turn 126)", () => {
       assert.equal(spoken.length, 3);
       assert.ok(spoken[0]!.startsWith("The ledger of the Vigil"), "the first part is the first paragraph, off disk");
       assert.ok(spoken[1]!.startsWith("Maren has the 1820 volume"), "the second part is the second paragraph");
+    }));
+
+  it("Stop ends a long read at the next paragraph rather than after the last (codex, PR 879)", () =>
+    withHarness(async ({ events, spoken, send, gate }) => {
+      let release = () => {};
+      gate.hold = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const reading = send({
+        kind: "read-prose-page",
+        requestId: requestId(1),
+        worldId: WORLD_ID,
+        sources: [0, 1, 2].map((paragraph) => ({ of: "chapter" as const, productionId: LEDGER, chapterId: "neap", paragraph })),
+      });
+      // The first block is being made; the stop arrives while it is.
+      while (spoken.length === 0) await new Promise((resolve) => setTimeout(resolve, 5));
+      await send({ kind: "stop-prose-page", worldId: WORLD_ID, requestId: requestId(1) });
+      release();
+      await reading;
+      const parts = events.filter(
+        (e): e is Audio => e.type === "voice.audio" && e.requestId === requestId(1) && e.status === "ready",
+      );
+      assert.equal(spoken.length, 1, "nothing after the block in flight was synthesised");
+      assert.equal(parts.length, 1);
     }));
 
   it("a paragraph past the saved chapter drops out of the page rather than reading the wrong words", () =>

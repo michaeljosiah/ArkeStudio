@@ -57,6 +57,22 @@ const PLACEHOLDER = "Start here. It saves as you go.";
 
 type OpenedRecord = { body: string; version: number; hash: string; versions: number[] };
 
+/**
+ * A save that must follow one still in flight after the screen is gone (codex, PR 879): the
+ * answer to the first names the base the second needs, so the second waits for it here, outside
+ * any component. A refusal ends it — the base moved, and there is no screen left to adopt the
+ * disk for; the next open reads the file.
+ */
+function flushAfter(pending: string, save: { worldId: string; prodId: string; file: string; value: string }): void {
+  const unsubscribe = subscribeChapterSaveResults((result) => {
+    if (result.requestId !== pending) return;
+    unsubscribe();
+    if (result.disposition === "saved" && result.hash !== undefined) {
+      saveChapter(save.worldId, save.prodId, save.file, save.value, result.hash);
+    }
+  });
+}
+
 /** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
 const PAGE_READ_BLOCK_CAP = 1000;
 
@@ -164,17 +180,28 @@ export function ChapterWorkspace({
     // Nothing leaves the client while the transport is down; the connection coming back is a
     // dependency so a chapter opened during an outage does not sit on "Opening…" for good.
     if (connection !== "open") return;
-    // A draft written offline goes out first (below) rather than being replaced by the disk.
-    if (unsentDraft.current !== null) return;
     const requestId = openChapter(worldId, prodId, chapter.id);
     if (requestId === null) return;
     return subscribeChapterOpenResults((result: ChapterOpenResult) => {
       if (result.requestId !== requestId) return;
       if (result.disposition === "opened" && result.body !== undefined && result.version !== undefined && result.hash !== undefined) {
         const opened = { body: result.body, version: result.version, hash: result.hash, versions: result.versions ?? [] };
+        const previous = recordRef.current;
         recordRef.current = opened;
         setRecord(opened);
         setOpenFailure(null);
+        // A draft the transport could not carry goes out now, against the base just read —
+        // unless the record moved while it waited, in which case the disk text is the text and
+        // the foot says why the words on screen went.
+        const unsent = unsentDraft.current;
+        unsentDraft.current = null;
+        if (unsent !== null && previous !== null && previous.version === opened.version) {
+          setSaving(true);
+          setSaveRefusal(null);
+          flushSave(unsent);
+          return;
+        }
+        if (unsent !== null) setSaveRefusal("the chapter moved · reloaded from disk");
         // Someone else's edit is adopted, ours has already been saved: either way the text on
         // disk is the text (the Bible's three-writer rule).
         setDraft(null);
@@ -257,33 +284,43 @@ export function ChapterWorkspace({
     });
   }, [flushSave]);
 
-  // A draft the transport could not carry goes out as soon as it can.
+  /*
+   * A save in flight when the transport drops never answers: the connection coming back brings
+   * a snapshot, not the result. Its newest text is kept as unsent, so the reopen above sends it
+   * against a fresh base, and the foot says so rather than staying on "Saving…" (codex, PR 879).
+   */
   useEffect(() => {
-    if (connection !== "open" || unsentDraft.current === null) return;
-    const value = unsentDraft.current;
-    unsentDraft.current = null;
-    setSaving(true);
-    flushSave(value);
-  }, [connection, flushSave]);
+    if (connection === "open" || pendingSave.current === null) return;
+    pendingSave.current = null;
+    unsentDraft.current = queuedDraft.current ?? savedText.current;
+    queuedDraft.current = null;
+    setSaving(false);
+    setSaveRefusal("offline · kept to send");
+  }, [connection]);
 
   /*
-   * Leaving within the pause flushes the pending save rather than cancelling it: the screen
-   * promises the chapter saves as you type, and the sentence before a rail press is the one
-   * most easily lost. The answer lands after the listener is gone, which is fine — the snapshot
-   * carries the count and the next open reads the file. A save already in flight cannot be
-   * joined: this names the base the editor holds, and if the in-flight save moves it the
-   * committer refuses the second, as it must (codex, PR 879).
+   * Leaving flushes what has not gone out rather than cancelling it: the screen promises the
+   * chapter saves as you type, and the sentence before a rail press is the one most easily
+   * lost. The newest text is the draft; if it is the text of a save already in flight there is
+   * nothing to do, if a save is in flight with older text the flush waits behind it for the
+   * base that save returns (`flushAfter`), and otherwise it goes now against the base the
+   * editor holds. The answer lands after the listener is gone, which is fine — the snapshot
+   * carries the count and the next open reads the file (codex, PR 879).
    */
   useEffect(
     () => () => {
-      if (timer.current === null) return;
-      clearTimeout(timer.current);
-      timer.current = null;
+      if (timer.current !== null) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
       const value = draftRef.current;
       const current = recordRef.current;
-      if (value !== null && current !== null && value !== current.body) {
-        saveChapter(worldId, prodId, chapter.file, value, current.hash);
+      if (value === null || current === null || value === current.body) return;
+      if (pendingSave.current !== null) {
+        if (savedText.current !== value) flushAfter(pendingSave.current, { worldId, prodId, file: chapter.file, value });
+        return;
       }
+      saveChapter(worldId, prodId, chapter.file, value, current.hash);
     },
     [worldId, prodId, chapter.file],
   );
@@ -371,7 +408,9 @@ export function ChapterWorkspace({
           <div className="fy-sw__headline">
             <h1 className="fy-sw__title">{chapter.title}</h1>
             <div className="fy-sw__actions">
-              {paragraphs.length > 0 && <PageReadControl read={read} label="Read the chapter" />}
+              {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
+                  and the words on screen are the draft's (codex, PR 879). */}
+              {paragraphs.length > 0 && stagedDraft === undefined && <PageReadControl read={read} label="Read the chapter" />}
             </div>
           </div>
           <div className="fy-sw__context" aria-label="Chapter state">

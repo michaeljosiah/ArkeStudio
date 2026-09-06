@@ -212,6 +212,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       confirmationToken: z.string().min(1).optional(),
     })
     .strict(),
+  /**
+   * Stop a page read this window started (codex, PR 879). A chapter is narrated a paragraph at a
+   * time and can run to a thousand blocks; the Stop control clears playback on the client, and
+   * this is what tells the coordinator not to synthesise the rest.
+   */
+  z
+    .object({
+      kind: z.literal("stop-prose-page"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("read-bible-section"),

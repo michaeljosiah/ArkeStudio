@@ -650,7 +650,17 @@ export async function createChapter(
   // differs from its stem (`01-neap.md` is `neap`), and a new file whose stem equalled an old
   // id would answer to two chapters at once — the route opens by id (codex, PR 879).
   const existing = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters ?? [];
-  const taken = existing.flatMap((c) => [c.file, c.id]);
+  // And the stems a staged draft has already claimed: a proposal that would create
+  // `chapters/untitled.md` is not in the bundle's chapters yet, and a live create under it
+  // would leave the accept refused as stale (the reservation the chat action itself makes).
+  const claimed = new RegExp(`^productions/${productionId}/chapters/([^/]+)\\.md$`);
+  const staged = store.getBundle().proposals.flatMap((entry) =>
+    entry.proposal.targets.flatMap((target) => {
+      const match = claimed.exec(target.path);
+      return match ? [match[1]!] : [];
+    }),
+  );
+  const taken = [...existing.flatMap((c) => [c.file, c.id]), ...staged];
   const slug = uniqueSlug(slugify(input.title) || `chapter-${input.order}`, "chapter", taken);
   const doc = MarkdownFile.create(
     {
@@ -697,17 +707,22 @@ export async function saveChapter(
   // The base is the file the editor read when the caller says so (turn 126), not the file as
   // it is now: hashing the live bytes here would make every save pass, including one written
   // over an accepted draft the editor never saw. The committer refuses a moved base.
-  await store.commit({
+  const result = await store.commit({
     kind: "chapter-save",
     source: "editor",
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }],
   });
-  // Read back rather than hashing what was handed over: the committer stamps `updated` and
-  // `version` on the way through, so the bytes on disk are the base the next save must name.
+  // The base the next save must name is the bytes this commit wrote — the committer stamps
+  // `updated` and `version` on the way through, so it is not what was handed over, and it is
+  // not the file as read back either: an outside edit landing between the commit and the read
+  // would hand the editor that edit's hash and let its next save overwrite it (codex, PR 879).
+  const committed = result.hashes?.[path];
+  const version = result.versions[path];
+  if (committed !== undefined && version !== undefined) return { version: Math.max(1, version), hash: committed };
   const saved = await readFile(file, "utf8");
   const stamped = MarkdownFile.parse(saved);
-  const version = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
-  return { version: Math.max(1, version), hash: sha256(saved) };
+  const parsed = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
+  return { version: Math.max(1, version ?? parsed), hash: committed ?? sha256(saved) };
 }
 
 /**

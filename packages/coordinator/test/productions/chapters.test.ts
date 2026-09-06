@@ -209,6 +209,19 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     // The frontmatter id is reserved as well as the stem: the fixture's `01-neap.md` is `neap`,
     // and a new `neap.md` would answer to two chapters by id (codex, PR 879).
     assert.equal(await createChapter(store, LEDGER, { title: "Neap", order: 9 }), "neap-2");
+    // A stem a staged draft has claimed is taken too, or accepting that draft would find its
+    // create refused as stale (codex, PR 879).
+    const gate = new ProposalManager(store);
+    await gate.stage({
+      kind: "chapter-draft",
+      summary: "New chapter: Untitled",
+      source: "test",
+      targets: [{
+        path: `productions/${LEDGER}/chapters/untitled.md`,
+        content: MarkdownFile.create({ id: "untitled", title: "Untitled", order: 10, status: "planned", version: 1 }, "").serialize(),
+      }],
+    });
+    assert.equal(await createChapter(store, LEDGER, { title: "Untitled", order: 10 }), "untitled-2");
     assert.deepEqual(
       (await chaptersOf(dir, "inkbound")).map((c) => ({ id: c.id, order: c.order })),
       [
