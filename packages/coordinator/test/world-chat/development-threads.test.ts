@@ -928,3 +928,81 @@ describe("production-scoped threads (issue 400)", () => {
     );
   });
 });
+
+/*
+ * Two settled items touching one file (issue #909).
+ *
+ * A shot has no file of its own, so five shots written into one scene are five rewrites of the
+ * scene file. Built each from the live record, only the last would survive — and the wrap-up
+ * refused rather than lose four, handing the person a path and a question with nothing to answer
+ * it. Built each on the last, they are one change.
+ */
+describe("two settled items touching one file (issue 909)", () => {
+  it("writes five shots into one scene as one change, each after the last", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const before = orderedShots(scene).map((shot) => shot.id);
+    const groupId = newId("grp");
+    const titles = ["Lights out", "The count", "A door", "Roll call", "Nobody answers"];
+    const seq = await withCandidates(
+      w.log,
+      titles.map((title) =>
+        candidate({
+          classification: "development.shot",
+          groupId,
+          title,
+          target: { kind: "shot", productionId: "saltlight", sceneId: scene.id },
+          draft: { title, description: `${title}, in the dark.` },
+        } as Partial<WorldChangeCandidate>)),
+    );
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-909",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+    assert.equal(result.proposalIds.length, 1, "one change, not five rewrites of the scene");
+    const proposal = (await w.gate.listOpen()).find((p) => p.id === result.proposalIds[0]);
+    assert.ok(proposal);
+    const shots = orderedShots(await readStagedGraphScene(w.dir, proposal));
+    assert.deepEqual(shots.slice(0, before.length).map((shot) => shot.id), before, "the scene keeps what it had");
+    assert.deepEqual(shots.slice(before.length).map((shot) => shot.title), titles, "every shot, in the order they were said");
+    assert.equal(new Set(shots.map((shot) => shot.id)).size, shots.length, "each with an id of its own");
+    assert.equal(accepted(await w.gate.accept(proposal.id)), "accepted", "and the gate takes it whole");
+  });
+
+  it("names both items when two of them still cannot be written together, and shows no path", async () => {
+    const w = await world();
+    const groupId = newId("grp");
+    const amend = (title: string, statement: string) =>
+      candidate({
+        classification: "canon.amend",
+        groupId,
+        title,
+        target: { kind: "canon", entryId: "CANON-002" },
+        draft: { statement },
+      } as Partial<WorldChangeCandidate>);
+    const seq = await withCandidates(w.log, [
+      amend("Tide-calling costs sight", "A caller pays in sight, one verse at a time."),
+      amend("Tide-calling costs sleep", "A caller pays in sleep, one verse at a time."),
+    ]);
+    await assert.rejects(
+      () =>
+        wrapUp({
+          store: w.store,
+          gate: w.gate,
+          conversationId: w.conversationId,
+          requestId: "req-909b",
+          expectedConversationSeq: seq,
+          now: NOW,
+        }),
+      (err: Error) => {
+        assert.match(err.message, /“Tide-calling costs sight” and “Tide-calling costs sleep”/, "the two are named");
+        assert.doesNotMatch(err.message, /canon\/|\.md|\.json/, "a path is not something a person is shown");
+        return true;
+      },
+    );
+  });
+});

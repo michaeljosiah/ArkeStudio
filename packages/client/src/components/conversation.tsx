@@ -844,6 +844,8 @@ export function ProductionConversation({
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
+  /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
+  const [pointsOpen, setPointsOpen] = useState(false);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
@@ -1147,7 +1149,11 @@ export function ProductionConversation({
                   narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
                   the only way a conversation becomes anything (turn 92). */}
               {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
-                <details className="fy-arke__points">
+                <details
+                  className="fy-arke__points"
+                  open={pointsOpen}
+                  onToggle={(event) => setPointsOpen(event.currentTarget.open)}
+                >
                   <summary>
                     What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
                   </summary>
@@ -1178,6 +1184,7 @@ export function ProductionConversation({
                   subjectKey={contextKey}
                   wrapping={wrapping}
                   onWrappingChange={setWrapping}
+                  onRefused={() => setPointsOpen(true)}
                 />
               ) : null}
             </>
@@ -1335,6 +1342,7 @@ function WrapUp({
   subjectKey,
   wrapping,
   onWrappingChange,
+  onRefused,
 }: {
   worldId: string | undefined;
   conversationId: string | null;
@@ -1347,6 +1355,8 @@ function WrapUp({
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
   wrapping: boolean;
   onWrappingChange: (next: boolean) => void;
+  /** A refusal answered this press; the dock opens the points the refusal names. */
+  onRefused?: () => void;
 }) {
   const setWrapping = onWrappingChange;
   /*
@@ -1377,6 +1387,19 @@ function WrapUp({
   useEffect(() => {
     if (wrapping && (refusedMine || status === "closed")) setWrapping(false);
   }, [wrapping, refusedMine, status]);
+  /*
+   * The refusal opens the points it points at (issue 909).
+   *
+   * A refusal names two points and asks which one comes first, and the points are under a
+   * disclosure the dock keeps shut for room — so what the message asked about was the one
+   * thing not on the screen.
+   * Keyed to the attempt, not the callback: opened once per refusal, and a person who shuts it
+   * again is not fighting an effect that reopens it on every render.
+   */
+  const refusedRequestId = refusedMine && refusal ? refusal.requestId : null;
+  useEffect(() => {
+    if (refusedRequestId !== null) onRefused?.();
+  }, [refusedRequestId]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>
