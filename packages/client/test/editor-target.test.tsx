@@ -339,14 +339,16 @@ describe("the export sheet (R-24, T-5)", () => {
 });
 
 describe("spoken lines in the Library (R-1, R-8)", () => {
-  it("lists every line under the audio filter, and places a read one with the Voice role", async () => {
+  it("lists read lines with the Voice role and reuses the generic track for later placements", async () => {
     const state = savedState();
     const production = state.world!.productions[0]!;
+    assert.ok(production.timeline?.status === "ready");
+    production.timeline.timeline.tracks = production.timeline.timeline.tracks.filter(track => track.kind === "picture");
     const spoken = production.scenes.flatMap((scene) => orderedShots(scene)).find((shot) => (shot.audio?.kind === "vo" || shot.audio?.kind === "dialogue") && shot.audio.line);
     assert.ok(spoken, "the fixture has a spoken line");
     production.takes.push({
       ...production.takes[0]!,
-      id: "tk_voice_1" as never,
+      id: "tk_01J8G0000000000000000000V1" as never,
       coversShots: [spoken.id],
       kind: "voice",
       provider: "kokoro",
@@ -369,7 +371,16 @@ describe("spoken lines in the Library (R-1, R-8)", () => {
       assert.deepEqual(batch.map((command) => command.kind), ["add-track", "place"]);
       assert.equal(batch[0]!.kind === "add-track" && batch[0]!.trackKind, "audio");
       assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.role, "dialogue");
-      assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.source.kind === "take" && batch[1]!.clip.source.takeId, "tk_voice_1");
+      assert.equal(batch[1]!.kind === "place" && batch[1]!.clip.source.kind === "take" && batch[1]!.clip.source.takeId, "tk_01J8G0000000000000000000V1");
+      assert.ok(batch[0]?.kind === "add-track" && batch[1]?.kind === "place");
+      production.timeline.timeline = applyTimelineCommands(production.timeline.timeline, [batch[0], batch[1]]);
+      await act(async () => __setStateForTest(structuredClone(state)));
+      await act(async () => button(screen, "Add to timeline").click());
+      const next = commandsSent(screen).at(-1)!;
+      assert.equal(next.length, 1, "the next line reuses the existing track");
+      assert.ok(next[0]?.kind === "place" && batch[1]?.kind === "place");
+      assert.equal(next[0].trackId, batch[1].trackId);
+      assert.equal(next[0].clip.startFrame, batch[1].clip.startFrame + batch[1].clip.durationFrames, "the next line starts in the next free span");
     } finally {
       await close(screen);
     }
@@ -428,7 +439,7 @@ describe("the picker and the keys sheet, round two", () => {
     production.timeline = {
       status: "ready",
       timeline: applyTimelineCommands(
-        { ...seeded, tracks: [{ ...seeded.tracks[0]!, clips: [first] }] },
+        { ...seeded, tracks: [{ ...seeded.tracks[0]!, id: "tr_saved-picture", clips: [first] }] },
         [{ kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }] }],
       ),
     };
@@ -440,6 +451,7 @@ describe("the picker and the keys sheet, round two", () => {
       await act(async () => add.click());
       const [batch] = commandsSent(screen);
       assert.ok(batch && batch[0]!.kind === "place");
+      assert.equal(batch[0].trackId, "tr_saved-picture");
       assert.equal(batch[0]!.kind === "place" && batch[0]!.clip.startFrame, first.startFrame + first.durationFrames, "it slides past the clip at the playhead");
     } finally {
       await close(screen);

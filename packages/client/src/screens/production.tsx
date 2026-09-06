@@ -57,7 +57,6 @@ import {
   type TimelineCommand,
   type TimelineClipCommand,
   type TimelineTrackId,
-  PICTURE_TRACK_ID,
   basePictureTrack,
   mediaPlacementCommands,
   newAudioTrack,
@@ -6114,7 +6113,7 @@ export function CutScreen() {
     const durationFrames = Math.max(1, secondsToFrames(duration, frameRate));
     const kind = options.kind ?? (artifact.kind === "audio" ? "audio" : "picture");
     let track = trackId ? editableTimeline.tracks.find(candidate => candidate.id === trackId) : undefined;
-    if (!track && !options.newTrack) track = editableTimeline.tracks.find(candidate => candidate.kind === kind && candidate.id !== PICTURE_TRACK_ID &&
+    if (!track && !options.newTrack) track = editableTimeline.tracks.find(candidate => candidate.kind === kind && candidate.id !== basePictureTrack(editableTimeline)?.id &&
       !candidate.clips.some(clip => clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame));
     const sound = track ? AUDIO_TRACK_KINDS.has(track.kind) : kind === "audio";
     if (sound ? !(artifact.kind === "audio" || artifact.kind === "video" && artifact.mediaInfo?.hasAudio) : !(still || artifact.kind === "video")) {
@@ -6139,12 +6138,15 @@ export function CutScreen() {
   };
   const placeVoiceTake = (take: Take, shot: Shot, sceneNumber: number) => {
     if (!editableTimeline || !production) return;
-    const dialogue = [...editableTimeline.tracks].sort((a, b) => a.order - b.order).find((track) => track.kind === "dialogue") ?? null;
+    const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
+    const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
+    const audioTracks = [...(placementTimeline ?? editableTimeline).tracks].sort((a, b) => a.order - b.order)
+      .filter(track => AUDIO_TRACK_KINDS.has(track.kind) && !track.muted);
+    const dialogue = audioTracks.find(track => track.kind === "audio" || track.kind === "dialogue") ??
+      audioTracks.find(track => !track.clips.some(clip => clip.startFrame < playheadFrame + durationFrames && clip.startFrame + clip.durationFrames > playheadFrame)) ?? null;
     const commands: TimelineCommand[] = [];
     let fresh: TimelineTrackId = "tr_audio-1";
     if (dialogue === null) { const added = newAudioTrack(placementTimeline ?? editableTimeline); fresh = added.trackId; commands.push(added); }
-    const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
-    const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
     let startFrame = playheadFrame;
     for (const other of orderedTrackClips(dialogue ?? { clips: [] })) {
       if (other.startFrame < startFrame + durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
@@ -6184,7 +6186,8 @@ export function CutScreen() {
     const durationFrames = Math.max(1, secondsToFrames(found.shot.durationSec ?? CLIP_DEFAULT_SEC, frameRate));
     // The playhead usually sits inside a clip; the shot slides to the first free span after it
     // rather than being refused for the overlap (round eleven).
-    const base = editableTimeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
+    const base = basePictureTrack(editableTimeline);
+    if (base === null) return;
     let startFrame = frameWanted;
     for (const clip of orderedTrackClips(base ?? { clips: [] })) {
       if (clip.startFrame < startFrame + durationFrames && clip.startFrame + clip.durationFrames > startFrame) startFrame = clip.startFrame + clip.durationFrames;
@@ -6193,7 +6196,7 @@ export function CutScreen() {
       [
         {
           kind: "place",
-          trackId: PICTURE_TRACK_ID,
+          trackId: base.id,
           clip: {
             id: mintClipId(),
             startFrame,
@@ -6688,7 +6691,8 @@ export function CutScreen() {
                                 return;
                               }
                               const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
-                              if (artifact) placeArtifact(artifact, PICTURE_TRACK_ID, drop.frame);
+                              const base = editableTimeline ? basePictureTrack(editableTimeline) : null;
+                              if (artifact && base) placeArtifact(artifact, base.id, drop.frame);
                             },
                           })}
                     />

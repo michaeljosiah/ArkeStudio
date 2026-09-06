@@ -75,7 +75,8 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
           : clip.source.kind === "shot"
             ? `shot ${clip.source.shotNumber} · no accepted take`
             : clip.source.label,
-      poster: mediaPath ? posterize(mediaPath) : null,
+      // Imported videos have no take-directory frame.png; show their label until a poster exists.
+      poster: artifact?.kind === "video" ? null : mediaPath ? posterize(mediaPath) : null,
       gap: !mediaPath,
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
       shotId,
@@ -367,7 +368,9 @@ export function PictureTrack({
                 <span className="fy-pictclip__gap">{view.label}</span>
               ) : (
                 <>
-                  <Portrait worldSlug={slug} path={view.poster ?? ""} label={view.label} radius={0} />
+                  {view.poster === null
+                    ? <div className="fy-portrait--fallback"><Film size={18} /></div>
+                    : <Portrait worldSlug={slug} path={view.poster} label={view.label} radius={0} />}
                   <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
                 </>
               )}

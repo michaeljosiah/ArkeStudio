@@ -359,7 +359,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
    * Arke could not close safely. The artifact is filed either way; the measurement catches up.
    */
   if ((outcome.outcome === "filed" || outcome.outcome === "deduplicated") &&
-      outcome.artifact.mediaInfo === undefined && (kind === "audio" || kind === "video")) {
+      outcome.artifact.mediaInfo === undefined && (outcome.artifact.kind === "audio" || outcome.artifact.kind === "video")) {
     await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned);
   }
   return outcome;

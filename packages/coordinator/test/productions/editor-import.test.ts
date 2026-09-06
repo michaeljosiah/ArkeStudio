@@ -141,7 +141,7 @@ it("detaches the live accepted take and selection trim even when the renderer's 
   assert.equal(saved(p()).tracks.flatMap(track => track.clips).some(clip => clip.id === sound.id), false);
 });
 
-it("remeasures an unmeasured duplicate before appending it", async t => {
+it("remeasures an unmeasured duplicate with a changed extension before appending it", async t => {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
   const id = await createProduction(store, { title: "Remeasure", medium: "video", frameRate: 24 });
   const p = () => store.getBundle().productions.find(production => production.meta.id === id)!;
@@ -149,8 +149,9 @@ it("remeasures an unmeasured duplicate before appending it", async t => {
   const editor = { productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p()), destination: "library" as const };
   await importEditorMedia(store, [source], editor, { abandoned: () => false });
   const libraryId = saved(p()).library[0]!;
+  const renamed = join(dir, "renamed.txt"); await writeFile(renamed, "once unavailable");
   let probes = 0;
-  await importEditorMedia(store, [source], { ...editor, baseRevision: saved(p()).revision, destination: "append" }, {
+  await importEditorMedia(store, [renamed], { ...editor, baseRevision: saved(p()).revision, destination: "append" }, {
     abandoned: () => false, mediaProbe: { ...probe, async info() { probes++; return { durationSec: 3, hasAudio: true }; } },
   });
   assert.equal(probes, 1);

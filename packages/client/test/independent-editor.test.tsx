@@ -109,6 +109,7 @@ it("shows the filename as an editable clip and detaches sound with a neutral rol
     const picture = screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!;
     assert.ok(picture); assert.match(picture.getAttribute("aria-label")!, /holiday.mp4/);
     assert.equal(picture.classList.contains("fy-cutseg--gap"), false);
+    assert.equal(picture.querySelector("img"), null, "imported video does not request a take-only poster or an empty media path");
     assert.equal(screen.container.querySelector(".fy-scenes__band"), null);
     assert.equal(screen.container.querySelector('[data-testid="needs-decision"]'), null, "imported footage is not a shot waiting for a take");
     assert.doesNotMatch(screen.container.textContent!, /0 of 0 shots|1 gap/);
@@ -122,5 +123,25 @@ it("shows the filename as an editable clip and detaches sound with a neutral rol
     assert.ok(command.kind === "detach-audio");
     assert.equal(command.clipId, "cl_holiday");
     assert.match(command.newClipId, /^cl_/);
+  } finally { await screen.close(); }
+});
+
+it("places an overlay above a base Picture track with a custom saved id", async () => {
+  const state = stateWithVideo(false), p = state.world!.productions[0]!;
+  const timeline = applyTimelineCommands(seedEmptyPictureTimeline(p), [{ kind: "add-to-library", items: [{ kind: "artifact", artifactId: state.world!.artifacts[0]!.id }] }]);
+  timeline.tracks[0]!.id = "tr_saved-picture";
+  p.timeline = { status: "ready", timeline };
+  const screen = await mount(state);
+  try {
+    const row = screen.container.querySelector<HTMLButtonElement>("[data-library-item^='artifact:'] .fy-artrow__pick");
+    assert.ok(row); await act(async () => row.click());
+    await act(async () => screen.button("Overlay at playhead").click());
+    const batch = screen.sent.find(message => message.kind === "timeline-command");
+    assert.ok(batch?.kind === "timeline-command");
+    const [added, placement] = batch.commands;
+    assert.ok(added?.kind === "add-track" && placement?.kind === "place");
+    const placed = applyTimelineCommands(timeline, [added, placement]);
+    assert.equal(placed.tracks.find(track => track.id === "tr_saved-picture")!.clips.length, 0);
+    assert.equal(placed.tracks.find(track => track.id === "tr_overlay-1")!.clips.length, 1);
   } finally { await screen.close(); }
 });
