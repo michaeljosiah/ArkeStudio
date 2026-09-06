@@ -646,7 +646,9 @@ export function ChapterWorkspace({
   // A recast landing while a voiced read plays would remap the band, the count and the speaker
   // labels onto audio made from the earlier cast (codex on PR 914, round two): the read stops
   // with the cast it was made from, and the next press reads the new one.
-  const castKey = voicesRecord === null ? null : `${voicesRecord.hash}:${voicesRecord.lines.length}`;
+  // When it was cast is part of the key (codex on PR 924): a recast that reads the same prose
+  // and finds the same number of lines can still name different speakers.
+  const castKey = voicesRecord === null ? null : `${voicesRecord.hash}:${voicesRecord.derivedAt}:${voicesRecord.lines.length}`;
   const readCast = useRef<string | null>(null);
   useEffect(() => {
     if (!voicedRead.reading) {

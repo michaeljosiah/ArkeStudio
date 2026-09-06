@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { MANUSCRIPT_CAPS, manuscriptChapters, manuscriptDocument, paragraphRuns, runsToMarkdown, type StructuredDocument } from "../src/manuscript.js";
+import { isManuscriptLanguage, MANUSCRIPT_CAPS, manuscriptChapters, manuscriptDocument, paragraphRuns, runsToMarkdown, type StructuredDocument } from "../src/manuscript.js";
 
 /**
  * A manuscript out and in (design turn 131, issue 915, SPEC-012 R-49, R-50): the little
@@ -50,6 +50,13 @@ describe("the manuscript a production exports (R-49)", () => {
 
 const heading = (style: string, text: string) => ({ style, runs: [{ text }] });
 const para = (text: string, flags: { italic?: true; bold?: true } = {}) => ({ runs: [{ text, ...flags }] });
+
+describe("the language an EPUB is marked with (R-52)", () => {
+  it("is the subtitles' tag rule, with no subtag said twice (codex on PR 924)", () => {
+    for (const tag of ["en", "en-GB", "pt-BR", "sr-Latn-RS", "zh-yue-Hant-HK", "en-GB-oed"]) assert.ok(isManuscriptLanguage(tag), tag);
+    for (const tag of ["English", "en-US-US", "e", ""]) assert.equal(isManuscriptLanguage(tag), false, tag);
+  });
+});
 
 describe("the chapters an import finds (R-50)", () => {
   it("one Title over Heading 1 chapters: the title is the book's, the chapters are the headings (codex on PR 916)", () => {

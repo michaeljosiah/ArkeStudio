@@ -49,7 +49,7 @@ import {
   lookHoldingScope,
   type CharacterLook,
   type FrameRate,
-  MANUSCRIPT_LANGUAGE,
+  isManuscriptLanguage,
   type ChapterSummary,
   type ProductionBundle,
   type ProductionTimeline,
@@ -2574,7 +2574,7 @@ function ManuscriptExportSheet({
   const [language, setLanguage] = useState("en");
   // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
   // reader may refuse, so the press waits until the field is one.
-  const languageOk = format !== "epub" || MANUSCRIPT_LANGUAGE.test(language.trim());
+  const languageOk = format !== "epub" || isManuscriptLanguage(language.trim());
   const exportsState = useExports();
   const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
   const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);

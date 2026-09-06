@@ -238,7 +238,78 @@ export function writeEpub(doc: ManuscriptDocument, opts: { identifier: string; l
 // ---------------------------------------------------------------------------
 
 const TAG = /<(\/?)([A-Za-z0-9_:.-]+)((?:"[^"]*"|'[^']*'|[^>"'])*?)(\/?)>/g;
-const attribute = (attrs: string, name: string): string | undefined => new RegExp(`(?:^|\\s)${name}="([^"]*)"`).exec(attrs)?.[1];
+// Either quote XML allows (codex on PR 924): a serializer that writes `w:val='Heading1'` is as valid as one that writes double quotes.
+const attribute = (attrs: string, name: string): string | undefined => {
+  const match = new RegExp(`(?:^|\\s)${name}=(?:"([^"]*)"|'([^']*)')`).exec(attrs);
+  return match?.[1] ?? match?.[2];
+};
+
+/**
+ * The italic and bold a character style carries (codex on PR 924): Word's `Emphasis` and
+ * `Strong`, or anything a person named, applied through `w:rStyle` rather than as `w:i` and
+ * `w:b` on the run. Read from the styles part, with `basedOn` followed so a style that only
+ * renames another still says what it inherits.
+ */
+function characterStyles(bytes: Uint8Array): (id: string | undefined) => { italic: boolean; bold: boolean } {
+  const none = { italic: false, bold: false };
+  let entry: Uint8Array | null = null;
+  try {
+    entry = zipEntry(bytes, "word/styles.xml");
+  } catch {
+    entry = null;
+  }
+  if (entry === null) return () => none;
+  const source = new TextDecoder("utf-8").decode(entry);
+  const styles = new Map<string, { basedOn?: string; italic?: boolean; bold?: boolean }>();
+  let current: { id: string; basedOn?: string; italic?: boolean; bold?: boolean } | null = null;
+  let inRunProps = false;
+  for (const match of source.matchAll(TAG)) {
+    const closing = match[1] === "/";
+    const selfClosing = match[4] === "/";
+    const name = match[2] ?? "";
+    const local = name.slice(name.indexOf(":") + 1);
+    const attrs = match[3] ?? "";
+    switch (local) {
+      case "style":
+        if (!closing && !selfClosing) {
+          const id = attribute(attrs, "w:styleId");
+          current = attribute(attrs, "w:type") === "character" && id !== undefined ? { id } : null;
+        } else if (closing && current !== null) {
+          styles.set(current.id, current);
+          current = null;
+        }
+        break;
+      case "basedOn":
+        if (current !== null) current.basedOn = attribute(attrs, "w:val");
+        break;
+      case "rPr":
+        inRunProps = current !== null && !closing && !selfClosing;
+        break;
+      case "i":
+      case "b":
+        if (current !== null && inRunProps) {
+          const on = !OFF.has((attribute(attrs, "w:val") ?? "true").toLowerCase());
+          if (local === "i") current.italic = on;
+          else current.bold = on;
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  const resolved = new Map<string, { italic: boolean; bold: boolean }>();
+  const resolve = (id: string, depth: number): { italic: boolean; bold: boolean } => {
+    const known = resolved.get(id);
+    if (known !== undefined) return known;
+    const style = styles.get(id);
+    if (style === undefined || depth > 8) return none;
+    const parent = style.basedOn !== undefined ? resolve(style.basedOn, depth + 1) : none;
+    const flags = { italic: style.italic ?? parent.italic, bold: style.bold ?? parent.bold };
+    resolved.set(id, flags);
+    return flags;
+  };
+  return (id) => (id === undefined ? none : resolve(id, 0));
+}
 const OFF = new Set(["0", "false", "off"]);
 
 /**
@@ -260,6 +331,7 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
     return { ok: false, reason: "damaged" };
   }
   const source = new TextDecoder("utf-8").decode(entry);
+  const styleFlags = characterStyles(bytes);
   const paragraphs: StructuredParagraph[] = [];
   let paragraph: StructuredParagraph | null = null;
   let inParagraphProps = false;
@@ -275,6 +347,7 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
     if (paragraph === null || text === "") return;
     paragraph.runs.push({ text, ...(italic ? { italic: true as const } : {}), ...(bold ? { bold: true as const } : {}) });
   };
+  try {
   for (const match of source.matchAll(TAG)) {
     const index = match.index;
     if (reading && index > readAt) say(decodeXmlEntities(source.slice(readAt, index)));
@@ -315,6 +388,14 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
       case "rPr":
         inRunProps = inRun && !inParagraphProps && !closing && !selfClosing;
         break;
+      case "rStyle": {
+        // The style's own italic and bold first; an explicit w:i or w:b after it still wins.
+        if (!inRunProps) break;
+        const flags = styleFlags(attribute(attrs, "w:val"));
+        if (flags.italic) italic = true;
+        if (flags.bold) bold = true;
+        break;
+      }
       case "i":
       case "b":
         if (inRunProps) {
@@ -345,10 +426,13 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
           // The break keeps its place (codex on PR 924): words after it in the same paragraph
           // are a paragraph of their own, so the scene break falls between them, not after both.
           if (paragraph !== null) {
-            paragraph.pageBreak = true;
             if (paragraph.runs.some((run) => run.text.trim() !== "")) {
+              paragraph.pageBreak = true;
               paragraphs.push(paragraph);
               paragraph = { runs: [] };
+            } else {
+              // Before any words (codex on PR 924): a break of its own, so what follows comes after it.
+              paragraphs.push({ runs: [], pageBreak: true });
             }
           }
         } else {
@@ -358,6 +442,11 @@ export function readDocxDocument(bytes: Uint8Array): { ok: true; document: Struc
       default:
         break;
     }
+  }
+  } catch {
+    // An entity no code point can hold, or any other thing the walk cannot read: damaged, said
+    // so, rather than an exception the sheet never hears of (codex on PR 924).
+    return { ok: false, reason: "damaged" };
   }
   if (paragraph !== null) paragraphs.push(paragraph);
   const said = paragraphs.some((entry) => entry.runs.some((run) => run.text.trim() !== ""));

@@ -1,4 +1,5 @@
 import { chapterParagraphs, countWords } from "./prose.js";
+import { LanguageTagSchema } from "./subtitles.js";
 
 /**
  * A manuscript out and a manuscript in (design turn 131, SPEC-012 §2.4.3, R-49, R-50).
@@ -56,11 +57,14 @@ export interface StructuredDocument {
 export type ChapterLevel = "title" | "subtitle" | "heading1" | "heading2" | "document";
 
 /**
- * A BCP 47 tag's shape (codex on PR 916): a language, then at most a script, a region and
- * variants, each once and in order. `en`, `en-GB`, `pt-BR`, `sr-Latn-RS` pass; `English` and
- * `en-US-US` do not.
+ * The language an EPUB is marked with: the subtitles' own tag rule (codex on PR 924), which
+ * admits every shape a subtitle track may carry — an extlang like `zh-yue-Hant-HK`, a
+ * grandfathered `en-GB-oed` — with one thing added, since that rule reads subtags loosely: no
+ * subtag said twice in a row, so `en-US-US` is refused as the malformed tag it is.
  */
-export const MANUSCRIPT_LANGUAGE = /^[A-Za-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|\d{3}))?(?:-(?:[A-Za-z0-9]{5,8}|\d[A-Za-z0-9]{3}))*$/;
+export function isManuscriptLanguage(tag: string): boolean {
+  return LanguageTagSchema.safeParse(tag).success && !/(?:^|-)([A-Za-z0-9]+)-\1(?=-|$)/i.test(tag);
+}
 
 /** A document past either is refused by the count (R-50). */
 export const MANUSCRIPT_CAPS = { chapters: 200, characters: 1_000_000 } as const;
