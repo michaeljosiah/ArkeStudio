@@ -7,6 +7,7 @@ import { createPreparedSession, type SessionInput } from "../harness/session-fil
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { sha256 } from "../world/text-files.js";
 import { openChapter } from "./ops.js";
 
 /**
@@ -18,11 +19,12 @@ import { openChapter } from "./ops.js";
  * `productions/<id>/.continuity/<file>.json`: derived, unversioned, durable and exported,
  * because a derivation is a paid model run and the index is the cache anyone may delete for
  * free. The whole chapter is read, in passes of whole paragraphs when it is longer than one
- * pass of the model's window, and the passes are unioned into one record (R-41).
+ * pass of the model's window, each pass carrying the tail of the pass before it as context, and
+ * the passes are unioned into one record (R-41).
  */
 
 /** The sizes turn 129 fixes; the read schema bounds nothing, the derivation does. */
-export const CONTINUITY_BOUNDS = { characters: 12, lines: 6, line: 300, where: 120, character: 120, pass: 24_000 } as const;
+export const CONTINUITY_BOUNDS = { characters: 12, lines: 6, line: 300, where: 120, character: 120, pass: 24_000, context: 2_000 } as const;
 
 const RawContinuitySchema = z
   .object({
@@ -45,6 +47,12 @@ export interface ContinuityDeriverInput {
   title: string;
   /** One pass of the chapter: the whole body, or a run of whole paragraphs within the window. */
   body: string;
+  /**
+   * The tail of the pass before this one — its last paragraph — read for who "she" is and never
+   * quoted from (codex on turn 129): a pass that began mid-scene would otherwise lose a fact to
+   * a pronoun it could not resolve, silently.
+   */
+  context?: string;
   /** Which pass this is, so the prompt can say the text is part of a chapter, not all of it. */
   pass: { index: number; of: number };
   /** The production's cast, so a placed character is named as the world names it. */
@@ -57,16 +65,20 @@ function buildContinuityPrompt(input: ContinuityDeriverInput, retryNote?: string
   const part = input.pass.of > 1
     ? `This is pass ${input.pass.index} of ${input.pass.of} over the chapter; say only what this pass's text evidences.`
     : "";
+  const context = input.context !== undefined && input.context !== ""
+    ? `\n## The end of the pass before this one (read it for who is who; do not quote from it)\n${input.context}\n`
+    : "";
   return `Read the chapter text below and say, for each character the prose places, where they are and what they learn by its end. Respond with ONLY a JSON object:
-{"characters": [{"character": "<sheet slug from the cast, or the name the chapter introduces>", "present": true, "where": "<a location slug or the chapter's own words>", "placed": "<the span of the chapter that puts them there, copied exactly>", "knows": ["<a span copied from the chapter, character for character>"]}]}
+{"characters": [{"character": "<the character's name as the chapter gives it, or the sheet slug from the cast>", "present": true, "where": "<a location slug or the chapter's own words>", "placed": "<the span of the chapter that puts them there, copied exactly>", "knows": ["<a span copied from the chapter, character for character>"]}]}
 
 Rules — every one is enforced mechanically after you answer:
 - "knows" holds spans copied from the chapter exactly. A paraphrase will be dropped. Each at most ${CONTINUITY_BOUNDS.line} characters, at most ${CONTINUITY_BOUNDS.lines} per character.
 - "placed" is the span, copied exactly, that puts the character where "where" says. A "where" with no such span will be dropped.
+- "present" is false only when the text says the character has gone or is absent; then "placed" is the span that says so, and there is no "where".
 - At most ${CONTINUITY_BOUNDS.characters} characters. Name a character by its sheet slug when the cast has one: ${cast}.
 - "where" is where the character is at the end of this text, in a location slug or the chapter's own words; leave it out when the text does not place them.
 - If the text places no one, return {"characters": []}.
-${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}
+${part ? `- ${part}\n` : ""}${retryNote ? `\nYour previous response was rejected: ${retryNote}\n` : ""}${context}
 ## Chapter (${input.title})
 ${input.body}`;
 }
@@ -158,8 +170,8 @@ const fold = (text: string) => text.replace(/\s+/g, " ").trim();
  * A paragraph longer than the window — pasted prose with no blank lines — cannot be read whole
  * (codex on turn 129): it is split at sentence ends into pieces that fit, never mid-sentence
  * while a sentence fits, and a sentence longer than the window is split at the window as the
- * last resort. A line the model quotes across a split is in neither piece and is dropped and
- * counted like any other, so the record never claims more than the check proved.
+ * last resort. Nothing is lost at a split, because every line is verified against the whole
+ * chapter, not the piece it was read in.
  */
 function pieces(paragraph: string, limit: number): string[] {
   if (paragraph.length <= limit) return [paragraph];
@@ -203,25 +215,48 @@ export function chapterPasses(body: string, limit: number = CONTINUITY_BOUNDS.pa
   return passes;
 }
 
+/** The tail of a pass, carried into the next as context: its last paragraph, within the bound. */
+export function passTail(pass: string, limit: number = CONTINUITY_BOUNDS.context): string {
+  const paragraphs = pass.trim().split(/\n\s*\n/);
+  const last = paragraphs[paragraphs.length - 1] ?? "";
+  return last.length <= limit ? last : last.slice(last.length - limit);
+}
+
 export interface VerifiedContinuity {
   characters: ChapterContinuity["characters"];
-  /** Lines and placings that were not in the chapter. */
+  /** Lines, placings and departures that were not in the chapter. */
   dropped: number;
   /** Characters beyond the cap. */
   omitted: number;
   /** Lines beyond a character's sixth, verified or not (codex on turn 129): counted, never silent. */
   cut: number;
+  /**
+   * Who the cap left out of this pass, by name or sheet, so the union counts a character once
+   * however many passes named them (codex on PR 907); `omitted` is their number for one pass.
+   */
+  beyond?: string[];
 }
 
 /**
- * What the model said, held to the chapter (SPEC-015 D2, D3; SPEC-012 R-40): a line, and a
- * placing, is kept only when it is a span of the body — whitespace folded, since the file wraps
- * where the model would not — and everything else is dropped and counted. A placing that does
- * not verify takes `where` with it: a location the model invented never reaches the table, let
- * alone carries. Sizes are enforced here, never trusted, and characters beyond the cap are
- * counted as omitted rather than silently cut.
+ * The sheet a name belongs to, when the cast has one (codex on turn 129): matched by id or by
+ * name, so a slug-shaped name is never mistaken for a sheet and a sheet made after the
+ * derivation is matched by the next derivation, never by a guess.
  */
-export function verifyContinuity(raw: RawContinuity, body: string): VerifiedContinuity {
+function sheetOf(character: string, cast: ReadonlyArray<{ id: string; name: string }>): string | undefined {
+  const wanted = character.trim().toLowerCase();
+  return cast.find((entry) => entry.id.toLowerCase() === wanted || entry.name.trim().toLowerCase() === wanted)?.id;
+}
+
+/**
+ * What the model said, held to the chapter (SPEC-015 D2, D3; SPEC-012 R-40): a line, a placing,
+ * or a departure is kept only when it is a span of the body — the whole chapter, whitespace
+ * folded, since the file wraps where the model would not and a pass ends where the prose does
+ * not — and everything else is dropped and counted. A placing that does not verify takes
+ * `where` with it: a location the model invented never reaches the table, let alone carries.
+ * Sizes are enforced here, never trusted, and characters beyond the cap are counted as omitted
+ * rather than silently cut.
+ */
+export function verifyContinuity(raw: RawContinuity, body: string, cast: ReadonlyArray<{ id: string; name: string }> = []): VerifiedContinuity {
   const folded = fold(body);
   const inBody = (quote: string) => quote !== "" && quote.length <= CONTINUITY_BOUNDS.line && folded.includes(quote);
   let dropped = 0;
@@ -230,52 +265,84 @@ export function verifyContinuity(raw: RawContinuity, body: string): VerifiedCont
   const named = raw.characters.filter((entry) => entry.character.trim() !== "");
   for (const entry of named.slice(0, CONTINUITY_BOUNDS.characters)) {
     const character = entry.character.trim().slice(0, CONTINUITY_BOUNDS.character);
+    const sheet = sheetOf(character, cast);
     const knows: string[] = [];
     for (const line of entry.knows ?? []) {
       const quote = fold(line);
-      if (!inBody(quote)) dropped++;
-      else if (knows.includes(quote)) continue;
-      else if (knows.length >= CONTINUITY_BOUNDS.lines) cut++;
+      // The cap first (codex on PR 907): a seventh line is cut whether or not it verifies, so
+      // the stamp gives the right reason; only a line within the cap can be dropped.
+      if (knows.includes(quote)) continue;
+      if (knows.length >= CONTINUITY_BOUNDS.lines) cut++;
+      else if (!inBody(quote)) dropped++;
       else knows.push(quote);
     }
-    const where = entry.where === undefined ? "" : fold(entry.where).slice(0, CONTINUITY_BOUNDS.where);
     const placed = entry.placed === undefined ? "" : fold(entry.placed);
+    if (entry.present === false) {
+      // A departure is evidenced like a placing (codex on turn 129): the words that say they
+      // have gone, or the claim is dropped and the chapter is taken to say nothing of them.
+      if (!inBody(placed)) {
+        dropped++;
+        continue;
+      }
+      characters.push({ character, ...(sheet !== undefined ? { sheet } : {}), present: false, placed, knows });
+      continue;
+    }
+    const where = entry.where === undefined ? "" : fold(entry.where).slice(0, CONTINUITY_BOUNDS.where);
     const placedHere = where !== "" && inBody(placed);
     if (where !== "" && !placedHere) dropped++;
     characters.push({
       character,
-      present: entry.present ?? true,
+      ...(sheet !== undefined ? { sheet } : {}),
+      present: true,
       ...(placedHere ? { where, placed } : {}),
       knows,
     });
   }
-  return { characters, dropped, omitted: Math.max(0, named.length - CONTINUITY_BOUNDS.characters), cut };
+  const beyond = named.slice(CONTINUITY_BOUNDS.characters).map((entry) => {
+    const character = entry.character.trim().slice(0, CONTINUITY_BOUNDS.character);
+    return sheetOf(character, cast) ?? character;
+  });
+  return { characters, dropped, omitted: beyond.length, cut, beyond };
 }
 
 /**
- * The union of a chapter's passes (R-41): `where` and its placing from the last pass that placed
- * the character, `knows` from every pass up to the cap, the counts summed, and the cap applied
- * once more over the union in order of first appearance.
+ * The union of a chapter's passes (R-41): the last pass to place a character, or to say they
+ * have gone, decides `where` and `present`; `knows` is every pass's lines up to the cap; the
+ * counts are summed, and the cap is applied once more over the union in order of first
+ * appearance. Passes are joined by the name the chapter gave, or the sheet it was tagged with.
  */
 export function mergePasses(passes: readonly VerifiedContinuity[]): VerifiedContinuity {
   const byCharacter = new Map<string, ChapterContinuity["characters"][number]>();
+  // Who the cap left out, by identity rather than by count (codex on PR 907): a character the
+  // model named in three passes is one character, omitted once, or not at all if another pass
+  // fitted them in.
+  const beyond = new Set<string>();
   let dropped = 0;
-  let omitted = 0;
   let cut = 0;
   for (const pass of passes) {
     dropped += pass.dropped;
-    omitted += pass.omitted;
     cut += pass.cut;
+    for (const name of pass.beyond ?? []) beyond.add(name);
     for (const entry of pass.characters) {
-      const held = byCharacter.get(entry.character);
+      const key = entry.sheet ?? entry.character;
+      const held = byCharacter.get(key);
       if (held === undefined) {
-        byCharacter.set(entry.character, { ...entry, knows: [...entry.knows] });
+        byCharacter.set(key, { ...entry, knows: [...entry.knows] });
         continue;
       }
-      held.present = held.present || entry.present;
-      if (entry.where !== undefined) {
+      if (entry.sheet !== undefined) held.sheet = entry.sheet;
+      if (!entry.present) {
+        held.present = false;
+        delete held.where;
+        held.placed = entry.placed!;
+      } else if (entry.where !== undefined) {
+        held.present = true;
         held.where = entry.where;
         held.placed = entry.placed!;
+      } else if (!held.present) {
+        // Spoken of again after leaving, with no place given: present, but nowhere yet.
+        held.present = true;
+        delete held.placed;
       }
       for (const line of entry.knows) {
         if (held.knows.includes(line)) continue;
@@ -286,7 +353,10 @@ export function mergePasses(passes: readonly VerifiedContinuity[]): VerifiedCont
   }
   const all = [...byCharacter.values()];
   const characters = all.slice(0, CONTINUITY_BOUNDS.characters);
-  return { characters, dropped, omitted: omitted + (all.length - characters.length), cut };
+  const kept = new Set(characters.map((entry) => entry.sheet ?? entry.character));
+  for (const entry of all.slice(CONTINUITY_BOUNDS.characters)) beyond.add(entry.sheet ?? entry.character);
+  const left = [...beyond].filter((name) => !kept.has(name));
+  return { characters, dropped, omitted: left.length, cut, beyond: left };
 }
 
 /** Where a chapter's record lives, as a portable path. */
@@ -322,11 +392,13 @@ export interface DerivedContinuity {
 }
 
 /**
- * Derive one chapter's continuity and write the record beside it (turn 129). Keyed to the bytes
- * read here — the hash decides staleness, since a direct save keeps the version (R-39). Read in
- * passes when the body is longer than the window, each pass its own model run, stoppable
- * between and during them; nothing is written until every pass is in, so a stop or a failed
- * pass leaves the last record standing.
+ * Derive one chapter's continuity and write the record beside it (turn 129). Keyed to the hash
+ * of the prose read — the body, not the file, so a plan typed into the frontmatter moves
+ * nothing, and the summary carries the same body hash for the screen to compare (R-39). Read
+ * in passes when the body is longer than the window, each pass its own model run carrying the
+ * tail of the one before, stoppable between and during them; every line is verified against
+ * the whole chapter; nothing is written until every pass is in, so a stop or a failed pass
+ * leaves the last record standing.
  */
 export async function deriveContinuity(
   store: WorldStore,
@@ -348,14 +420,24 @@ export async function deriveContinuity(
   const verified: VerifiedContinuity[] = [];
   for (const [index, body] of passes.entries()) {
     if (signal?.aborted) throw new Error("stopped");
-    const raw = await deriver({ title: summary.title, body, pass: { index: index + 1, of: passes.length }, cast }, signal);
+    const previous = index > 0 ? passes[index - 1]! : undefined;
+    const raw = await deriver(
+      {
+        title: summary.title,
+        body,
+        ...(previous !== undefined ? { context: passTail(previous) } : {}),
+        pass: { index: index + 1, of: passes.length },
+        cast,
+      },
+      signal,
+    );
     if (signal?.aborted) throw new Error("stopped");
-    verified.push(verifyContinuity(raw, body));
+    verified.push(verifyContinuity(raw, opened.body, cast));
   }
   const merged = mergePasses(verified);
   const record: ChapterContinuity = {
     version: opened.version,
-    hash: opened.hash,
+    hash: sha256(opened.body),
     derivedAt: store.now(),
     passes: passes.length,
     dropped: merged.dropped,
@@ -363,9 +445,14 @@ export async function deriveContinuity(
     cut: merged.cut,
     characters: merged.characters,
   };
+  // Through the store's ownership-checked path (codex on PR 907): a pass can outlive the world
+  // it read — closed under it, or owned elsewhere by now — and a bare write would land in a
+  // world this run no longer speaks for. Refused, it throws, and the last record stands.
   const absolute = join(store.dir, fromPortable(continuityPath(productionId, summary.file)));
-  await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
-  await atomicWriteFile(absolute, `${JSON.stringify(record, null, 2)}\n`);
+  await store.ownedWrite(async () => {
+    await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
+    await atomicWriteFile(absolute, `${JSON.stringify(record, null, 2)}\n`);
+  });
   await store.reload();
   return { record, placed: merged.characters.length, dropped: merged.dropped, omitted: merged.omitted };
 }

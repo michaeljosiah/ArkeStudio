@@ -563,19 +563,28 @@ export type ChapterFrontmatter = z.infer<typeof ChapterFrontmatterSchema>;
  */
 export const ChapterContinuityCharacterSchema = z
   .object({
-    /** A sheet slug, or a name the chapter introduces with no sheet. */
+    /** The name as the chapter gives it. */
     character: z.string().min(1),
+    /** The cast's sheet, when one matches by id or name; a slug-shaped name is never mistaken for one. */
+    sheet: SlugSchema.optional(),
+    /** False only when the chapter says they have gone, evidenced by `placed` like a placing, with no `where`. */
     present: z.boolean(),
     /** A location slug, or the chapter's own words. */
     where: z.string().optional(),
-    /** The span of the chapter that puts them where `where` says; without one, `where` is dropped. */
+    /** The span of the chapter that puts them where `where` says, or that says they have gone; without one, the claim is dropped. */
     placed: z.string().optional(),
     knows: z.array(z.string().min(1)),
   })
-  .strict();
+  .strict()
+  // A place, or a departure, with no words of the chapter behind it is no record of either
+  // (codex on PR 907): a file that claims one is unreadable, not a source for the table.
+  .refine((entry) => (entry.where === undefined && entry.present) || (entry.placed !== undefined && entry.placed.length > 0), {
+    message: "a placing or a departure needs the span of the chapter behind it",
+  });
 export const ChapterContinuitySchema = z
   .object({
     version: z.number().int().min(1),
+    /** The hash of the prose read — the body, not the file — compared with the summary's `bodyHash` (R-39). */
     hash: z.string().min(1),
     derivedAt: IsoDateTimeSchema,
     /** Passes the chapter was read in (R-41): one, unless it was longer than the model's window. */
@@ -606,7 +615,9 @@ export const ChapterContinuitySummarySchema = z
     dropped: z.number().int().min(0),
     omitted: z.number().int().min(0),
     cut: z.number().int().min(0),
-    placed: z.array(z.object({ character: z.string().min(1), where: z.string().optional() }).strict()),
+    placed: z.array(
+      z.object({ character: z.string().min(1), sheet: SlugSchema.optional(), present: z.boolean(), where: z.string().optional() }).strict(),
+    ),
   })
   .strict();
 export type ChapterContinuitySummary = z.infer<typeof ChapterContinuitySummarySchema>;
@@ -628,7 +639,12 @@ export function summariseContinuity(record: ChapterContinuity): ChapterContinuit
     dropped: record.dropped,
     omitted: record.omitted,
     cut: record.cut,
-    placed: record.characters.map((entry) => ({ character: entry.character, ...(entry.where !== undefined ? { where: entry.where } : {}) })),
+    placed: record.characters.map((entry) => ({
+      character: entry.character,
+      ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}),
+      present: entry.present,
+      ...(entry.where !== undefined ? { where: entry.where } : {}),
+    })),
   };
 }
 
@@ -646,6 +662,11 @@ export const ChapterSummarySchema = z
      * and what says a direct save moved the chapter while its version stayed.
      */
     hash: z.string().optional(),
+    /**
+     * The hash of the prose alone (turn 129, SPEC-012 R-39): what a continuity record is keyed
+     * to, so a plan typed into the frontmatter moves the file's hash and not this one.
+     */
+    bodyHash: z.string().optional(),
     /** The stamp and the placings of the continuity record beside the chapter (turn 129), when one has been derived — or that the one there cannot be read. */
     continuity: ChapterContinuityStateSchema.optional(),
     words: z.number().int().min(0).optional(),

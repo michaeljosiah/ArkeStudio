@@ -7,6 +7,7 @@ import {
   continuityPath,
   deriveContinuity,
   mergePasses,
+  passTail,
   readContinuity,
   verifyContinuity,
   type ContinuityDeriverInput,
@@ -68,9 +69,34 @@ describe("what the model said, held to the chapter (R-40)", () => {
     assert.equal(verified.omitted, 2, "two characters over the cap, counted");
     assert.equal(verified.cut, 0);
 
+    // A name is tagged with its sheet by id or by name, and a departure is evidenced like a
+    // placing (codex, round five).
+    const cast = [{ id: "maren-kest", name: "Maren Kest" }, { id: "odile-sarn", name: "Odile Sarn" }];
+    const tagged = verifyContinuity(
+      {
+        characters: [
+          { character: "Maren Kest", where: "the-vigil", placed: "Maren stood on the Vigil", knows: [] },
+          { character: "odile-sarn", present: false, placed: "Odile found her there an hour later", knows: [] },
+          { character: "Perrin", present: false, placed: "nowhere in the text", knows: [] },
+          { character: "the-chorister", knows: [] },
+        ],
+      },
+      body,
+      cast,
+    );
+    assert.equal(tagged.characters[0]!.sheet, "maren-kest", "matched by name");
+    assert.deepEqual(tagged.characters[1], { character: "odile-sarn", sheet: "odile-sarn", present: false, placed: "Odile found her there an hour later", knows: [] });
+    assert.equal(tagged.characters.length, 3, "a departure with no words behind it is dropped");
+    assert.equal(tagged.dropped, 1);
+    assert.equal(tagged.characters[2]!.sheet, undefined, "a slug-shaped name the cast does not know is a name");
+
     const many = verifyContinuity({ characters: [{ character: "maren-kest", knows: ["Maren", "stood", "on the", "Vigil", "at", "slack", "water"] }] }, body);
     assert.equal(many.characters[0]!.knows.length, 6, "six lines is the cap");
     assert.equal(many.cut, 1, "the seventh is counted, never silent (codex, round four)");
+    const mixed = verifyContinuity({ characters: [{ character: "maren-kest", knows: ["Maren", "stood", "on the", "Vigil", "at", "slack", "not in the chapter"] }] }, body);
+    assert.equal(mixed.cut, 1, "a seventh line is cut whether or not it verifies (codex on PR 907)");
+    assert.equal(mixed.dropped, 0);
+    assert.deepEqual(verified.beyond, ["guest-10", "guest-11"], "who the cap left out, by name");
   });
 
   it("reads a long chapter in passes of whole paragraphs, splits only a paragraph that cannot fit, and unions the passes (R-41)", () => {
@@ -98,17 +124,27 @@ describe("what the model said, held to the chapter (R-40)", () => {
         dropped: 0,
         omitted: 1,
         cut: 0,
+        beyond: ["perrin-tallow"],
       },
+      { characters: [{ character: "maren-kest", present: false, placed: "she left", knows: [] }], dropped: 0, omitted: 1, cut: 0, beyond: ["perrin-tallow"] },
     ]);
     assert.deepEqual(merged, {
       characters: [
-        { character: "maren-kest", present: true, where: "b", placed: "pb", knows: ["one", "two"] },
+        { character: "maren-kest", present: false, placed: "she left", knows: ["one", "two"] },
         { character: "odile-sarn", present: true, knows: [] },
       ],
       dropped: 1,
       omitted: 1,
       cut: 0,
+      beyond: ["perrin-tallow"],
     });
+    // A character one pass's cap left out and another pass fitted in is not omitted at all.
+    const fitted = mergePasses([
+      { characters: [], dropped: 0, omitted: 1, cut: 0, beyond: ["odile-sarn"] },
+      { characters: [{ character: "odile-sarn", present: true, knows: [] }], dropped: 0, omitted: 0, cut: 0 },
+    ]);
+    assert.equal(fitted.omitted, 0, "omitted is who the record lacks, counted once (codex on PR 907)");
+    assert.equal(passTail("one\n\ntwo\n\nthree"), "three", "the tail of a pass is its last paragraph");
   });
 });
 
@@ -128,15 +164,18 @@ describe("derived by a press, kept beside the chapter, keyed to the bytes (R-38,
 
     const onDisk = JSON.parse(await readFile(join(dir, ...continuityPath(PRODUCTION, "01-neap").split("/")), "utf8"));
     assert.equal(onDisk.version, 4);
-    assert.equal(onDisk.hash, (await openChapter(store, PRODUCTION, "neap")).hash, "keyed to the bytes read");
+    assert.equal(onDisk.hash, (await openChapter(store, PRODUCTION, "neap")).bodyHash, "keyed to the prose read, not the file");
+    assert.equal(seen[0]!.context, undefined, "one pass carries no context");
+    assert.equal(onDisk.characters[0].sheet, "maren-kest", "tagged with the sheet the cast names");
     assert.equal(onDisk.characters[0].knows[0], KNOWS);
     assert.equal(onDisk.passes, 1);
 
     const summary = chapterOf(store, "neap");
     assert.ok(summary.continuity && !("unreadable" in summary.continuity));
-    assert.deepEqual(summary.continuity.placed, [{ character: "maren-kest", where: "the-vigil" }], "the bundle carries the placings");
+    assert.deepEqual(summary.continuity.placed, [{ character: "maren-kest", sheet: "maren-kest", present: true, where: "the-vigil" }], "the bundle carries the placings");
     assert.equal((summary.continuity as { characters?: unknown }).characters, undefined, "and never the lines");
-    assert.equal(summary.continuity.hash, summary.hash, "fresh: the record's hash is the summary's");
+    assert.equal(summary.continuity.hash, summary.bodyHash, "fresh: the record's hash is the summary's body hash");
+    assert.notEqual(summary.bodyHash, summary.hash, "which is not the file's");
     assert.deepEqual(await readContinuity(store, PRODUCTION, "01-neap"), derived.record, "the lines come with the chapter");
     assert.ok(store.getBundle().externalEdits.length === 0, "the app writing a record is not the world changing outside it");
 
@@ -146,7 +185,7 @@ describe("derived by a press, kept beside the chapter, keyed to the bytes (R-38,
     const moved = chapterOf(store, "neap");
     assert.equal(moved.version, 4);
     assert.ok(moved.continuity && !("unreadable" in moved.continuity));
-    assert.notEqual(moved.continuity.hash, moved.hash, "stale, by the hash alone");
+    assert.notEqual(moved.continuity.hash, moved.bodyHash, "stale, by the hash alone");
   });
 
   it("a stop, or a pass that fails, leaves the last record standing; a record that cannot be read is said so, never treated as absent", async () => {

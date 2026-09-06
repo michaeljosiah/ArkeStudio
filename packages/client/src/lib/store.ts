@@ -181,8 +181,10 @@ interface StoreState {
     }
   >;
   /**
-   * Deriving continuity for a chapter (turn 129), keyed by `productionId/chapterId`. What the
-   * panel shows while one runs and how it ended — the record itself arrives on the summary.
+   * Deriving continuity for a chapter (turn 129), keyed by `worldId/productionId/chapterId` —
+   * the world too, because two worlds can share a production and a chapter slug and a record
+   * finished in one must never be shown in the other (codex on PR 907). What the panel shows
+   * while one runs and how it ended; the record a run finished with rides here as well.
    */
   deriving: Record<
     string,
@@ -1218,12 +1220,12 @@ function handleFrame(json: string): void {
     } else if (event.type === "continuity.started") {
       deriving = {
         ...deriving,
-        [`${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
       };
     } else if (event.type === "continuity.finished") {
       deriving = {
         ...deriving,
-        [`${event.productionId}/${event.chapterId}`]: {
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
           state: event.outcome,
           placed: event.placed,
           dropped: event.dropped,
@@ -3827,7 +3829,7 @@ export function stopContinuity(worldId: string, productionId: string, chapterFil
   send({ kind: "stop-continuity", worldId, productionId, chapterFile });
 }
 
-/** How each chapter's derivation is going, keyed by `productionId/chapterId` — the panel reads this. */
+/** How each chapter's derivation is going, keyed by `worldId/productionId/chapterId` — the panel reads this. */
 export function useDeriving(): StoreState["deriving"] {
   return useStore().deriving;
 }

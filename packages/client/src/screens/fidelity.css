@@ -6637,6 +6637,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__panelpush { flex: 1; }
 .fy-ch__derive { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; cursor: pointer; font: 500 11px var(--font-sans); color: var(--foreground); letter-spacing: 0; text-transform: none; }
 .fy-ch__derive:disabled { cursor: default; color: var(--muted-foreground); }
+.fy-ch__deriving { display: inline-flex; align-items: baseline; gap: 8px; }
 .fy-ch__scope { margin: -3px 0 0; font-size: 10px; }
 .fy-ch__moved--line { display: flex; border-radius: 8px; padding: 5px 9px; }
 .fy-ch__who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }

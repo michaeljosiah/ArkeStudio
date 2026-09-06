@@ -445,21 +445,23 @@ describe("after this chapter (turn 129)", () => {
     cut: 0,
     characters: [
       {
-        character: "maren-kest",
+        character: "Maren Kest",
+        sheet: "maren-kest",
         present: true,
         where: "the-vigil",
         placed: "Maren counted the bells.",
         knows: ["Maren counted the bells.", "Six, and the tide", "not yet called", "a fourth line the panel counts"],
       },
-      { character: "odile-sarn", present: true, knows: [] },
+      { character: "Odile Sarn", present: false, placed: "Odile had left the Vigil.", knows: [] },
     ],
   };
-  const withHash = (state: ClientState, hash: string): ClientState => ({
+  // The summary's body hash is what the record's hash is compared with (R-39).
+  const withHash = (state: ClientState, bodyHash: string): ClientState => ({
     ...state,
     world: {
       ...state.world!,
       productions: state.world!.productions.map((p) =>
-        p.meta.id === "inkbound" ? { ...p, chapters: p.chapters.map((c) => (c.id === "neap" ? { ...c, hash } : c)) } : p,
+        p.meta.id === "inkbound" ? { ...p, chapters: p.chapters.map((c) => (c.id === "neap" ? { ...c, bodyHash } : c)) } : p,
       ),
     },
   });
@@ -523,7 +525,8 @@ describe("after this chapter (turn 129)", () => {
     assert.match(text(m), /derived · v4 · every line is the chapter’s own words/);
     assert.match(text(m), /Derive again/);
     assert.match(text(m), /What does Maren Kest learn here\?/);
-    assert.match(text(m), /Where is (Odile Sarn|odile-sarn) now\?/);
+    assert.match(text(m), /Where is Odile Sarn now\?/, "a name the cast does not know is shown as the chapter gave it");
+    assert.match(text(m), /Odile Sarn\s*gone/, "said to have gone, and drawn so");
     assert.doesNotMatch(text(m), /chapter moved/);
   });
 
@@ -546,11 +549,24 @@ describe("after this chapter (turn 129)", () => {
   it("deriving puts the press away; finishing brings the record; a rerun that fails says why and leaves the last record standing", async () => {
     const m = await mount(withHash(inkbound(), HASH));
     await answerOpen(m);
+    // Another world's run, with the same production and chapter slugs, is not this chapter's
+    // (codex on PR 907): the panel does not stir.
+    await act(async () => {
+      __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "continuity.started", worldId: "01J8H0000000000000000000W2", productionId: "inkbound", chapterId: "neap" });
+    });
+    assert.doesNotMatch(text(m), /deriving…/);
     await act(async () => {
       __applyEventForTest({ at: "2026-09-06T12:00:02Z", type: "continuity.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" });
     });
     assert.match(text(m), /deriving…/);
-    assert.equal(q(m, ".fy-ch__derive"), null, "the press is put away");
+    const stop = q(m, ".fy-ch__derive")!;
+    assert.equal(stop.textContent, "Stop", "Stop stands where the press stood");
+    await act(async () => {
+      stop.click();
+    });
+    const stopped = m.sent.find((message) => message.kind === "stop-continuity") as Extract<ClientMessage, { kind: "stop-continuity" }>;
+    assert.ok(stopped, "the stop is sent");
+    assert.equal(stopped.chapterFile, "01-neap");
     await act(async () => {
       __applyEventForTest(finished({ outcome: "derived", placed: 2, record: RECORD }));
     });

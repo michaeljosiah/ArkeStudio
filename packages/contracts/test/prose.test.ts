@@ -128,10 +128,13 @@ describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
       dropped: 1,
       omitted: 0,
       cut: 0,
-      characters: [{ character: "maren-kest", present: true, where: "the-vigil", placed: "Maren stood on the Vigil", knows: ["a line of the chapter"] }],
+      characters: [{ character: "Maren Kest", sheet: "maren-kest", present: true, where: "the-vigil", placed: "Maren stood on the Vigil", knows: ["a line of the chapter"] }],
     };
     assert.ok(ChapterContinuitySchema.safeParse(record).success);
     assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: true, knows: [], mood: "dark" }] }).success, false, "nothing outside the record");
+    assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: true, where: "somewhere", knows: [] }] }).success, false, "a place with no span behind it is no record (codex on PR 907)");
+    assert.equal(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, knows: [] }] }).success, false, "nor is a departure");
+    assert.ok(ChapterContinuitySchema.safeParse({ ...record, characters: [{ character: "x", present: false, placed: "she left", knows: [] }] }).success);
     assert.deepEqual(summariseContinuity(record), {
       version: 4,
       hash: "sha256:x",
@@ -140,7 +143,7 @@ describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
       dropped: 1,
       omitted: 0,
       cut: 0,
-      placed: [{ character: "maren-kest", where: "the-vigil" }],
+      placed: [{ character: "Maren Kest", sheet: "maren-kest", present: true, where: "the-vigil" }],
     });
     const summary = { id: "neap", file: "01-neap", order: 1, title: "Neap", status: "drafted", version: 4 };
     assert.ok(ChapterSummarySchema.safeParse({ ...summary, continuity: summariseContinuity(record) }).success, "the stamp and the placings ride on the summary");

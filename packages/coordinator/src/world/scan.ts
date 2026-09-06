@@ -482,12 +482,17 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
-    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; continuity: ChapterContinuityState | null }> = [];
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const fm = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
-        ChapterFrontmatterSchema.parse(MarkdownFile.parse(raw).data),
-      );
-      if (!fm) continue;
+      const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
+        const doc = MarkdownFile.parse(raw);
+        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
+        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
+        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
+        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
+      });
+      if (!parsed) continue;
+      const { fm, bodyHash } = parsed;
       const stem = file.slice(0, -".md".length);
       // The continuity record beside the chapter (turn 129, SPEC-012 §2.4.1): derived, not
       // authored, so it is read plainly rather than through `tryParse` — it belongs in no
@@ -501,14 +506,14 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
           return parsed.success ? summariseContinuity(parsed.data) : { unreadable: true as const };
         })
         .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
-      chapterEntries.push({ file: stem, fm, continuity });
+      chapterEntries.push({ file: stem, fm, bodyHash, continuity });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
       return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
     };
     chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
-    const chapters = chapterEntries.map(({ file, fm, continuity }, i) => ({
+    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity }, i) => ({
       id: fm.id,
       file,
       order: i + 1,
@@ -518,6 +523,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       // The content hash rides on the summary (turn 128) so one chapter's read can be fenced
       // and re-observed from the bundle alone.
       ...(manifest[`productions/${id}/chapters/${file}.md`] !== undefined ? { hash: manifest[`productions/${id}/chapters/${file}.md`]! } : {}),
+      bodyHash,
       ...(continuity !== null ? { continuity } : {}),
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),

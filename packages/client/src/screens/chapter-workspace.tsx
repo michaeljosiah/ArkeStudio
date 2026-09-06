@@ -36,6 +36,7 @@ import {
   useStore,
   editChapterPlan,
   deriveContinuity,
+  stopContinuity,
   useDeriving,
 } from "../lib/store.js";
 
@@ -616,7 +617,7 @@ export function ChapterWorkspace({
    * left behind; a second press while one runs does nothing, and every ending short of derived
    * leaves the last record standing and says so.
    */
-  const derivingState = useDeriving()[`${prodId}/${chapter.id}`];
+  const derivingState = useDeriving()[`${worldId}/${prodId}/${chapter.id}`];
   // The record a derivation finished with is held, not read back off the store each render: a
   // rerun that fails replaces the store's last word, and the last record must still stand.
   const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
@@ -631,7 +632,8 @@ export function ChapterWorkspace({
   }, [record?.continuity, finishedRecord]);
   const derivingNow = derivingState?.state === "deriving";
   const continuityRecord = continuity === "unreadable" ? null : continuity;
-  const continuityStale = continuityRecord !== null && chapter.hash !== undefined && chapter.hash !== continuityRecord.hash;
+  // The record is keyed to the prose, and the summary carries the prose's own hash (R-39).
+  const continuityStale = continuityRecord !== null && chapter.bodyHash !== undefined && chapter.bodyHash !== continuityRecord.hash;
   const deriveFailure =
     derivingState?.state === "unavailable" || derivingState?.state === "failed" ? (derivingState.reason ?? "the run failed") : null;
   const derive = () => {
@@ -644,8 +646,9 @@ export function ChapterWorkspace({
     deriveContinuity(worldId, prodId, chapter.file);
   };
   const sheetName = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
-  const placedFirst = continuityRecord?.characters[0]?.character;
-  const placedSecond = continuityRecord?.characters[1]?.character ?? placedFirst;
+  const named = (who: { character: string; sheet?: string }) => sheetName(who.sheet ?? who.character);
+  const placedFirst = continuityRecord?.characters[0];
+  const placedSecond = continuityRecord?.characters[1] ?? placedFirst;
 
   /*
    * The passage selected (turn 128): the words, which become the dock's subject, and where they
@@ -885,7 +888,14 @@ export function ChapterWorkspace({
                 After this chapter
                 <span className="fy-ch__panelpush" />
                 {derivingNow ? (
-                  <span className="fy-mono">deriving…</span>
+                  <span className="fy-ch__deriving">
+                    <span className="fy-mono">deriving…</span>
+                    {/* Stop stands where the press stood (codex on PR 907): a slow or mistaken run
+                        is the author's to end, and a stop leaves the last record standing. */}
+                    <button type="button" className="fy-ch__derive" onClick={() => stopContinuity(worldId, prodId, chapter.file)}>
+                      Stop
+                    </button>
+                  </span>
                 ) : (
                   <button type="button" className="fy-ch__derive" onClick={derive}>
                     <RotateCcw size={11} />
@@ -906,13 +916,18 @@ export function ChapterWorkspace({
               ) : (
                 <ul className="fy-ch__who">
                   {continuityRecord.characters.map((who) => (
-                    <li key={who.character}>
+                    <li key={who.sheet ?? who.character}>
                       <div className="fy-ch__who-head">
-                        <span className="fy-ch__who-name">{sheetName(who.character)}</span>
+                        <span className="fy-ch__who-name">{named(who)}</span>
                         {who.where !== undefined && (
                           <span className="fy-ch__who-where fy-mono" title={who.placed}>
                             <Pin size={10} />
                             {sheetName(who.where)}
+                          </span>
+                        )}
+                        {!who.present && (
+                          <span className="fy-ch__who-where fy-mono" title={who.placed}>
+                            gone
                           </span>
                         )}
                       </div>
@@ -1080,7 +1095,7 @@ export function ChapterWorkspace({
               : continuityRecord !== null && continuityStale
                 ? [{ label: "Derive again", press: derive }, "Who is in this chapter?"]
                 : continuityRecord !== null && placedFirst !== undefined
-                  ? [`What does ${sheetName(placedFirst)} learn here?`, `Where is ${sheetName(placedSecond ?? placedFirst)} now?`]
+                  ? [`What does ${named(placedFirst)} learn here?`, `Where is ${named(placedSecond ?? placedFirst)} now?`]
                   : [firstPrompt(live, chapter.synopsis), style !== null ? { label: "Hold this against the style", replyOnly: true } : "What does this chapter draw on?"],
             // The thread is the production's own (no new entry context, turn 126): the chapter
             // the dock names has to be in the words themselves or the studio never hears it.

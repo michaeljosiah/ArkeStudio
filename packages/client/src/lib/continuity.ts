@@ -36,19 +36,25 @@ export function continuityRows(chapters: readonly ChapterSummary[], cast: readon
         carry.clear();
         return { chapter, stamp: { kind: record === undefined ? ("none" as const) : ("unreadable" as const), omitted: 0 }, cells: cast.map(() => null) };
       }
-      const stale = chapter.hash !== undefined && chapter.hash !== record.hash;
+      // The record is keyed to the prose, and the summary carries the prose's own hash (R-39).
+      const stale = chapter.bodyHash !== undefined && chapter.bodyHash !== record.hash;
       const overCap = record.omitted > 0;
+      // A column is a sheet; a placing matches it by its tag, never by the spelling of a name.
+      const spoken = (id: string) => record.placed.find((entry) => (entry.sheet ?? entry.character) === id);
       const cells = cast.map((id): ContinuityCell | null => {
-        const placed = record.placed.find((entry) => entry.character === id && entry.where !== undefined);
-        if (placed !== undefined) return { where: placed.where!, warn: stale };
+        const entry = spoken(id);
+        if (entry?.where !== undefined) return { where: entry.where, warn: stale };
+        // Said to have gone (codex on turn 129): a dash here, and nothing carried from before.
+        if (entry !== undefined && !entry.present) return null;
         const held = overCap ? undefined : carry.get(id);
         return held === undefined ? null : { where: held.where, since: held.since, warn: held.stale };
       });
       if (overCap) carry.clear();
       else {
         for (const id of cast) {
-          const placed = record.placed.find((entry) => entry.character === id && entry.where !== undefined);
-          if (placed !== undefined) carry.set(id, { where: placed.where!, since: chapter.order, stale });
+          const entry = spoken(id);
+          if (entry?.where !== undefined) carry.set(id, { where: entry.where, since: chapter.order, stale });
+          else if (entry !== undefined && !entry.present) carry.delete(id);
           // A chapter that has moved may have moved anyone it did not place either (codex on turn
           // 129): every cell carried past it is in warning from here on, whatever its source says.
           else if (stale) {

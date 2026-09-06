@@ -14840,6 +14840,9 @@ export class Coordinator {
       // A sign-in poll racing shutdown would dial a harness the supervisor is stopping.
       this.vendorAuth.stop();
       for (const controller of this.reading.values()) controller.abort();
+      // A continuity run is passes of two-minute turns (turn 129): shutdown aborts it rather
+      // than waiting on every pass (codex on PR 907), and the last record stands.
+      for (const controller of this.derivingContinuity.values()) controller.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.

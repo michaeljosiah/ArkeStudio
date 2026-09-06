@@ -113,7 +113,7 @@ describe("the door's continuity view (turn 129)", () => {
     },
   });
   const H = (c: string) => `sha256:${c.repeat(64)}`;
-  const record = (hash: string, placed: Array<{ character: string; where?: string }>) => ({
+  const record = (hash: string, placed: Array<{ character: string; sheet?: string; present: boolean; where?: string }>) => ({
     version: 4,
     hash,
     derivedAt: "2026-09-06T12:00:00.000Z",
@@ -124,9 +124,9 @@ describe("the door's continuity view (turn 129)", () => {
     placed,
   });
   const ROWS: ChapterSummary[] = [
-    { ...CHAPTERS[0]!, order: 1, hash: H("a"), continuity: record(H("a"), [{ character: "maren-kest", where: "The Vigil" }]) },
-    { ...CHAPTERS[1]!, order: 2, hash: H("b"), continuity: record(H("c"), []) },
-    { ...CHAPTERS[2]!, order: 3, hash: H("d") },
+    { ...CHAPTERS[0]!, order: 1, bodyHash: H("a"), continuity: record(H("a"), [{ character: "Maren Kest", sheet: "maren-kest", present: true, where: "The Vigil" }]) },
+    { ...CHAPTERS[1]!, order: 2, bodyHash: H("b"), continuity: record(H("c"), []) },
+    { ...CHAPTERS[2]!, order: 3, bodyHash: H("d") },
   ];
 
   it("remembers the view; draws the cast across and the chapters down; carries a cell naming its chapter; stamps each row", () => {

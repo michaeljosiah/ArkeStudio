@@ -13,11 +13,12 @@ import { continuityRows, continuityRowStamp, continuityStamp } from "../src/lib/
 
 const CAST = ["maren-kest", "odile-sarn", "ines-half-hitch", "bray-half-hitch", "the-chorister"];
 
-function chapter(order: number, hash: string, continuity?: ChapterContinuityState): ChapterSummary {
-  return { id: `c${order}`, file: `0${order}-c`, order, title: `Chapter ${order}`, status: "drafted", version: 1, hash, ...(continuity ? { continuity } : {}) };
+function chapter(order: number, bodyHash: string, continuity?: ChapterContinuityState): ChapterSummary {
+  return { id: `c${order}`, file: `0${order}-c`, order, title: `Chapter ${order}`, status: "drafted", version: 1, hash: `file-${bodyHash}`, bodyHash, ...(continuity ? { continuity } : {}) };
 }
 
-function derived(hash: string, placed: Record<string, string>, extra: { omitted?: number } = {}): ChapterContinuityState {
+/** A placing per sheet; `null` says the chapter said they had gone. */
+function derived(hash: string, placed: Record<string, string | null>, extra: { omitted?: number } = {}): ChapterContinuityState {
   return {
     version: 1,
     hash,
@@ -26,7 +27,7 @@ function derived(hash: string, placed: Record<string, string>, extra: { omitted?
     dropped: 0,
     omitted: extra.omitted ?? 0,
     cut: 0,
-    placed: Object.entries(placed).map(([character, where]) => ({ character, where })),
+    placed: Object.entries(placed).map(([sheet, where]) => ({ character: sheet.replace(/-/g, " "), sheet, present: where !== null, ...(where !== null ? { where } : {}) })),
   };
 }
 
@@ -96,6 +97,21 @@ describe("the continuity table (turn 129)", () => {
     assert.equal(continuityRowStamp(unreadable[1]!.stamp), "record unreadable");
     assert.equal(unreadable[1]!.cells[0], null);
     assert.equal(unreadable[2]!.cells[0], null, "a record that cannot be read is no source");
+  });
+
+  it("a chapter that says a character has gone clears their place until a chapter places them again (codex, round five)", () => {
+    const rows = continuityRows(
+      [
+        chapter(1, "h1", derived("h1", { "maren-kest": "the-vigil" })),
+        chapter(2, "h2", derived("h2", { "maren-kest": null })),
+        chapter(3, "h3", derived("h3", {})),
+        chapter(4, "h4", derived("h4", { "maren-kest": "the-quay" })),
+      ],
+      ["maren-kest"],
+    );
+    assert.equal(rows[1]!.cells[0], null, "gone: a dash, not the Vigil carried");
+    assert.equal(rows[2]!.cells[0], null, "and nothing carried from before it");
+    assert.deepEqual(rows[3]!.cells[0], { where: "the-quay", warn: false }, "until a chapter places them again");
   });
 
   it("the panel's stamp says what the check proved and what it dropped or cut", () => {
