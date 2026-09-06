@@ -239,7 +239,8 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, readContinuity, type ContinuityDeriver } from "./productions/continuity.js";
-import type { ChapterContinuity } from "@arke-studio/contracts";
+import { castLines, makeAdapterVoicesDeriver, readVoices, type VoicesDeriver } from "./productions/voices.js";
+import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { materialiseForContinuation } from "./productions/continuation.js";
 
@@ -811,6 +812,8 @@ export interface CoordinatorOptions {
   extractor?: (text: string, artifactFile: string, signal?: AbortSignal) => Promise<RawCandidate[]>;
   /** Turn 129: the continuity model seam; every line and placing is re-verified regardless (SPEC-012 R-40). */
   continuityDeriver?: ContinuityDeriver;
+  /** Turn 130: the cast-of-lines model seam; every quote is re-verified regardless (SPEC-012 R-45). */
+  voicesDeriver?: VoicesDeriver;
   /** Desktop-owned update commands. Electron APIs remain outside the coordinator. */
   updates?: {
     check: () => Promise<void>;
@@ -1010,6 +1013,8 @@ export class Coordinator {
   private readonly reading = new Map<string, AbortController>();
   /** Chapters whose continuity is being derived right now, by `worldId/productionId/chapterFile` (turn 129). */
   private readonly derivingContinuity = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
+  /** Chapters whose lines are being cast right now, keyed the same way (turn 130). */
+  private readonly castingVoices = new Map<string, { control: AbortController; worldId: string; productionId: string; chapterId: string }>();
   /**
    * Clips chosen or recorded for a clone, held between 74c and 74d (SPEC-022 T-10).
    *
@@ -1093,7 +1098,40 @@ export class Coordinator {
     store: WorldStore,
     source: ProseReadSource,
     chapters?: Map<string, ReturnType<typeof openChapter>>,
-  ): Promise<{ text: string; heading: string; version: number; subjectId: string }> {
+    casts?: Map<string, ReturnType<typeof readVoices>>,
+  ): Promise<{ text: string; heading: string; version: number; subjectId: string; voice?: { provider: string; model?: string; voiceId: string; label?: string } }> {
+    // One block of a voiced read (turn 130): the chapter's paragraphs split at the cast lines,
+    // by the same rule the screen declared them with, so an index names one block at both ends.
+    // A line reads in its speaker's assigned voice when the sheet has one; the narrator's
+    // otherwise, which the page decides.
+    if (source.of === "chapter-voiced") {
+      const key = `${source.productionId}/${source.chapterId}`;
+      let opened = chapters?.get(key);
+      if (opened === undefined) {
+        opened = openChapter(store, source.productionId, source.chapterId);
+        chapters?.set(key, opened);
+      }
+      const chapter = await opened;
+      let cast = casts?.get(key);
+      if (cast === undefined) {
+        cast = readVoices(store, source.productionId, chapter.file);
+        casts?.set(key, cast);
+      }
+      const record = await cast;
+      const { blocks } = voicedBlocks(chapter.body, record === "unreadable" ? null : record);
+      const block = blocks[source.block ?? 0];
+      if (block === undefined) throw new Error("That block is not in the saved chapter.");
+      const text = normalizeSpeechText(block.text);
+      if (!text) throw new Error("Nothing to read yet.");
+      const speaker = block.sheet !== undefined ? store.getBundle().sheets.find((sheet) => sheet.id === block.sheet) : undefined;
+      return {
+        text,
+        heading: speaker?.name ?? block.speaker ?? "Narration",
+        version: Math.max(1, chapter.version),
+        subjectId: `${source.productionId}/chapters/${source.chapterId}#voiced-${source.block}`,
+        ...(speaker?.voice !== undefined ? { voice: speaker.voice } : {}),
+      };
+    }
     // A chapter's body is not in the bundle (turn 126), so it is the one authored record read
     // off disk here rather than by the pure resolver; `openChapter` fails by name if it is gone.
     // A page read hands in a map so every paragraph of one chapter comes from one read: a
@@ -1367,6 +1405,226 @@ export class Coordinator {
   /** Session config builder with the user's agent settings folded in. */
   /** Session input plus whatever Settings currently says — read per call, never captured. */
   private readonly stageConstructor = new StageConstructor();
+  /**
+   * A voiced page (turn 130, SPEC-012 R-46, R-47): blocks read in the narrator's voice or the
+   * speaker's, each block's voice decided before anything plays. A speaker's assignment stands
+   * when its model is in the manifest; otherwise the narrator reads the block, and the event
+   * says which voice was used. Local voices sound as they are made; cloud voices are served from
+   * the speech cache, and what the cache lacks is priced together and confirmed once — a page
+   * that would cost nothing asks nothing — then made in order behind the blocks already ready.
+   */
+  private async narrateVoicedPage(input: {
+    store: WorldStore;
+    frameKind: QueueCommand;
+    worldId: string;
+    requestId: string;
+    confirmationToken?: string;
+    voiceUploadConfirmedFor?: string;
+    blocks: readonly { heading: string; text: string; subjectId: string; voice?: { provider: string; model?: string; voiceId: string; label?: string } }[];
+    subject: { id: string; version: number };
+    fail: (error: string, characters?: number) => void;
+  }): Promise<void> {
+    if (!this.voiceService) return;
+    const { store, worldId, requestId, blocks, subject, fail } = input;
+    const characters = blocks.reduce((sum, block) => sum + block.text.length, 0);
+    const identity = (heading: string | null) => ({
+      worldId,
+      sheetVersion: subject.version,
+      purpose: "prose" as const,
+      ...(heading === null ? {} : { sectionHeading: heading }),
+    });
+    const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
+    const clonedVoices = store.getBundle().clonedVoices ?? [];
+    // The catalogue is what says whether a concrete voice can speak now (codex on PR 914): the
+    // manifest still lists a model whose key was removed, whose voice was withdrawn or whose
+    // engine is down, and a block sent that way fails instead of falling to the narrator.
+    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
+    const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
+    const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
+    const manifest = this.opts.manifest;
+    const modelOf = (voice: { provider: string; model: string }) =>
+      manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
+    const narration = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
+    // Each block's voice: the sheet's assignment when the manifest knows its model, the
+    // catalogue says it can speak now and, for a cloned voice, its recording is still there;
+    // else the narrator (R-46).
+    const speaking = await Promise.all(
+      blocks.map(async (block) => {
+        const assigned = block.voice;
+        if (assigned === undefined) return narration;
+        const model = assigned.model ?? legacyVoiceModel(assigned.provider, assigned.voiceId, clonedVoices) ?? undefined;
+        if (model === undefined || modelOf({ provider: assigned.provider, model }) === null) return narration;
+        const listed = catalogue.find((voice) => voice.provider === assigned.provider && voice.model === model && voice.voiceId === assigned.voiceId);
+        if (listed === undefined || listed.unavailableReason !== undefined) return narration;
+        const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
+        if (source.kind === "missing-clone") return narration;
+        if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
+        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned" };
+      }),
+    );
+    const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
+    const ready = (index: number, file: string, cached: boolean, provider: string, model: string, voiceId: string, format: string, estimated = 0) =>
+      this.emit({
+        at: new Date().toISOString(),
+        type: "voice.audio",
+        requestId,
+        ...identity(blocks[index]!.heading),
+        provider,
+        model,
+        voiceId,
+        format,
+        status: "ready",
+        file,
+        cached,
+        characterCount: blocks[index]!.text.length,
+        estimatedMicroUsd: estimated,
+        part: index,
+        parts: blocks.length,
+      } as DomainEvent);
+    // The cloud blocks: their cache files, and what the cache lacks.
+    const cloud = blocks.map((block, index) => {
+      const voice = speaking[index]!;
+      if (isLocal(voice)) return null;
+      const model = modelOf(voice);
+      if (model === null) return null;
+      const format = voiceFormatForModel(model);
+      return { index, model, format, file: speechCacheFile({ provider: model.provider, model: model.id, voiceId: voice.voiceId, text: block.text, format }) };
+    });
+    const misses: number[] = [];
+    for (const entry of cloud) {
+      if (entry === null) continue;
+      try {
+        const bytes = new Uint8Array(await readFile(toExtendedLength(join(store.dir, fromPortable(entry.file)))));
+        if (!cachedVoiceAudioLooksRight(bytes, entry.format)) throw new Error("invalid cache");
+      } catch {
+        misses.push(entry.index);
+      }
+    }
+    let queuedInputs: EnqueueInput[] = [];
+    if (misses.length > 0) {
+      // A cloned voice's recording goes with its job (SPEC-022): a remote engine is confirmed as
+      // the table read confirms it, once, before anything is priced or queued (codex on PR 914).
+      if (
+        misses.some((index) => speaking[index]!.cloned) &&
+        this.requireVoiceUploadConfirmation({
+          worldId,
+          requestId,
+          command: input.frameKind,
+          ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+        })
+      )
+        return;
+      const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: blocks[index]!.text.length }), 0);
+      const token = createHash("sha256")
+        .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
+        .digest("hex");
+      queuedInputs = misses.map((index) => {
+        const entry = cloud[index]!;
+        const voice = speaking[index]!;
+        return {
+          worldId,
+          target: { kind: "voice-preview", id: `${blocks[index]!.subjectId}/${entry.model.provider}/${entry.model.id}/${voice.voiceId}` },
+          capability: "voice-tts",
+          provider: entry.model.provider,
+          model: entry.model.id,
+          params: {
+            voiceId: voice.voiceId,
+            text: blocks[index]!.text,
+            audioFormat: entry.format,
+            requestId,
+            purpose: "prose",
+            sheetVersion: subject.version,
+            sectionHeading: blocks[index]!.heading,
+            characterCount: blocks[index]!.text.length,
+            part: index,
+            parts: blocks.length,
+          },
+          estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: blocks[index]!.text.length }),
+          landing: { dir: ".cache/voice-previews", name: entry.file.split("/").pop()! },
+          // The marker the dispatcher resolves the recording by, and the engine it was allowed
+          // to go to (codex on PR 914): without them every uncached cloned line fails.
+          ...(voice.cloned ? { voiceReference: true } : {}),
+          ...(voice.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+        };
+      });
+      // Priced once before anything plays, and asked only when there is a price (R-47): a free
+      // voice, and a cached line, say nothing.
+      if (estimate > 0 && input.confirmationToken !== token) {
+        this.pendingVoiceReads.set(requestId, { token, inputs: queuedInputs });
+        const first = cloud[misses[0]!]!;
+        // Every cloud voice the words would go to, named once (R-47, codex on PR 914): the
+        // approval is the last point before a paid call leaves, and a page can span providers.
+        const named = new Map<string, { label: string; provider: string }>();
+        for (const index of misses) {
+          const voice = speaking[index]!;
+          named.set(`${voice.provider}\n${voice.label}`, { label: voice.label, provider: voice.provider });
+        }
+        this.emit({
+          at: new Date().toISOString(),
+          type: "voice.audio",
+          requestId,
+          ...identity(null),
+          provider: first.model.provider,
+          model: first.model.id,
+          voiceId: speaking[misses[0]!]!.voiceId,
+          format: first.format,
+          status: "confirmation-required",
+          file: null,
+          cached: false,
+          characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
+          estimatedMicroUsd: estimate,
+          confirmationToken: token,
+          voices: [...named.values()],
+        } as DomainEvent);
+        return;
+      }
+      if (estimate > 0) {
+        const pending = this.pendingVoiceReads.get(requestId);
+        if (!pending || pending.token !== token) {
+          fail("The read request changed; review it again.", characters);
+          return;
+        }
+        this.pendingVoiceReads.delete(requestId);
+      }
+    }
+    // Everything the cache holds and everything local, in order; then what must be made.
+    try {
+      for (const [index, block] of blocks.entries()) {
+        if (this.stopping || this.stoppedReads.has(requestId)) break;
+        const voice = speaking[index]!;
+        const entry = cloud[index] ?? null;
+        if (entry === null) {
+          const result = await this.voiceService.localSpeech(store, voice.voiceId, block.text);
+          ready(index, result.file, result.cached, "kokoro", voice.model, voice.voiceId, "wav");
+        } else if (!misses.includes(index)) {
+          ready(index, entry.file, true, entry.model.provider, entry.model.id, voice.voiceId, entry.format);
+        }
+      }
+    } catch (error) {
+      fail(error instanceof Error ? error.message : "Local voice failed.", characters);
+      return;
+    }
+    if (this.stoppedReads.has(requestId)) {
+      this.stoppedReads.delete(requestId);
+      return;
+    }
+    if (queuedInputs.length === 0) return;
+    const queued = await this.enqueueBatch(requestId, input.frameKind, queuedInputs);
+    if (queued.jobIds.length < queuedInputs.length) {
+      // One block refused is a page with a hole in it (codex on PR 914): playback would wait on
+      // a part no event fills, after the rest was queued and perhaps charged. None of it stands.
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+      return;
+    }
+    if (this.stoppedReads.has(requestId)) {
+      this.stoppedReads.delete(requestId);
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      return;
+    }
+    if (queued.jobIds.length > 0) this.readJobs.set(requestId, queued.jobIds);
+  }
+
   private readonly sessionInput: SessionInput;
 
   /**
@@ -1905,6 +2163,9 @@ export class Coordinator {
         // started, so a reload never hides a paid run from the press that could stop it.
         for (const run of this.derivingContinuity.values()) {
           replayed.push({ at: new Date().toISOString(), type: "continuity.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
+        }
+        for (const run of this.castingVoices.values()) {
+          replayed.push({ at: new Date().toISOString(), type: "voices.started", worldId: run.worldId, productionId: run.productionId, chapterId: run.chapterId });
         }
         return replayed;
       },
@@ -6882,7 +7143,17 @@ export class Coordinator {
         const store = this.opts.provider.openStore?.();
         const answer = (
           result:
-            | { disposition: "opened"; body: string; version: number; hash: string; versions: number[]; continuity?: ChapterContinuity; continuityUnreadable?: true }
+            | {
+                disposition: "opened";
+                body: string;
+                version: number;
+                hash: string;
+                versions: number[];
+                continuity?: ChapterContinuity;
+                continuityUnreadable?: true;
+                voices?: ChapterVoices;
+                voicesUnreadable?: true;
+              }
             | { disposition: "failed"; reason: string },
         ) =>
           this.emit({
@@ -6903,6 +7174,8 @@ export class Coordinator {
           // The lines come with the chapter (turn 129, SPEC-012 R-42); the bundle's summary
           // carries only the record's stamp and placings.
           const continuity = await readContinuity(store, msg.productionId, chapter.file);
+          // The cast of lines too (turn 130), for the same reason: the bundle has only its stamp.
+          const voices = await readVoices(store, msg.productionId, chapter.file);
           answer({
             disposition: "opened",
             body: chapter.body,
@@ -6910,6 +7183,7 @@ export class Coordinator {
             hash: chapter.hash,
             versions: chapter.versions,
             ...(continuity === "unreadable" ? { continuityUnreadable: true as const } : continuity !== null ? { continuity } : {}),
+            ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
           });
         } catch (err) {
           answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
@@ -10388,6 +10662,74 @@ export class Coordinator {
         }
         return;
       }
+      case "stop-voices": {
+        const store = this.opts.provider.openStore?.();
+        const chapter = store?.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        this.castingVoices.get(`${msg.worldId}/${msg.productionId}/${chapter?.file ?? msg.chapterFile}`)?.control.abort();
+        return;
+      }
+      case "cast-voices": {
+        // The cast of lines (turn 130, SPEC-012 §2.4.2): continuity's press, turned on speech —
+        // one run per chapter at a time, keyed by world as well, ended with the world that began
+        // it, and every ending short of cast leaving the last cast standing.
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.chapters.find((c) => c.file === msg.chapterFile || c.id === msg.chapterFile);
+        if (!chapter) return;
+        const key = `${msg.worldId}/${msg.productionId}/${chapter.file}`;
+        if (this.castingVoices.has(key)) return;
+        const control = new AbortController();
+        this.castingVoices.set(key, { control, worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const onClose = () => control.abort();
+        store.closingSignal.addEventListener("abort", onClose, { once: true });
+        const finished = (
+          outcome: "cast" | "stopped" | "unavailable" | "failed",
+          counts: { lines: number; dropped: number; omitted: number },
+          extra: { reason?: string; record?: ChapterVoices } = {},
+        ) =>
+          this.emit({
+            at: new Date().toISOString(),
+            type: "voices.finished",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            chapterId: chapter.id,
+            outcome,
+            ...counts,
+            ...(extra.record !== undefined ? { record: extra.record } : {}),
+            ...(extra.reason !== undefined ? { reason: extra.reason } : {}),
+          });
+        this.emit({ at: new Date().toISOString(), type: "voices.started", worldId: msg.worldId, productionId: msg.productionId, chapterId: chapter.id });
+        const none = { lines: 0, dropped: 0, omitted: 0 };
+        try {
+          let deriver = this.opts.voicesDeriver ?? null;
+          if (!deriver && this.opts.adapter?.readiness().ready && this.opts.authoring) {
+            deriver = makeAdapterVoicesDeriver(
+              this.opts.adapter,
+              this.sessionInput,
+              this.opts.appRoot ? join(this.opts.appRoot, ".extract") : `${this.opts.changeLogPath}.extract`,
+            );
+          }
+          if (!deriver) {
+            void this.appLog?.append({ kind: "voices.unavailable", chapter: chapter.file, reason: "casting needs the authoring harness running" });
+            finished("unavailable", none, { reason: "the writing service is not running" });
+            return;
+          }
+          const cast = await castLines(store, msg.productionId, chapter.id, deriver, control.signal);
+          this.refreshIfStillOpen(store);
+          finished("cast", { lines: cast.lines, dropped: cast.dropped, omitted: cast.omitted }, { record: cast.record });
+        } catch (err) {
+          if (control.signal.aborted) {
+            finished("stopped", none);
+            return;
+          }
+          void this.appLog?.append({ kind: "voices.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
+          finished("failed", none, { reason: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+        } finally {
+          store.closingSignal.removeEventListener("abort", onClose);
+          this.castingVoices.delete(key);
+        }
+        return;
+      }
       case "resolve-extraction": {
         const gate = this.opts.provider.gate?.();
         const store = this.opts.provider.openStore?.();
@@ -10968,20 +11310,63 @@ export class Coordinator {
             estimatedMicroUsd: 0,
             error,
           } as DomainEvent);
-        const blocks: { heading: string; text: string; subjectId: string }[] = [];
+        const blocks: { heading: string; text: string; subjectId: string; voice?: { provider: string; model?: string; voiceId: string; label?: string } }[] = [];
         let version = 1;
         const chapters = new Map<string, ReturnType<typeof openChapter>>();
+        const casts = new Map<string, ReturnType<typeof readVoices>>();
         for (const source of msg.sources) {
-          try {
-            const one = await this.resolveProse(store, source, chapters);
-            blocks.push({ heading: one.heading, text: one.text, subjectId: one.subjectId });
-            version = Math.max(version, one.version);
-          } catch {
-            /* not part of the page */
+          // A voiced chapter named without a block is every block of it (turn 130): expanded here
+          // by the rule the screen declared its blocks with, so the frame carries one address
+          // for a page a cast of four hundred lines would otherwise overflow.
+          const expanded: ProseReadSource[] = [];
+          if (source.of === "chapter-voiced" && source.block === undefined) {
+            try {
+              // The reads that count the blocks are the reads that resolve them (codex on PR
+              // 914): a chapter saved or recast in between would be counted one way and read
+              // another, and the addresses would miss or truncate.
+              const key = `${source.productionId}/${source.chapterId}`;
+              const opening = chapters.get(key) ?? openChapter(store, source.productionId, source.chapterId);
+              chapters.set(key, opening);
+              const opened = await opening;
+              const reading = casts.get(key) ?? readVoices(store, source.productionId, opened.file);
+              casts.set(key, reading);
+              const record = await reading;
+              const count = voicedBlocks(opened.body, record === "unreadable" ? null : record).blocks.length;
+              for (let block = 0; block < count; block += 1) expanded.push({ ...source, block });
+            } catch {
+              /* not part of the page */
+            }
+          } else {
+            expanded.push(source);
+          }
+          for (const one of expanded) {
+            try {
+              const resolved = await this.resolveProse(store, one, chapters, casts);
+              blocks.push({ heading: resolved.heading, text: resolved.text, subjectId: resolved.subjectId, ...(resolved.voice !== undefined ? { voice: resolved.voice } : {}) });
+              version = Math.max(version, resolved.version);
+            } catch {
+              /* not part of the page */
+            }
           }
         }
         if (blocks.length === 0) {
           failPage("Nothing to read yet.");
+          return;
+        }
+        // A page with a speaker's voice on any block is voiced (turn 130): each block in its own
+        // voice, priced together; a page in one voice is the narration turn 126 made.
+        if (blocks.some((block) => block.voice !== undefined)) {
+          await this.narrateVoicedPage({
+            store,
+            frameKind: msg.kind,
+            worldId: msg.worldId,
+            requestId: msg.requestId,
+            ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
+            blocks,
+            subject: { id: blocks[0]!.subjectId, version },
+            fail: failPage,
+          });
           return;
         }
         await this.narrateSection({
@@ -14312,6 +14697,10 @@ export class Coordinator {
         const record = await readContinuity(store, productionId, chapterFile);
         return record === "unreadable" ? null : record;
       },
+      getChapterVoices: async (productionId, chapterFile) => {
+        const record = await readVoices(store, productionId, chapterFile);
+        return record === "unreadable" ? null : record;
+      },
       attachments,
       findAttachment: async (lease, id) => {
         const loaded = await new WorldChatService(store.dir).load(lease.conversationId);
@@ -14860,6 +15249,7 @@ export class Coordinator {
       // A continuity run is passes of two-minute turns (turn 129): shutdown aborts it rather
       // than waiting on every pass (codex on PR 907), and the last record stands.
       for (const run of this.derivingContinuity.values()) run.control.abort();
+      for (const run of this.castingVoices.values()) run.control.abort();
       for (const handle of this.exports.values()) handle.cancel();
       // Nothing awaits the backfill, but it should stop trying: its next write would be refused
       // by the store anyway once the world begins closing.

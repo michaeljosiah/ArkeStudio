@@ -11,10 +11,12 @@ import {
   spineTimelineFingerprint,
   storyShotFrames,
   storyTimelineFingerprint,
+  summariseVoices,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
+  type ChapterVoices,
   type DispatchPlan,
   type Job,
   type ProductionBundle,
@@ -59,6 +61,8 @@ export interface TargetReadDeps {
   readonly getChapterBody?: (productionId: string, chapterFile: string) => Promise<string | null>;
   /** The continuity record beside a chapter (turn 129), so an ask can be answered from the record rather than the whole prose. */
   readonly getChapterContinuity?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterContinuity | null>;
+  /** The cast of lines beside a chapter (turn 130), so who speaks can be answered from the record. */
+  readonly getChapterVoices?: (productionId: string, chapterFile: string) => Promise<import("@arke-studio/contracts").ChapterVoices | null>;
 }
 
 export interface TargetReadOutcome {
@@ -404,6 +408,20 @@ function chunks(text: string): Row[] {
   return rows;
 }
 
+/**
+ * A cast in bounded rows (codex on PR 914): the stamp, then the lines fifty at a time, so the
+ * row limit and the cursor can split a record of four hundred lines that would otherwise reach
+ * a turn as one row twice the fallback budget.
+ */
+function voiceRows(voices: ChapterVoices): Row[] {
+  const rows: Row[] = [{ key: "voices", value: summariseVoices(voices) }];
+  for (let offset = 0; offset < voices.lines.length; offset += VOICE_ROW_LINES) {
+    rows.push({ key: `voices:${padded(offset)}`, value: { offset, lines: voices.lines.slice(offset, offset + VOICE_ROW_LINES) } });
+  }
+  return rows;
+}
+const VOICE_ROW_LINES = 50;
+
 function productionOf(bundle: WorldBundle, productionId: string): ProductionBundle | undefined {
   return bundle.productions.find((production) => production.meta.id === productionId);
 }
@@ -656,11 +674,17 @@ export class WorldChatTargetReads {
         // The full record beside the chapter (turn 129): the summary carries only its stamp and
         // placings, and a question about what a character learned is answered from the lines.
         const continuity = chapter && this.deps.getChapterContinuity ? await this.deps.getChapterContinuity(productionId, chapter.file) : null;
+        const voices = chapter && this.deps.getChapterVoices ? await this.deps.getChapterVoices(productionId, chapter.file) : null;
         // The receipt names the chapter by its id whichever spelling was asked for, so an edit
         // that names it the other way still matches (codex on PR 899).
         readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}`);
         rows = chapter
-          ? [{ key: "metadata", value: chapter }, ...(continuity !== null ? [{ key: "continuity", value: continuity }] : []), ...chunks(body ?? "")]
+          ? [
+              { key: "metadata", value: chapter },
+              ...(continuity !== null ? [{ key: "continuity", value: continuity }] : []),
+              ...(voices !== null ? voiceRows(voices) : []),
+              ...chunks(body ?? ""),
+            ]
           : [];
         // Fenced on the summary's content hash rather than the body read here, so the action
         // check can re-observe the same fence from the bundle (codex on PR 899).

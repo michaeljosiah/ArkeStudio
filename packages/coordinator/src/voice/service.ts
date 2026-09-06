@@ -211,7 +211,7 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
  */
 export function authoritativeProseSpeech(
   bundle: WorldBundle,
-  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" }>,
+  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" } | { of: "chapter-voiced" }>,
 ): { text: string; heading: string; version: number; subjectId: string } {
   const production = (id: string) => {
     const found = bundle.productions.find((candidate) => candidate.meta.id === id);

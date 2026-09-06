@@ -215,6 +215,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice on a voiced page (turn 130): the remote engine its recording may go to. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -2765,6 +2767,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /** The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time, stoppable. */
+  z
+    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z

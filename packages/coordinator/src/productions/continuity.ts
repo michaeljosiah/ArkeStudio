@@ -86,18 +86,22 @@ ${input.body}`;
 const WALL_CLOCK_MS = 120_000;
 
 /**
- * The built-in deriver: a sandboxed session as extraction runs one, stoppable the same way. A
- * seam takes its place under test. One session per pass, so a pass is a run of its own (R-41).
+ * The built-in runner behind every derivation from the prose (turns 129 and 130): a sandboxed
+ * session as extraction runs one, a prompt asked as one turn, the answer parsed against a
+ * contract with one correction and never a loop, stoppable the same way. A seam takes its
+ * place under test. One session per pass, so a pass is a run of its own (R-41).
  */
-export function makeAdapterContinuityDeriver(
+export function makeAdapterJsonDeriver<T>(
   adapter: HarnessAdapter,
   sessionInput: SessionInput,
   scratchRoot: string,
-): ContinuityDeriver {
-  return async (input, signal) => {
+  contract: { parse: (value: unknown) => T },
+  name: string,
+): (prompt: (retryNote?: string) => string, signal?: AbortSignal) => Promise<T> {
+  return async (prompt, signal) => {
     const stopped = () => new Error("stopped");
     if (signal?.aborted) throw stopped();
-    const sandbox = join(scratchRoot, `continuity-${Date.now().toString(36)}-${input.pass.index}`);
+    const sandbox = join(scratchRoot, `${name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`);
     await mkdir(toExtendedLength(sandbox), { recursive: true });
     const session = await createPreparedSession(adapter, sandbox, sessionInput({}), {
       purpose: "extraction",
@@ -128,7 +132,9 @@ export function makeAdapterContinuityDeriver(
           if (event.type === "session.error") throw new Error(event.message);
         }
       })();
-      await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
+      // Handled from the start: the abort in the cleanup below can end the listener after the
+      // race has already settled the other way, and that rejection must land nowhere loud.
+      void collected.catch(() => {});
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
         deadline = setTimeout(() => {
@@ -139,7 +145,16 @@ export function makeAdapterContinuityDeriver(
         }, WALL_CLOCK_MS);
       });
       try {
-        await Promise.race([collected, timeout]);
+        // Dispatch under the same cleanup as collection (codex on PR 907, round five) and under
+        // the same clock (codex on PR 914): a dispatch that hangs past the deadline would
+        // otherwise reject the timer into nothing, no handler attached yet, and hold this await.
+        await Promise.race([
+          (async () => {
+            await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
+            await collected;
+          })(),
+          timeout,
+        ]);
       } finally {
         clearTimeout(deadline);
         signal?.removeEventListener("abort", onStop);
@@ -149,24 +164,29 @@ export function makeAdapterContinuityDeriver(
       return finalText;
     };
 
-    let raw = await turn(buildContinuityPrompt(input));
+    let raw = await turn(prompt());
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return RawContinuitySchema.parse(extractJson(raw));
+        return contract.parse(extractJson(raw));
       } catch (err) {
         // One correction, never a loop; a second bad answer is a failed run, said as such, not
-        // an empty record presented as the chapter placing no one.
-        if (attempt === 1) throw new Error("the model did not answer with a continuity record");
-        raw = await turn(
-          buildContinuityPrompt(
-            input,
-            `not valid JSON matching the contract (${err instanceof Error ? err.message.slice(0, 200) : "parse error"})`,
-          ),
-        );
+        // an empty record presented as the chapter saying nothing.
+        if (attempt === 1) throw new Error(`the model did not answer with a ${name} record`);
+        raw = await turn(prompt(`not valid JSON matching the contract (${err instanceof Error ? err.message.slice(0, 200) : "parse error"})`));
       }
     }
-    throw new Error("the model did not answer with a continuity record");
+    throw new Error(`the model did not answer with a ${name} record`);
   };
+}
+
+/** The continuity deriver: the shared runner, asked continuity's prompt. */
+export function makeAdapterContinuityDeriver(
+  adapter: HarnessAdapter,
+  sessionInput: SessionInput,
+  scratchRoot: string,
+): ContinuityDeriver {
+  const ask = makeAdapterJsonDeriver(adapter, sessionInput, scratchRoot, RawContinuitySchema, "continuity");
+  return (input, signal) => ask((note) => buildContinuityPrompt(input, note), signal);
 }
 
 const fold = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -247,7 +267,7 @@ export interface VerifiedContinuity {
  * name, so a slug-shaped name is never mistaken for a sheet and a sheet made after the
  * derivation is matched by the next derivation, never by a guess.
  */
-function sheetOf(character: string, cast: ReadonlyArray<{ id: string; name: string }>): string | undefined {
+export function sheetOf(character: string, cast: ReadonlyArray<{ id: string; name: string }>): string | undefined {
   const wanted = character.trim().toLowerCase();
   // An exact id first, anywhere in the cast; then a name, and only a name exactly one sheet
   // carries (codex on PR 907): two sheets with one name, or a name that is another sheet's id,
@@ -280,7 +300,9 @@ export function verifyContinuity(raw: RawContinuity, body: string, cast: Readonl
     const character = entry.character.trim().slice(0, CONTINUITY_BOUNDS.character);
     if (character === "") continue;
     const sheet = sheetOf(character, cast);
-    const key = sheet ?? character;
+    // An untagged name folds case for the key and keeps its first spelling (codex on PR 907):
+    // Perrin and perrin are one person, not two slots and a false omission.
+    const key = sheet ?? character.toLowerCase();
     let held = byKey.get(key);
     if (held === undefined) {
       held = { character, ...(sheet !== undefined ? { sheet } : {}), present: true, knows: [] };

@@ -199,6 +199,22 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * Casting a chapter's lines (turn 130), keyed by `worldId/productionId/chapterId` as deriving
+   * is: what the Voices panel shows while one runs and how it ended, with the record a run
+   * finished with.
+   */
+  casting: Record<
+    string,
+    {
+      state: "casting" | "cast" | "stopped" | "unavailable" | "failed";
+      lines: number;
+      dropped: number;
+      omitted: number;
+      record?: import("@arke-studio/contracts").ChapterVoices;
+      reason?: string;
+    }
+  >;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -326,6 +342,7 @@ let current: StoreState = {
   diagnostics: null,
   reading: {},
   deriving: {},
+  casting: {},
   archiveNote: null,
   permissions: {},
   askResults: {},
@@ -962,6 +979,7 @@ function handleFrame(json: string): void {
     let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
     let deriving = current.deriving;
+    let casting = current.casting;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
@@ -1231,6 +1249,23 @@ function handleFrame(json: string): void {
           dropped: event.dropped,
           omitted: event.omitted,
           cut: event.cut,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "voices.started") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "casting", lines: 0, dropped: 0, omitted: 0 },
+      };
+    } else if (event.type === "voices.finished") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          lines: event.lines,
+          dropped: event.dropped,
+          omitted: event.omitted,
           ...(event.record !== undefined ? { record: event.record } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
@@ -1523,6 +1558,7 @@ function handleFrame(json: string): void {
       setupStatus,
       reading,
       deriving,
+      casting,
       archiveNote,
       permissions,
       askResults,
@@ -2963,6 +2999,7 @@ export function readProsePage(
   sources: readonly ProseReadSource[],
   requestId = queueRequest("read-prose-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose-page",
@@ -2970,6 +3007,7 @@ export function readProsePage(
     sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3834,6 +3872,20 @@ export function useDeriving(): StoreState["deriving"] {
   return useStore().deriving;
 }
 
+/** Cast a chapter's lines (turn 130): a press, never a save. */
+export function castVoices(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "cast-voices", worldId, productionId, chapterFile });
+}
+
+export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-voices", worldId, productionId, chapterFile });
+}
+
+/** How each chapter's casting is going, keyed by `worldId/productionId/chapterId` — the Voices panel reads this. */
+export function useCasting(): StoreState["casting"] {
+  return useStore().casting;
+}
+
 export function extractArtifact(worldId: string, artifactId: string): void {
   send({ kind: "extract-artifact", worldId, artifactId });
 }
@@ -4009,6 +4061,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     diagnostics: null,
     reading: {},
   deriving: {},
+    casting: {},
     archiveNote: null,
     permissions: {},
     askResults: {},

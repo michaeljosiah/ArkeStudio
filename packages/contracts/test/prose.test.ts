@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ProseReadSourceSchema, changedSpan, chapterParagraphs, countWords, overviewMoved, passageOf, targetWords } from "../src/prose.js";
-import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ProseStyleSchema, summariseContinuity } from "../src/world.js";
+import { ChapterContinuitySchema, ChapterFrontmatterSchema, ChapterImpliesWriteSchema, ChapterSummarySchema, ChapterVoicesSchema, ProseStyleSchema, summariseContinuity, summariseVoices } from "../src/world.js";
+import { occurrencesOf, voicedBlocks } from "../src/prose.js";
 import { ClientMessageSchema } from "../src/frames.js";
 
 /**
@@ -156,5 +157,57 @@ describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {
     assert.ok(ChapterSummarySchema.safeParse({ ...summary, continuity: summariseContinuity(record) }).success, "the stamp and the placings ride on the summary");
     assert.ok(ChapterSummarySchema.safeParse({ ...summary, continuity: { unreadable: true } }).success, "so does the word that a record cannot be read");
     assert.equal(ChapterSummarySchema.safeParse({ ...summary, continuity: record }).success, false, "the lines never do");
+  });
+});
+
+describe("the cast of lines (turn 130, SPEC-012 §2.4.2)", () => {
+  it("the record parses, the summary carries the stamp and the speakers by lines, and the voiced arm is an address with or without a block", () => {
+    const record = {
+      version: 4,
+      hash: "sha256:x",
+      derivedAt: "2026-09-06T12:00:00.000Z",
+      passes: 1,
+      dropped: 0,
+      omitted: 0,
+      lines: [
+        { speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: "“No,”" },
+        { speaker: "Odile Sarn", paragraph: 0, occurrence: 1, quote: "“No,”" },
+        { speaker: "Maren Kest", sheet: "maren-kest", paragraph: 1, occurrence: 0, quote: "“Six.”" },
+      ],
+    };
+    assert.ok(ChapterVoicesSchema.safeParse(record).success);
+    assert.equal(ChapterVoicesSchema.safeParse({ ...record, lines: [{ speaker: "x", paragraph: 0, occurrence: 0, quote: "y", mood: "dark" }] }).success, false, "nothing outside the record");
+    assert.deepEqual(summariseVoices(record).speakers, [
+      { speaker: "Maren Kest", sheet: "maren-kest", lines: 2 },
+      { speaker: "Odile Sarn", lines: 1 },
+    ]);
+    const summary = { id: "neap", file: "01-neap", order: 1, title: "Neap", status: "drafted", version: 4 };
+    assert.ok(ChapterSummarySchema.safeParse({ ...summary, voices: summariseVoices(record) }).success, "the stamp rides on the summary");
+    assert.ok(ChapterSummarySchema.safeParse({ ...summary, voices: { unreadable: true } }).success);
+    assert.equal(ChapterSummarySchema.safeParse({ ...summary, voices: record }).success, false, "the lines never do");
+    assert.ok(ProseReadSourceSchema.safeParse({ of: "chapter-voiced", productionId: "inkbound", chapterId: "neap", block: 3 }).success);
+    assert.ok(ProseReadSourceSchema.safeParse({ of: "chapter-voiced", productionId: "inkbound", chapterId: "neap" }).success, "the whole page, expanded by the coordinator");
+  });
+
+  it("finds a quote's occurrences with whitespace folded, and splits a paragraph at its lines in order", () => {
+    assert.deepEqual(occurrencesOf("No, no,\nno.", "no,"), [{ start: 4, end: 7 }], "matched as words, case and all");
+    assert.deepEqual(occurrencesOf("“No,” said Maren. “No,” said Odile.", "“No,”").length, 2);
+    const { blocks, ambiguous } = voicedBlocks("Maren looked up. “No,” she said.\n\nOdile went.", {
+      lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: "“No,”" }],
+    });
+    assert.deepEqual(blocks, [
+      { paragraph: 0, text: "Maren looked up." },
+      { paragraph: 0, text: "“No,”", speaker: "Maren Kest", sheet: "maren-kest" },
+      { paragraph: 0, text: "she said." },
+      { paragraph: 1, text: "Odile went." },
+    ]);
+    assert.equal(ambiguous, 0);
+  });
+
+  it("a line copied into another paragraph while the original stands is nobody's (codex on PR 914)", () => {
+    const record = { lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: "“No,”" }] };
+    const copied = voicedBlocks("“No,” she said.\n\n“No,” he said.", record);
+    assert.deepEqual(copied.blocks.map((block) => block.speaker ?? null), [null, null], "two spans for one attribution: narration");
+    assert.equal(copied.ambiguous, 1);
   });
 });

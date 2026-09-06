@@ -604,7 +604,8 @@ export const ChapterContinuitySchema = z
     omitted: z.number().int().min(0),
     /** Lines beyond a character's sixth, verified or not, counted rather than silently cut (R-40). */
     cut: z.number().int().min(0),
-    characters: z.array(ChapterContinuityCharacterSchema),
+    /** At most twelve (R-40): a record holding more is not one this build wrote, and reads as unreadable. */
+    characters: z.array(ChapterContinuityCharacterSchema).max(12),
   })
   .strict();
 export type ChapterContinuity = z.infer<typeof ChapterContinuitySchema>;
@@ -666,6 +667,81 @@ export function summariseContinuity(record: ChapterContinuity): ChapterContinuit
   };
 }
 
+/**
+ * The cast of lines (design turn 130, SPEC-012 §2.4.2): each spoken line of a chapter as a
+ * verified span attributed to the character who speaks it, derived from the prose the way
+ * continuity is and never authored (R-44, R-45). A line names its paragraph and its occurrence
+ * in that paragraph, so a stale cast can tell one "No" from another. Keyed to the chapter's
+ * version and the hash of its prose (R-48).
+ */
+export const ChapterVoiceLineSchema = z
+  .object({
+    /** The name as the chapter gives it. */
+    speaker: z.string().min(1),
+    /** The cast's sheet, by exact id or a name exactly one sheet carries; a name otherwise. */
+    sheet: SlugSchema.optional(),
+    /** The paragraph the line is in, counted from 0 as `chapterParagraphs` counts. */
+    paragraph: z.number().int().min(0),
+    /** The n-th occurrence of the quote in that paragraph, from 0. */
+    occurrence: z.number().int().min(0),
+    /** The line, a span of the chapter verified character for character with whitespace folded. */
+    quote: z.string().min(1),
+  })
+  .strict();
+export const ChapterVoicesSchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** The hash of the prose read — the body, not the file — compared with the summary's `bodyHash`. */
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    /** Lines the check dropped for not being in the chapter, or longer than a line. */
+    dropped: z.number().int().min(0),
+    /** Lines beyond the cap, counted rather than silently cut; they read as narration. */
+    omitted: z.number().int().min(0),
+    lines: z.array(ChapterVoiceLineSchema),
+  })
+  .strict();
+export type ChapterVoices = z.infer<typeof ChapterVoicesSchema>;
+export type ChapterVoiceLine = z.infer<typeof ChapterVoiceLineSchema>;
+
+/** The stamp, which is all the bundle carries (R-48): the lines come with the chapter. */
+export const ChapterVoicesSummarySchema = z
+  .object({
+    version: z.number().int().min(1),
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    dropped: z.number().int().min(0),
+    omitted: z.number().int().min(0),
+    lines: z.number().int().min(0),
+    speakers: z.array(z.object({ speaker: z.string().min(1), sheet: SlugSchema.optional(), lines: z.number().int().min(1) }).strict()),
+  })
+  .strict();
+export type ChapterVoicesSummary = z.infer<typeof ChapterVoicesSummarySchema>;
+export const ChapterVoicesStateSchema = z.union([ChapterVoicesSummarySchema, z.object({ unreadable: z.literal(true) }).strict()]);
+export type ChapterVoicesState = z.infer<typeof ChapterVoicesStateSchema>;
+
+export function summariseVoices(record: ChapterVoices): ChapterVoicesSummary {
+  const speakers = new Map<string, { speaker: string; sheet?: string; lines: number }>();
+  for (const line of record.lines) {
+    const key = line.sheet ?? line.speaker;
+    const held = speakers.get(key);
+    if (held !== undefined) held.lines += 1;
+    else speakers.set(key, { speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), lines: 1 });
+  }
+  return {
+    version: record.version,
+    hash: record.hash,
+    derivedAt: record.derivedAt,
+    passes: record.passes,
+    dropped: record.dropped,
+    omitted: record.omitted,
+    lines: record.lines.length,
+    speakers: [...speakers.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker)),
+  };
+}
+
 export const ChapterSummarySchema = z
   .object({
     id: SlugSchema,
@@ -687,6 +763,8 @@ export const ChapterSummarySchema = z
     bodyHash: z.string().optional(),
     /** The stamp and the placings of the continuity record beside the chapter (turn 129), when one has been derived — or that the one there cannot be read. */
     continuity: ChapterContinuityStateSchema.optional(),
+    /** The stamp of the cast of lines beside the chapter (turn 130), when one has been cast — or that the one there cannot be read. */
+    voices: ChapterVoicesStateSchema.optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({

@@ -9,6 +9,10 @@ import {
   type ChangedSpan,
   type ChapterContinuity,
   type ChapterSummary,
+  type ChapterVoices,
+  DEFAULT_NARRATOR,
+  legacyVoiceModel,
+  voicedBlocks,
   type ProductionBundle,
   type ProseReadSource,
   type StagedProposal,
@@ -38,6 +42,10 @@ import {
   deriveContinuity,
   stopContinuity,
   useDeriving,
+  castVoices,
+  requestVoiceCatalogue,
+  stopVoices,
+  useCasting,
 } from "../lib/store.js";
 
 /**
@@ -73,6 +81,8 @@ type OpenedRecord = {
   versions: number[];
   /** The continuity record beside the chapter (turn 129), read with it; "unreadable" when one is there but cannot be read. */
   continuity: ChapterContinuity | "unreadable" | null;
+  /** The cast of lines beside the chapter (turn 130), the same way. */
+  voices: ChapterVoices | "unreadable" | null;
 };
 
 /**
@@ -263,12 +273,15 @@ export function ChapterWorkspace({
    * is the record, whether that is a newer one, none, or one that cannot be read.
    */
   const [finishedRecord, setFinishedRecord] = useState<ChapterContinuity | null>(null);
+  /** The cast a run finished with (turn 130), held for the same reason; a fresh open replaces it. */
+  const [finishedCast, setFinishedCast] = useState<ChapterVoices | null>(null);
   const [openFailure, setOpenFailure] = useState<string | null>(null);
   const [reopen, setReopen] = useState(0);
   const [draft, setDraft] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveRefusal, setSaveRefusal] = useState<string | null>(null);
   const [readNow, setReadNow] = useState(false);
+  const [voicedNow, setVoicedNow] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The save in flight, by requestId; a newer draft waits in `queuedDraft` until it answers. */
   const pendingSave = useRef<string | null>(null);
@@ -288,6 +301,10 @@ export function ChapterWorkspace({
   const readAfterSave = useRef(false);
   /** A derivation asked for while a save was pending; sent once the save lands (turn 129, SPEC-012 R-41). */
   const deriveAfterSave = useRef(false);
+  /** A cast asked for while a save was pending, the same way (turn 130). */
+  const castAfterSave = useRef(false);
+  /** A voiced read asked for while a save was pending (turn 130): begun once the save lands. */
+  const voicedAfterSave = useRef(false);
   /*
    * The latest record and draft, for callbacks that outlive the render that made them: the
    * autosave timer, the save answer and the unmount flush all need the base hash as it is now,
@@ -322,11 +339,13 @@ export function ChapterWorkspace({
           hash: result.hash,
           versions: result.versions ?? [],
           continuity: result.continuityUnreadable === true ? "unreadable" : (result.continuity ?? null),
+          voices: result.voicesUnreadable === true ? "unreadable" : (result.voices ?? null),
         };
         const previous = recordRef.current;
         recordRef.current = opened;
         setRecord(opened);
         setFinishedRecord(null);
+        setFinishedCast(null);
         setOpenFailure(null);
         // A draft the transport could not carry goes out now, against the base just read —
         // unless the record moved while it waited, in which case the disk text is the text and
@@ -420,6 +439,7 @@ export function ChapterWorkspace({
           // The record beside the chapter is untouched by a save; the summary's hash moving past
           // it is what makes it stale (turn 129).
           continuity: recordRef.current?.continuity ?? null,
+          voices: recordRef.current?.voices ?? null,
         };
         recordRef.current = saved;
         setRecord(saved);
@@ -445,6 +465,14 @@ export function ChapterWorkspace({
           deriveAfterSave.current = false;
           deriveContinuity(worldId, prodId, chapter.file);
         }
+        if (castAfterSave.current) {
+          castAfterSave.current = false;
+          castVoices(worldId, prodId, chapter.file);
+        }
+        if (voicedAfterSave.current) {
+          voicedAfterSave.current = false;
+          setVoicedNow(true);
+        }
       } else {
         // Refused: the file moved underneath the editor. The draft is not merged over it; the
         // chapter is re-read and the disk text adopted, which is what the Bible does on the
@@ -453,6 +481,8 @@ export function ChapterWorkspace({
         queuedDraft.current = null;
         readAfterSave.current = false;
         deriveAfterSave.current = false;
+        castAfterSave.current = false;
+        voicedAfterSave.current = false;
         setSaveRefusal("the chapter moved · reloaded from disk");
         setReopen((n) => n + 1);
       }
@@ -571,12 +601,112 @@ export function ChapterWorkspace({
     setReadNow(false);
     pageRead.begin();
   }, [readNow, pageRead]);
+
+  /*
+   * The voiced read (turn 130, SPEC-012 R-46): the same page read, its blocks the chapter's
+   * paragraphs split at the cast lines by the one rule both ends use, narration in the
+   * narrator's voice and a line in its speaker's. The frame names the chapter once and the
+   * coordinator expands it, so a cast of four hundred lines never overflows the frame; the
+   * blocks here label and count. A stale cast still reads what it still finds.
+   */
+  const castingState = useCasting()[`${worldId}/${prodId}/${chapter.id}`];
+  useEffect(() => {
+    if (castingState?.state === "cast" && castingState.record !== undefined) setFinishedCast(castingState.record);
+  }, [castingState]);
+  const voices = useMemo((): ChapterVoices | "unreadable" | null => {
+    const opened = record?.voices ?? null;
+    if (finishedCast === null) return opened;
+    if (opened === null || opened === "unreadable" || finishedCast.derivedAt >= opened.derivedAt) return finishedCast;
+    return opened;
+  }, [record?.voices, finishedCast]);
+  const castingNow = castingState?.state === "casting";
+  const voicesRecord = voices === "unreadable" ? null : voices;
+  const voicesStale = voicesRecord !== null && chapter.bodyHash !== undefined && chapter.bodyHash !== voicesRecord.hash;
+  const voiced = useMemo(() => voicedBlocks(live, voicesRecord), [live, voicesRecord]);
+  const sheetNameOf = (id: string) => world.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const voicedRead = useProsePageRead({
+    pageId: `${chapter.id}#voiced`,
+    title: chapter.title,
+    blocks: voiced.blocks.map((block) => ({
+      heading: block.speaker === undefined ? "Narration" : block.sheet !== undefined ? sheetNameOf(block.sheet) : block.speaker,
+      body: block.text,
+      source: { of: "chapter-voiced", productionId: prodId, chapterId: chapter.id },
+    })),
+    sources: [{ of: "chapter-voiced", productionId: prodId, chapterId: chapter.id }],
+    voiceOf: (index) => {
+      const block = voiced.blocks[index];
+      return block?.speaker === undefined ? "narrator" : block.sheet !== undefined ? sheetNameOf(block.sheet) : block.speaker;
+    },
+  });
+  useEffect(() => {
+    if (!voicedNow) return;
+    setVoicedNow(false);
+    voicedRead.begin();
+  }, [voicedNow, voicedRead]);
+  const castNote =
+    castingState?.state === "unavailable" || castingState?.state === "failed"
+      ? `could not cast · ${castingState.reason ?? "the run failed"}`
+      : castingState?.state === "stopped"
+        ? "stopped · the last cast stands"
+        : null;
+  const castLinesPress = () => {
+    if (castingNow || locked) return;
+    if ((draft !== null && draft !== live) || pendingSave.current !== null) {
+      castAfterSave.current = true;
+      if (draft !== null && draft !== live) flushSave(draft);
+      return;
+    }
+    castVoices(worldId, prodId, chapter.file);
+  };
+  /** Who speaks, by lines, the narration first: the Voices panel's rows. */
+  const speakers = useMemo(() => {
+    const counts = new Map<string, { speaker: string; sheet?: string; lines: number }>();
+    for (const line of voicesRecord?.lines ?? []) {
+      const key = line.sheet ?? line.speaker;
+      const held = counts.get(key);
+      if (held !== undefined) held.lines += 1;
+      else counts.set(key, { speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), lines: 1 });
+    }
+    return [...counts.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker));
+  }, [voicesRecord]);
+  const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
+  const narratorName = useStore().state?.app.narrator?.label ?? DEFAULT_NARRATOR.label;
+  // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
+  // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
+  // narrator's, said so in the row rather than found out when the block fails.
+  const catalogue = useStore().voiceCatalogue;
+  const castShown = voicesRecord !== null;
+  useEffect(() => {
+    if (castShown && connection === "open") requestVoiceCatalogue(worldId);
+  }, [castShown, connection, worldId]);
+  const voiceUnavailable = (voice: { provider: string; model?: string; voiceId: string }): boolean => {
+    if (catalogue === null) return false;
+    const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, world.clonedVoices ?? []);
+    const listed = catalogue.find(
+      (candidate) => candidate.provider === voice.provider && candidate.voiceId === voice.voiceId && (model === null || candidate.model === model),
+    );
+    return listed === undefined || listed.unavailableReason !== undefined;
+  };
   // A read under way when a draft arrives is stopped with it: the manuscript now shows the
   // draft, and the accepted prose must not go on sounding under it (codex, PR 879).
   const drafted = stagedDraft !== undefined;
   useEffect(() => {
     if (drafted && pageRead.reading) pageRead.stop();
-  }, [drafted, pageRead.reading, pageRead.stop]);
+    if (drafted && voicedRead.reading) voicedRead.stop();
+  }, [drafted, pageRead.reading, pageRead.stop, voicedRead.reading, voicedRead.stop]);
+  const readVoiced = {
+    ...voicedRead,
+    begin: () => {
+      if ((draft !== null && draft !== live) || pendingSave.current !== null) {
+        voicedAfterSave.current = true;
+        if (draft !== null && draft !== live) flushSave(draft);
+        return;
+      }
+      voicedRead.begin();
+    },
+  };
+  // The block being read, for the band over the manuscript (turn 130).
+  const voicedAt = voicedRead.reading && voicedRead.at !== null ? voiced.blocks[voicedRead.at] ?? null : null;
   const read = {
     ...pageRead,
     begin: () => {
@@ -651,9 +781,11 @@ export function ChapterWorkspace({
     // A record is derived from the saved chapter, never from a draft standing in its place
     // (codex on PR 907): while one waits the press is disabled, as Read the chapter is.
     if (derivingNow || locked) return;
-    if (draft !== null && draft !== live) {
+    // A save still in flight is waited for even when the editor has come back to the saved
+    // words (codex on PR 907, round five): the run reads what finally lands, never the middle.
+    if ((draft !== null && draft !== live) || pendingSave.current !== null) {
       deriveAfterSave.current = true;
-      flushSave(draft);
+      if (draft !== null && draft !== live) flushSave(draft);
       return;
     }
     deriveContinuity(worldId, prodId, chapter.file);
@@ -730,7 +862,10 @@ export function ChapterWorkspace({
             <div className="fy-sw__actions">
               {/* Not while a draft stands in the prose's place: the read speaks the saved chapter,
                   and the words on screen are the draft's (codex, PR 879). */}
-              {paragraphs.length > 0 && stagedDraft === undefined && <PageReadControl read={read} label="Read the chapter" />}
+              {paragraphs.length > 0 && stagedDraft === undefined && !voicedRead.reading && <PageReadControl read={read} label="Read the chapter" />}
+              {paragraphs.length > 0 && stagedDraft === undefined && voicesRecord !== null && !pageRead.reading && (
+                <PageReadControl read={readVoiced} label="Voiced" />
+              )}
             </div>
           </div>
           {/* The synopsis, typed where it reads (turn 127), the way the scene's is. */}
@@ -790,6 +925,14 @@ export function ChapterWorkspace({
 
         <div className="fy-ch__body">
           <div className="fy-ch__manuscript" ref={manuscriptRef}>
+            {voicedAt !== null && (
+              <div className="fy-ch__band" data-testid="voiced-band">
+                <span className="fy-ch__band-who">{voicedAt.speaker === undefined ? narratorName : voicedAt.sheet !== undefined ? sheetNameOf(voicedAt.sheet) : voicedAt.speaker}</span>
+                <span className="fy-mono">{(voicedRead.at ?? 0) + 1} of {voiced.blocks.length}</span>
+                <span className="fy-ch__band-push" />
+                <span className="fy-ch__band-line">{voicedAt.text}</span>
+              </div>
+            )}
             {openFailure !== null ? (
               <EmptyState title={openFailure} />
             ) : record === null ? (
@@ -920,7 +1063,7 @@ export function ChapterWorkspace({
                     </button>
                   </span>
                 ) : (
-                  <button type="button" className="fy-ch__derive" disabled={locked} onClick={derive}>
+                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={derive}>
                     <RotateCcw size={11} />
                     {continuity === null ? "Derive" : "Derive again"}
                   </button>
@@ -973,6 +1116,78 @@ export function ChapterWorkspace({
                 </ul>
               )}
               {continuityRecord !== null && <p className="fy-ch__stamp fy-mono">{continuityStamp(continuityRecord)}</p>}
+            </section>
+
+            <section className="fy-bible__panel" data-testid="chapter-voices">
+              <h2 className="fy-bible__paneltitle fy-ch__paneltitle--row">
+                Voices
+                <span className="fy-ch__panelpush" />
+                {castingNow ? (
+                  <span className="fy-ch__deriving">
+                    <span className="fy-mono">casting…</span>
+                    <button type="button" className="fy-ch__derive" onClick={() => stopVoices(worldId, prodId, chapter.file)}>
+                      Stop
+                    </button>
+                  </span>
+                ) : (
+                  <button type="button" className="fy-ch__derive" disabled={locked || connection !== "open"} onClick={castLinesPress}>
+                    <RotateCcw size={11} />
+                    {voices === null ? "Cast the lines" : "Cast again"}
+                  </button>
+                )}
+              </h2>
+              <p className="fy-ch__scope fy-mono">who speaks · in whose voice</p>
+              {voices === "unreadable" && <div className="fy-ch__moved fy-ch__moved--line">record unreadable · Cast again replaces it</div>}
+              {voicesStale && voicesRecord !== null && (
+                <div className="fy-ch__moved fy-ch__moved--line">chapter moved · cast against v{voicesRecord.version}</div>
+              )}
+              {castNote !== null && !castingNow && <div className="fy-ch__moved fy-ch__moved--line">{castNote}</div>}
+              {voicesRecord === null ? (
+                voices === "unreadable" ? null : <p className="fy-bible__empty">Not cast yet.</p>
+              ) : (
+                <ul className="fy-ch__who">
+                  <li>
+                    <div className="fy-ch__who-head">
+                      <span className="fy-ch__who-name">Narration</span>
+                      <span className="fy-ch__who-where fy-mono">{narratorName} · narrator</span>
+                      <span className="fy-ch__who-count fy-mono">{narrationBlocks} blocks</span>
+                    </div>
+                  </li>
+                  {speakers.map((who) => {
+                    const sheet = who.sheet === undefined ? undefined : world.sheets.find((candidate) => candidate.id === who.sheet);
+                    const voice = sheet?.voice;
+                    return (
+                      <li key={who.sheet ?? who.speaker}>
+                        <div className="fy-ch__who-head">
+                          <span className="fy-ch__who-name">{sheet?.name ?? who.speaker}</span>
+                          {voice !== undefined && voiceUnavailable(voice) ? (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
+                          ) : voice !== undefined ? (
+                            <span className="fy-ch__who-where fy-mono">{voice.label ?? voice.voiceId} · {voice.provider}</span>
+                          ) : who.sheet === undefined ? (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>
+                          ) : (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no voice · narrator</span>
+                          )}
+                          <span className="fy-ch__who-count fy-mono">{who.lines} line{who.lines === 1 ? "" : "s"}</span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {voicesRecord !== null && (
+                <p className="fy-ch__stamp fy-mono">
+                  {[
+                    `cast · v${voicesRecord.version}`,
+                    `${voicesRecord.lines.length} line${voicesRecord.lines.length === 1 ? "" : "s"}`,
+                    `${speakers.length} speaker${speakers.length === 1 ? "" : "s"}`,
+                    voicesRecord.dropped === 0 ? "every line is the chapter’s own words" : `${voicesRecord.dropped} line${voicesRecord.dropped === 1 ? "" : "s"} dropped, not in the chapter`,
+                    ...(voicesRecord.omitted > 0 ? [`${voicesRecord.omitted} line${voicesRecord.omitted === 1 ? "" : "s"} over the cap`] : []),
+                    ...(voiced.ambiguous > 0 ? [`${voiced.ambiguous} ambiguous`] : []),
+                  ].join(" · ")}
+                </p>
+              )}
             </section>
 
             {style !== null && (
@@ -1125,6 +1340,10 @@ export function ChapterWorkspace({
             // under a stale one, the press that reads again and a question the prose answers.
             prompts: passage !== null
               ? ["Tighten this", { label: "Hold this against the style", replyOnly: true }]
+              : voicesRecord !== null && voicesStale
+                ? [{ label: "Cast again", press: castLinesPress }, "Who speaks in this chapter?"]
+                : voicesRecord !== null && speakers.length > 0 && !(continuityRecord !== null && continuityStale)
+                  ? ["Who speaks in this chapter?", `Which lines are ${speakers[0]!.sheet !== undefined ? sheetNameOf(speakers[0]!.sheet) : speakers[0]!.speaker}’s?`]
               : continuityRecord !== null && continuityStale
                 ? [{ label: "Derive again", press: derive }, "Who is in this chapter?"]
                 : continuityRecord !== null && placedFirst !== undefined
