@@ -55,9 +55,12 @@ import {
   type TimelineClipId,
   type TimelineLibraryItem,
   type TimelineCommand,
+  type TimelineClipCommand,
   type TimelineTrackId,
-  PICTURE_TRACK_ID,
   basePictureTrack,
+  mediaPlacementCommands,
+  newAudioTrack,
+  migrateLegacyCut,
   buildRenderPlan,
   orderedTrackClips,
   secondsToFrames,
@@ -150,13 +153,14 @@ import {
 } from "../lib/clip-drag.js";
 import {
   PictureClipTiming,
+  DetachAudio,
   PictureTrack,
   TakePicker,
   pictureClipViews,
   type EditorTool,
   type PictureClipView,
 } from "./editor-timeline.js";
-import { ARTIFACT_DRAG_TYPE, ClipGain, LANE_DRAG_PICTURE, LANE_DRAG_SOUND, MixPanel, MoveToLane, SHOT_DRAG_TYPE, TypedTrackRows, dragAccepts, laneIcon, type TrackDrop } from "./editor-audio.js";
+import { ARTIFACT_DRAG_TYPE, ClipGain, LANE_DRAG_PICTURE, LANE_DRAG_SOUND, MixPanel, AudioClipSettings, SHOT_DRAG_TYPE, TypedTrackRows, dragAccepts, laneIcon, type TrackDrop } from "./editor-audio.js";
 import { CueInspector, SubtitleSources, SubtitleTrackRow, subtitleTracksOf } from "./editor-subtitles.js";
 import { EditorRequestCards } from "./editor-requests.js";
 import { usePlanAudio } from "../lib/plan-audio.js";
@@ -184,6 +188,7 @@ import {
   rejoinOverlayAudio,
   splitOverlayAudio,
   uploadArtifacts,
+  importEditorMedia,
   setProductionAspect,
   setProductionModel,
   setShotTrim,
@@ -555,7 +560,7 @@ export function ProductionLayout() {
   let cut: ReturnType<typeof deriveCut> | null = null;
   if (production) {
     try {
-      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, production.timeline);
+      cut = production.spine ? deriveCut(production) : resolvePictureTimeline(production, production.timeline, world?.artifacts ?? []);
     } catch {
       // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
       // the legacy runtime while those screens correctly block it.
@@ -574,7 +579,13 @@ export function ProductionLayout() {
    */
   const mediaOnly =
     cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
-  const filmSec = mediaOnly ? placedFilmSec(production?.cut.overlays ?? [], world?.artifacts ?? []) : 0;
+  let filmSec = 0;
+  if (mediaOnly && production) {
+    if (production.timeline?.status === "ready") {
+      const planned = buildRenderPlan({ production, timeline: production.timeline, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
+      filmSec = planned.ok ? planned.plan.totalSec : 0;
+    } else filmSec = placedFilmSec(production.cut.overlays, world?.artifacts ?? []);
+  }
   const audioCount =
     (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
     (production?.scenes
@@ -3573,6 +3584,8 @@ function ArtifactPanel({
   onOpenPicker,
   onAddLine,
   onAddArtifact,
+  onOverlayArtifact,
+  onImport,
   onAddShot,
   onLocate,
   initialFilter = "all",
@@ -3596,6 +3609,8 @@ function ArtifactPanel({
   /** A read line lands on Dialogue (the Audio screen's rows, kept here since it redirects; R-1). */
   onAddLine: ((take: Take, shot: Shot, sceneNumber: number) => void) | null;
   onAddArtifact: ((artifact: ArtifactSidecar) => void) | null;
+  onOverlayArtifact: ((artifact: ArtifactSidecar) => void) | null;
+  onImport: ((files?: File[]) => void) | null;
   onAddShot: ((shotId: string) => void) | null;
   /** Select one use and bring the playhead to it (R-11, R-16). */
   onLocate: (clipId: TimelineClipId, startFrame: number) => void;
@@ -3632,7 +3647,7 @@ function ArtifactPanel({
       .flatMap((track) => track.clips.filter(matches).map((clip) => ({ id: clip.id, startFrame: clip.startFrame })))
       .sort((a, b) => a.startFrame - b.startFrame);
   const laneOf = (artifact: ArtifactSidecar): string | null =>
-    artifact.kind === "audio" ? "Music" : artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board" ? "Picture" : null;
+    artifact.kind === "audio" ? "Audio" : artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board" ? "Picture" : null;
 
   /*
    * One flat list, in the target's density (R-8a): accepted takes and shots waiting for one,
@@ -3653,6 +3668,7 @@ function ArtifactPanel({
     drag: string | null;
     search: string;
     kind: "take" | "shot" | "artifact" | "line";
+    overlay?: (() => void) | null;
     /** The scenes this row belongs to: a shot's own, an artifact's links. */
     scenes: string[];
     /** A spoken line's shot, and what has been read of it. */
@@ -3701,6 +3717,7 @@ function ArtifactPanel({
       used: usedArtifactIds.has(artifact.id),
       uses: usesOf((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifact.id),
       add: onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
+      overlay: onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
       drag: lane === null ? null : artifact.id,
       search: `${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`,
       kind: "artifact",
@@ -3743,7 +3760,7 @@ function ArtifactPanel({
     if (sceneScope !== "all" && !item.scenes.includes(sceneScope)) return false;
     if (item.kind === "line" && filter !== "audio" && !inLibrary.has(`shot:${item.line!.shotId}`)) return false;
     if (filter === "needs-take" && item.kind !== "shot") return false;
-    if (filter === "audio" && !((item.kind === "artifact" && item.lane === "Music") || item.kind === "line")) return false;
+    if (filter === "audio" && !((item.kind === "artifact" && item.lane === "Audio") || item.kind === "line")) return false;
     if (filter === "unused" && (item.used || item.kind === "shot")) return false;
     if (filter === "all" && item.kind === "shot") return true;
     return normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery);
@@ -3764,7 +3781,9 @@ function ArtifactPanel({
   };
 
   return (
-    <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={open} aria-label="Library">
+    <aside ref={panelRef} className="fy-artpanel" id="cut-library" data-open={open} aria-label="Library"
+      onDragOver={event => { if (Array.from(event.dataTransfer.types).includes("Files")) event.preventDefault(); }}
+      onDrop={event => { if (event.dataTransfer.files?.length) { event.preventDefault(); event.stopPropagation(); onImport?.(Array.from(event.dataTransfer.files)); } }}>
       <div className="fy-artpanel__head">
         <span className="fy-artpanel__title">Library</span>
         <span className="fy-mono fy-artpanel__count">{items.length} item{items.length === 1 ? "" : "s"}</span>
@@ -3772,10 +3791,10 @@ function ArtifactPanel({
         <button
           type="button"
           className="fy-tlbtn fy-tip"
-          data-tip="Upload from this machine"
-          aria-label="Upload from this machine"
-          disabled={worldId === undefined}
-          onClick={() => worldId && uploadArtifacts(worldId)}
+          data-tip="Import to Library"
+          aria-label="Import to Library"
+          disabled={onImport === null}
+          onClick={() => onImport?.()}
         >
           <Upload size={12} />
         </button>
@@ -3848,7 +3867,7 @@ function ArtifactPanel({
                   if (item.drag === null) return;
                   event.dataTransfer.setData(ARTIFACT_DRAG_TYPE, item.drag);
                   if (item.drag.startsWith("shot:")) event.dataTransfer.setData(SHOT_DRAG_TYPE, "1");
-                  event.dataTransfer.setData(item.lane === "Music" ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE, "1");
+                  event.dataTransfer.setData(item.lane === "Audio" ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE, "1");
                   event.dataTransfer.effectAllowed = "copy";
                 }}
               >
@@ -3884,9 +3903,10 @@ function ArtifactPanel({
                     {item.add !== null && (
                       <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.add}>
                         <Plus size={11} />
-                        Add to timeline
+                        {item.kind === "artifact" ? "Append to timeline" : "Add to timeline"}
                       </button>
                     )}
+                    {item.overlay && <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.overlay}>Overlay at playhead</button>}
                     {item.uses.length > 0 && (
                       <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={() => locate(item)}>
                         <Locate size={11} />
@@ -5051,12 +5071,12 @@ function CutInspector({
         <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
-          <MoveToLane clip={selectedClip} track={selectedTrack} timeline={timeline} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />
+          <AudioClipSettings clip={selectedClip} track={selectedTrack} disabled={commandsDisabled} onCommands={onCommands} />
         )}
         <p className="fy-cutinspect__note">
           {selectedTrack.kind === "dialogue"
-            ? "Dialogue is foreground: Music and Ambience lower under it while speech-first mixing is on."
-            : "Background sound lowers under Dialogue while speech-first mixing is on. Mute and Solo live on the track row."}
+            ? "The Voice role lowers Music and Ambience clips while speech-first mixing is on."
+            : "Choose an optional role to control speech-first mixing. Unspecified sound keeps its level."}
         </p>
       </div>
     );
@@ -5080,6 +5100,7 @@ function CutInspector({
           )}
         </div>
         <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
+        {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
     );
   }
@@ -5103,9 +5124,10 @@ function CutInspector({
           <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
-        {selectedClip && (
+        {selectedClip && (<>
           <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
-        )}
+        {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
+        </>)}
         {selectedShotId && !savedPictureOrder && (
           <TrimStrip
             worldId={worldId}
@@ -5253,7 +5275,7 @@ function ExportSheet({
   else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : nothingOnTimeline;
   else {
     try {
-      cut = resolvePictureTimeline(production, timelineState);
+      cut = resolvePictureTimeline(production, timelineState, world?.artifacts ?? []);
     } catch (error) {
       blockedBy = error instanceof Error ? error.message : String(error);
     }
@@ -5296,7 +5318,7 @@ function ExportSheet({
   const meta =
     cut === null || nothingPlaced
       ? blockedBy ?? ""
-      : `${runtimeSeconds(runtimeSec ?? cut.totalSec)} · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
+      : `${runtimeSeconds(runtimeSec ?? cut.totalSec)}${shotCount ? ` · ${covered} of ${shotCount} shot${shotCount === 1 ? "" : "s"}` : ""}${gaps > 0 ? ` · ${gaps} gap${gaps === 1 ? "" : "s"}` : ""}`;
   return (
     <EditorDialog open={open} title="Export film" subtitle={meta} onClose={onClose} width={430} labelledBy="export-sheet-title">
       <div className="fy-exsheet" data-testid="export-sheet">
@@ -5583,6 +5605,7 @@ function AddToLibraryDialog({
 
 export function CutScreen() {
   const { worldId, prodId } = useParams();
+  const connection = useStore().connection;
   const { world, production } = useProduction(worldId, prodId);
   const timelineState = production?.timeline ?? { status: "absent" as const };
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
@@ -5597,8 +5620,8 @@ export function CutScreen() {
         production.spine && timelineState.status !== "ready"
           ? deriveCut(production)
           : timelineState.status === "absent"
-            ? resolvePictureTimeline(production, { status: "ready", timeline: seedFirstPictureTimeline(production) })
-            : resolvePictureTimeline(production, timelineState);
+            ? resolvePictureTimeline(production, { status: "ready", timeline: seedFirstPictureTimeline(production) }, world?.artifacts ?? [])
+            : resolvePictureTimeline(production, timelineState, world?.artifacts ?? []);
     } catch (error) {
       timelineError = error instanceof Error ? error.message : String(error);
     }
@@ -5614,6 +5637,22 @@ export function CutScreen() {
   const [watchToken, setWatchToken] = useState(0);
   const [selected, setSelected] = useState<CutSelection | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [showScenes, setShowScenes] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importRequest = useRef<string | null>(null);
+  useEffect(() => {
+    importRequest.current = null; setImporting(false);
+    return subscribeQueueResults(result => {
+      if (result.requestId !== importRequest.current) return;
+      importRequest.current = null; setImporting(false);
+      setTimelineCommandError(result.failures.length ? result.failures.map(failure => failure.reason).join(" ") : null);
+    });
+  }, [worldId, prodId]);
+  useEffect(() => {
+    if (connection === "open" || importRequest.current === null) return;
+    importRequest.current = null; setImporting(false);
+    setTimelineCommandError("Connection lost during import. Reconnect and check the Library before importing again.");
+  }, [connection]);
   const [rightOpen, setRightOpen] = useState(false);
   const [tool, setTool] = useState<EditorTool>("select");
   const [snap, setSnap] = useState(true);
@@ -5710,7 +5749,7 @@ export function CutScreen() {
    * somebody mid-edit. A production with a spine is never this, however unresolved that spine is.
    */
   const mediaOnly =
-    cut !== null && view.kind === "scene-order" && isMediaOnly(cut) && (production?.scenes ?? []).every((scene) => orderedShots(scene).length === 0);
+    cut !== null && view.kind === "scene-order" && (production?.scenes ?? []).every((scene) => orderedShots(scene).length === 0);
   /*
    * Resolved exactly as the coordinator resolves them, because the screen must not advertise a
    * film the export will not produce: `exportOverlays` drops a document or a missing artifact and
@@ -5821,6 +5860,8 @@ export function CutScreen() {
       timelineError = error instanceof Error ? error.message : String(error);
     }
   }
+  // Allocation must reserve the same legacy ids the first coordinator write migrates.
+  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, artifacts).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
@@ -5857,7 +5898,7 @@ export function CutScreen() {
     decideEditorRequest(worldId, prodId, requestId, decision);
   };
   const shownTimeline = draft ?? ghostTimeline ?? editableTimeline;
-  const views = shownTimeline ? pictureClipViews(shownTimeline, cut) : [];
+  const views = shownTimeline ? pictureClipViews(shownTimeline, cut, artifacts) : [];
   const usedShotIds = new Set(
     editableTimeline
       ? editableTimeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "shot" ? [clip.source.shotId] : [])))
@@ -5956,6 +5997,7 @@ export function CutScreen() {
     !production ||
     editableTimeline === null ||
     commandPending ||
+    importing ||
     fence === null ||
     // A ghost is the request's timeline, not the live one; a gesture drawn against it would
     // land against the record and mean something else (round eight). Decide the card first.
@@ -5976,6 +6018,18 @@ export function CutScreen() {
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, commands, timelineRevision, fence, label);
+  };
+  const importMedia = (destination: "library" | "append" | number, files?: File[]) => {
+    if (commandsDisabled || !worldId || !prodId || !fence) return;
+    setTimelineCommandError(null);
+    const result = importEditorMedia(worldId, { productionId: prodId, baseRevision: timelineRevision, sourceFingerprint: fence, destination }, files);
+    importRequest.current = result.requestId; setImporting(result.requestId !== null);
+    if (result.reason) setTimelineCommandError(result.reason);
+  };
+  const appendArtifact = (artifact: ArtifactSidecar) => {
+    if (!editableTimeline) return;
+    try { sendCommands(mediaPlacementCommands(placementTimeline ?? editableTimeline, [artifact], "append", mintClipId), "Append media"); }
+    catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); }
   };
   const changeLibrary = (added: TimelineLibraryItem[], removed: TimelineLibraryItem[]) => {
     // One command holds at most 200 items (the schema's cap); a bigger choice is several in one batch.
@@ -6050,107 +6104,49 @@ export function CutScreen() {
     playheadFrame > selectedAny.clip.startFrame &&
     playheadFrame < selectedAny.clip.startFrame + selectedAny.clip.durationFrames;
   /** Placement from the Library (SPEC-039 R-9, R-10): one `place` command, never a host path. */
-  const placeArtifact = (
-    artifact: ArtifactSidecar,
-    trackId: TimelineTrackId | null,
-    frameWanted: number,
-    options: { kind?: "picture" | "dialogue" | "ambience" | "music"; newTrack?: boolean } = {},
-  ) => {
+  const placeArtifact = (artifact: ArtifactSidecar, trackId: TimelineTrackId | null, frame: number,
+    options: { kind?: "picture" | "audio"; newTrack?: boolean } = {}) => {
     if (!editableTimeline) return;
-    let frame = frameWanted;
     const still = artifact.kind === "image" || artifact.kind === "board";
-    // Refused here, in the words the coordinator would use, rather than written and then refused
-    // by every render: a document has no picture and no sound, an image has no sound, and a
-    // video is only sound when it is known to carry some (SPEC-037 R-22).
-    const targetTrack = trackId === null ? null : (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null);
-    const laneKind: "picture" | "dialogue" | "ambience" | "music" =
-      targetTrack !== null && targetTrack.kind !== "subtitle" ? targetTrack.kind : (options.kind ?? (artifact.kind === "audio" ? "music" : "picture"));
-    const audioTarget = targetTrack !== null ? AUDIO_TRACK_KINDS.has(targetTrack.kind) : AUDIO_TRACK_KINDS.has(laneKind);
-    const carriesSound = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
-    const carriesPicture = still || artifact.kind === "video";
-    if (targetTrack !== null && targetTrack.kind === "subtitle") {
-      setTimelineCommandError(`${targetTrack.name} holds subtitles, not media`);
-      return;
+    const duration = still ? CLIP_DEFAULT_SEC : artifact.mediaInfo?.durationSec;
+    if (!duration) { setTimelineCommandError("Measure this media before placing it."); return; }
+    const durationFrames = Math.max(1, secondsToFrames(duration, frameRate));
+    const kind = options.kind ?? (artifact.kind === "audio" ? "audio" : "picture");
+    let track = trackId ? editableTimeline.tracks.find(candidate => candidate.id === trackId) : undefined;
+    if (!track && !options.newTrack) track = editableTimeline.tracks.find(candidate => candidate.kind === kind && candidate.id !== basePictureTrack(editableTimeline)?.id &&
+      !candidate.clips.some(clip => clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame));
+    const sound = track ? AUDIO_TRACK_KINDS.has(track.kind) : kind === "audio";
+    if (sound ? !(artifact.kind === "audio" || artifact.kind === "video" && artifact.mediaInfo?.hasAudio) : !(still || artifact.kind === "video")) {
+      setTimelineCommandError(sound ? "This media has no measured sound." : "This media has no picture."); return;
     }
-    if (audioTarget && !carriesSound) {
-      setTimelineCommandError(`${artifact.file.split("/").pop()} is not known to carry sound; it cannot go on ${targetTrack?.name ?? "an audio track"}`);
-      return;
-    }
-    if (!audioTarget && !carriesPicture) {
-      setTimelineCommandError(`${artifact.file.split("/").pop()} is ${artifact.kind} and has no picture to place`);
-      return;
-    }
-    const measured = artifact.mediaInfo?.durationSec;
-    const durationFrames = Math.max(1, secondsToFrames(still ? CLIP_DEFAULT_SEC : (measured ?? CLIP_DEFAULT_SEC), frameRate));
-    const label = artifact.file.split("/").pop() ?? artifact.file;
-    const wantsAudio = AUDIO_TRACK_KINDS.has(laneKind);
-    /*
-     * A non-drag placement lands on a same-kind track with room at the playhead, or on a new
-     * one. The first matching track alone was refused for overlap while another sat empty
-     * (round six). An explicit drop keeps its target, and the coordinator's overlap refusal.
-     */
-    const sameKind = (candidate: TimelineTrack) => candidate.kind === laneKind && candidate.id !== PICTURE_TRACK_ID;
-    const roomAt = (candidate: TimelineTrack) =>
-      !candidate.clips.some((clip) => clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame);
-    const track = options.newTrack
-      ? null
-      : trackId !== null
-        ? (editableTimeline.tracks.find((candidate) => candidate.id === trackId) ?? null)
-        : (editableTimeline.tracks.find((candidate) => sameKind(candidate) && roomAt(candidate)) ?? editableTimeline.tracks.find(sameKind) ?? null);
-    const commands: TimelineCommand[] = [];
-    const laneName = laneKind === "picture" ? "Inserts" : laneKind === "dialogue" ? "Dialogue" : laneKind === "ambience" ? "Ambience" : "Music";
-    const stem: TimelineTrackId = `tr_${laneName.toLowerCase()}`;
-    const taken = new Set(editableTimeline.tracks.map((candidate) => candidate.id));
-    let fresh: TimelineTrackId = stem;
-    for (let n = 2; taken.has(fresh); n += 1) fresh = `${stem}-${n}`;
-    const target: TimelineTrackId = track?.id ?? fresh;
-    if (track === null) {
-      const alike = editableTimeline.tracks.filter(sameKind).length;
-      commands.push({
-        kind: "add-track",
-        trackId: target,
-        trackKind: laneKind,
-        name: `${laneName}${alike > 0 ? ` ${alike + 1}` : ""}`,
-      });
-    } else {
-      // The target's drop: snap to a neighbouring edge when close, then slide to the first span
-      // that is actually free rather than refusing the overlap.
-      const edges = track.clips.flatMap((clip) => [clip.startFrame, clip.startFrame + clip.durationFrames]);
-      const snapWithin = Math.round(1.2 * frameRate);
-      const nearest = edges.reduce<number | null>((best, edge) => (Math.abs(edge - frame) < snapWithin && (best === null || Math.abs(edge - frame) < Math.abs(best - frame)) ? edge : best), null);
-      if (snap && nearest !== null) frame = nearest;
-      for (const clip of orderedTrackClips(track)) {
-        if (clip.startFrame < frame + durationFrames && clip.startFrame + clip.durationFrames > frame) frame = clip.startFrame + clip.durationFrames;
+    const commands: TimelineClipCommand[] = [];
+    let target = track?.id;
+    if (!target) {
+      if (sound) { const added = newAudioTrack(placementTimeline ?? editableTimeline); commands.push(added); target = added.trackId; }
+      else {
+        let number = 1; while (editableTimeline.tracks.some(candidate => candidate.id === 'tr_overlay-' + number)) number++;
+        target = ('tr_overlay-' + number) as TimelineTrackId;
+        commands.push({ kind: "add-track", trackId: target, trackKind: "picture", name: "Overlay " + number });
       }
     }
     const placedId = mintClipId();
-    commands.push({
-      kind: "place",
-      trackId: target,
-      clip: {
-        id: placedId,
-        startFrame: frame,
-        durationFrames,
-        sourceInFrames: 0,
-        source: { kind: "artifact", artifactId: artifact.id, label },
-        ...(wantsAudio || (track !== null && AUDIO_TRACK_KINDS.has(track.kind)) ? { gainDb: 0 } : {}),
-        ...(artifact.kind === "video" && !(track !== null && AUDIO_TRACK_KINDS.has(track.kind)) ? { audio: "keep" as const } : {}),
-      },
-    });
-    sendCommands(commands, `Place ${label}`);
-    // The placed clip becomes the selection and the Inspector's subject once it exists (round four).
-    pendingSelect.current = placedId;
+    commands.push({ kind: "place", trackId: target, clip: { id: placedId, startFrame: frame, durationFrames, sourceInFrames: 0,
+      source: { kind: "artifact", artifactId: artifact.id, label: artifact.file.split("/").pop() ?? artifact.file },
+      ...(sound ? { gainDb: 0 } : artifact.kind === "video" ? { audio: "keep" as const } : {}),
+    } });
+    sendCommands(commands, "Place media"); pendingSelect.current = placedId;
   };
   const placeVoiceTake = (take: Take, shot: Shot, sceneNumber: number) => {
     if (!editableTimeline || !production) return;
-    const dialogue = [...editableTimeline.tracks].sort((a, b) => a.order - b.order).find((track) => track.kind === "dialogue") ?? null;
-    const commands: TimelineCommand[] = [];
-    const taken = new Set(editableTimeline.tracks.map((track) => track.id));
-    let fresh: TimelineTrackId = "tr_dialogue";
-    for (let n = 2; taken.has(fresh); n += 1) fresh = `tr_dialogue-${n}`;
-    if (dialogue === null) commands.push({ kind: "add-track", trackId: fresh, trackKind: "dialogue", name: "Dialogue" });
     const measured = production.takeMediaInfo?.[take.id]?.mediaInfo.durationSec;
     const durationFrames = Math.max(1, secondsToFrames(measured ?? CLIP_DEFAULT_SEC, frameRate));
+    const audioTracks = [...(placementTimeline ?? editableTimeline).tracks].sort((a, b) => a.order - b.order)
+      .filter(track => AUDIO_TRACK_KINDS.has(track.kind) && !track.muted);
+    const dialogue = audioTracks.find(track => track.kind === "audio" || track.kind === "dialogue") ??
+      audioTracks.find(track => !track.clips.some(clip => clip.startFrame < playheadFrame + durationFrames && clip.startFrame + clip.durationFrames > playheadFrame)) ?? null;
+    const commands: TimelineCommand[] = [];
+    let fresh: TimelineTrackId = "tr_audio-1";
+    if (dialogue === null) { const added = newAudioTrack(placementTimeline ?? editableTimeline); fresh = added.trackId; commands.push(added); }
     let startFrame = playheadFrame;
     for (const other of orderedTrackClips(dialogue ?? { clips: [] })) {
       if (other.startFrame < startFrame + durationFrames && other.startFrame + other.durationFrames > startFrame) startFrame = other.startFrame + other.durationFrames;
@@ -6170,18 +6166,13 @@ export function CutScreen() {
           label: `SC ${sceneNumber} · SH ${shot.number} · ${(shot.audio?.line ?? "").slice(0, 40)}`,
           ...(shot.audio?.speaker !== undefined ? { sheetId: shot.audio.speaker } : {}),
         },
-        gainDb: 0,
+        gainDb: 0, role: "dialogue",
       },
     });
     sendCommands(commands, `Place line SH ${shot.number}`);
     pendingSelect.current = id;
   };
-  const laneKindFor = (artifact: ArtifactSidecar): "picture" | "music" => (artifact.kind === "audio" ? "music" : "picture");
-  const dropOnEmptyLane = (kind: "picture" | "dialogue" | "ambience" | "music") => (artifactId: string, _frame: number, laneWidth: number, x: number) => {
-    const artifact = artifacts.find((candidate) => candidate.id === artifactId);
-    if (!artifact) return;
-    placeArtifact(artifact, null, Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1))), { kind, newTrack: true });
-  };
+  const laneKindFor = (artifact: ArtifactSidecar): "picture" | "audio" => (artifact.kind === "audio" ? "audio" : "picture");
   const dropOnNewLane = (artifactId: string, laneWidth: number, x: number) => {
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
     if (!artifact) return;
@@ -6195,7 +6186,8 @@ export function CutScreen() {
     const durationFrames = Math.max(1, secondsToFrames(found.shot.durationSec ?? CLIP_DEFAULT_SEC, frameRate));
     // The playhead usually sits inside a clip; the shot slides to the first free span after it
     // rather than being refused for the overlap (round eleven).
-    const base = editableTimeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
+    const base = basePictureTrack(editableTimeline);
+    if (base === null) return;
     let startFrame = frameWanted;
     for (const clip of orderedTrackClips(base ?? { clips: [] })) {
       if (clip.startFrame < startFrame + durationFrames && clip.startFrame + clip.durationFrames > startFrame) startFrame = clip.startFrame + clip.durationFrames;
@@ -6204,7 +6196,7 @@ export function CutScreen() {
       [
         {
           kind: "place",
-          trackId: PICTURE_TRACK_ID,
+          trackId: base.id,
           clip: {
             id: mintClipId(),
             startFrame,
@@ -6383,7 +6375,9 @@ export function CutScreen() {
   );
 
   return (
-    <div className="fy-cutcols" data-screen="cut">
+    <div className="fy-cutcols" data-screen="cut"
+      onDragOver={event => { if (Array.from(event.dataTransfer.types).includes("Files")) event.preventDefault(); }}
+      onDrop={event => { if (event.dataTransfer.files?.length) { event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files)); } }}>
       <ArtifactPanel
         worldId={worldId}
         artifacts={artifacts}
@@ -6396,7 +6390,9 @@ export function CutScreen() {
         library={libraryItems}
         onOpenPicker={editableTimeline !== null && !commandsDisabled ? () => setPickerOpen(true) : null}
         onAddLine={editableTimeline !== null && !commandsDisabled ? placeVoiceTake : null}
-        onAddArtifact={editableTimeline !== null && !commandsDisabled ? (artifact) => placeArtifact(artifact, null, playheadFrame) : null}
+        onAddArtifact={commandsDisabled ? null : appendArtifact}
+        onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
+        onImport={commandsDisabled ? null : files => importMedia("library", files)}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
         onLocate={locateClip}
         initialFilter={libraryFilter}
@@ -6409,6 +6405,7 @@ export function CutScreen() {
       />
       <main className="fy-cutmain">
         <header className="fy-cuthead">
+          <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => importMedia("append")}><Upload size={12} />{importing ? "Importing…" : "Import media"}</button>
           <button
             ref={libraryToggleRef}
             type="button"
@@ -6518,6 +6515,8 @@ export function CutScreen() {
                 <RotateCw size={12} />
               </button>
             </span>
+            <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(placementTimeline ?? editableTimeline)], "Add audio track")}>Add audio track</button>
+            <button type="button" className="fy-tlbtn fy-tlbtn--text" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}>Scene labels</button>
             <span className="fy-timeline__group" role="group" aria-label="Order">
               <button
                 type="button"
@@ -6581,7 +6580,7 @@ export function CutScreen() {
                 </button>
               </span>
             )}
-            <button type="button" className="fy-tlbtn fy-tlbtn--text fy-tlbtn--toggle fy-tip" data-tip="Clips land on shot boundaries" aria-label="Snap" aria-pressed={snap} onClick={() => setSnap((on) => !on)}>
+            <button type="button" className="fy-tlbtn fy-tlbtn--text fy-tlbtn--toggle fy-tip" data-tip="Snap to clip boundaries" aria-label="Snap" aria-pressed={snap} onClick={() => setSnap((on) => !on)}>
               <Snap size={10} />
               snap
             </button>
@@ -6589,7 +6588,7 @@ export function CutScreen() {
               <button
                 type="button"
                 className="fy-tlbtn fy-tlbtn--text fy-tlbtn--toggle fy-tip"
-                data-tip="Music drops under dialogue automatically"
+                data-tip="Music and Ambience roles lower under Voice clips"
                 aria-label="Duck"
                 aria-pressed={editableTimeline.mix.speechFirst}
                 disabled={commandsDisabled}
@@ -6665,8 +6664,9 @@ export function CutScreen() {
                   />
                 ) : shownTimeline ? (
                   <>
-                    <SceneBands views={views} totalFrames={totalFrames} />
+                    {showScenes && <SceneBands views={views} totalFrames={totalFrames} />}
                     <PictureTrack
+                      onFileDrop={(files, frame) => importMedia(frame, files)}
                       timeline={shownTimeline}
                       views={views}
                       slug={slug}
@@ -6691,7 +6691,8 @@ export function CutScreen() {
                                 return;
                               }
                               const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
-                              if (artifact) placeArtifact(artifact, PICTURE_TRACK_ID, drop.frame);
+                              const base = editableTimeline ? basePictureTrack(editableTimeline) : null;
+                              if (artifact && base) placeArtifact(artifact, base.id, drop.frame);
                             },
                           })}
                     />
@@ -6717,17 +6718,6 @@ export function CutScreen() {
               ) : (
                 <EmptyEditorTrack label="Picture" detail="Opening accepted takes…" kind="picture" />
               )}
-              {(["dialogue", "ambience", "music"] as const)
-                .filter((kind) => !(shownTimeline?.tracks.some((track) => track.kind === kind) ?? false))
-                .map((kind) => (
-                  <EmptyEditorTrack
-                    key={kind}
-                    label={kind === "dialogue" ? "Dialogue" : kind === "ambience" ? "Ambience" : "Music"}
-                    detail={editableTimeline ? "drop sound here" : `Typed ${kind} track not available`}
-                    kind={kind}
-                    {...(editableTimeline && !commandsDisabled ? { onDrop: dropOnEmptyLane(kind) } : {})}
-                  />
-                ))}
               {editableTimeline && <NewLaneStrip onDrop={commandsDisabled ? null : dropOnNewLane} />}
               {worldId && prodId && timelineError === null && !placementsOnTimeline && overlays.length > 0 && (
                 <ClipLanes

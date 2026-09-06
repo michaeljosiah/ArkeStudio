@@ -1205,6 +1205,16 @@ async function initialize(): Promise<{ port: number }> {
       });
       return result.canceled ? [] : result.filePaths;
     },
+    confirmLargeMediaImport: async ({ name, sizeBytes }) => {
+      const parent = window;
+      if (!parent) return false;
+      const result = await dialog.showMessageBox(parent, {
+        type: "question", title: "Import media", message: `Copy ${name} into this world?`,
+        detail: `This file uses ${(sizeBytes / (1024 * 1024)).toFixed(1)} MB of disk space.`,
+        buttons: ["Import", "Cancel"], defaultId: 0, cancelId: 1,
+      });
+      return result.response === 0;
+    },
     pickFolder: async () => {
       const parent = window;
       if (!parent) return null;

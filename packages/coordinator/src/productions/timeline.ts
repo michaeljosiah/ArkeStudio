@@ -2,7 +2,9 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AUDIO_TRACK_KINDS,
+  assembleSceneCommands,
   ProductionTimelineSchema,
+  SelectionsSchema,
   TimelineOperationRefused,
   orderedShots,
   applyTimelineCommands,
@@ -159,6 +161,23 @@ function planTakeSwitches(
   return { decisions, selections: current, changes };
 }
 
+/** Scene assembly plans against the same migrated track identities the write will persist. */
+export async function assembleTimelineScene(store: WorldStore, productionId: string, sceneId: string,
+  fence: { baseRevision: number | null; sourceFingerprint: string }): Promise<{ dropped: string[] }> {
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
+  if (!production) throw new TimelineCommandRefused("This production is no longer open");
+  if (production.spine !== null) throw new TimelineCommandRefused("this production is cut to a song; open it on the timeline and place its shots there");
+  const scene = production.scenes.find(candidate => candidate.id === sceneId);
+  if (!scene) throw new TimelineCommandRefused(`${sceneId} is not a scene of this production`);
+  const artifacts = store.getBundle().artifacts;
+  const seed = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
+  const timeline = migrateLegacyCut(seed, production, artifacts).timeline;
+  const assembly = assembleSceneCommands({ production, timeline, sceneId, artifacts });
+  if ("refused" in assembly) throw new TimelineCommandRefused(assembly.refused);
+  return applyTimelineCommand(store, productionId, { kind: "commands", commands: assembly.commands, ...fence,
+    label: `Arke assembled ${scene.title}`, notes: assembly.notes });
+}
+
 /**
  * Materialise or update one production timeline under the world's existing atomic write gate.
  *
@@ -272,6 +291,11 @@ export async function applyTimelineCommand(
         // Trim bounds follow the take this batch commits, not the one it replaces: a switch to a
         // shorter take and a tail trim in one batch must be judged against the shorter source.
         let boundedBy: ProductionBundle = production;
+        // Accepting or trimming a take does not advance the timeline revision. Resolve a
+        // detachment from selections read under this gate, never from a renderer snapshot.
+        if (clipCommands.some(edit => edit.kind === "detach-audio")) {
+          boundedBy = { ...production, selections: SelectionsSchema.parse(JSON.parse(await readOptional(store, selectionsPath) ?? "{}")) };
+        }
         if (switches.length > 0) {
           const reviewsRaw = await readOptional(store, reviewsPath);
           const selectionsRaw = await readOptional(store, selectionsPath);
@@ -298,6 +322,7 @@ export async function applyTimelineCommand(
           label,
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
+          sources: { production: boundedBy, artifacts: store.getBundle().artifacts },
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
           ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
@@ -424,7 +449,7 @@ export function refuseUnrenderablePlacements(
       if (media === undefined) refuse(`${command.clip.id} cites take ${source.takeId}, which has no media`);
     } else if (source.kind === "performance") {
       const performance = production.performances.find(p => p.id === source.performanceId);
-      if (kind !== "dialogue" || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
+      if (!audio || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
     } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
       refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
     }

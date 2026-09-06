@@ -1,8 +1,8 @@
 import { ProposalManager } from "../gate/proposals.js";
-import { SceneRecordSchema, editShot, stagingRetimed, orderedShots, resolvedAuthoredDuration } from "@arke-studio/contracts";
+import { SceneRecordSchema, editShot, stagingRetimed, orderedShots, resolvedAuthoredDuration, newAudioTrack, applyTimelineCommands, AUDIO_TRACK_KINDS } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { calculateDialogueTiming, dialogueSlots, dialogueTimingProblems, performanceLineKey, framesToSeconds, secondsToFrames,
-  type PerformanceRecord, type DialogueTimingIntent, type ClientMessage, type DialogueTiming, type TimelineCommand, type ProductionBundle } from "@arke-studio/contracts";
+  type PerformanceRecord, type DialogueTimingIntent, type ClientMessage, type DialogueTiming, type TimelineClipCommand, type ProductionBundle } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
 import { audioWorldPath } from "./storage.js";
@@ -17,7 +17,8 @@ export async function placeSelectedPerformance(store: WorldStore, request: Extra
   if (!production || production.timeline?.status !== "ready") throw new Error("Open and assemble the production timeline before placing dialogue.");
   const timeline = production.timeline.timeline;
   const placements: Array<{ performance: PerformanceRecord; calculated: DialogueTiming; leadInSec: number; timing: DialogueTimingIntent }> = [];
-  const commands: TimelineCommand[] = [];
+  const commands: TimelineClipCommand[] = [];
+  let allocation = timeline;
   for (const [index, choice] of [request, ...(request.partner ? [request.partner] : [])].entries()) {
     const performance = await readPerformance(store, request.productionId, choice.performanceId);
     if (placements.some(p => p.performance.target.shotId === performance.target.shotId)) throw new Error("Paired placement needs two different shots.");
@@ -29,16 +30,28 @@ export async function placeSelectedPerformance(store: WorldStore, request: Extra
     placements.push({ performance, calculated: t, leadInSec: choice.leadInSec, timing: choice.timing });
     const current = timeline.tracks.flatMap(track => track.clips.filter(c => c.source.kind === "performance" && c.source.shotId === performance.target.shotId));
     if (current.length > 1) throw new Error("Remove duplicate dialogue placements for this shot first.");
-    const trackId = `tr_dialogue_${performance.target.shotId.replaceAll("_", "-")}` as const;
-    commands.push(...current.map(clip => ({ kind: "delete" as const, clipId: clip.id })));
-    if (!timeline.tracks.some(track => track.id === trackId)) commands.push({ kind: "add-track", trackId, trackKind: "dialogue", name: `Dialogue · ${performance.target.shotId}` });
-    commands.push({ kind: "place", trackId, clip: {
-      id: current[0]?.id ?? `cl_performance_${request.requestId}_${index}`, startFrame: secondsToFrames(t.speechStartSec,timeline.frameRate),
-      durationFrames: Math.max(1,Math.ceil(t.spokenSec / framesToSeconds(1,timeline.frameRate))),
-      sourceInFrames: secondsToFrames(t.sourceInSec,timeline.frameRate),
+    const existingTrack = timeline.tracks.find(track => current.some(clip => track.clips.includes(clip)));
+    const removals = current.map(clip => ({ kind: "delete" as const, clipId: clip.id }));
+    commands.push(...removals);
+    const remaining = removals.length ? applyTimelineCommands(allocation, removals) : allocation;
+    const startFrame = secondsToFrames(t.speechStartSec, timeline.frameRate);
+    const durationFrames = Math.max(1, Math.ceil(t.spokenSec / framesToSeconds(1, timeline.frameRate)));
+    const free = (track: typeof timeline.tracks[number]) => !track.clips.some(clip =>
+      clip.startFrame < startFrame + durationFrames && clip.startFrame + clip.durationFrames > startFrame);
+    const previous = remaining.tracks.find(track => track.id === existingTrack?.id);
+    const destination = previous && free(previous) ? previous : remaining.tracks.find(track =>
+      AUDIO_TRACK_KINDS.has(track.kind) && !track.muted && track.solo !== true && free(track));
+    const added = destination ? null : newAudioTrack(remaining);
+    const trackId = destination?.id ?? added!.trackId;
+    const placementCommands: TimelineClipCommand[] = [...(added ? [added] : []), { kind: "place", trackId, clip: {
+      // A relocated placement gets a new clip id so one atomic history entry can restore both tracks.
+      id: (trackId === existingTrack?.id ? current[0]?.id : undefined) ?? `cl_performance_${request.requestId}_${index}`, startFrame, durationFrames,
+      sourceInFrames: secondsToFrames(t.sourceInSec,timeline.frameRate), role: "dialogue",
       source: { kind: "performance", performanceId: performance.id, shotId: performance.target.shotId,
         label: `Performance ${performance.id}`, sourceHash: performance.provenance.outputHash, leadInSec: choice.leadInSec, timing: choice.timing },
-    } });
+    } }];
+    commands.push(...placementCommands);
+    allocation = applyTimelineCommands(remaining, placementCommands);
   }
   if (request.partner && placements.some((placement, index) => placement.timing.overflow.mode !== "overlap" ||
     placement.timing.overflow.withShotId !== placements[1-index]!.performance.target.shotId)) throw new Error("Both performances must explicitly approve each other as overlap partners.");

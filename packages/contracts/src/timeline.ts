@@ -1,3 +1,4 @@
+import type { ArtifactSidecar } from "./artifact.js";
 import { FullSha256Schema } from "./audio.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
@@ -23,9 +24,11 @@ import {
   type SubtitleCueId,
 } from "./subtitles.js";
 
-/** The saved timeline's complete track vocabulary. Only Picture behavior is implemented here. */
-export const TimelineTrackKindSchema = z.enum(["picture", "dialogue", "ambience", "music", "subtitle"]);
+/** The saved track vocabulary includes legacy audio kinds so existing mixes retain their roles. */
+export const TimelineTrackKindSchema = z.enum(["picture", "audio", "dialogue", "ambience", "music", "subtitle"]);
 export type TimelineTrackKind = z.infer<typeof TimelineTrackKindSchema>;
+export const AudioRoleSchema = z.enum(["unspecified", "dialogue", "ambience", "music"]);
+export type AudioRole = z.infer<typeof AudioRoleSchema>;
 
 export type TimelineTrackId = `tr_${string}`;
 export type TimelineClipId = `cl_${string}`;
@@ -72,6 +75,8 @@ export const TimelineClipSourceSchema = z.discriminatedUnion("kind", [
       kind: z.literal("take"),
       takeId: TakeIdSchema,
       label: z.string().min(1),
+      /** A frozen selection's exact trim, before independent frame edits (SPEC-042 R-7). */
+      offsetSec: z.number().finite().nonnegative().optional(),
       /** Dialogue keeps the speaking sheet and the version its voice was assigned at (SPEC-013 R-18, SPEC-038 R-20). */
       sheetId: SlugSchema.optional(),
       voiceAssignedAtVersion: z.number().int().min(1).optional(),
@@ -97,6 +102,7 @@ export const TimelineClipSchema = z
     performanceSourceClipId: TimelineClipIdSchema.optional(),
     /** Audio clips: gain in dB, 0 when absent (SPEC-038 R-13). */
     gainDb: z.number().min(-60).max(12).optional(),
+    role: AudioRoleSchema.optional(),
     /**
      * A placed video's own sound while it sits on a Picture track: kept or muted (SPEC-038 R-12).
      * `only` never lands here; a split's sound half is a typed audio clip linked back to it.
@@ -117,6 +123,7 @@ export const TimelineTrackSchema = z
     muted: z.boolean(),
     /** Audio tracks only (SPEC-038 R-6, R-13). Never written for Picture or Subtitle tracks. */
     solo: z.boolean().optional(),
+    defaultRole: AudioRoleSchema.optional(),
     /**
      * Where the track's used range ends when that is past its last clip. Deleting the final clip
      * leaves a hole (R-21), and a hole with nothing after it has no clip to mark its far side, so
@@ -144,6 +151,7 @@ export const TimelineTrackPropsSchema = z
     order: WholeFrameSchema,
     muted: z.boolean(),
     solo: z.boolean().optional(),
+    defaultRole: AudioRoleSchema.optional(),
     endFrame: WholeFrameSchema.optional(),
     language: LanguageTagSchema.optional(),
     style: SubtitleStyleSchema.optional(),
@@ -157,6 +165,7 @@ export function trackProps(track: TimelineTrack): TimelineTrackProps {
     order: track.order,
     muted: track.muted,
     ...(track.solo !== undefined ? { solo: track.solo } : {}),
+    ...(track.defaultRole !== undefined ? { defaultRole: track.defaultRole } : {}),
     ...(track.endFrame !== undefined ? { endFrame: track.endFrame } : {}),
     ...(track.language !== undefined ? { language: track.language } : {}),
     ...(track.style !== undefined ? { style: track.style } : {}),
@@ -181,7 +190,17 @@ export type MixSettings = z.infer<typeof MixSettingsSchema>;
 
 export const DEFAULT_MIX: MixSettings = { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 };
 
-export const AUDIO_TRACK_KINDS: ReadonlySet<TimelineTrackKind> = new Set(["dialogue", "ambience", "music"]);
+export const AUDIO_TRACK_KINDS: ReadonlySet<TimelineTrackKind> = new Set(["audio", "dialogue", "ambience", "music"]);
+
+/** Legacy track names retain their mix; a new default only affects future placements. */
+export function effectiveAudioRole(track: Pick<TimelineTrack, "kind">, clip: Pick<TimelineClip, "role" | "source">): AudioRole {
+  if (clip.source.kind === "performance") return "dialogue";
+  return clip.role ?? (track.kind === "dialogue" || track.kind === "music" || track.kind === "ambience" ? track.kind : "unspecified");
+}
+
+export function placementAudioRole(track: Pick<TimelineTrack, "kind" | "defaultRole">): AudioRole {
+  return track.defaultRole ?? "unspecified";
+}
 
 export const TimelineMoveDirectionSchema = z.enum(["earlier", "later"]);
 export type TimelineMoveDirection = z.infer<typeof TimelineMoveDirectionSchema>;
@@ -335,6 +354,9 @@ export const ProductionTimelineSchema = z
     const clipIds = new Set<TimelineClipId>();
 
     for (const [trackIndex, track] of timeline.tracks.entries()) {
+      if (track.defaultRole !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "defaultRole"], message: "Only audio tracks have a default role" });
+      }
       if (trackIds.has(track.id)) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks", trackIndex, "id"], message: "track ids must be unique" });
       }
@@ -447,11 +469,15 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   /** Place a clip on a track (SPEC-039 R-10). The clip arrives whole so a ghost and the record agree. */
   z.object({ kind: z.literal("place"), trackId: TimelineTrackIdSchema, clip: TimelineClipSchema }).strict(),
   z.object({ kind: z.literal("set-clip-gain"), clipId: TimelineClipIdSchema, gainDb: z.number().min(-60).max(12) }).strict(),
+  z.object({ kind: z.literal("detach-audio"), clipId: TimelineClipIdSchema, newClipId: TimelineClipIdSchema }).strict(),
+  z.object({ kind: z.literal("set-clip-audio"), clipId: TimelineClipIdSchema, audio: z.enum(["keep", "mute"]) }).strict(),
+  z.object({ kind: z.literal("set-clip-role"), clipId: TimelineClipIdSchema, role: AudioRoleSchema }).strict(),
   z
     .object({
       kind: z.literal("set-track"),
       trackId: TimelineTrackIdSchema,
       name: z.string().min(1).optional(),
+      defaultRole: AudioRoleSchema.optional(),
       muted: z.boolean().optional(),
       solo: z.boolean().optional(),
       order: WholeFrameSchema.optional(),
@@ -465,6 +491,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
       trackId: TimelineTrackIdSchema,
       trackKind: TimelineTrackKindSchema,
       name: z.string().min(1),
+      defaultRole: AudioRoleSchema.optional(),
       order: WholeFrameSchema.optional(),
     })
     .strict(),
@@ -516,10 +543,11 @@ export type TimelineCommand = z.infer<typeof TimelineCommandSchema>;
 export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take" }>;
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
-export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId">): string | null {
+export function sourceProblem(kind: TimelineTrackKind, clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role">): string | null {
+  if (clip.role !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "Only audio clips have an audio role";
   if (clip.performanceSourceClipId && (kind !== "picture" || clip.source.kind !== "shot")) return "master playback belongs to a shot on a Picture track";
   if (kind === "subtitle") return "a Subtitle track holds cues, not clips";
-  if (clip.source.kind === "performance" && kind !== "dialogue") return "an exact performance belongs on a Dialogue track";
+  if (clip.source.kind === "performance" && !AUDIO_TRACK_KINDS.has(kind)) return "an exact performance belongs on an audio track";
   if (kind === "picture") return null;
   if (clip.source.kind === "shot") return `a shot belongs on a Picture track, not ${kind}`;
   if (clip.audio !== undefined) return "keep and mute describe a picture's own sound; an audio clip has gain";
@@ -553,6 +581,12 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Change performance playback for ${command.clipId}`;
     case "set-clip-gain":
       return `Set ${command.clipId} to ${command.gainDb} dB`;
+    case "detach-audio":
+      return "Detach audio";
+    case "set-clip-audio":
+      return `${command.audio === "mute" ? "Mute" : "Keep"} picture sound`;
+    case "set-clip-role":
+      return `Set audio role to ${command.role}`;
     case "set-track":
       return `Change track ${command.trackId}`;
     case "add-track":
@@ -725,7 +759,7 @@ export function seedSpinePictureTimeline(production: ProductionBundle, spine: Pr
       { id: PICTURE_TRACK_ID, kind: "picture", name: "Picture", order: 0, muted: false, endFrame: songFrames, clips },
       {
         id: "tr_master",
-        kind: "music",
+        kind: "audio",
         name: "Master track",
         order: 1,
         muted: false,
@@ -737,7 +771,7 @@ export function seedSpinePictureTimeline(production: ProductionBundle, spine: Pr
             durationFrames: songFrames,
             sourceInFrames: 0,
             source: { kind: "artifact", artifactId: spine.trackArtifactId, label: "Master track" },
-            gainDb: 0,
+            gainDb: 0, role: "music",
           },
         ],
       },
@@ -836,7 +870,7 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 }
 
 export interface SceneAssembly {
-  commands: TimelineClipCommand[];
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" }>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -880,7 +914,7 @@ export function assembleSceneCommands(input: {
   // the tail is kept as the track's `endFrame`, and the next scene goes after it.
   let cursor = base === undefined ? 0 : Math.max(base.endFrame ?? 0, base.clips.reduce((end, clip) => Math.max(end, clip.startFrame + clip.durationFrames), 0));
   const startFrame = cursor;
-  const commands: TimelineClipCommand[] = [];
+  const commands: SceneAssembly["commands"] = [];
   const placed: string[] = [];
   const gaps: string[] = [];
   const cues: Array<{ id: SubtitleCueId; text: string; startFrame: number; endFrame: number; speaker?: string }> = [];
@@ -960,16 +994,15 @@ export function assembleSceneCommands(input: {
     notes.push(`Conformed ${cues.length} subtitle${cues.length === 1 ? "" : "s"} from the shot lines.`);
   }
   if (beds.length > 0 && cursor > startFrame) {
-    // The first Ambience lane with the span free; a new one when every lane already holds
+    // The first generic or legacy Ambience lane with the span free; a new one when each holds
     // something across it, rather than an overlap that refuses the whole assembly.
     const spanFree = (track: TimelineTrack) => !track.clips.some((clip) => clip.startFrame < cursor && clip.startFrame + clip.durationFrames > startFrame);
-    const ambienceLanes = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "ambience");
+    const ambienceLanes = [...timeline.tracks].sort((a, b) => a.order - b.order).filter((track) => track.kind === "ambience" || track.kind === "audio");
     const ambience = ambienceLanes.find(spanFree);
     let trackId: TimelineTrackId = ambience?.id ?? "tr_ambience";
     if (ambience === undefined) {
-      const takenIds = new Set(timeline.tracks.map((track) => track.id));
-      for (let n = 2; takenIds.has(trackId); n += 1) trackId = `tr_ambience-${n}`;
-      commands.push({ kind: "add-track", trackId, trackKind: "ambience", name: ambienceLanes.length > 0 ? `Ambience ${ambienceLanes.length + 1}` : "Ambience" });
+      const added = newAudioTrack(timeline);
+      trackId = added.trackId; commands.push(added);
     }
     // One bed per scene span on one track; a second file for the same scene waits in the Library.
     const bed = beds[0]!;
@@ -985,7 +1018,7 @@ export function assembleSceneCommands(input: {
         durationFrames: cursor - startFrame,
         sourceInFrames: 0,
         source: { kind: "artifact", artifactId: bed.id, label: bed.file.split("/").pop() ?? bed.file },
-        gainDb: -12,
+        gainDb: -12, role: "ambience",
       },
     });
     notes.push(`Laid ${bed.file.split("/").pop()} under ${scene.title} at −12 dB.`);
@@ -1119,6 +1152,8 @@ function swapAdjacent(clips: TimelineClip[], firstIndex: number, secondIndex: nu
 export type SourceLengthFrames = (clip: TimelineClip) => number | undefined;
 
 interface Working {
+  timeline: ProductionTimeline;
+  sources?: { production: ProductionBundle; artifacts: readonly ArtifactSidecar[] };
   tracks: TimelineTrack[];
   mix: MixSettings;
   library: TimelineLibraryItem[];
@@ -1269,6 +1304,13 @@ function relayPreservingHoles(before: readonly TimelineClip[], reordered: readon
 
 function applyClipCommand(working: Working, command: TimelineClipCommand): void {
   switch (command.kind) {
+    case "detach-audio": {
+      if (!working.sources) throw new TimelineOperationRefused("Detaching audio requires current production sources");
+      const current = { ...working.timeline, tracks: working.tracks, mix: working.mix, library: working.library };
+      const { production, artifacts } = working.sources;
+      for (const edit of detachAudioCommands(production, current, artifacts, command.clipId, command.newClipId)) applyClipCommand(working, edit);
+      return;
+    }
     case "move-adjacent": {
       const { track, ordered, index } = findClip(working, command.clipId);
       const toIndex = index + (command.direction === "earlier" ? -1 : 1);
@@ -1401,7 +1443,8 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       assertNewClipId(working, command.clip.id);
-      const clip = TimelineClipSchema.parse(command.clip);
+      const clip = TimelineClipSchema.parse(AUDIO_TRACK_KINDS.has(track.kind)
+        ? { ...command.clip, role: command.clip.role ?? placementAudioRole(track) } : command.clip);
       touch(working, track.id, clip.id, null);
       replaceTrackClips(working, track.id, [...track.clips, clip]);
       return;
@@ -1411,13 +1454,28 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       if (track.kind !== "picture" || clip.source.kind !== "shot") throw new TimelineOperationRefused("Performance playback belongs to a shot on the Picture track");
       if (command.sourceClipId !== null) {
         const source = findClip(working, command.sourceClipId);
-        if (source.track.kind !== "music" || source.clip.source.kind !== "artifact") throw new TimelineOperationRefused("Choose an audio artifact placed on a Music track");
+        if (!AUDIO_TRACK_KINDS.has(source.track.kind) || source.clip.source.kind !== "artifact") throw new TimelineOperationRefused("Choose an audio artifact placed on an audio track");
         if (clip.startFrame < source.clip.startFrame || clipEnd(clip) > clipEnd(source.clip)) throw new TimelineOperationRefused("The soundtrack clip must cover the entire shot slot");
       }
       touch(working, track.id, clip.id, clip);
       const { performanceSourceClipId: _previous, ...rest } = clip;
       replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id
         ? { ...rest, ...(command.sourceClipId === null ? {} : { performanceSourceClipId: command.sourceClipId }) } : candidate));
+      return;
+    }
+    case "set-clip-audio": {
+      const { track, clip, ordered } = findClip(working, command.clipId);
+      if (track.kind !== "picture") throw new TimelineOperationRefused("Only picture clips have embedded sound");
+      touch(working, track.id, clip.id, clip);
+      replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id ? { ...candidate, audio: command.audio } : candidate));
+      return;
+    }
+    case "set-clip-role": {
+      const { track, clip, ordered } = findClip(working, command.clipId);
+      if (!AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused("Choose a clip on an audio track");
+      if (clip.source.kind === "performance" && command.role !== "dialogue") throw new TimelineOperationRefused("Reviewed performances keep their Voice role");
+      touch(working, track.id, clip.id, clip);
+      replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id ? { ...candidate, role: command.role } : candidate));
       return;
     }
     case "set-clip-gain": {
@@ -1431,6 +1489,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const track = working.tracks.find((candidate) => candidate.id === command.trackId);
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       if (command.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${track.name} is not an audio track and cannot solo`);
+      if (command.defaultRole !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused("Only audio tracks have a default role");
       if (command.language !== undefined && track.kind !== "subtitle") throw new TimelineOperationRefused(`${track.name} is not a Subtitle track and has no language`);
       if (command.order !== undefined && working.tracks.some((candidate) => candidate.id !== track.id && candidate.order === command.order)) {
         throw new TimelineOperationRefused(`another track already has order ${command.order}`);
@@ -1439,6 +1498,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const next: TimelineTrack = {
         ...track,
         ...(command.name !== undefined ? { name: command.name } : {}),
+        ...(command.defaultRole !== undefined ? { defaultRole: command.defaultRole } : {}),
         ...(command.muted !== undefined ? { muted: command.muted } : {}),
         ...(command.solo !== undefined ? { solo: command.solo } : {}),
         ...(command.order !== undefined ? { order: command.order } : {}),
@@ -1450,6 +1510,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     }
     case "add-track": {
       if (command.trackKind === "subtitle") throw new TimelineOperationRefused("a Subtitle track is added with its language");
+      if (command.defaultRole !== undefined && !AUDIO_TRACK_KINDS.has(command.trackKind)) throw new TimelineOperationRefused("Only audio tracks have a default role");
       if (working.tracks.some((candidate) => candidate.id === command.trackId)) {
         throw new TimelineOperationRefused(`track ${command.trackId} is already on the timeline`);
       }
@@ -1463,6 +1524,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         order,
         muted: false,
         ...(AUDIO_TRACK_KINDS.has(command.trackKind) ? { solo: false } : {}),
+        ...(command.defaultRole !== undefined ? { defaultRole: command.defaultRole } : {}),
         clips: [],
       };
       touchTrack(working, track, null);
@@ -1589,11 +1651,15 @@ export function applyTimelineCommands(
     selections?: readonly TimelineSelectionChange[];
     /** Measured source lengths, so a tail trim cannot reach past what a source can supply. */
     sourceLength?: SourceLengthFrames;
+    /** Live sources supplied by the coordinator while its write gate is held. */
+    sources?: Working["sources"];
     /** What this action did, for the record that explains it (Arke's assembly). */
     notes?: readonly string[];
   } = {},
 ): ProductionTimeline {
   const working: Working = {
+    timeline,
+    sources: options.sources,
     tracks: timeline.tracks,
     mix: timeline.mix,
     library: timeline.library,
@@ -1869,7 +1935,17 @@ export function sourceLengthFramesFor(
       const seconds = production.performances.find(p => p.id === id)?.provenance.outputTechnical.durationSec;
       return seconds == null ? undefined : secondsToFrames(seconds, frameRate);
     }
-    if (clip.source.kind === "take") return measured(clip.source.takeId);
+    if (clip.source.kind === "take") {
+      const take = takesById.get(clip.source.takeId);
+      const offset = clip.source.offsetSec ?? 0;
+      if (!take?.segment) {
+        const whole = production.takeMediaInfo[clip.source.takeId]?.mediaInfo.durationSec;
+        return whole === undefined ? undefined : Math.max(0, secondsToFrames(whole - offset, frameRate));
+      }
+      const segment = take.segment;
+      const physical = production.takeMediaInfo[segment.passTakeId]?.mediaInfo.durationSec;
+      return Math.max(0, secondsToFrames(Math.min(segment.outSec, physical ?? segment.outSec) - segment.inSec - offset, frameRate));
+    }
     const takeId = production.selections[clip.source.shotId]?.acceptedTakeId ?? null;
     const take = takeId === null ? undefined : takesById.get(takeId);
     if (take === undefined) return undefined;
@@ -1935,6 +2011,7 @@ export interface ResolvedPictureCut extends Omit<DerivedCut, "entries"> {
 export function resolvePictureTimeline(
   production: ProductionBundle,
   state: TimelineState | undefined,
+  artifacts: readonly { id: string; file: string; kind: string }[] = [],
 ): ResolvedPictureCut {
   if (state === undefined || state.status === "absent") return deriveCut(production);
   if (state.status === "invalid") throw new TimelineOperationRefused(state.message);
@@ -1977,15 +2054,23 @@ export function resolvePictureTimeline(
     cursor = clipEnd(clip);
     const durationSec = framesToSeconds(clip.durationFrames, frameRate);
     if (clip.source.kind !== "shot") {
-      // Take- and artifact-sourced Picture clips are the render plan's business (SPEC-038); the
-      // compatibility cut shows them as timed entries it cannot play rather than dropping time.
+      const source = clip.source;
+      const artifact = source.kind === "artifact" ? artifacts.find(item => item.id === source.artifactId) : undefined;
+      const take = source.kind === "take" ? production.takes.find(item => item.id === source.takeId) : undefined;
+      const pass = take?.segment ? production.takes.find(item => item.id === take.segment!.passTakeId) : take;
+      // Imported picture is playable footage, with no synthetic shot to fill or generate.
+      const media: CutEntry["media"] = artifact && ["video", "image", "board"].includes(artifact.kind)
+        ? { path: `artifacts/${artifact.file}`, inSec: framesToSeconds(clip.sourceInFrames, frameRate) }
+        : pass?.media ? { path: `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`,
+          inSec: (take?.segment?.inSec ?? 0) + (source.kind === "take" ? source.offsetSec ?? 0 : 0) + framesToSeconds(clip.sourceInFrames, frameRate),
+          ...(take?.segment ? { outSec: take.segment.outSec } : {}) } : null;
       entries.push({
         clipId: clip.id,
         sceneNumber: 0,
         shot: { id: clip.id, number: 0, title: clip.source.label, description: "", durationSec },
-        takeId: null,
-        take: null,
-        media: null,
+        takeId: media && take ? take.id : null,
+        take: media ? take ?? null : null,
+        media,
         durationSec,
         label: clip.source.label,
       });
@@ -2045,7 +2130,7 @@ export function resolvePictureTimeline(
       label: `EMPTY · ${formatFrames(end - cursor, frameRate)}`,
     });
   }
-  const gaps = entries.filter((entry) => entry.takeId === null && entry.hole !== true);
+  const gaps = entries.filter((entry) => entry.media === null && entry.hole !== true);
   return {
     entries,
     // Split and duplicate make more clips, not more covered shots.
@@ -2054,4 +2139,56 @@ export function resolvePictureTimeline(
     totalSec: entries.reduce((total, entry) => total + entry.durationSec, 0),
     uncoveredSec: gaps.reduce((total, entry) => total + entry.durationSec, 0),
   };
+}
+
+/** Track identity is independent of its audio role (SPEC-042). */
+export function newAudioTrack(timeline: ProductionTimeline): Extract<TimelineClipCommand, { kind: "add-track" }> {
+  let number = 1;
+  while (timeline.tracks.some(track => track.id === `tr_audio-${number}` || track.name === `Audio ${number}`)) number++;
+  return { kind: "add-track", trackId: `tr_audio-${number}`, trackKind: "audio", name: `Audio ${number}` };
+}
+
+/** Detachment freezes embedded sound only; external performances and master bindings stay put. */
+export function detachAudioCommands(production: ProductionBundle, timeline: ProductionTimeline,
+  artifacts: readonly ArtifactSidecar[], clipId: TimelineClipId, newClipId: TimelineClipId): TimelineClipCommand[] {
+  const track = timeline.tracks.find(candidate => candidate.clips.some(clip => clip.id === clipId));
+  const clip = track?.clips.find(candidate => candidate.id === clipId);
+  if (!clip || track?.kind !== "picture") throw new TimelineOperationRefused("Select a video clip to detach its audio");
+  if (clip.audio === "mute") throw new TimelineOperationRefused("This picture's embedded audio is already muted");
+  let source = clip.source;
+  const sourceInFrames = clip.sourceInFrames;
+  let measured: { hasAudio: boolean } | undefined;
+  if (source.kind === "artifact") {
+    const artifact = artifacts.find(candidate => source.kind === "artifact" && candidate.id === source.artifactId);
+    if (!artifact || artifact.kind !== "video") throw new TimelineOperationRefused("This clip has no embedded video audio");
+    measured = artifact.mediaInfo;
+  } else if (source.kind === "take" || source.kind === "shot") {
+    let takeId = source.kind === "take" ? source.takeId : production.selections[source.shotId]?.acceptedTakeId;
+    const offsetSec = source.kind === "take" ? source.offsetSec : production.selections[source.shotId]?.trimInSec;
+    if (source.kind === "shot") {
+      // Freeze the actually resolved take. Selection trims may be finer than a frame, so
+      // preserve their exact seconds in the source and keep subsequent frame edits separate.
+      const resolved = resolvePictureTimeline(production, { status: "ready", timeline }).entries.find(entry => entry.clipId === clip.id && !entry.hole);
+      takeId = resolved?.takeId ?? undefined;
+    }
+    const take = production.takes.find(candidate => candidate.id === takeId);
+    const pass = take?.segment ? production.takes.find(candidate => candidate.id === take.segment!.passTakeId) : take;
+    if (!take || !pass?.media) throw new TimelineOperationRefused("The video's source is missing");
+    measured = production.takeMediaInfo[pass.id]?.mediaInfo;
+    source = { kind: "take", takeId: take.id, label: clip.source.label, ...(offsetSec ? { offsetSec } : {}) };
+  } else throw new TimelineOperationRefused("This source is already independent performance audio");
+  if (!measured) throw new TimelineOperationRefused("Measure the video before detaching its audio");
+  if (!measured.hasAudio) throw new TimelineOperationRefused("This video has no audio stream");
+  const destination = timeline.tracks.find(candidate => AUDIO_TRACK_KINDS.has(candidate.kind) && !candidate.muted && candidate.solo !== true &&
+    !candidate.clips.some(other => other.startFrame < clip.startFrame + clip.durationFrames && other.startFrame + other.durationFrames > clip.startFrame));
+  const added = destination ? null : newAudioTrack(timeline);
+  const sound: TimelineClip = {
+    id: newClipId, startFrame: clip.startFrame, durationFrames: clip.durationFrames, sourceInFrames,
+    source, gainDb: clip.gainDb ?? 0, role: destination?.defaultRole ?? "unspecified",
+  };
+  return [
+    ...(added ? [added] : []),
+    { kind: "place", trackId: destination?.id ?? added!.trackId, clip: sound },
+    { kind: "set-clip-audio", clipId, audio: "mute" },
+  ];
 }

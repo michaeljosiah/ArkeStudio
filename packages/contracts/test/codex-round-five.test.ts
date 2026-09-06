@@ -59,9 +59,9 @@ describe("codex round five", () => {
     // 16s of picture at 25 fps; one spoken line at 10s–12.48s over a bed the whole way.
     const timeline = applyTimelineCommands(seedStoryPictureTimeline(production), [
       { kind: "add-track", trackId: "tr_dialogue", trackKind: "dialogue", name: "Dialogue" },
-      { kind: "place", trackId: "tr_dialogue", clip: { id: "cl_line", startFrame: 250, durationFrames: 62, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "the line" } } },
+      { kind: "place", trackId: "tr_dialogue", clip: { id: "cl_line", role: "dialogue", startFrame: 250, durationFrames: 62, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "the line" } } },
       { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" },
-      { kind: "place", trackId: "tr_music", clip: { id: "cl_bed", startFrame: 0, durationFrames: 400, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "the bed" } } },
+      { kind: "place", trackId: "tr_music", clip: { id: "cl_bed", role: "music", startFrame: 0, durationFrames: 400, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "the bed" } } },
     ]);
     const whole = buildRenderPlan({ production, artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
     assert.equal(whole.ok, true);

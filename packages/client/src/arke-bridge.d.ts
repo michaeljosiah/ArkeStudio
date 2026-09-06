@@ -33,6 +33,10 @@ export interface ArkeBridge {
    * dropped file's path, so the composer simply does not offer the affordance there.
    */
   attachDropped?(target: AttachTarget, files: readonly File[]): { filed: number; unresolved: number[] };
+  importDroppedMedia?(
+    target: Omit<Extract<import("@arke-studio/contracts").ClientMessage, { kind: "upload-artifacts" }>, "sourcePaths" | "kind">,
+    files: readonly File[],
+  ): { submitted: boolean; unresolved: number[] };
   attachBytes?(
     target: AttachTarget,
     name: string,

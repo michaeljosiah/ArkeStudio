@@ -37,7 +37,7 @@ it("master playback freezes physical soundtrack time across picture trims and la
   await applyTimelineCommand(store, initial.meta.id, { kind: "commands", baseRevision: state.timeline.revision, sourceFingerprint: storyTimelineFingerprint(production()), commands: [
     ...(existing ? [{ kind: "delete" as const, clipId: first.id }] : []),
     { kind: "place", trackId: basePictureTrack(state.timeline)!.id, clip: { ...first, durationFrames: rate, sourceInFrames: 9 * rate } },
-    { kind: "add-track", trackId: "tr_soundtrack", trackKind: "music", name: "Master soundtrack" },
+    { kind: "add-track", trackId: "tr_soundtrack", trackKind: "audio", name: "Master soundtrack" },
     { kind: "place", trackId: "tr_soundtrack", clip: { id: "cl_soundtrack", startFrame: 0, durationFrames: 10 * rate,
       sourceInFrames: 2 * rate, source: { kind: "artifact", artifactId, label: "Master soundtrack" } } },
     { kind: "set-performance-source", clipId: first.id, sourceClipId: "cl_soundtrack" },
