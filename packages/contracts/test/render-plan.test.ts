@@ -252,6 +252,10 @@ describe("video sound defaults and export diagnostics (#908)", () => {
     const render = () => buildRenderPlan({ production: p, artifacts: catalog, timeline: { status: "ready" as const, timeline }, scope: { kind: "production" as const }, preset: "review-cut" as const });
     let result = render(); assert.ok(result.ok);
     assert.deepEqual(result.plan.unmeasuredAudio, [{ clipId: p.cut.overlays[0]!.id, label: "unmeasured.mp4", startSec: 1, endSec: 2 }]);
+    p.cut.overlays[0]!.audio = "only";
+    result = render(); assert.ok(result.ok);
+    assert.equal(result.plan.totalSec, 0, "unknown sound cannot establish playable duration");
+    assert.equal(result.plan.unmeasuredAudio?.[0]?.label, "unmeasured.mp4", "the omission's cause survives the empty plan");
     p.cut.overlays[0]!.audio = "mute";
     result = render(); assert.ok(result.ok); assert.equal(result.plan.unmeasuredAudio, undefined);
     p.cut.overlays[0]!.audio = "keep"; timeline.migratedCut = true;

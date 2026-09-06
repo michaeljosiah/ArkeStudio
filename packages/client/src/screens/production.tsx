@@ -5644,7 +5644,9 @@ function ExportSheet({
    * record with nothing on it is, to the person, the same state as no record at all.
    */
   const nothingPlaced = plan?.ok === true && plan.plan.items.length === 0;
-  if (nothingPlaced && blockedBy === null) blockedBy = nothingOnTimeline;
+  if (nothingPlaced && blockedBy === null) blockedBy = plan?.ok && plan.plan.unmeasuredAudio?.length
+    ? "Video audio has not been measured. Import the source video to measure it before exporting."
+    : nothingOnTimeline;
   const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
   const gaps = cut?.gaps ?? 0;
   const covered = cut === null ? 0 : cut.covered;

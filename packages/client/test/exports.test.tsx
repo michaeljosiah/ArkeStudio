@@ -256,6 +256,21 @@ afterEach(() => {
 });
 
 describe("export audio status (#908)", () => {
+  it("names unmeasured legacy audio-only content instead of claiming nothing was placed", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState, p = state.world!.productions[0]!;
+    p.scenes = [];
+    const artifact = { ...state.world!.artifacts[0]!, kind: "video" as const, file: "Original.mp4", mediaInfo: undefined };
+    state.world!.artifacts = [artifact];
+    p.cut = { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000B1", artifactId: artifact.id, startSec: 0, endSec: 5, lane: 0, audio: "only" }] };
+    const timeline = seedEmptyPictureTimeline(p); delete timeline.migratedCut;
+    p.timeline = { status: "ready", timeline };
+    const mounted = await mountSheet(state);
+    try {
+      assert.deepEqual(warnings(mounted), ["Video audio has not been measured. Import the source video to measure it before exporting."]);
+      assert.ok(sheet(mounted).textContent?.includes("Original.mp4"));
+      assert.equal(primary(mounted).disabled, true);
+    } finally { await unmount(mounted); }
+  });
   for (const sound of ["audio", "silent", "unmeasured"] as const) {
     it(`reports ${sound} video sound for the film and episode before export`, async () => {
       const state = structuredClone(FIXTURE_STATE) as ClientState;

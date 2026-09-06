@@ -70,10 +70,13 @@ function segmentSound(item: RenderAudioItem, sourceOutSec?: number): RenderAudio
 }
 
 function unmeasuredLegacySound(placements: CutFile["overlays"], artifacts: readonly RenderArtifact[], totalSec = Infinity): NonNullable<RenderPlan["unmeasuredAudio"]> {
+  // If omitted audio is all that was placed, there is no render duration to bound it by.
+  // Keep the diagnosis without inventing playable content or an export length.
+  const limit = totalSec > 0 ? totalSec : Infinity;
   return placements.flatMap(placement => {
     const artifact = artifacts.find(candidate => candidate.id === placement.artifactId);
-    return placement.startSec < totalSec && placement.audio !== "mute" && artifact?.kind === "video" && artifact.mediaInfo === undefined
-      ? [{ clipId: placement.id, label: artifact.file, startSec: placement.startSec, endSec: Math.min(placement.endSec, totalSec) }] : [];
+    return placement.startSec < limit && placement.audio !== "mute" && artifact?.kind === "video" && artifact.mediaInfo === undefined
+      ? [{ clipId: placement.id, label: artifact.file, startSec: placement.startSec, endSec: Math.min(placement.endSec, limit) }] : [];
   });
 }
 
