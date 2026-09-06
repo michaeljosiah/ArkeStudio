@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings · AI models</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap">
+<style>
+/* ---------------------------------------------------------------------------
+   Settings — three columns, and a model is an object you can consider.
+
+   What this screen is for, in the order it is asked:
+     1. can I use this right now
+     2. which one should I pick for this shot
+     3. turn it on, or get it here
+
+   (1) wants every kind of model present at once, so the kinds are a rail, not a
+   scroll. (2) wants the picture and the price side by side and each model as its
+   own object, so the tiles have air around them. (3) wants a control you cannot
+   mistake, so the switch is a switch.
+
+   Within a kind, models are grouped by who supplies them — the section is the
+   provider, and a provider that cannot be reached says so once, at its heading,
+   with the remedy there. Never a route to another tab: the switch and the thing
+   that unlocks it stay reachable from the same place (SPEC-033 R-7).
+
+   Colour comes from the previews. The interface is achromatic apart from one
+   signal, reserved for something a person has to act on.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --background: #FFFFFF;
+  --foreground: #000000;
+  --secondary-text: #6E6E6E;
+  --edge: #E3E3E1;
+  --rule: #EFEFED;
+  --hover: #F5F5F3;
+  --signal: #B45309;
+  --unexposed: #E6E6E3;
+  --plate: #FCFCFB;
+  --lift: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.10);
+
+  --font: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+html.dark {
+  --background: #0A0A0A;
+  --foreground: #FFFFFF;
+  --secondary-text: #949494;
+  --edge: #262626;
+  --rule: #1B1B1B;
+  --hover: #161616;
+  --signal: #F0A83A;
+  --unexposed: #1C1C1C;
+  --plate: #101010;
+  --lift: 0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.6);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 34px 0 70px;
+  background: #EDEDEB;
+  font-family: var(--font);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+}
+html.dark body { background: #050505; }
+
+.shot {
+  width: 1360px; height: 850px;
+  margin: 0 auto 34px;
+  background: var(--background);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 2px 22px rgba(0,0,0,.14);
+}
+.caption { width: 1360px; margin: 0 auto; padding: 26px 0 6px; font-size: 13px; color: #6E6E6E; }
+html.dark .caption { color: #949494; }
+
+/* --- window chrome --------------------------------------------------------- */
+
+.chrome {
+  flex: none; height: 44px; display: flex; align-items: center;
+  padding: 0 16px; border-bottom: 1px solid var(--rule); position: relative;
+}
+.chrome__where { flex: 1; font-size: 12.5px; color: var(--secondary-text); }
+.chrome__mark {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  font-size: 15px; font-weight: 600; letter-spacing: -.02em;
+}
+.chrome__mark span { font-weight: 400; color: var(--secondary-text); }
+.chrome__tools { flex: 1; display: flex; justify-content: flex-end; gap: 3px; }
+.chrome__tool {
+  width: 26px; height: 22px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--secondary-text);
+}
+.chrome__tool[data-here] { color: var(--foreground); background: var(--rule); }
+
+/* --- column one: the settings sections ------------------------------------- */
+
+.page { flex: 1; min-height: 0; display: flex; }
+
+.rail {
+  width: 200px; flex: none;
+  border-right: 1px solid var(--rule);
+  padding: 30px 18px 18px 30px;
+  display: flex; flex-direction: column;
+}
+.rail__title { font-size: 21px; font-weight: 600; letter-spacing: -.03em; margin: 0 0 20px; }
+.rail a { display: block; padding: 6px 0; font-size: 13.5px; color: var(--secondary-text); text-decoration: none; }
+.rail a[aria-current] {
+  color: var(--foreground); font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--foreground);
+  padding-left: 12px; margin-left: -12px;
+}
+.rail__spring { flex: 1; }
+.rail__build { font-size: 11.5px; color: var(--secondary-text); }
+
+/* --- column two: the kinds of model ---------------------------------------- */
+
+.kinds {
+  width: 206px; flex: none;
+  border-right: 1px solid var(--rule);
+  padding: 30px 14px 18px 18px;
+  overflow-y: auto;
+}
+.kinds__where { font-size: 12.5px; color: var(--secondary-text); padding: 0 10px 8px; }
+.kinds__where:not(:first-child) { padding-top: 24px; }
+.kind {
+  display: flex; align-items: baseline; gap: 8px;
+  padding: 7px 10px; border-radius: 8px;
+  font-size: 13.5px; color: var(--secondary-text);
+  text-decoration: none;
+}
+.kind:hover { background: var(--hover); }
+.kind[aria-current] { background: var(--rule); color: var(--foreground); font-weight: 500; }
+.kind__name { flex: 1; }
+.kind__n { font-size: 12px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.kind--empty { opacity: .5; }
+
+/* --- column three: the models ---------------------------------------------- */
+
+.pane { flex: 1; min-width: 0; padding: 30px 34px 0; overflow: hidden; display: flex; flex-direction: column; }
+
+.pane__head { display: flex; align-items: baseline; gap: 14px; padding-bottom: 4px; }
+.pane__name { font-size: 27px; font-weight: 600; letter-spacing: -.035em; line-height: 1.1; margin: 0; }
+.pane__where { font-size: 13px; color: var(--secondary-text); flex: 1; }
+.pane__count { font-size: 13px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+
+/* A provider is a section: its mark, its name, and — when it cannot be reached —
+   the remedy, once, here. */
+.by { margin-top: 28px; }
+.by + .by { margin-top: 34px; }
+.by__head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; }
+.by__mark {
+  width: 22px; height: 22px; flex: none; border-radius: 6px;
+  background: var(--rule); color: var(--foreground);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 600; letter-spacing: -.01em;
+}
+.by__name { font-size: 14px; font-weight: 500; letter-spacing: -.01em; }
+.by__spring { flex: 1; }
+.by__state { font-size: 12.5px; color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.by__fix {
+  font-size: 12.5px; color: var(--signal);
+  text-decoration: underline; text-underline-offset: 3px;
+}
+
+.tiles { display: flex; flex-wrap: wrap; gap: 20px; align-items: stretch; }
+
+.tile {
+  appearance: none; margin: 0; padding: 0; text-align: left; font: inherit; color: inherit;
+  width: 282px; flex: none;
+  background: var(--plate);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex; flex-direction: column;
+  transition: box-shadow 140ms ease, transform 140ms ease, border-color 140ms ease;
+}
+/* The hover has a job here: it is what starts the sample playing. */
+.tile:hover { border-color: var(--secondary-text); box-shadow: var(--lift); transform: translateY(-2px); }
+.tile:focus-visible { outline: 2px solid var(--foreground); outline-offset: 2px; }
+
+.tile__pic {
+  display: block; width: 100%; aspect-ratio: 16 / 9;
+  object-fit: cover; background: var(--unexposed);
+  border-bottom: 1px solid var(--edge);
+}
+.tile__pic--none {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--secondary-text);
+}
+
+.tile__body { padding: 12px 14px 13px; display: flex; flex-direction: column; flex: 1; }
+.tile__row { display: flex; align-items: center; gap: 10px; }
+.tile__name {
+  font-size: 14px; font-weight: 500; letter-spacing: -.01em;
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tile__meta {
+  margin-top: auto; padding-top: 6px;
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 12.5px; color: var(--secondary-text);
+}
+.tile__at { font-variant-numeric: tabular-nums; }
+.tile__spring { flex: 1; }
+.tile__note { font-size: 12.5px; color: var(--secondary-text); white-space: nowrap; }
+.tile__note--short { color: var(--signal); }
+.tile__do {
+  font-size: 12.5px; color: var(--foreground);
+  text-decoration: underline; text-underline-offset: 3px; white-space: nowrap;
+}
+.tile__bar {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+}
+.tile__bar i { position: absolute; inset: 0 auto 0 0; background: var(--background); }
+.tile__pic-wrap { position: relative; }
+
+/* Off keeps the picture, at a weight that says you are not using it. A model
+   whose provider cannot be reached reads the same; its remedy is on the heading. */
+.tile--out { background: var(--background); }
+.tile--out .tile__pic { opacity: .38; filter: grayscale(1); }
+.tile--out .tile__name { color: var(--secondary-text); }
+
+.switch {
+  width: 34px; height: 20px; flex: none; border-radius: 999px;
+  background: var(--foreground);
+  display: inline-flex; align-items: center; justify-content: flex-end;
+  padding: 0 3px;
+  transition: background 140ms ease;
+}
+.switch i { width: 14px; height: 14px; border-radius: 999px; background: var(--background); display: block; }
+.switch--off { background: var(--edge); justify-content: flex-start; }
+.switch--off i { background: var(--background); }
+html.dark .switch--off i { background: var(--secondary-text); }
+
+/* --- kinds with nothing to show -------------------------------------------- */
+
+.rows { border-top: 1px solid var(--rule); }
+.rows__row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 2px; border-bottom: 1px solid var(--rule);
+  font-size: 13.5px;
+}
+.rows__play--none { width: 26px; height: 26px; flex: none; }
+.rows__play {
+  width: 26px; height: 26px; flex: none; border-radius: 999px;
+  border: 1px solid var(--edge); background: var(--plate);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.rows__play::after {
+  content: ""; width: 0; height: 0;
+  border-left: 7px solid var(--foreground);
+  border-top: 4.5px solid transparent; border-bottom: 4.5px solid transparent;
+  margin-left: 2px;
+}
+.rows__name { font-weight: 500; }
+.rows__sample { flex: 1; font-size: 12.5px; color: var(--secondary-text); }
+.rows__at { color: var(--secondary-text); font-variant-numeric: tabular-nums; }
+.rows__note { font-size: 12.5px; color: var(--secondary-text); }
+.rows__note--short { color: var(--signal); }
+.rows__do { font-size: 12.5px; color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+
+/* --- Providers ------------------------------------------------------------- */
+
+.sources { border-bottom: 1px solid var(--rule); padding-bottom: 16px; }
+.sources__band { display: flex; align-items: baseline; gap: 8px; }
+.sources__band + .sources__band { margin-top: 10px; }
+.sources__what { width: 150px; flex: none; font-size: 12.5px; color: var(--secondary-text); }
+.sources__list { display: flex; flex-wrap: wrap; gap: 18px; }
+.source {
+  font-size: 13.5px; color: var(--secondary-text);
+  padding-bottom: 4px; border-bottom: 2px solid transparent; white-space: nowrap;
+}
+.source[aria-current] { color: var(--foreground); font-weight: 500; border-bottom-color: var(--foreground); }
+.source__note { color: var(--signal); }
+
+.head { display: flex; align-items: flex-end; gap: 14px; margin: 26px 0 0; }
+.head__mark {
+  width: 30px; height: 30px; flex: none; border-radius: 8px;
+  background: var(--rule); color: var(--secondary-text);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600;
+}
+.head__name { font-size: 27px; font-weight: 600; letter-spacing: -.035em; line-height: 1; margin: 0; }
+.head__does { font-size: 13px; color: var(--secondary-text); flex: 1; }
+.head__state { font-size: 13px; color: var(--secondary-text); }
+
+.facts { margin-top: 22px; display: flex; flex-direction: column; gap: 12px; max-width: 820px; }
+.fact { display: flex; align-items: baseline; gap: 14px; font-size: 13.5px; }
+.fact__what { width: 140px; flex: none; color: var(--secondary-text); }
+.fact__is { flex: 1; font-variant-numeric: tabular-nums; }
+.fact__do { font-size: 12.5px; color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
+.fact__do + .fact__do { margin-left: 14px; }
+
+.aside { margin: 28px 0 0; font-size: 13px; color: var(--secondary-text); }
+.aside a { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+
+.foot {
+  margin-top: auto; padding: 16px 0 18px; border-top: 1px solid var(--rule);
+  display: flex; gap: 20px; font-size: 13px;
+}
+.foot a { color: var(--secondary-text); text-decoration: underline; text-underline-offset: 3px; }
+.foot__spring { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tile { transition: none; }
+  .tile:hover { transform: none; }
+}
+</style>
+<script>if (location.search.includes('dark')) document.documentElement.classList.add('dark');</script>
+</head>
+<body>
+<p class="caption">D&#8202;&#183;&#8202;a &nbsp;AI models &#183; a kind is a rail, a provider is a section</p><div class="shot" data-shot="Da"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where">Cloud</div><a class="kind" href="#" aria-current="page"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where">On this machine</div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Images</h2><div class="pane__where">Cloud</div><div class="pane__count">5 of 12 on</div></div><section class="by"><div class="by__head"><span class="by__mark" aria-hidden="true">f</span><span class="by__name">fal</span><span class="by__spring"></span><span class="by__state">3 of 4 on</span></div><div class="tiles"><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/art-direction-cinematic.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Nano Banana Pro</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.15 an image</span></div></div></button><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/art-direction-world.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Seedream 4</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.03 an image</span></div></div></button><button class="tile" type="button" aria-pressed="true"><img class="tile__pic" src="assets/drowned-quarter.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Flux 2 Pro</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.03 a megapixel</span></div></div></button><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/art-direction-illustrated.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Recraft V3</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.04 an image</span></div></div></button></div></section><section class="by"><div class="by__head"><span class="by__mark" aria-hidden="true">O</span><span class="by__name">OpenAI</span><span class="by__spring"></span><a class="by__fix" href="#">Add a key</a></div><div class="tiles"><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/art-direction-animated.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">GPT Image 2</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.20 an image</span></div></div></button><button class="tile tile--out" type="button" aria-pressed="false"><img class="tile__pic" src="assets/char-odile.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">GPT Image 2 mini</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div><div class="tile__meta"><span class="tile__at">$0.06 an image</span></div></div></button></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;b &nbsp;On this machine &#183; the same shape, and what a local model says instead of a price</p><div class="shot" data-shot="Db"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where">Cloud</div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where">On this machine</div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#" aria-current="page"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Video</h2><div class="pane__where">On this machine</div><div class="pane__count">2 of 3 ready</div></div><section class="by"><div class="by__head"><span class="by__mark" aria-hidden="true">C</span><span class="by__name">ComfyUI</span><span class="by__spring"></span><span class="by__state">55 GB on disk</span></div><div class="tiles"><button class="tile" type="button"><img class="tile__pic" src="assets/scene4-shot14.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">Draft Video</span></div><div class="tile__meta"><span class="tile__at">14.2 GB</span><span class="tile__spring"></span><span class="tile__note">Ready, first pick</span></div></div></button><button class="tile" type="button"><span class="tile__pic-wrap"><img class="tile__pic" src="assets/saltlight-shot15.png" alt=""><span class="tile__bar"><i style="width:26%"></i></span></span><div class="tile__body"><div class="tile__row"><span class="tile__name">H3 Video</span></div><div class="tile__meta"><span class="tile__at">34 GB</span><span class="tile__spring"></span><span class="tile__note">9 of 34 GB</span><a class="tile__do" href="#">Pause</a></div></div></button><button class="tile tile--out" type="button"><img class="tile__pic" src="assets/scene4-shot14b.png" alt=""><div class="tile__body"><div class="tile__row"><span class="tile__name">H3 Video 720p</span></div><div class="tile__meta"><span class="tile__at">18 GB</span><span class="tile__spring"></span><span class="tile__note tile__note--short">Wants 20 GB, this card has 12</span></div></div></button></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;c &nbsp;A kind with nothing to show &#183; rows, and a sample you can hear</p><div class="shot" data-shot="Dc"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#">Providers</a><a href="#" aria-current="page">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><nav class="kinds"><div class="kinds__where">Cloud</div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">12</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">8</span></a><a class="kind" href="#" aria-current="page"><span class="kind__name">Text-to-Speech</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Music</span><span class="kind__n">1</span></a><div class="kinds__where">On this machine</div><a class="kind" href="#"><span class="kind__name">Images</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Video</span><span class="kind__n">3</span></a><a class="kind" href="#"><span class="kind__name">Text-to-Speech</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Speech-to-Text</span><span class="kind__n">2</span></a><a class="kind" href="#"><span class="kind__name">Voice clone</span><span class="kind__n">1</span></a><a class="kind" href="#"><span class="kind__name">Language</span><span class="kind__n">2</span></a></nav><div class="pane"><div class="pane__head"><h2 class="pane__name">Text-to-Speech</h2><div class="pane__where">Cloud</div><div class="pane__count">1 of 3 on</div></div><section class="by"><div class="by__head"><span class="by__mark" aria-hidden="true">E</span><span class="by__name">ElevenLabs</span><span class="by__spring"></span><span class="by__state">1 of 2 on</span></div><div class="rows"><div class="rows__row"><span class="rows__play" aria-hidden="true"></span><span class="rows__name">Eleven v3</span><span class="rows__sample">&#8220;The tide came in over the sill.&#8221;</span><span class="rows__at">$0.30 a minute</span><span class="switch" aria-hidden="true"><i></i></span></div><div class="rows__row"><span class="rows__play" aria-hidden="true"></span><span class="rows__name">Eleven Turbo</span><span class="rows__sample">&#8220;The tide came in over the sill.&#8221;</span><span class="rows__at">$0.12 a minute</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div></div></section><section class="by"><div class="by__head"><span class="by__mark" aria-hidden="true">O</span><span class="by__name">OpenAI</span><span class="by__spring"></span><a class="by__fix" href="#">Add a key</a></div><div class="rows"><div class="rows__row"><span class="rows__play--none" aria-hidden="true"></span><span class="rows__name">GPT Realtime Voice</span><span class="rows__sample">No sample without a key</span><span class="rows__at">$0.24 a minute</span><span class="switch switch--off" aria-hidden="true"><i></i></span></div></div></section></div></div></div>
+<p class="caption">D&#8202;&#183;&#8202;d &nbsp;Providers &#183; a credential, and one line about models</p><div class="shot" data-shot="Dd"><div class="chrome"><div class="chrome__where">Settings</div><div class="chrome__mark">Arke <span>Studio</span></div><div class="chrome__tools"><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg></span><span class="chrome__tool"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span><span class="chrome__tool" data-here><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/></svg></span></div></div><div class="page"><nav class="rail"><h1 class="rail__title">Settings</h1><a href="#" aria-current="page">Providers</a><a href="#">AI models</a><a href="#">General</a><a href="#">Harness</a><a href="#">Appearance</a><a href="#">Notifications</a><a href="#">Sign-in</a><a href="#">Sample world</a><a href="#">Diagnostics</a><a href="#">About</a><span class="rail__spring"></span><span class="rail__build">0.4.1</span></nav><div class="pane"><div class="sources"><div class="sources__band"><div class="sources__what">Services you connect</div><div class="sources__list"><span class="source" aria-current="page">fal</span><span class="source">OpenAI <span class="source__note">no key</span></span><span class="source">Anthropic</span><span class="source">ElevenLabs</span><span class="source">Higgsfield <span class="source__note">not signed in</span></span></div></div><div class="sources__band"><div class="sources__what">Engines you run</div><div class="sources__list"><span class="source">ComfyUI</span><span class="source">Ollama</span><span class="source">Voxa</span></div></div></div><div class="head"><span class="head__mark" aria-hidden="true">f</span><h2 class="head__name">fal</h2><div class="head__does">Images, video, music</div><div class="head__state">Connected</div></div><div class="facts"><div class="fact"><div class="fact__what">Key</div><div class="fact__is">fal-&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;1C7D</div><a class="fact__do" href="#">Replace</a><a class="fact__do" href="#">Remove</a></div><div class="fact"><div class="fact__what">Last tested</div><div class="fact__is">Today at 09:14, images and video answered</div><a class="fact__do" href="#">Test again</a></div><div class="fact"><div class="fact__what">Bills to</div><div class="fact__is">Salt Light Pictures, team plan</div><a class="fact__do" href="#">Change</a></div></div><p class="aside">8 fal models, 5 of them on. <a href="#">AI models</a></p></div></div></div>
+</body>
+</html>
