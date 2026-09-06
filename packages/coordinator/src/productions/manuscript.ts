@@ -304,7 +304,10 @@ function characterStyles(bytes: Uint8Array): (id: string | undefined) => { itali
     const style = styles.get(id);
     if (style === undefined || depth > 8) return none;
     const parent = style.basedOn !== undefined ? resolve(style.basedOn, depth + 1) : none;
-    const flags = { italic: style.italic ?? parent.italic, bold: style.bold ?? parent.bold };
+    // Bold and italic are toggles down a style chain (codex on PR 927): a child that says `w:b`
+    // over a bold parent turns bold off, and one that says it off leaves the parent's word.
+    const toggle = (own: boolean | undefined, inherited: boolean) => (own === undefined || own === false ? inherited : !inherited);
+    const flags = { italic: toggle(style.italic, parent.italic), bold: toggle(style.bold, parent.bold) };
     resolved.set(id, flags);
     return flags;
   };

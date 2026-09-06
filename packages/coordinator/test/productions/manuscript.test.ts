@@ -81,17 +81,17 @@ describe("the manuscript out (R-49)", () => {
   it("reads a character style's emphasis, an apostrophe-quoted attribute and a leading page break, and calls a bad entity damaged (codex on PR 924)", () => {
     const utf8Bytes = (text: string) => new TextEncoder().encode(text);
     const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
-    const styles = `<?xml version="1.0"?><w:styles ${W}><w:style w:type="character" w:styleId="Emphasis"><w:name w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style><w:style w:type="character" w:styleId="Loud"><w:basedOn w:val="Emphasis"/><w:rPr><w:b/></w:rPr></w:style></w:styles>`;
+    const styles = `<?xml version="1.0"?><w:styles ${W}><w:style w:type="character" w:styleId="Emphasis"><w:name w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style><w:style w:type="character" w:styleId="Loud"><w:basedOn w:val="Emphasis"/><w:rPr><w:b/></w:rPr></w:style><w:style w:type="character" w:styleId="Plainer"><w:basedOn w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style></w:styles>`;
     const document =
       `<?xml version="1.0"?><w:document ${W}><w:body>` +
       `<w:p><w:pPr><w:pStyle w:val='Heading1'/></w:pPr><w:r><w:t>Neap</w:t></w:r></w:p>` +
-      `<w:p><w:r><w:t xml:space="preserve">Plain, </w:t></w:r><w:r><w:rPr><w:rStyle w:val="Emphasis"/></w:rPr><w:t>felt</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Loud"/><w:i w:val='0'/></w:rPr><w:t> and loud</w:t></w:r></w:p>` +
+      `<w:p><w:r><w:t xml:space="preserve">Plain, </w:t></w:r><w:r><w:rPr><w:rStyle w:val="Emphasis"/></w:rPr><w:t>felt</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Loud"/><w:i w:val='0'/></w:rPr><w:t> and loud</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Plainer"/></w:rPr><w:t xml:space="preserve"> and toggled off</w:t></w:r></w:p>` +
       `<w:p><w:r><w:br w:type='page'/></w:r><w:r><w:t>After the break.</w:t></w:r></w:p>` +
       `</w:body></w:document>`;
     const bytes = writeZip([{ name: "word/document.xml", data: utf8Bytes(document) }, { name: "word/styles.xml", data: utf8Bytes(styles) }]);
     const read = readManuscript(bytes, "styled.docx").read;
     assert.ok(read.ok);
-    assert.deepEqual(read.chapters.map((chapter) => [chapter.title, chapter.body]), [["Neap", "Plain, *felt* **and loud**\n\n***\n\nAfter the break."]]);
+    assert.deepEqual(read.chapters.map((chapter) => [chapter.title, chapter.body]), [["Neap", "Plain, *felt* **and loud** and toggled off\n\n***\n\nAfter the break."]], "a child style's repeated italic toggles its parent's off (codex on PR 927)");
     const broken = writeZip([{ name: "word/document.xml", data: utf8Bytes(`<?xml version="1.0"?><w:document ${W}><w:body><w:p><w:r><w:t>&#1114112;</w:t></w:r></w:p></w:body></w:document>`) }]);
     const refused = readManuscript(broken, "broken.docx").read;
     assert.equal(refused.ok, false);

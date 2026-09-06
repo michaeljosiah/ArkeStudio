@@ -60,10 +60,11 @@ export type ChapterLevel = "title" | "subtitle" | "heading1" | "heading2" | "doc
  * The language an EPUB is marked with: the subtitles' own tag rule (codex on PR 924), which
  * admits every shape a subtitle track may carry — an extlang like `zh-yue-Hant-HK`, a
  * grandfathered `en-GB-oed` — with one thing added, since that rule reads subtags loosely: no
- * subtag said twice in a row, so `en-US-US` is refused as the malformed tag it is.
+ * subtag said twice in a row, in the tag's own case, so `en-US-US` is refused as the malformed
+ * tag it is while `de-DE` and `fr-FR` stay the locales they are (codex on PR 927).
  */
 export function isManuscriptLanguage(tag: string): boolean {
-  return LanguageTagSchema.safeParse(tag).success && !/(?:^|-)([A-Za-z0-9]+)-\1(?=-|$)/i.test(tag);
+  return LanguageTagSchema.safeParse(tag).success && !/(?:^|-)([A-Za-z0-9]+)-\1(?=-|$)/.test(tag);
 }
 
 /** A document past either is refused by the count (R-50). */
