@@ -76,8 +76,8 @@ describe("a revision is a passage, never a chapter (turn 128)", () => {
       () => stageWorldChatProductionAuthoredAction(store, gate, intent, { ...passageAction("Maren", "Ines"), worldId: store.worldId }),
       /that passage occurs 2 times in chapter 01 · quote more of it/,
     );
-    assert.equal(replacePassage("a b c", "b", "B", "chapter 01"), "a B c");
-    assert.equal(replacePassage("a b c", "b", "", "chapter 01"), "a  c", "an empty replacement removes the passage");
+    assert.equal(replacePassage("a b c", { find: "b", with: "B" }, "chapter 01"), "a B c");
+    assert.equal(replacePassage("a b c", { find: "b", with: "" }, "chapter 01"), "a  c", "an empty replacement removes the passage");
   });
 });
 
