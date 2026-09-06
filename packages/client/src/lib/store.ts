@@ -530,6 +530,13 @@ export function subscribeVoiceUploadConfirmations(
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
+type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
+const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
+  commandFailureListeners.add(listener);
+  return () => commandFailureListeners.delete(listener);
+}
+
 const sceneRefusalListeners = new Set<
   (event: { productionId: string; sceneFile: string; reason: string }) => void
 >();
@@ -1014,6 +1021,10 @@ function handleFrame(json: string): void {
     const event = frame.event;
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
+    if (event.type === "command.failed") {
+      if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      for (const listener of commandFailureListeners) listener(event);
+    }
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
       if (expected?.command === event.command) {
