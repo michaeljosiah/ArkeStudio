@@ -29,6 +29,7 @@ import {
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
+  WorldChatSubjectSchema,
   type ModelEditorRequest,
   type ModelSceneEdit,
 } from "./editor-request.js";
@@ -235,6 +236,22 @@ export const WorldChatMessageSchema = z
   })
   .strict();
 export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;
+
+/**
+ * What a line was said under (turn 128): the passage selected while it was said, and whether it
+ * asked for a reply only. Its own event beside `turn.started` rather than fields on the message,
+ * because the message is strict and durable: a build older than the constraints skips a line it
+ * cannot read, and skipping this one loses the guard while keeping the words, where fields on the
+ * message would have lost the words themselves (codex on PR 903).
+ */
+export const WorldChatTurnConstraintsSchema = z
+  .object({
+    turnId: TurnIdSchema,
+    subject: WorldChatSubjectSchema.optional(),
+    replyOnly: z.boolean().optional(),
+  })
+  .strict();
+export type WorldChatTurnConstraints = z.infer<typeof WorldChatTurnConstraintsSchema>;
 
 export const WorldChatRunStatusSchema = z.enum([
   "running",
@@ -1098,6 +1115,8 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("run.retry-started"), run: WorldChatRunSchema }).strict(),
+  /** Appended right after `turn.started` when the line was said under a passage or a reply-only promise (turn 128). */
+  z.object({ type: z.literal("turn.constraints"), constraints: WorldChatTurnConstraintsSchema }).strict(),
   z
     .object({
       type: z.literal("run.session-created"),
@@ -2406,6 +2425,12 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-prose-style": {
+    kind: "production-prose-style",
+    productionId: "saltlight",
+    changes: { pov: "close third", tense: "past", voice: "Short declaratives. Weather and stone before feeling." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-season": {
     kind: "production-season",
     productionId: "bell-watch-season-1",
@@ -2533,6 +2558,7 @@ const exampleWorldActions = {
     trimInSec: 0.5,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-stage-construct": { kind: "production-stage-construct", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_001", instruction: "Construct this shot from its script and inspect the camera views.", preserve: "blocking", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-stage-playblast": {
     kind: "production-stage-playblast",
     productionId: "saltlight",

@@ -386,6 +386,11 @@ export function SceneWorkspace({
     setSubject({ kind: "shot", shotId: shotId as never });
     setView("stage");
   };
+  const constructionRequest = state?.stageConstructionRequests?.find(request => request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
+  useEffect(() => {
+    if (!constructionRequest) return;
+    setSubject({ kind: "shot", shotId: constructionRequest.shotId as never }); setView("stage");
+  }, [constructionRequest?.actionId, constructionRequest?.shotId]);
   const playblastRequest = state?.stagePlayblastRequests?.find((request) =>
     request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
   useEffect(() => {
@@ -661,6 +666,7 @@ export function SceneWorkspace({
               refusalVersion={refusalVersion}
               onCommand={write}
               onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
+              {...(constructionRequest ? { constructionRequest } : {})}
               {...(playblastRequest ? { playblastRequest } : {})}
             />
           ) : (

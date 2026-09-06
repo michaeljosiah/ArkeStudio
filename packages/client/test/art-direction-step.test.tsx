@@ -249,10 +249,17 @@ describe("the chat-to-build handoff (issue 666)", () => {
       assert.ok(!mounted.container.textContent?.includes("Build Glass Harbor"));
       await answerPlan(mounted);
       assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
+      // A card in the thread, not a route of its own (issue 920): the conversation that reached
+      // the decision stays on screen under it.
+      assert.ok(mounted.container.textContent?.includes("A drowned city."), "the review is a card in the conversation");
+      assert.ok(button(mounted.container, "Begin in this world").disabled, "the card is the control while it is open");
       assert.ok(
         !mounted.container.textContent?.includes("The conversation proposed this look."),
         "the duplicate words confirmation is skipped",
       );
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.ok(!mounted.container.textContent?.includes("One press makes Glass Harbor."), "set aside, the card goes");
+      assert.equal(button(mounted.container, "Begin in this world").disabled, false);
     } finally {
       await unmountGenesis(mounted);
     }
@@ -271,7 +278,7 @@ describe("the chat-to-build handoff (issue 666)", () => {
     }
   });
 
-  it("uses a conversational look that changed after returning to chat", async () => {
+  it("follows a conversational look that changed under the open card", async () => {
     const firstLook = "Ink-washed miniatures under cold harbor light.";
     const latestLook = "Charcoal silhouettes against a warm harbor dawn.";
     const mounted = await mountGenesis(genesisBlueprint(firstLook));
@@ -279,7 +286,9 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       const firstRequest = latestPlanRequest(mounted);
       assert.equal(firstRequest.look, firstLook);
-      await act(async () => button(mounted.container, "Back to chat").click());
+      // The card sits in the thread, so the conversation can move under it. A blueprint that
+      // changed is what the press would be refused for, so the plan is asked again — with the
+      // look the conversation now proposes, not the one it proposed before.
       await act(async () => {
         __applyEventForTest({
           type: "genesis.blueprint",
@@ -288,8 +297,8 @@ describe("the chat-to-build handoff (issue 666)", () => {
           blueprint: genesisBlueprint(latestLook),
         });
       });
-      await act(async () => button(mounted.container, "Begin in this world").click());
       const latestRequest = latestPlanRequest(mounted);
+      assert.notEqual(latestRequest.requestId, firstRequest.requestId, "the moved blueprint is sized again");
       assert.equal(latestRequest.look, latestLook);
       await emitBuildPlan(latestRequest.requestId, BUILD_REVIEW);
       await emitBuildPlan(firstRequest.requestId, { ...BUILD_REVIEW, worldName: "Old Harbor" });
@@ -306,12 +315,16 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       await answerPlan(mounted);
       await act(async () => button(mounted.container, "Build Glass Harbor").click());
-      assert.equal(button(mounted.container, "Back to chat").disabled, true, "the authorized blueprint cannot change");
+      // The composer is the way the blueprint could change now that the card is in the thread,
+      // so it is the thing the press locks.
+      assert.ok(mounted.container.textContent?.includes("founding the world…"), "the authorized blueprint cannot change");
       assert.ok(mounted.container.textContent?.includes("Building…"), "the accepted review remains visible while it starts");
+      assert.equal(button(mounted.container, "Not yet").disabled, true);
       const beginRequest = latestBeginRequest(mounted);
       await emitBuildPlan(beginRequest.requestId, null, "the blueprint changed; review it again");
       assert.ok(mounted.container.textContent?.includes("the blueprint changed; review it again"));
-      assert.equal(button(mounted.container, "Back to chat").disabled, false, "a refused build releases navigation");
+      assert.ok(!mounted.container.textContent?.includes("founding the world…"), "a refused build releases the conversation");
+      assert.equal(button(mounted.container, "Not yet").disabled, false);
     } finally {
       await unmountGenesis(mounted);
     }

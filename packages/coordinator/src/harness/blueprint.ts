@@ -36,6 +36,7 @@ interface FoldedEntity {
   line?: string;
   description?: string;
   brief?: Record<string, unknown>;
+  neverDepicted?: boolean;
 }
 
 interface FoldedKind {
@@ -90,6 +91,7 @@ async function foldKind(
       name: parsed.name,
       ...(parsed.line !== undefined ? { line: parsed.line } : {}),
       ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+      ...("neverDepicted" in parsed && parsed.neverDepicted !== undefined ? { neverDepicted: parsed.neverDepicted } : {}),
       ...("brief" in parsed && parsed.brief !== undefined ? { brief: parsed.brief } : {}),
     });
   }

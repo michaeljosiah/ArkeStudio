@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   basePictureTrack,
   detachAudioCommands,
@@ -38,9 +39,6 @@ import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
  */
 
 export type EditorTool = "select" | "blade" | "hand";
-
-export const CLIP_MENU_WIDTH_PX = 232;
-export const CLIP_MENU_HEIGHT_PX = 236;
 
 export interface PictureClipView {
   clip: TimelineClip;
@@ -87,6 +85,8 @@ function describeClip(view: PictureClipView, frameRate: FrameRate): string {
 }
 
 export function PictureTrack({
+  production,
+  artifacts,
   timeline,
   views,
   slug,
@@ -104,6 +104,8 @@ export function PictureTrack({
   onDrop,
   onFileDrop,
 }: {
+  production?: ProductionBundle;
+  artifacts?: readonly ArtifactSidecar[];
   timeline: ProductionTimeline;
   views: readonly PictureClipView[];
   slug: string | undefined;
@@ -127,34 +129,6 @@ export function PictureTrack({
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState(false);
   const clips = views.map((view) => view.clip);
-
-  useEffect(() => {
-    if (menu === null) return;
-    const close = () => setMenu(null);
-    // Capture-phase, so a press a clip's own handler stops still closes the menu — but a press
-    // inside the menu is the menu being used, and closing on it would unmount the item before
-    // its click could fire.
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".fy-clipmenu")) return;
-      close();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        close();
-        event.stopImmediatePropagation();
-      }
-    };
-    window.addEventListener("pointerdown", closeOutside, { capture: true });
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, { capture: true });
-    return () => {
-      window.removeEventListener("pointerdown", closeOutside, { capture: true });
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, { capture: true });
-    };
-  }, [menu]);
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);
@@ -263,8 +237,13 @@ export function PictureTrack({
   };
 
   const onClipKeyDown = (clipId: TimelineClipId) => (event: React.KeyboardEvent) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || disabled) return;
     const key = event.key;
+    if (key === "ContextMenu" || (key === "F10" && event.shiftKey)) {
+      const box = event.currentTarget.getBoundingClientRect();
+      onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
+      event.preventDefault(); event.stopPropagation(); return;
+    }
     if (key === "Delete" || key === "Backspace") act(clipId, event.shiftKey ? "ripple" : "delete");
     else if (key === "[") act(clipId, "earlier");
     else if (key === "]") act(clipId, "later");
@@ -356,6 +335,9 @@ export function PictureTrack({
               onKeyDown={onClipKeyDown(clip.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
+                if (disabled) return;
+                event.currentTarget.focus({ preventScroll: true });
                 onSelect(clip.id);
                 setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
               }}
@@ -377,16 +359,9 @@ export function PictureTrack({
         })}
       </div>
       {menu !== null && menuView !== null && (
-        <div
-          className="fy-clipmenu"
-          role="menu"
-          aria-label={`Actions for ${menuView.label}`}
-          style={{
-            left: Math.min(menu.x, Math.max(0, window.innerWidth - CLIP_MENU_WIDTH_PX - 8)),
-            top: Math.min(menu.y, Math.max(0, window.innerHeight - CLIP_MENU_HEIGHT_PX - 8)),
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
+        <ClipMenu at={menu} label={`Actions for ${menuView.label}`} onClose={() => setMenu(null)}>
+          <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
+            disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
           {(
             [
               ["split", "Split at playhead", !playheadInside(menuView.clip)],
@@ -402,7 +377,7 @@ export function PictureTrack({
               type="button"
               role="menuitem"
               className="fy-clipmenu__item"
-              disabled={off}
+              disabled={disabled || off}
               onClick={() => {
                 act(menu.clipId, action);
                 setMenu(null);
@@ -411,7 +386,7 @@ export function PictureTrack({
               {label}
             </button>
           ))}
-        </div>
+        </ClipMenu>
       )}
     </div>
   );

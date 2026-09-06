@@ -1,3 +1,4 @@
+import { stageProblems, resolvedShotStaging } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -296,6 +297,10 @@ async function candidateFor(
             ? undefined
             : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
         });
+      }
+      if (command.staging) {
+        const problems = stageProblems(resolvedShotStaging(next, { ...command.staging, version: 1 }), current.durationSec ?? 4);
+        if (problems.length) throw new SceneCommandRefused(problems);
       }
       return command.staging === undefined
         ? next

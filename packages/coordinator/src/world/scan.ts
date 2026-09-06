@@ -40,7 +40,14 @@ import {
   type TakeMediaInfoRecord,
   SheetSchema,
   RoutingSchema,
+  ChapterContinuitySchema,
+  ChapterVoicesSchema,
+  summariseVoices,
+  type ChapterVoicesState,
+  ProseStyleSchema,
   StoryOverviewSchema,
+  summariseContinuity,
+  type ChapterContinuityState,
   TakeSchema,
   WorldMetaSchema,
   resolveArtDirection,
@@ -79,7 +86,10 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * scene files carrying `flow` and no `shots[]`.
  * Version 4 marks durable frame-run outcomes; version 5, typed Picture timelines; version 6,
  * scene-owned Stage blocking; version 7, Stage figure posture; version 8, camera-key easing;
- * version 9, deterministic camera rigs.
+ * version 9, deterministic camera rigs; version 10, the prose style a book is written in
+ * (`prose-style.json`, turn 128) — fenced so a build that cannot read it refuses the world rather
+ * than drafting without the style every draft is promised to hold to. Version 11 fences AI Stage
+ * geometry, animation, inspection provenance and encoded video metadata.
  * Worlds are born at 1 and raised lazily by the first write that needs the boundary, so a
  * world that never uses those features stays openable by older builds; a build older than the
  * boundary refuses a newer-schema world by name instead of silently dropping strict-parse
@@ -87,7 +97,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  * boundary here: a build that only knows `shots[]` reads a graph scene as a parse failure and
  * drops it, so the scene would vanish from a world it was never meant to open.
  */
-export const SUPPORTED_SCHEMA_VERSION = 9;
+// Thirteen is a chapter's `source` (turn 131): an imported chapter's strict frontmatter names
+// the file it came from, and a build without the field would drop the chapter on scan.
+export const SUPPORTED_SCHEMA_VERSION = 13;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -460,6 +472,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     const story = (await exists(join(pdir, "story.json")))
       ? await tryParse(`productions/${id}/story.json`, (raw) => StoryOverviewSchema.parse(JSON.parse(raw)))
       : null;
+    // prose-style.json — the style the book is written in, beside the overview (turn 128).
+    const proseStyle = (await exists(join(pdir, "prose-style.json")))
+      ? await tryParse(`productions/${id}/prose-style.json`, (raw) => ProseStyleSchema.parse(JSON.parse(raw)))
+      : null;
     const routing = (await exists(join(pdir, "routing.json")))
       ? await tryParse(`productions/${id}/routing.json`, (raw) => RoutingSchema.parse(JSON.parse(raw)))
       : null;
@@ -471,27 +487,66 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // absent, and anything unresolvable — a tie, a missing value, a value that is not a positive
     // integer — falls back to filename order. The summary carries the resolved dense sequence, so
     // no display surface has to reapply this rule.
-    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter }> = [];
+    const chapterEntries: Array<{ file: string; fm: ChapterFrontmatter; bodyHash: string; continuity: ChapterContinuityState | null; voices: ChapterVoicesState | null }> = [];
     for (const file of (await listDir(join(pdir, "chapters"))).filter((f) => f.endsWith(".md")).sort()) {
-      const fm = await tryParse(`productions/${id}/chapters/${file}`, (raw) =>
-        ChapterFrontmatterSchema.parse(MarkdownFile.parse(raw).data),
-      );
-      if (fm) chapterEntries.push({ file: file.slice(0, -".md".length), fm });
+      const parsed = await tryParse(`productions/${id}/chapters/${file}`, (raw) => {
+        const doc = MarkdownFile.parse(raw);
+        // The hash of the prose alone rides beside the file's (turn 129, R-39): a continuity
+        // record is keyed to what it read, and a plan typed into the frontmatter moves nothing.
+        // Normalised as `openChapter` normalises the body, so the two hashes are of one text.
+        return { fm: ChapterFrontmatterSchema.parse(doc.data), bodyHash: sha256(doc.body.trim() === "" ? "" : doc.body) };
+      });
+      if (!parsed) continue;
+      const { fm, bodyHash } = parsed;
+      const stem = file.slice(0, -".md".length);
+      // The continuity record beside the chapter (turn 129, SPEC-012 §2.4.1): derived, not
+      // authored, so it is read plainly rather than through `tryParse` — it belongs in no
+      // manifest and is no external edit, and a record that does not parse is simply no record.
+      // Only its stamp and placings ride on the summary (R-42); the lines come with the chapter.
+      // A file that is there but cannot be read is not no record (codex on turn 129): it is a
+      // paid run, and the summary says it is unreadable rather than inviting another.
+      const continuity: ChapterContinuityState | null = await read(join(pdir, ".continuity", `${stem}.json`))
+        .then((raw) => {
+          const parsed = ChapterContinuitySchema.safeParse(JSON.parse(raw));
+          return parsed.success ? summariseContinuity(parsed.data) : { unreadable: true as const };
+        })
+        .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
+      // The cast of lines beside the chapter (turn 130), the same way: its stamp on the summary.
+      const voices: ChapterVoicesState | null = await read(join(pdir, ".voices", `${stem}.json`))
+        .then((raw) => {
+          const parsed = ChapterVoicesSchema.safeParse(JSON.parse(raw));
+          return parsed.success ? summariseVoices(parsed.data) : { unreadable: true as const };
+        })
+        .catch((err: NodeJS.ErrnoException) => (err.code === "ENOENT" ? null : { unreadable: true as const }));
+      chapterEntries.push({ file: stem, fm, bodyHash, continuity, voices });
     }
     const chapterRank = (fm: ChapterFrontmatter): number => {
       const v = fm.order ?? fm.number;
       return typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : Infinity;
     };
     chapterEntries.sort((a, b) => chapterRank(a.fm) - chapterRank(b.fm) || (a.file < b.file ? -1 : 1));
-    const chapters = chapterEntries.map(({ file, fm }, i) => ({
+    const chapters = chapterEntries.map(({ file, fm, bodyHash, continuity, voices }, i) => ({
       id: fm.id,
       file,
       order: i + 1,
       title: fm.title,
       status: fm.status ?? "planned",
       version: fm.version,
+      // The content hash rides on the summary (turn 128) so one chapter's read can be fenced
+      // and re-observed from the bundle alone.
+      ...(manifest[`productions/${id}/chapters/${file}.md`] !== undefined ? { hash: manifest[`productions/${id}/chapters/${file}.md`]! } : {}),
+      bodyHash,
+      ...(continuity !== null ? { continuity } : {}),
+      ...(voices !== null ? { voices } : {}),
       ...(fm.words !== undefined ? { words: fm.words } : {}),
       ...(fm.draws !== undefined ? { draws: fm.draws } : {}),
+      // The plan rides on the summary (turn 127): the door and Arke's list_chapters read it.
+      ...(fm.synopsis !== undefined ? { synopsis: fm.synopsis } : {}),
+      ...(fm.pov !== undefined ? { pov: fm.pov } : {}),
+      ...(fm.when !== undefined ? { when: fm.when } : {}),
+      ...(fm.implies !== undefined ? { implies: fm.implies } : {}),
+      ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
+      ...(fm.source !== undefined ? { source: fm.source } : {}),
     }));
 
     // Scene order (issue #387): explicit `order` wins, the birth number is the fallback, ties
@@ -725,6 +780,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       performances,
       meta: metaDoc,
       story,
+      proseStyle,
       season,
       routing,
       treatment,

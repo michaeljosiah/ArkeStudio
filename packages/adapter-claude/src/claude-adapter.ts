@@ -447,6 +447,18 @@ export class ClaudeAdapter implements HarnessAdapter {
     for (const subscriber of this.subscribers) subscriber.push(event);
   }
 
+  /**
+   * Stop one session's generation now (turn 129, codex on PR 907): the SDK's query runs under
+   * the session's own controller, so aborting it ends the turn in flight, and the turn is
+   * settled so nothing waits on it. A session that is not this adapter's is nobody's to stop.
+   */
+  async interrupt(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    session.abort.abort();
+    session.turn?.settle(new Error("interrupted"));
+  }
+
   /** Stops what this adapter started, and nothing it did not (SPEC-005 R-3). */
   async dispose(): Promise<void> {
     for (const session of this.sessions.values()) {

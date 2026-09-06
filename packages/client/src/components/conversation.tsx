@@ -319,6 +319,7 @@ export function ConversationPermissionCard({
     setAnnouncement("");
   };
 
+  const stageRequest = state?.stageConstructionRequests?.find(request=>request.actionId===action.actionId&&request.conversationId===action.conversationId);
   const body = <ConversationActionBody action={action} supported={supported} />;
   const consequences = action.shown.ripples.length > 0 ? (
     <div className="fy-actioncard__body">
@@ -395,6 +396,7 @@ export function ConversationPermissionCard({
           ) : null}
         </div>
       )}
+      {action.status === "awaiting-host" && stageRequest ? <Button variant="primary" onClick={()=>void navigate(`/w/${action.worldId}/p/${stageRequest.productionId}/scenes/${stageRequest.sceneId}`)}>Open Stage to construct</Button>:null}
       {action.undo && <div className="fy-actioncard__audit">Undo available · {action.undo.kind}</div>}
       {supported && (action.status === "pending" || action.availableDecisions.includes("deny")) && (
         <div className="fy-actioncard__actions">
@@ -782,12 +784,22 @@ export function ProductionConversation({
     /** Flips the subject between the shot and the whole scene; the title is a button when set. */
     onToggleSubject?: () => void;
     /** Quick asks above the composer, each said as it stands. */
-    prompts?: readonly string[];
+    /**
+     * Quick asks. A prompt that promises a reply and nothing else (turn 128: `Hold this against
+     * the style`) says so, and the send carries it, so the coordinator refuses any action the
+     * turn comes back with.
+     */
+    prompts?: readonly (string | { label: string; replyOnly?: boolean; press?: () => void })[];
     /**
      * Said before whatever is typed while a shot is the subject. The thread enters at the scene,
      * so the shot the dock names has to be in the words themselves or the studio never hears it.
      */
     subjectPrefix?: string;
+    /**
+     * A line over the prompts that says what the subject is right now — `about this passage ·
+     * 42 words` (turn 128). The prefix is what the thread hears; this is what the author sees.
+     */
+    subjectLine?: string;
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
     /**
@@ -829,9 +841,12 @@ export function ProductionConversation({
     was: string | null;
     subject?: WorldChatSubject;
     modelId?: string;
+    replyOnly?: boolean;
   } | null>(null);
   const [busyMedia, setBusyMedia] = useState<string | null>(null);
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
+  /** The dock's points: put away by default (turn 92), opened by a refusal that points at them (issue 909). */
+  const [pointsOpen, setPointsOpen] = useState(false);
   const mediaRequest = useRef<{ requestId: string; candidateId: string; conversationId: string } | null>(null);
   const context: WorldChatContext = entry ?? { kind: "production", productionId: productionId ?? "" };
   const contextKey = JSON.stringify(context);
@@ -919,7 +934,7 @@ export function ProductionConversation({
     const opened = workspace?.conversationId ?? null;
     if (!opened || opened === opening.was || opened !== conversationId) return;
     if (opening.attach) worldChatAttachFiles(worldId, opened);
-    else sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId);
+    else sendWorldChat(worldId, opened, opening.text, [], opening.subject, opening.modelId, opening.replyOnly ?? false);
     setOpening(null);
   }, [opening, worldId, workspace?.conversationId, conversationId]);
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
@@ -962,7 +977,7 @@ export function ProductionConversation({
   }, [openWith, worldId, productionId, conversationId]);
 
   /** Says one thing into the thread — the composer's draft, or a quick ask said as it stands. */
-  const say = (text: string) => {
+  const say = (text: string, replyOnly = false) => {
     if (!text || !worldId || !productionId) return;
     // A second line said while the first is still opening its thread would open a second one,
     // and one said over a running turn starts a second turn the first can no longer stop.
@@ -979,12 +994,13 @@ export function ProductionConversation({
         was: workspace?.conversationId ?? null,
         ...(subject !== undefined ? { subject } : {}),
         ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+        ...(replyOnly ? { replyOnly: true } : {}),
       });
       setLanguageModelId(undefined);
       createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
-    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId);
+    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId, replyOnly);
     setLanguageModelId(undefined);
   };
   const submit = () => {
@@ -1142,7 +1158,11 @@ export function ProductionConversation({
                   narrow cannot hold it open beside a transcript, and the wrap-up beneath it is
                   the only way a conversation becomes anything (turn 92). */}
               {pointsEmpty !== undefined && (!dock.conversationFirst || points.length > 0) && (
-                <details className="fy-arke__points">
+                <details
+                  className="fy-arke__points"
+                  open={pointsOpen}
+                  onToggle={(event) => setPointsOpen(event.currentTarget.open)}
+                >
                   <summary>
                     What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
                   </summary>
@@ -1173,6 +1193,7 @@ export function ProductionConversation({
                   subjectKey={contextKey}
                   wrapping={wrapping}
                   onWrappingChange={setWrapping}
+                  onRefused={() => setPointsOpen(true)}
                 />
               ) : null}
             </>
@@ -1181,13 +1202,29 @@ export function ProductionConversation({
         ) : null}
         <div className="fy-arke__foot">
           {languageControl}
+          {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
-              {dock.prompts.map((prompt) => (
-                <button key={prompt} type="button" className="fy-arke__prompt" disabled={opening !== null || running || languageUnavailableReason !== undefined} onClick={() => say(prompt)}>
-                  {prompt}
-                </button>
-              ))}
+              {dock.prompts.map((entry) => {
+                const prompt = typeof entry === "string" ? entry : entry.label;
+                const replyOnly = typeof entry === "string" ? false : entry.replyOnly === true;
+                const press = typeof entry === "string" ? undefined : entry.press;
+                // A prompt is said with the subject before it, as a typed line is (turn 128):
+                // `Tighten this` said bare names nothing, and the thread never sees the selection.
+                // A prompt with a press of its own is a press, not a line (turn 129): `Derive
+                // again` under a stale record derives, and nothing is said.
+                return (
+                  <button
+                    key={prompt}
+                    type="button"
+                    className="fy-arke__prompt"
+                    disabled={press === undefined && (opening !== null || running || languageUnavailableReason !== undefined)}
+                    onClick={() => (press !== undefined ? press() : say(dock.subjectPrefix === undefined ? prompt : `${dock.subjectPrefix} ${prompt}`, replyOnly))}
+                  >
+                    {prompt}
+                  </button>
+                );
+              })}
             </div>
           )}
           <Composer
@@ -1314,6 +1351,7 @@ function WrapUp({
   subjectKey,
   wrapping,
   onWrappingChange,
+  onRefused,
 }: {
   worldId: string | undefined;
   conversationId: string | null;
@@ -1326,6 +1364,8 @@ function WrapUp({
   /* Lifted (review 2026-08-22): the transcript holds retry back while a wrap-up commits. */
   wrapping: boolean;
   onWrappingChange: (next: boolean) => void;
+  /** A refusal answered this press; the dock opens the points the refusal names. */
+  onRefused?: () => void;
 }) {
   const setWrapping = onWrappingChange;
   /*
@@ -1356,6 +1396,19 @@ function WrapUp({
   useEffect(() => {
     if (wrapping && (refusedMine || status === "closed")) setWrapping(false);
   }, [wrapping, refusedMine, status]);
+  /*
+   * The refusal opens the points it points at (issue 909).
+   *
+   * A refusal names two points and asks which one comes first, and the points are under a
+   * disclosure the dock keeps shut for room — so what the message asked about was the one
+   * thing not on the screen.
+   * Keyed to the attempt, not the callback: opened once per refusal, and a person who shuts it
+   * again is not fighting an effect that reopens it on every render.
+   */
+  const refusedRequestId = refusedMine && refusal ? refusal.requestId : null;
+  useEffect(() => {
+    if (refusedRequestId !== null) onRefused?.();
+  }, [refusedRequestId]);
   // A press that transmitted nothing has no answer coming, so the wait must never begin on one.
   return (
     <div style={{ display: "grid", gap: 8, marginTop: 14 }}>

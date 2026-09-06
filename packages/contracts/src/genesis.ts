@@ -100,6 +100,9 @@ export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
     brief.stakes !== undefined ? `At stake: ${brief.stakes}` : null,
   ]
     .filter((clause): clause is string => clause !== null && clause !== undefined)
+    // Each clause is a sentence of its own; one that arrived with its full stop would
+    // otherwise read `beds.. The moment` once joined (issue 906).
+    .map((clause) => clause.trim().replace(/\.+$/, ""))
     .join(". ");
 }
 
@@ -169,7 +172,7 @@ const entityFileBase = {
 };
 
 export const GenesisCharacterFileSchema = z
-  .object({ ...entityFileBase, brief: GenesisCharacterBriefSchema.optional() })
+  .object({ ...entityFileBase, neverDepicted: z.boolean().optional(), brief: GenesisCharacterBriefSchema.optional() })
   .strip();
 export type GenesisCharacterFile = z.infer<typeof GenesisCharacterFileSchema>;
 
@@ -192,6 +195,7 @@ export const BlueprintCharacterSchema = z
     name: z.string().min(1).max(120),
     line: z.string().min(1).max(300).optional(),
     description: z.string().min(1).max(4000).optional(),
+    neverDepicted: z.boolean().optional(),
     brief: GenesisCharacterBriefSchema.optional(),
   })
   .strict();

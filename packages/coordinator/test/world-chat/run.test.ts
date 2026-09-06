@@ -80,6 +80,7 @@ async function setup(
     timeoutMs?: number;
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     createdModels?: Array<string | undefined>;
+    raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
   } = {},
 ) {
   const worldPath = await tempDir("arke-run-");
@@ -104,6 +105,7 @@ async function setup(
           },
         }
       : {}),
+    ...(options.raiseSchemaBoundary ? { raiseSchemaBoundary: options.raiseSchemaBoundary } : {}),
     prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
     release: async ({ runId }) => void released.push(runId),
     receiptsFor: () => [],
@@ -153,6 +155,46 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("a turn held to a passage, or to a reply, fences the world and writes its constraints before the words (codex on PR 903, round three)", async () => {
+    const raised: number[] = [];
+    const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply, reply]), {
+      raiseSchemaBoundary: async (version) => void raised.push(version),
+    });
+    await runner.send(store, conversationId, "Tighten this.", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" });
+    let types = (await store.read()).events.map((e) => e.event.type);
+    assert.deepEqual(raised, [12], "the world is fenced at a boundary of the event's own, past the ones the style's and the stage's builds support (codex, round four)");
+    assert.ok(types.includes("turn.constraints"));
+    assert.ok(types.indexOf("turn.constraints") < types.indexOf("turn.started"), "the constraints land first, so a turn is never found without them");
+
+    await runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true);
+    types = (await store.read()).events.map((e) => e.event.type);
+    assert.equal(types.filter((type) => type === "turn.constraints").length, 2, "a reply-only ask is a constraint too");
+    assert.deepEqual(raised, [12, 12], "asked each time; the store is the one that knows it is already there");
+
+    // A subject that only colours the narration, as it always did, is no constraint: nothing is
+    // written for it, and nothing is fenced.
+    await runner.send(store, conversationId, "About this scene.", [], { kind: "scene", sceneId: "sc_1" } as never);
+    types = (await store.read()).events.map((e) => e.event.type);
+    assert.equal(types.filter((type) => type === "turn.constraints").length, 2);
+    assert.deepEqual(raised, [12, 12]);
+  });
+
+  it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {
+    const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply]), {
+      raiseSchemaBoundary: async () => {
+        throw new Error("external edits awaiting reconciliation");
+      },
+    });
+    await assert.rejects(() => runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true), /awaiting reconciliation/);
+    assert.equal((await store.read()).events.some((e) => e.event.type === "turn.started"), false, "nothing was written for the turn");
+    // The next line goes through: the controller of the turn that never began is not in the way.
+    const outcome = await runner.send(store, conversationId, "And now?");
+    assert.notEqual(outcome.status, "unavailable");
+    assert.ok((await store.read()).events.some((e) => e.event.type === "turn.started"), "the conversation is still live");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");

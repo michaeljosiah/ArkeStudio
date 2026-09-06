@@ -11,6 +11,7 @@ import {
   resolveCast,
   shotCardState,
   shotCoverage,
+  UNTITLED_SHOT,
   type ArtifactSidecar,
   type BenchSessionSummary,
   type ClientMessage,
@@ -236,7 +237,7 @@ export function StoryboardRows({
                 onCommand({
                   kind: "insert-shot",
                   at: { atStart: true },
-                  shot: { title: "Untitled shot", description: "" },
+                  shot: { title: UNTITLED_SHOT, description: "" },
                 })
               }
             >
@@ -310,7 +311,7 @@ export function StoryboardRows({
                     onCommand({
                       kind: "insert-shot",
                       at: { before: shot.id },
-                      shot: { title: "Untitled shot", description: "" },
+                      shot: { title: UNTITLED_SHOT, description: "" },
                     })
                   }
                   onSplit={() => onCommand({ kind: "set-board-override", shotId: shot.id, override: "split" })}
@@ -386,7 +387,7 @@ export function StoryboardRows({
                 kind: "insert-shot",
                 // An empty scene is a valid one; its first shot has nothing to follow.
                 at: shots.length === 0 ? { atStart: true } : { after: shots.at(-1)!.id },
-                shot: { title: "Untitled shot", description: "" },
+                shot: { title: UNTITLED_SHOT, description: "" },
               })
             }
           >
@@ -1526,7 +1527,7 @@ function Row({
                     disabled={disabled}
                     onClick={() => {
                       closeMenu(true);
-                      onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: "Untitled shot", description: "" } });
+                      onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: UNTITLED_SHOT, description: "" } });
                     }}
                   >
                     Add shot after

@@ -16,6 +16,8 @@ import {
   type CutOverlay,
   type ShotSelection,
   orderedShots,
+  resolveProductionArtifact,
+  legacyCutArtifactReferences,
 } from "@arke-studio/contracts";
 import { supersededBy } from "../productions/continuation.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -294,6 +296,7 @@ async function editOverlays(
   store: WorldStore,
   productionId: string,
   edit: (current: CutOverlay[]) => CutOverlay[],
+  precondition?: WorldStatePrecondition,
 ): Promise<CutFile> {
   const path = `productions/${productionId}/cut.json`;
   const existing = await readOr(store, path, "{}");
@@ -310,7 +313,7 @@ async function editOverlays(
         baseHash: existing.existed ? sha256(existing.raw) : null,
       },
     ],
-  });
+  }, undefined, precondition);
   return next;
 }
 
@@ -323,11 +326,6 @@ export async function placeOverlay(
   if (input.endSec <= input.startSec) {
     throw new Error(`a clip ending at ${input.endSec}s cannot start at ${input.startSec}s`);
   }
-  // A clip cites an artifact; citing one the world does not have would file a placement pointing
-  // at nothing, which the cut would then have to render as an absence it cannot explain.
-  const known = store.getBundle().artifacts.some((a) => a.id === input.artifactId);
-  if (!known) throw new Error(`artifact ${input.artifactId} is not in this world`);
-
   const overlay = CutOverlaySchema.parse({
     id: newId("ov"),
     artifactId: input.artifactId,
@@ -336,7 +334,11 @@ export async function placeOverlay(
     ...(input.lane !== undefined ? { lane: input.lane } : {}),
     ...(input.audio !== undefined ? { audio: input.audio } : {}),
   });
-  await editOverlays(store, productionId, (current) => [...current, overlay]);
+  await editOverlays(store, productionId, (current) => [...current, overlay], () => {
+    // Rechecked after a fresh scan under the write gate, including a sidecar scope change.
+    const resolved = resolveProductionArtifact(store.getBundle().artifacts, input.artifactId, productionId);
+    return resolved.ok ? null : `${overlay.id} cites ${resolved.reason}`;
+  });
   return overlay;
 }
 
@@ -421,6 +423,9 @@ export async function splitOverlayAudio(
     const lane = Math.max(0, (found.lane ?? 0) - 1);
     sound = CutOverlaySchema.parse({ ...found, id: newId("ov"), lane, audio: "only" });
     return [...current.map((o) => (o.id === overlayId ? { ...o, audio: "mute" as const } : o)), sound];
+  }, () => {
+    const resolved = resolveProductionArtifact(store.getBundle().artifacts, sound!.artifactId, productionId);
+    return resolved.ok ? null : `${overlayId} cites ${resolved.reason}`;
   });
   return sound!;
 }
@@ -473,7 +478,19 @@ export async function removeOverlay(store: WorldStore, productionId: string, ove
 
 export async function saveAudioTracks(store: WorldStore, productionId: string, cutJson: string): Promise<void> {
   const path = `productions/${productionId}/cut.json`;
-  const existing = await readOr(store, path, "");
+  const existing = await readOr(store, path, "{}");
+  const previous = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(existing.raw)));
+  const next = legacyCutArtifactReferences(CutFileSchema.parse(JSON.parse(cutJson)));
+  // Existing unavailable placements may be retained while others are removed. Legacy audio
+  // has no IDs: its normalized source/placement key survives deletion that shifts entry indices.
+  const remaining = new Map<string, number>();
+  for (const reference of previous) remaining.set(reference.key, (remaining.get(reference.key) ?? 0) + 1);
+  const added = next.filter(reference => {
+    const count = remaining.get(reference.key) ?? 0;
+    if (count === 0) return true;
+    remaining.set(reference.key, count - 1);
+    return false;
+  });
   await store.commit({
     kind: "cut-audio",
     source: "form",
@@ -485,5 +502,11 @@ export async function saveAudioTracks(store: WorldStore, productionId: string, c
         baseHash: existing.existed ? sha256(existing.raw) : null,
       },
     ],
+  }, undefined, () => {
+    for (const reference of added) {
+      const resolved = resolveProductionArtifact(store.getBundle().artifacts, reference.id, productionId);
+      if (!resolved.ok) return `${reference.label} cites ${resolved.reason}`;
+    }
+    return null;
   });
 }

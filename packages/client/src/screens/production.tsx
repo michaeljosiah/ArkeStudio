@@ -3,6 +3,7 @@ import {
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
+  overviewMoved,
 } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
@@ -48,9 +49,12 @@ import {
   lookHoldingScope,
   type CharacterLook,
   type FrameRate,
+  isManuscriptLanguage,
+  type ChapterSummary,
   type ProductionBundle,
   type ProductionTimeline,
   type ResolvedPictureCut,
+  type RenderPlan,
   type Scene,
   type TimelineClip,
   type TimelineChangeHistoryEntry,
@@ -66,6 +70,8 @@ import {
   newAudioTrack,
   migrateLegacyCut,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
+  resolveProductionArtifact,
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
@@ -173,6 +179,13 @@ import {
   acceptTake,
   attachCharacterLook,
   cancelExport,
+  cancelManuscript,
+  exportManuscript,
+  importManuscript,
+  openExportsFolder,
+  pickManuscript,
+  rereadManuscript,
+  useManuscripts,
   createSheetFromSentence,
   attachHostFiles,
   attachHostText,
@@ -209,6 +222,7 @@ import {
   createChapter,
   subscribeChapterCreateResults,
 } from "../lib/store.js";
+import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
 
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
 
@@ -1937,10 +1951,17 @@ export function ProductionChatScreen() {
    * both, so a single match is the whole answer.
    */
   const file = shape?.isEpisodic ? "season.json" : "story.json";
+  // The style the book is written in is settled here too (turn 128), in its own file.
   const staged =
     (world?.proposals ?? []).find((sp) =>
       sp.proposal.targets.some((t) => t.path === `productions/${prodId}/${file}`),
-    ) ?? null;
+    ) ??
+    (shape?.isEpisodic
+      ? null
+      : (world?.proposals ?? []).find((sp) =>
+          sp.proposal.targets.some((t) => t.path === `productions/${prodId}/prose-style.json`),
+        ) ?? null);
+  const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -1980,9 +2001,9 @@ export function ProductionChatScreen() {
               side: (
                 <StagedDecision
                   worldId={worldId}
-                  subject={shape?.isEpisodic ? "the season" : "the overview"}
+                  subject={stagedStyle ? "the style" : shape?.isEpisodic ? "the season" : "the overview"}
                   staged={staged}
-                  writes={`the gate writes ${file} · nothing else moves`}
+                  writes={`the gate writes ${stagedStyle ? "prose-style.json" : file} · nothing else moves`}
                   onAccepted={() => navigate(detailsPath)}
                 />
               ),
@@ -2018,7 +2039,7 @@ function OverviewStoryScreen() {
    * screen cannot claim a change the gate would not make.
    */
   const staged = (world?.proposals ?? []).find((sp) =>
-    sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json`),
+    sp.proposal.targets.some((t) => t.path === `productions/${prodId}/story.json` || t.path === `productions/${prodId}/prose-style.json`),
   );
   /** Every field the staged proposal would change, flattened out of its per-target review. */
   const stagedFields = staged?.review?.targets.flatMap((t) => t.fields) ?? [];
@@ -2037,20 +2058,37 @@ function OverviewStoryScreen() {
     .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
     .join(" ");
   const overviewTitle = production?.meta.title ?? "Overview";
-  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = (
-    [
-      ["logline", "Logline", story?.logline ?? ""],
-      ["spine", "Spine", story?.spine ?? ""],
-      ["acts", "Acts", actsSpoken],
-      ["treatment", "Treatment", production?.treatment ?? ""],
-    ] as const
-  )
-    .filter(([, , body]) => body.trim() !== "")
-    .map(([field, heading, body]) => ({
-      heading,
-      body,
-      source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
-    }));
+  /* The style the book is written in (turn 128): its cards sit under the overview's. */
+  const style = production?.proseStyle ?? null;
+  // A blank sample in a hand-edited record is no listen and no card line (codex on PR 903) —
+  // and the ones that remain keep their places in the record, because the read names a sample
+  // by its index there, and a compacted list would read the wrong one aloud.
+  const samples = (style?.samples ?? [])
+    .map((sample, index) => ({ sample, index }))
+    .filter(({ sample }) => sample.trim() !== "");
+  const pageBlocks: (PageReadBlock & { source: ProseReadSource })[] = [
+    ...(
+      [
+        ["logline", "Logline", story?.logline ?? ""],
+        ["spine", "Spine", story?.spine ?? ""],
+        ["acts", "Acts", actsSpoken],
+        ["treatment", "Treatment", production?.treatment ?? ""],
+        ["voice", "Voice", style?.voice ?? ""],
+      ] as const
+    )
+      .filter(([, , body]) => body.trim() !== "")
+      .map(([field, heading, body]) => ({
+        heading,
+        body,
+        source: { of: "story", productionId: prodId ?? "", field } as ProseReadSource,
+      })),
+    // One block per sample (codex on turn 128), so no single read outruns a narrator's cap.
+    ...samples.map(({ sample, index }) => ({
+      heading: `Sample ${index + 1}`,
+      body: sample,
+      source: { of: "story", productionId: prodId ?? "", field: "samples", sample: index } as ProseReadSource,
+    })),
+  ];
   const pageRead = useProsePageRead({ pageId: prodId, title: overviewTitle, blocks: pageBlocks });
   return (
     <div className="fy-story" data-screen="story-overview">
@@ -2061,7 +2099,7 @@ function OverviewStoryScreen() {
           <div className="fy-eyebrow-sm">
             OVERVIEW · {production ? productionShape(production.meta).displayLabel.toLowerCase() : ""}
           </div>
-          <h1 className="fy-story__h1">{story ? "The story, as it stands" : "Nothing settled yet"}</h1>
+          <h1 className="fy-story__h1">{story || style ? "The story, as it stands" : "Nothing settled yet"}</h1>
           {/* Page scale (issue 859): the cards below, read through in the order drawn. Only once
               there is more than one — a page read of a lone logline is that card's own press. */}
           {pageBlocks.length > 1 && (
@@ -2071,7 +2109,9 @@ function OverviewStoryScreen() {
           )}
         </div>
         <div className="fy-story__log">
-          {story ? (
+          {/* A style can be settled before an overview is (codex on turn 128): either is enough
+              for the page to have something to draw. */}
+          {story || style ? (
             <div style={{ display: "grid", gap: 14 }}>
               {/*
                 The overview is one document, and its cards are the blocks it is read in
@@ -2079,15 +2119,17 @@ function OverviewStoryScreen() {
                 a logline and a treatment are not the same length of listen, and the press should
                 say which of them it is starting.
               */}
-              <div className="fy-draftcard fy-texthost">
-                <div className="fy-eyebrow-sm">LOGLINE</div>
-                <div className="fy-draftcard__logline">“{story.logline}”</div>
-                <ReadAloud
-                  source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
-                  title={`${production?.meta.title ?? "Overview"} · logline`}
-                  text={story.logline ?? ""}
-                />
-              </div>
+              {story && (
+                <div className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">LOGLINE</div>
+                  <div className="fy-draftcard__logline">“{story.logline}”</div>
+                  <ReadAloud
+                    source={{ of: "story", productionId: prodId ?? "", field: "logline" }}
+                    title={`${production?.meta.title ?? "Overview"} · logline`}
+                    text={story.logline ?? ""}
+                  />
+                </div>
+              )}
               {spineLines.length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">SPINE</div>
@@ -2099,14 +2141,14 @@ function OverviewStoryScreen() {
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "spine" }}
                     title={`${production?.meta.title ?? "Overview"} · spine`}
-                    text={story.spine ?? ""}
+                    text={story?.spine ?? ""}
                   />
                 </div>
               )}
-              {(story.acts ?? []).length > 0 && (
+              {(story?.acts ?? []).length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">ACTS</div>
-                  {(story.acts ?? []).map((act, i) => (
+                  {(story?.acts ?? []).map((act, i) => (
                     <div key={act.title} style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>
                       {i + 1}. {act.title}
                       {act.summary ? ` — ${act.summary}` : ""}
@@ -2115,7 +2157,7 @@ function OverviewStoryScreen() {
                   <ReadAloud
                     source={{ of: "story", productionId: prodId ?? "", field: "acts" }}
                     title={`${production?.meta.title ?? "Overview"} · acts`}
-                    text={(story.acts ?? [])
+                    text={(story?.acts ?? [])
                       .map((act, i) => `${i + 1}. ${act.title}${act.summary ? ` — ${act.summary}` : ""}`)
                       .join(" ")}
                   />
@@ -2135,6 +2177,59 @@ function OverviewStoryScreen() {
                     text={production.treatment}
                   />
                 </div>
+              )}
+              {/*
+                The style the book is written in (turn 128): the overview's cards, at the
+                overview's measure, under a heading that says where it was settled and who reads
+                it. Voice and samples read aloud; point of view and tense are labels, not a listen.
+              */}
+              {style !== null && (
+                <>
+                  <div className="fy-story__stylehead" data-testid="prose-style">
+                    <span style={{ font: "600 13px var(--font-sans)" }}>Style</span>
+                    <span className="fy-mono">v{style.version} · settled in Develop · read by every draft and every revision</span>
+                  </div>
+                  {style.pov !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">POINT OF VIEW</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.pov}</div>
+                    </div>
+                  )}
+                  {style.tense !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">TENSE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4 }}>{style.tense}</div>
+                    </div>
+                  )}
+                  {style.voice !== undefined && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">VOICE</div>
+                      <div style={{ font: "400 13px/1.7 var(--font-sans)", marginTop: 4, whiteSpace: "pre-wrap" }}>{style.voice}</div>
+                      <ReadAloud
+                        source={{ of: "story", productionId: prodId ?? "", field: "voice" }}
+                        title={`${overviewTitle} · voice`}
+                        text={style.voice}
+                      />
+                    </div>
+                  )}
+                  {samples.length > 0 && (
+                    <div className="fy-draftcard fy-texthost">
+                      <div className="fy-eyebrow-sm">SAMPLES · {samples.length}</div>
+                      {/* One read per sample (codex on turn 128): six at their bound read as one
+                          block outrun a narrator's prompt cap, so each sample is its own listen. */}
+                      {samples.map(({ sample, index }) => (
+                        <div key={`${index}:${sample}`} style={{ marginTop: 4 }} data-sample={index}>
+                          <div className="fy-draftcard__logline">“{sample}”</div>
+                          <ReadAloud
+                            source={{ of: "story", productionId: prodId ?? "", field: "samples", sample: index }}
+                            title={`${overviewTitle} · sample ${index + 1}`}
+                            text={sample}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           ) : (
@@ -2201,40 +2296,212 @@ function OverviewStoryScreen() {
  */
 export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
-  const { production } = useProduction(worldId, prodId);
+  const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newChapter = useSharedNewChapter(worldId, prodId);
   const chapters = production?.chapters ?? [];
   const isStory = production ? productionShape(production.meta).hasChapters : false;
+  /*
+   * A manuscript out and in (turn 131): two presses beside New chapter and two sheets in the
+   * film export dialog's shape. The import's request is the sheet's; what came of it is the
+   * session's line under the band.
+   */
+  const [sheet, setSheet] = useState<"export" | "import" | null>(null);
+  const [importRequest, setImportRequest] = useState<string | null>(null);
+  const [imported, setImported] = useState<{ fileName: string; created: number; after: number } | null>(null);
+  const manuscripts = useManuscripts();
+  const importState = importRequest === null ? undefined : manuscripts[importRequest];
+  useEffect(() => {
+    if (importRequest === null) return;
+    // The picker closed without a file is no action (codex on PR 924): the sheet closes.
+    if (importState?.state === "cancelled") {
+      setImportRequest(null);
+      setSheet(null);
+      return;
+    }
+    if (importState?.state !== "imported") return;
+    setImported({ fileName: importState.fileName ?? "", created: importState.created ?? 0, after: importState.after ?? 0 });
+    setImportRequest(null);
+    setSheet(null);
+  }, [importState, importRequest]);
+  useEffect(() => {
+    setImported(null);
+  }, [prodId]);
+  const beginImport = () => {
+    if (!worldId || !prodId) return;
+    setImportRequest(pickManuscript(worldId, prodId));
+    setSheet("import");
+  };
+  const closeImport = () => {
+    if (worldId && importRequest !== null && importState?.state !== "importing") cancelManuscript(worldId, importRequest);
+    setImportRequest(null);
+    setSheet(null);
+  };
+  const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production?.story?.targetLength);
   // The same "in hand" the dashboard derives: the first chapter with no words yet.
   const inHand = chapters.find((c) => !c.words) ?? null;
+  /*
+   * The door's two views (turn 129): Outline is turn 127's; Continuity is where everyone is,
+   * chapters down and the cast across, computed from the summaries' placings alone. The view
+   * remembers itself for the session.
+   */
+  const [view, setView] = useState<ChaptersView>(() => rememberedChaptersView(prodId));
+  // The screen stays mounted when only the production changes (codex on PR 907): the view is
+  // the production's own, so it is read again for the next one.
+  useEffect(() => {
+    setView(rememberedChaptersView(prodId));
+  }, [prodId]);
+  const choose = (next: ChaptersView) => {
+    setView(next);
+    rememberChaptersView(prodId, next);
+  };
+  const cast = (world?.sheets ?? []).filter(
+    (sheet) => sheet.type === "character" && !sheet.retired && (sheet.production === undefined || sheet.production === prodId),
+  );
+  const rows = view === "continuity" ? continuityRows(chapters, cast.map((sheet) => sheet.id)) : [];
+  const derivedCount = chapters.filter((c) => c.continuity !== undefined && !("unreadable" in c.continuity)).length;
+  const placeName = (id: string) => world?.sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const pad = (order: number) => String(order).padStart(2, "0");
   return (
     <div className="fy-prodmain" data-screen="chapter-tree">
       <div className="fy-h1row">
-        <h1 className="fy-h1">Chapters</h1>
+        <h1 className="fy-h1">{view === "continuity" ? "Where everyone is" : "Chapters"}</h1>
         <span className="fy-h1row__meta">
-          {chapters.length} chapter{chapters.length === 1 ? "" : "s"} ·{" "}
+          {chapters.length} chapter{chapters.length === 1 ? "" : "s"} · {drafted} drafted ·{" "}
           {target === null
             ? `${bookWords.toLocaleString()} words`
             : `${bookWords.toLocaleString()} of ${target.toLocaleString()} words`}
         </span>
+        {isStory && (
+          <nav className="fy-seg" aria-label="Chapters view">
+            <button type="button" className={cx("fy-seg__item", view === "outline" && "fy-seg__item--active")} onClick={() => choose("outline")}>
+              Outline
+            </button>
+            <button type="button" className={cx("fy-seg__item", view === "continuity" && "fy-seg__item--active")} onClick={() => choose("continuity")}>
+              Continuity
+            </button>
+          </nav>
+        )}
         <span className="fy-h1row__push" />
         {isStory && (
-          <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
-            New chapter
-          </Button>
+          <>
+            <Button onClick={() => setSheet("export")} data-testid="export-manuscript">
+              <Download size={13} />
+              Export
+            </Button>
+            <Button onClick={beginImport} data-testid="import-manuscript">
+              <Upload size={13} />
+              Import
+            </Button>
+            <Button variant="primary" disabled={newChapter.pending} onClick={() => newChapter.create(chapters.length + 1)}>
+              New chapter
+            </Button>
+          </>
         )}
       </div>
-      {target !== null && (
+      {isStory && production && (
+        <ManuscriptExportSheet open={sheet === "export"} onClose={() => setSheet(null)} worldId={worldId} prodId={prodId} production={production} chapters={chapters} />
+      )}
+      {isStory && (
+        <ManuscriptImportSheet
+          open={sheet === "import"}
+          onClose={closeImport}
+          worldId={worldId}
+          prodId={prodId}
+          requestId={importRequest}
+          state={importState}
+        />
+      )}
+      {view === "outline" && imported !== null && (
+        <div className="fy-cont__meta" data-testid="imported-line">
+          imported · {imported.fileName} · {imported.created} chapter{imported.created === 1 ? "" : "s"} · after {imported.after}
+        </div>
+      )}
+      {view === "outline" && target !== null && (
         <div className="fy-ch__target fy-ch__target--page" role="progressbar" aria-valuemin={0} aria-valuemax={target} aria-valuenow={Math.min(bookWords, target)}>
           <span style={{ width: `${Math.min(100, Math.round((bookWords / target) * 100))}%` }} />
         </div>
       )}
-      {production && chapters.length > 0 ? (
+      {view === "continuity" && (
+        <div className="fy-cont__meta">
+          after each chapter · derived from the prose, never written into the world · {chapters.length} chapter{chapters.length === 1 ? "" : "s"}, {derivedCount} derived · a
+          quiet cell is carried from the chapter it names · nothing carries past a chapter not derived
+        </div>
+      )}
+      {production && chapters.length > 0 && view === "continuity" ? (
+        <div className="fy-cont" data-testid="continuity-table">
+          <table className="fy-cont__table">
+            <thead>
+              <tr>
+                <th className="fy-cont__th fy-cont__th--chapter">Chapter</th>
+                {cast.map((sheet) => (
+                  <th key={sheet.id} className="fy-cont__th">
+                    {sheet.name}
+                  </th>
+                ))}
+                <th className="fy-cont__th" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => {
+                const open = () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapter.id)}`);
+                const warn = row.stamp.kind === "stale";
+                return (
+                  <tr
+                    key={row.chapter.id}
+                    className={cx("fy-cont__row", warn && "fy-cont__row--warn")}
+                    role="button"
+                    tabIndex={0}
+                    data-stamp={row.stamp.kind}
+                    onClick={open}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        open();
+                      }
+                    }}
+                  >
+                    <td className="fy-cont__chapter">
+                      <span className="fy-mono">{pad(row.chapter.order)}</span>
+                      <span className="fy-cont__title">{row.chapter.title}</span>
+                      <span className="fy-mono">v{row.chapter.version}</span>
+                    </td>
+                    {row.cells.map((cell, i) =>
+                      cell === null || cell.gone || cell.unsure ? (
+                        <td
+                          key={cast[i]!.id}
+                          className={cx("fy-cont__cell fy-cont__cell--none", cell?.warn && "fy-cont__cell--warn")}
+                          {...(cell?.gone
+                            ? { title: `gone since ${pad(cell.since!)}${cell.warn ? " · that chapter moved" : ""}` }
+                            : cell?.unsure
+                              ? { title: "place dropped · the chapter said they moved and could not prove where" }
+                              : {})}
+                        >
+                          —
+                        </td>
+                      ) : (
+                        <td key={cast[i]!.id} className={cx("fy-cont__cell", cell.since !== undefined && "fy-cont__cell--carried", cell.warn && "fy-cont__cell--warn")}>
+                          {placeName(cell.where ?? "")}
+                          {cell.since !== undefined && <span className="fy-cont__since fy-mono">since {pad(cell.since)}</span>}
+                        </td>
+                      ),
+                    )}
+                    <td className={cx("fy-cont__stamp fy-mono", warn && "fy-cont__stamp--warn")}>{continuityRowStamp(row.stamp)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : production && chapters.length > 0 ? (
         <div className="fy-ledger">
-          {chapters.map((c) => (
+          {chapters.map((c) => {
+            // The outline (turn 127): the plan under the title, and the overview having moved.
+            const stale = overviewMoved(c, production?.story);
+            const pov = c.pov === undefined ? null : (world?.sheets.find((s) => s.id === c.pov)?.name ?? c.pov);
+            return (
             <button
               key={c.id}
               type="button"
@@ -2242,7 +2509,22 @@ export function ChapterTreeScreen() {
               onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)}
             >
               <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-              <span className="fy-row__name">{c.title}</span>
+              <span className="fy-row__plan">
+                <span className="fy-row__name">{c.title}</span>
+                {c.synopsis !== undefined && c.synopsis !== "" && <span className="fy-row__syn">{c.synopsis}</span>}
+                {(pov !== null || c.when !== undefined || stale) && (
+                  <span className="fy-row__marks">
+                    {pov !== null && <span className="fy-mono">{pov}</span>}
+                    {c.when !== undefined && <span className="fy-mono">{pov !== null ? "· " : ""}{c.when}</span>}
+                    {stale && (
+                      <span className="fy-row__moved">
+                        overview moved · v{c.draftedAgainst} → v{production?.story?.version}
+                      </span>
+                    )}
+                  </span>
+                )}
+              </span>
+              {c.source !== undefined && <Badge tone="outline">imported</Badge>}
               <Badge tone="outline">v{c.version}</Badge>
               <span className="fy-row__meta">
                 {c.words ? `${c.words.toLocaleString()} words` : c.status}
@@ -2252,7 +2534,8 @@ export function ChapterTreeScreen() {
                 <ChevronRight size={15} />
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <EmptyState
@@ -2269,6 +2552,197 @@ export function ChapterTreeScreen() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The export sheet (turn 131, SPEC-012 R-49, R-51): the format, what goes in and what is left
+ * out, the language an EPUB is marked with, and what was delivered. The file is built whole by
+ * the coordinator and lands under the world's exports folder; the sheet only names and counts.
+ */
+function ManuscriptExportSheet({
+  open,
+  onClose,
+  worldId,
+  prodId,
+  production,
+  chapters,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  production: ProductionBundle;
+  chapters: readonly ChapterSummary[];
+}) {
+  const [format, setFormat] = useState<"docx" | "epub">("docx");
+  const [language, setLanguage] = useState("en");
+  // A BCP 47 tag or nothing (codex on PR 916): "English" in the package would make an EPUB a
+  // reader may refuse, so the press waits until the field is one.
+  const languageOk = format !== "epub" || isManuscriptLanguage(language.trim());
+  const exportsState = useExports();
+  const withProse = chapters.filter((c) => (c.words ?? 0) > 0);
+  const words = withProse.reduce((sum, c) => sum + (c.words ?? 0), 0);
+  const leftOut = chapters.length - withProse.length;
+  const delivered = Object.entries(exportsState)
+    .filter(([id, entry]) => id.startsWith("ms_") && entry.productionId === prodId && (entry.worldId === undefined || entry.worldId === worldId))
+    .slice(-4);
+  // Only a host can open a folder (R-51): a browser session lists the file and has no folder to open.
+  const hosted = typeof window !== "undefined" && window.arke?.openDataFolder !== undefined;
+  const name = (output: string | null) => output?.split("/").pop() ?? "";
+  return (
+    <EditorDialog open={open} title="Export manuscript" subtitle={`${production.meta.title} · ${withProse.length} of ${chapters.length} chapters · ${words.toLocaleString()} words`} onClose={onClose} width={430} labelledBy="manuscript-export-title">
+      <div className="fy-exsheet" data-testid="manuscript-export">
+        <nav className="fy-seg" aria-label="Format">
+          <button type="button" className={cx("fy-seg__item", format === "docx" && "fy-seg__item--active")} onClick={() => setFormat("docx")}>
+            Word · .docx
+          </button>
+          <button type="button" className={cx("fy-seg__item", format === "epub" && "fy-seg__item--active")} onClick={() => setFormat("epub")}>
+            EPUB
+          </button>
+        </nav>
+        <div className="fy-ms__line">
+          {withProse.length} chapter{withProse.length === 1 ? "" : "s"} with prose, in order{leftOut > 0 ? ` · ${leftOut} planned left out` : ""}
+        </div>
+        <div className="fy-ms__line">
+          title page · chapter titles as headings · *emphasis* kept · *** as a scene break
+          {format === "epub" ? " · language " : ""}
+          {format === "epub" && (
+            <Input aria-label="Language" value={language} onChange={(e) => setLanguage(e.target.value)} style={{ width: 64, display: "inline-block" }} />
+          )}
+        </div>
+        {delivered.length > 0 && (
+          <div className="fy-ms__delivered">
+            <span className="fy-ms__label">Delivered</span>
+            {delivered.map(([id, entry]) => (
+              <div key={id} className="fy-ms__row" data-testid="manuscript-delivery">
+                <span className="fy-ms__row-mono">{entry.output ? name(entry.output) : id.slice(0, 9)}</span>
+                <span className="fy-ms__row-meta">
+                  {entry.status}
+                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
+                  {entry.error ? ` · ${entry.error}` : ""}
+                </span>
+                {entry.status === "running" && (
+                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
+                    Cancel
+                  </button>
+                )}
+                {entry.status === "done" && hosted && (
+                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && openExportsFolder(worldId)}>
+                    Show in folder
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {/* Said from the summaries, and the press stays live (codex on PR 916): a chapter written
+            outside the app carries no count until it is next saved, so the export reads the
+            chapters themselves and refuses in these words only when there is truly nothing. */}
+        {withProse.length === 0 && <div className="fy-ms__line fy-ms__line--warn">nothing to export · no chapter has prose yet</div>}
+        {!languageOk && <div className="fy-ms__line fy-ms__line--warn">language · not a BCP 47 tag</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            disabled={chapters.length === 0 || !languageOk || !worldId || !prodId}
+            onClick={() => worldId && prodId && exportManuscript(worldId, prodId, format, language.trim())}
+          >
+            {format === "docx" ? "Export .docx" : "Export EPUB"}
+          </Button>
+        </div>
+      </div>
+    </EditorDialog>
+  );
+}
+
+/**
+ * The import sheet (turn 131, R-50, R-51): the file read and shown before anything is written,
+ * the chapters as rows, and the press that counts them. Cancel writes nothing.
+ */
+function ManuscriptImportSheet({
+  open,
+  onClose,
+  worldId,
+  prodId,
+  requestId,
+  state,
+}: {
+  open: boolean;
+  onClose: () => void;
+  worldId: string | undefined;
+  prodId: string | undefined;
+  requestId: string | null;
+  state: ReturnType<typeof useManuscripts>[string] | undefined;
+}) {
+  const found = state?.chapters ?? [];
+  const after = state?.after ?? 0;
+  const shown = found.slice(0, 6);
+  const subtitle =
+    state?.state === "read" || state?.state === "importing"
+      ? `${state.fileName} · ${(state.words ?? 0).toLocaleString()} words · read, nothing written yet`
+      : state?.state === "refused"
+        ? (state.fileName ?? "")
+        : "reading…";
+  return (
+    <EditorDialog open={open} title="Import manuscript" subtitle={subtitle} onClose={onClose} width={430} labelledBy="manuscript-import-title">
+      <div className="fy-exsheet" data-testid="manuscript-import">
+        {state?.state === "refused" && <div className="fy-ms__line fy-ms__line--warn">could not read · {state.reason}</div>}
+        {state?.state === "failed" && <div className="fy-ms__line fy-ms__line--warn">could not import · {state.reason}</div>}
+        {(state?.state === "read" || state?.state === "importing") && (
+          <>
+            <div className="fy-ms__line">
+              {found.length} chapter{found.length === 1 ? "" : "s"}
+              {state.headingLevel !== undefined ? ` · ${state.headingLevel} as chapter titles` : " · no headings · the file name is the title"}
+              {(state.leftOut ?? 0) > 0 ? ` · ${state.leftOut} heading${state.leftOut === 1 ? "" : "s"} above left out` : ""}
+              {(state.notes ?? 0) > 0 ? ` · ${state.notes} footnote${state.notes === 1 ? "" : "s"} not carried` : ""}
+              {(state.links ?? 0) > 0 ? ` · ${state.links} link${state.links === 1 ? "" : "s"} kept as words` : ""} · after chapter {after} · nothing existing changes
+            </div>
+            {(state.levels?.length ?? 0) > 1 && (
+              <nav className="fy-seg" aria-label="Chapter level" data-testid="manuscript-levels">
+                {state.levels!.map((entry) => (
+                  <button
+                    key={entry.level}
+                    type="button"
+                    className={cx("fy-seg__item", entry.chosen && "fy-seg__item--active")}
+                    disabled={state.state === "importing"}
+                    onClick={() => worldId && prodId && requestId !== null && !entry.chosen && rereadManuscript(worldId, prodId, requestId, entry.level)}
+                  >
+                    {entry.level === "document" ? entry.label : `${entry.label} · ${entry.count}`}
+                  </button>
+                ))}
+              </nav>
+            )}
+            <div className="fy-ms__delivered">
+              {shown.map((chapter, index) => (
+                <div key={index} className="fy-ms__row" data-testid="manuscript-row">
+                  <span className="fy-ms__row-meta">{String(after + index + 1).padStart(2, "0")}</span>
+                  <span className="fy-ms__row-name">{chapter.title}</span>
+                  <span className="fy-ms__row-meta">{chapter.words.toLocaleString()} words</span>
+                </div>
+              ))}
+              {found.length > shown.length && <div className="fy-ms__line">and {found.length - shown.length} more</div>}
+            </div>
+          </>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          {(state?.state === "read" || state?.state === "importing") && (
+            <Button
+              variant="primary"
+              disabled={state.state === "importing" || !worldId || !prodId || requestId === null}
+              onClick={() => worldId && prodId && requestId !== null && importManuscript(worldId, prodId, requestId)}
+            >
+              Import {found.length} chapter{found.length === 1 ? "" : "s"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </EditorDialog>
   );
 }
 
@@ -3828,13 +4302,15 @@ function ArtifactPanel({
   const artifactItems: LibraryItem[] = artifacts.filter((artifact) => inLibrary.has(`artifact:${artifact.id}`)).map((artifact) => {
     const lane = laneOf(artifact);
     const name = artifact.file.split("/").pop() ?? artifact.file;
+    const access = resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "");
+    const why = access.ok ? null : access.reason;
     return {
       key: `artifact:${artifact.id}`,
       name,
-      sub: lane === null ? `${artifact.kind} · no picture or sound to place` : artifact.kind,
-      subTone: "muted",
+      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : artifact.kind),
+      subTone: why === null ? "muted" : "destructive",
       thumb:
-        artifact.kind === "image" || artifact.kind === "board" ? (
+        why !== null ? <Film size={12} /> : artifact.kind === "image" || artifact.kind === "board" ? (
           <Portrait worldSlug={slug} path={artifact.file} label="" radius={4} />
         ) : artifact.kind === "audio" ? (
           <Wave seed={artifact.file} width={34} height={12} />
@@ -3844,17 +4320,23 @@ function ArtifactPanel({
           <Scroll size={12} />
         ),
       lane,
-      why: lane === null ? `a ${artifact.kind} has no picture or sound to place` : null,
+      why: why ?? (lane === null ? `a ${artifact.kind} has no picture or sound to place` : null),
       used: usedArtifactIds.has(artifact.id),
       uses: usesOf((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifact.id),
-      add: onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
-      overlay: onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
-      drag: lane === null ? null : artifact.id,
+      add: why === null && onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
+      overlay: why === null && onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
+      drag: why !== null || lane === null ? null : artifact.id,
       search: `${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`,
       kind: "artifact",
       scenes: [...artifact.links],
     };
   });
+  for (const item of library) {
+    if (item.kind !== "artifact" || artifacts.some(artifact => artifact.id === item.artifactId)) continue;
+    artifactItems.push({ key: libraryItemKey(item), name: item.artifactId, sub: "Missing media", subTone: "destructive", thumb: <Film size={12} />,
+      lane: null, why: "This world does not have the media. Remove it from the Library or import the file.", used: usedArtifactIds.has(item.artifactId),
+      uses: usesOf(clip => clip.source.kind === "artifact" && clip.source.artifactId === item.artifactId), add: null, drag: null, search: item.artifactId, kind: "artifact", scenes: [] });
+  }
   // Every spoken line in the story (the Audio screen's dialogue rows): read or not, with the way
   // to read it, and a place on Dialogue once it is. Under `All` only the lines of shots in the
   // Library show; the audio filter shows them all, as the Audio address did.
@@ -5370,6 +5852,13 @@ function typingTarget(target: EventTarget | null): boolean {
  * the render plan decides what can be delivered, the same plan the preview draws. Sound options
  * are the timeline's mix, so choosing one is a timeline command, not a private export setting.
  */
+function exportAudioStatus(plan: RenderPlan): string | null {
+  if (plan.unmeasuredAudio?.length) return plan.audio.length === 0
+    ? "No sound — video audio not measured"
+    : "Some video sound is unavailable — measurement missing";
+  return plan.audio.length === 0 ? "No sound — no audible audio in this cut" : null;
+}
+
 function ExportSheet({
   open,
   onClose,
@@ -5401,8 +5890,10 @@ function ExportSheet({
   let cut: ReturnType<typeof resolvePictureTimeline> | null = null;
   let blockedBy: string | null = null;
   const nothingOnTimeline = "Nothing on the timeline yet. Add to the Library and place, or ask Arke.";
+  const legacyScopeRefusal = production ? legacyArtifactScopeRefusal(production, world?.artifacts ?? [], timelineState) : null;
   if (production === null) blockedBy = "No production here.";
   else if (timelineState.status === "invalid") blockedBy = `Timeline unavailable · ${timelineState.message}`;
+  else if (legacyScopeRefusal !== null) blockedBy = legacyScopeRefusal;
   else if (!ready) blockedBy = production.spine !== null ? "Open the song on the timeline first." : nothingOnTimeline;
   else {
     try {
@@ -5423,7 +5914,9 @@ function ExportSheet({
    * record with nothing on it is, to the person, the same state as no record at all.
    */
   const nothingPlaced = plan?.ok === true && plan.plan.items.length === 0;
-  if (nothingPlaced && blockedBy === null) blockedBy = nothingOnTimeline;
+  if (nothingPlaced && blockedBy === null) blockedBy = plan?.ok && plan.plan.unmeasuredAudio?.length
+    ? "Video audio has not been measured. Import the source video to measure it before exporting."
+    : nothingOnTimeline;
   const runtimeSec = plan?.ok === true ? plan.plan.totalSec : null;
   const gaps = cut?.gaps ?? 0;
   const covered = cut === null ? 0 : cut.covered;
@@ -5433,6 +5926,8 @@ function ExportSheet({
   const subtitleChoice =
     chosenSubtitleTrack !== null && subtitleMode !== "none" ? { trackId: chosenSubtitleTrack.id, mode: subtitleMode, sidecar: sidecarFormat } : undefined;
   const speechFirst = ready ? timelineState.timeline.mix.speechFirst : true;
+  const audioStatus = plan?.ok && blockedBy === null ? exportAudioStatus(plan.plan) : null;
+  const noAudio = plan?.ok === true && plan.plan.audio.length === 0;
   const mine = Object.entries(exportsState).filter(([, entry]) => entry.productionId === prodId);
   const revision = ready ? timelineState.timeline.revision : null;
   const episodic = production !== null && productionShape(production.meta).isEpisodic;
@@ -5504,8 +5999,12 @@ function ExportSheet({
         <div className="fy-exsheet__row">
           <span className="fy-exsheet__name">Audio</span>
           <span className="fy-exsheet__opts" role="group" aria-label="Audio">
-            {chip(speechFirst, "Stereo · ducked", () => onMix(true), !ready || commandsDisabled)}
-            {chip(!speechFirst, "Stereo · flat", () => onMix(false), !ready || commandsDisabled)}
+            {chip(speechFirst, "Stereo · ducked", () => onMix(true), !ready || commandsDisabled || noAudio)}
+            {chip(!speechFirst, "Stereo · flat", () => onMix(false), !ready || commandsDisabled || noAudio)}
+            {audioStatus && <span className="fy-exsheet__warn" role="status">{audioStatus}</span>}
+            {plan?.ok && !!plan.plan.unmeasuredAudio?.length && <span className="fy-clipmenu__note">
+              {plan.plan.unmeasuredAudio.map(item => item.label).join(", ")}
+            </span>}
           </span>
         </div>
         {blockedBy !== null && (
@@ -5523,11 +6022,19 @@ function ExportSheet({
             <span className="fy-exsheet__name">Episodes</span>
             {production.episodes.map((episode) => {
               const range = episodeTimelineRange(production, timelineState.timeline, episode.id);
-              const refused = range === null ? null : range.ok ? null : range.reason;
+              const episodePlan = range.ok ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState,
+                scope: { kind: "episode", episodeId: episode.id }, preset }) : null;
+              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : null;
+              const episodeAudio = episodePlan?.ok ? exportAudioStatus(episodePlan.plan) : null;
               return (
                 <div key={episode.id} className="fy-exsheet__episode">
                   <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
                   <span className="fy-exsheet__eptitle">{episode.release?.title ?? episode.title}</span>
+                  {episodeAudio && <span className="fy-exsheet__refused" role="status">
+                    {episodeAudio}
+                    {episodePlan?.ok && !!episodePlan.plan.unmeasuredAudio?.length &&
+                      <span className="fy-clipmenu__note">{episodePlan.plan.unmeasuredAudio.map(item => item.label).join(", ")}</span>}
+                  </span>}
                   {refused !== null ? (
                     <span className="fy-mono fy-exsheet__refused">{refused}</span>
                   ) : (
@@ -5626,7 +6133,10 @@ function AddToLibraryDialog({
   const scenes = production?.scenes ?? [];
   const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
   const shots = scene ? orderedShots(scene) : [];
-  const placeable = pickableArtifacts(artifacts).filter((artifact) => artifact.kind === "audio" || artifact.kind === "video" || artifact.kind === "image" || artifact.kind === "board");
+  const pickable = new Set(pickableArtifacts(artifactsFor(artifacts, production?.meta.id ?? "")).map(artifact => artifact.id));
+  const placeable = artifacts.filter(artifact => present.has(`artifact:${artifact.id}`) ||
+    (pickable.has(artifact.id) && resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "").ok && ["audio", "video", "image", "board"].includes(artifact.kind)));
+  const missing = library.filter((item): item is Extract<TimelineLibraryItem, { kind: "artifact" }> => item.kind === "artifact" && !artifacts.some(artifact => artifact.id === item.artifactId));
   const toggle = (key: string) =>
     (present.has(key) ? setDropped : setChosen)((current) => {
       const next = new Set(current);
@@ -5662,7 +6172,7 @@ function AddToLibraryDialog({
         <input type="checkbox" checked={checked} onChange={() => toggle(key)} />
         <span className="fy-libpick__name">{name}</span>
         <span className={cx("fy-mono fy-libpick__meta", tone === "destructive" && "fy-libpick__meta--destructive")}>
-          {already ? (dropped.has(key) ? "leaves the library" : "in the library") : meta}
+          {already ? (dropped.has(key) ? "leaves the library" : tone === "destructive" ? `${meta} · in the library` : "in the library") : meta}
         </span>
       </label>
     );
@@ -5710,10 +6220,14 @@ function AddToLibraryDialog({
         <div className="fy-libpick__col">
           <div className="fy-libpick__colhead">Artifacts</div>
           <div className="fy-libpick__list">
-            {placeable.length === 0 ? (
+            {placeable.length === 0 && missing.length === 0 ? (
               <div className="fy-libpick__empty">Nothing filed that can be placed. Upload from the Library.</div>
             ) : (
-              placeable.map((artifact) => row(`artifact:${artifact.id}`, artifact.file.split("/").pop() ?? artifact.file, artifact.kind))
+              <>{placeable.map((artifact) => {
+                const access = resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "");
+                return row(`artifact:${artifact.id}`, artifact.file.split("/").pop() ?? artifact.file, access.ok ? artifact.kind : "another production", access.ok ? "muted" : "destructive");
+              })}
+              {missing.map(item => row(libraryItemKey(item), item.artifactId, "missing media", "destructive"))}</>
             )}
           </div>
         </div>
@@ -5926,7 +6440,7 @@ export function CutScreen() {
     production && (!production.spine || timelineState.status === "ready") && timelineError === null
       ? buildRenderPlan({
           production,
-          artifacts,
+          artifacts: world?.artifacts ?? [],
           timeline: previewState,
           scope: { kind: "production" },
           preset: "review-cut",
@@ -5943,7 +6457,7 @@ export function CutScreen() {
    * editable so the clip can be removed, and Undo still works. Only an invalid or unresolvable
    * timeline record blocks editing.
    */
-  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : null;
+  const renderError = renderPlan !== null && !renderPlan.ok ? renderPlan.reason : view.kind === "unavailable" && timelineState.status !== "ready" ? view.reason : null;
   const planTotalSec = renderPlan?.ok ? renderPlan.plan.totalSec : null;
   const timelineOwnsFilm = previewState.status === "ready";
   const canvasSec = spineCut
@@ -5992,7 +6506,7 @@ export function CutScreen() {
     }
   }
   // Allocation must reserve the same legacy ids the first coordinator write migrates.
-  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, artifacts).timeline : null;
+  const placementTimeline = editableTimeline && production ? migrateLegacyCut(editableTimeline, production, world?.artifacts ?? []).timeline : null;
   /** The fence for the first materialising command; null while the song is unmeasured. */
   const sourceFingerprint = production ? timelineSourceFingerprint(production, masterDurationSec) : null;
   /*
@@ -6511,7 +7025,7 @@ export function CutScreen() {
       onDrop={event => { if (event.dataTransfer.files?.length) { event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files)); } }}>
       <ArtifactPanel
         worldId={worldId}
-        artifacts={artifacts}
+        artifacts={world?.artifacts ?? []}
         slug={slug}
         production={production}
         timeline={editableTimeline}
@@ -6797,6 +7311,8 @@ export function CutScreen() {
                   <>
                     {showScenes && <SceneBands views={views} totalFrames={totalFrames} />}
                     <PictureTrack
+                      production={production ?? undefined}
+                      artifacts={world?.artifacts ?? []}
                       onFileDrop={(files, frame) => importMedia(frame, files)}
                       timeline={shownTimeline}
                       views={views}
@@ -6828,6 +7344,8 @@ export function CutScreen() {
                           })}
                     />
                     <TypedTrackRows
+                      production={production ?? undefined}
+                      artifacts={world?.artifacts ?? []}
                       timeline={shownTimeline}
                       totalFrames={totalFrames}
                       frameRate={frameRate}
@@ -6927,7 +7445,7 @@ export function CutScreen() {
         <AddToLibraryDialog
           open={pickerOpen}
           production={production ?? null}
-          artifacts={artifacts}
+          artifacts={world?.artifacts ?? []}
           library={libraryItems}
           onClose={() => setPickerOpen(false)}
           onAdd={(added, removed) => {
@@ -6978,7 +7496,7 @@ export function CutScreen() {
               production={production}
               cut={cut}
               spineCut={spineCut}
-              artifacts={artifacts}
+              artifacts={world?.artifacts ?? []}
               selection={activeSelection}
               selectedClip={selectedAny?.clip ?? null}
               selectedTrack={selectedAny?.track ?? null}
@@ -7059,6 +7577,7 @@ export function CutScreen() {
  */
 type ExportView =
   | { kind: "scene-order" }
+  | { kind: "unavailable"; reason: string }
   | { kind: "no-track" }
   | { kind: "unmeasured" }
   | { kind: "silent"; durationSec: number }
@@ -7066,13 +7585,15 @@ type ExportView =
 
 function exportViewFor(
   world:
-    | { artifacts: readonly { id: string; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
+    | { artifacts: readonly { id: string; production?: string | null; mediaInfo?: { durationSec: number; hasAudio: boolean } }[] }
     | null
     | undefined,
-  production: Parameters<typeof deriveSpineCut>[0] | null | undefined,
+  production: ProductionBundle | null | undefined,
 ): ExportView {
   const spine = production?.spine;
   if (!production || !spine || !world) return { kind: "scene-order" };
+  const reason = legacyArtifactScopeRefusal(production, world.artifacts);
+  if (reason !== null) return { kind: "unavailable", reason };
   const track = world.artifacts.find((a) => a.id === spine.trackArtifactId);
   // A spine naming an artifact this world does not have is not the same as one nobody measured:
   // the coordinator has no path to probe, so no export can succeed and none should be offered.

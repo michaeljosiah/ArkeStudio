@@ -37,6 +37,7 @@ import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { openThread } from "../canon/authoring.js";
+import { MarkdownFile } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
@@ -290,6 +291,9 @@ export class FoundingBuildService {
       return;
     }
     const { route, notes } = await this.resolveImageRoute();
+    for (const character of blueprint.characters) {
+      if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
+    }
     if (!this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
@@ -305,6 +309,9 @@ export class FoundingBuildService {
       );
     }
     const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages });
+    if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
+      notes.push("Key art names a character who is never depicted — key art will not be made.");
+    }
     const generations = items.filter((item) => item.authorized && item.idempotencyKey !== undefined).length;
     const estimateMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     const plan: BuildReview = BuildReviewSchema.parse({
@@ -925,6 +932,7 @@ export class FoundingBuildService {
     if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
       return undefined;
     }
+    const neverDepicted = item.sheetType === "character" && "neverDepicted" in entity && entity.neverDepicted === true;
     const seed = entity.line ?? entity.description ?? entity.name;
     const draft = await createSheetFromSentence(store, gate, {
       sheetType: item.sheetType,
@@ -957,13 +965,30 @@ export class FoundingBuildService {
           scope: draft.scope,
           sheetType: item.sheetType,
           name: entity.name,
-          seed: `${seed}${description}${facts}`,
+          seed: `${seed}${description}${facts}${neverDepicted ? "\nThis character is never depicted. Preserve this rule; do not invent a visible appearance." : ""}`,
         })
         .then(
           () => undefined,
           (err: unknown) =>
             `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
         );
+    }
+    // The conversation's rule survives even a drafting agent that omits or contradicts it.
+    // Use the gate's recoverable draft edit before acceptance, so no unflagged sheet lands.
+    if (neverDepicted) {
+      const current = await gate.readManifest(draft.proposal.id);
+      const changed = await gate.mergeFormEdit({
+        proposalId: draft.proposal.id,
+        requestId: `never-depicted:${draft.proposal.id}`,
+        path: draft.path,
+        expectedDraftRevision: current.draftRevision,
+        edit(content) {
+          const doc = MarkdownFile.parse(content);
+          doc.setData({ neverDepicted: true });
+          return { content: doc.serialize() };
+        },
+      });
+      if (changed.status !== "updated") throw new Error("the character's depiction rule could not be saved");
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).

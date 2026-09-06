@@ -171,7 +171,7 @@ describe("scene detail owns the workspace", () => {
     await click(q(mounted, '[aria-label="Previous shot"]')!);
 
     // Staging writes the scene block and this shot's camera atomically.
-    const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Stage the shot") as unknown as HTMLElement;
+    const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement;
     await click(stageButton);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.kind, "scene-command");
@@ -184,9 +184,28 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(command.command.blocking?.cast.map((figure) => figure.sheetId), ["maren-kest"]);
     assert.ok((command.command.blocking?.sets.length ?? 0) >= 1, "the scene's location becomes set massing");
     assert.equal(staging.keys.length, 2);
-    assert.equal(staging.keys[0]!.anchor, "maren-kest", "a shot with a subject rides its keys on them");
+    assert.equal(staging.keys[0]!.anchor, undefined, "a push does not implicitly follow a performer");
     assert.ok(staging.keys[1]!.p[2] < staging.keys[0]!.p[2], "a push-in ends closer than it starts");
     assert.equal(staging.keys[1]!.t, 4, "the last key sits at the shot's length");
+  });
+
+  it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
+    const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
+    await click(all(mounted,".fy-sw__tab").find(tab=>tab.textContent==="Stage")!);
+    await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
+    const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
+    assert.ok(request);
+    const staging={keys:[{t:0,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]},{t:4,p:[0,1.5,4] as [number,number,number],l:[0,1,0] as [number,number,number]}],objectMotions:[{group:"vehicle",keys:[{t:0,p:[0,0,0] as [number,number,number]},{t:4,p:[0,0,5] as [number,number,number]}]}],authorship:{model:"test/vision",sourceVersion:request.baseVersion,assumptions:["Vehicle is stationary at opening."],assessment:"Framing inspected.",inspectedFrames:6}};
+    await apply({type:"stage.construction",at:"2026-09-06T12:00:00Z",worldId:request.worldId,requestId:request.requestId,sceneId:request.sceneId,shotId:request.shotId,baseVersion:request.baseVersion,status:"ready",round:2,detail:"Ready",draft:{staging,cast:[{sheetId:"maren-kest",parent:"vehicle",x:0,z:0}],sets:[{name:"Vehicle",group:"vehicle",x:0,z:0,w:2,h:1,d:4,solid:true}],assumptions:[],assessment:"Inspected",inspected:[]}});
+    assert.equal(sent.some(message=>message.kind==="scene-command"),false,"AI construction does not file changes");
+    assert.match(q(mounted,'[data-testid="workspace-stage"]')?.textContent??"",/Framing inspected/);
+    await click(all(mounted,'[data-testid="stage-moved"] button').find(button=>button.textContent==="Keep")!);
+    const write=sent.find((message):message is Extract<ClientMessage,{kind:"scene-command"}>=>message.kind==="scene-command");
+    assert.equal(write?.command.kind,"edit-stage");if(write?.command.kind!=="edit-stage")return;
+    assert.equal(write.command.blocking,undefined,"shared blocking is untouched");
+    assert.deepEqual(write.command.staging?.objectMotions,staging.objectMotions);
+    assert.deepEqual(write.command.staging?.authorship,staging.authorship);
+    assert.equal(write.command.staging?.cast?.[0]?.parent,"vehicle");
   });
 
   for (const entryContext of [
@@ -299,7 +318,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     await click(q(mounted, '[aria-label="Next shot"]')!);
-    await click(all(mounted, '[data-testid="workspace-stage"] button').find((button) => button.textContent === "Stage the shot")!);
+    await click(all(mounted, '[data-testid="workspace-stage"] button').find((button) => button.textContent === "Quick layout")!);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
     assert.equal(command.command.kind, "edit-stage");
     if (command.command.kind !== "edit-stage") return;
@@ -621,12 +640,12 @@ describe("scene detail owns the workspace", () => {
     await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
 
-    // Render with this asks the bench for the clip, not a still.
-    await click([...stage.querySelectorAll("button")].find((button) => button.textContent === "Render with this") as unknown as HTMLElement);
-    const open = sent.at(-1) as Extract<ClientMessage, { kind: "bench-open-subject" }>;
-    assert.equal(open.kind, "bench-open-subject");
-    assert.deepEqual(open.subject, { kind: "shot", shotId: "sh_12" });
-    assert.equal(open.mode, "video");
+    // A kept camera still needs a current exported reference before the Stage handoff.
+    const render = [...stage.querySelectorAll("button")].find(button=>button.textContent==="Render with this") as unknown as HTMLButtonElement;
+    assert.equal(render.disabled,true,"an unfiled blockout cannot claim motion-reference delivery");
+    const beforeRender=sent.length;
+    await click(render);
+    assert.equal(sent.length,beforeRender);
 
     // A nudge is a draft: nothing is written until Keep, and Keep writes the next version.
     await click(q(mounted, '[aria-label="Raise"]')!);
@@ -862,6 +881,71 @@ describe("scene detail owns the workspace", () => {
     assert.doesNotMatch(dock.textContent ?? "", /What it understood|Wrap up|story author/);
     assert.ok(q(mounted, ".fy-arke__who .fy-mono"), "the head names the subject under the title");
     assert.ok(q(mounted, ".fy-arke__log .fy-bubble--gate"), "the conversation remains the primary surface");
+  });
+
+  /*
+   * A refusal that names two points and asks which comes first has to put the points on the
+   * screen (issue 909). They are put away by default for room, and the person who was told to
+   * pick one could not find where.
+   */
+  it("opens What it understood when a wrap-up is refused", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const conversationId = "cv_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    state.world!.conversations = [{
+      id: conversationId as never,
+      title: "Five shots",
+      status: "open",
+      updatedAt: "2026-09-06T12:00:00.000Z",
+      pointCount: 2,
+      openProposalCount: 0,
+      entryContext: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+      notCarried: [],
+    }];
+    state.worldChat = {
+      conversationId,
+      status: "open",
+      initiative: "collaborate",
+      hasMore: false,
+      runStatus: null,
+      runStartedAt: null,
+      retrievalUnavailable: false,
+      attachments: [],
+      messages: [],
+      points: ["Lights out", "The count"].map((text, index) => ({
+        id: `cand_01J8F3K2QW9VZX4N7M0RTYB6H${index}` as never,
+        kind: "point",
+        subject: "Scene 4",
+        subjectKind: "new shot",
+        text,
+        settled: true,
+        revision: 1,
+      })),
+      seq: 3,
+    } as never;
+    const mounted = await mountState(state);
+    const isOpen = (): boolean => {
+      const details = q(mounted, ".fy-arke__points");
+      assert.ok(details, "the points are on the dock");
+      return details.hasAttribute("open") || (details as unknown as { open?: boolean }).open === true;
+    };
+    assert.equal(isOpen(), false, "put away by default (turn 92)");
+    await click(all(mounted, "button").find((button) => button.textContent?.startsWith("Wrap up") === true)!);
+    const attempt = sent.find(
+      (message): message is Extract<ClientMessage, { kind: "world-chat-wrap-up" }> => message.kind === "world-chat-wrap-up",
+    );
+    assert.ok(attempt, "the press left");
+    await apply({
+      at: "2026-09-06T12:00:01.000Z",
+      type: "world-chat.wrap-up-refused",
+      conversationId,
+      requestId: attempt.requestId,
+      reason: "materialise",
+      detail: "“Lights out” and “The count” change the same record and cannot be written together yet. Say which one you want first, and the other can follow.",
+    } as never);
+    assert.equal(isOpen(), true, "the refusal opens the points it names");
+    assert.match(q(mounted, ".fy-panel__refused")?.textContent ?? "", /Lights out/, "and says which two");
   });
 
   it("keeps durable video plans and their Generation options with the scene owner", async () => {

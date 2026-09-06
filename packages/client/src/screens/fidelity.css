@@ -2223,6 +2223,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   padding: 11px 15px;
   font: 400 13px/1.55 var(--font-sans);
 }
+/*
+ * The author's bubble in dark mode (issue 911). --primary is the inverted button colour, so
+ * in .dark it is near-white — and the author's own words became the single brightest object
+ * on an otherwise black world door, beside a reply that had darkened correctly. Two steps up
+ * the ramp from the reply's surface keeps the two speakers apart without lighting either.
+ */
+.dark .fy-bubble--user { background: var(--neutral-700); color: var(--foreground); }
 .fy-bubble--gate {
   align-self: flex-start;
   max-width: 440px;
@@ -4568,6 +4575,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   background: var(--primary); color: var(--primary-foreground);
   border-radius: 14px 14px 4px 14px; padding: 11px 15px; line-height: 1.55;
 }
+/* Same surface, same reason as .dark .fy-bubble--user (issue 911): the two chats must agree. */
+.dark .fy-chat__turn--user .fy-chat__bubble { background: var(--neutral-700); color: var(--foreground); }
 .fy-chat__turn--studio .fy-chat__bubble {
   background: var(--secondary);
   border-radius: 14px 14px 14px 4px; padding: 12px 15px;
@@ -6171,8 +6180,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-ovclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
 .fy-clipmenu { position: fixed; z-index: 40; min-width: 216px; background: var(--popover); border: 1px solid var(--border); border-radius: 9px; box-shadow: var(--shadow-md); padding: 5px; display: flex; flex-direction: column; }
 .fy-clipmenu__item { text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 9px; font: 400 12px var(--font-sans); color: var(--foreground); cursor: pointer; transition: var(--transition-control); }
-.fy-clipmenu__item:hover:not(:disabled) { background: var(--accent); }
-.fy-clipmenu__item:disabled { color: var(--neutral-400); cursor: default; }
+.fy-clipmenu__item:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--accent); }
+.fy-clipmenu__item:disabled, .fy-clipmenu__item[aria-disabled="true"] { color: var(--neutral-400); cursor: default; }
 .fy-clipmenu__note { font: 400 9px var(--font-mono); color: var(--neutral-400); padding: 3px 9px 5px; }
 
 @media (max-width: 1199px) {
@@ -6273,6 +6282,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--studio .fy-chat__bubble { border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 9px 11px; box-shadow: var(--shadow-xs); }
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--user { max-width: 82%; }
 .fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: var(--foreground); color: var(--background); border-radius: 10px; padding: 8px 11px; }
+/* --foreground inverts to near-white too; outranks the plain .dark rule above on specificity (issue 911). */
+.dark .fy-arke[data-conversation-first="true"] .fy-chat__turn--user .fy-chat__bubble { background: var(--neutral-700); color: var(--foreground); }
 .fy-arke__points { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--background); }
 .fy-arke__points > summary {
   cursor: pointer;
@@ -6592,6 +6603,82 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__draw > .fy-mono { width: 64px; flex: none; color: var(--neutral-400); font-size: 10px; }
 .fy-ch__draw-name { font: 500 12px var(--font-sans); min-width: 0; overflow-wrap: anywhere; }
 .fy-row--inhand { background: var(--secondary); }
+/* The outline (turn 127): the plan under the title, and the mark for an overview that moved. */
+.fy-row__plan { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.fy-row__syn { font: 400 12px/1.4 var(--font-sans); color: var(--muted-foreground); }
+.fy-row__marks { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+.fy-row__marks > .fy-mono { font-size: 10px; color: var(--neutral-400); }
+.fy-row__moved, .fy-ch__moved { padding: 2px 8px; border: 1px solid var(--warning); border-radius: 999px; color: var(--warning); font: 400 10px var(--font-mono); }
+.fy-sw__context > .fy-ch__moved { border-color: var(--warning); color: var(--warning); }
+.fy-ch__mark { display: inline-flex; align-items: center; gap: 5px; }
+.fy-ch__pick { border: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: pointer; }
+.fy-ch__pick:disabled { cursor: default; }
+.fy-sw__context .fy-ch__when { min-width: 40px; margin: 0; padding: 0; font: 400 10px var(--font-mono); color: inherit; }
+.fy-ch__synopsis--locked { color: var(--muted-foreground); }
+.fy-ch__implies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fy-ch__implies > li { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.fy-ch__implies > li > .fy-mono { width: 64px; flex: none; color: var(--neutral-400); font-size: 10px; padding-top: 2px; }
+.fy-ch__fact { flex: 1; min-width: 0; font: 400 12px/1.45 var(--font-sans); overflow-wrap: anywhere; }
+.fy-ch__dismiss { border: 0; background: transparent; color: var(--neutral-400); cursor: pointer; font: 400 13px var(--font-sans); padding: 0 2px; line-height: 1; }
+.fy-ch__dismiss:disabled { cursor: default; }
+/*
+ * The craft loop (turn 128). The chip beside a selection is a press at the selection's own rect,
+ * so it sits where the eye already is; the passage a revision changed is marked with a rule at
+ * the left the way the draft is, and the rest of the chapter stands untouched around it.
+ */
+.fy-ch__manuscript { position: relative; }
+.fy-ch__ask { position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); box-shadow: var(--shadow-xs); font: 500 10.5px var(--font-sans); color: var(--foreground); cursor: pointer; white-space: nowrap; transition: var(--transition-control); }
+.fy-ch__ask:hover { background: var(--accent); }
+.fy-ch__passage { border-left: 2px solid var(--foreground); padding-left: 12px; }
+.fy-ch__style { font: 400 11.5px/1.55 var(--font-sans); color: var(--muted-foreground); margin: 0; }
+.fy-arke__subject { color: var(--neutral-400); padding: 0 2px; }
+.fy-story__stylehead { display: flex; align-items: baseline; gap: 10px; margin-top: 6px; }
+.fy-story__stylehead > .fy-mono { color: var(--neutral-400); font-size: 10px; }
+/*
+ * Continuity (turn 129). The panel is the side's: a name, its place as a mark with the words that
+ * put it there as the mark's title, the lines under it as the chapter's own words, the stamp
+ * saying what the check proved. The door's table carries a place across chapters quietly, naming
+ * the chapter that placed it, and in warning past any chapter that has moved.
+ */
+.fy-ch__paneltitle--row { display: flex; align-items: baseline; gap: 8px; }
+.fy-ch__panelpush { flex: 1; }
+.fy-ch__derive { display: inline-flex; align-items: center; gap: 4px; border: 0; background: transparent; padding: 0; cursor: pointer; font: 500 11px var(--font-sans); color: var(--foreground); letter-spacing: 0; text-transform: none; }
+.fy-ch__derive:disabled { cursor: default; color: var(--muted-foreground); }
+.fy-ch__deriving { display: inline-flex; align-items: baseline; gap: 8px; }
+/* The voiced read (turn 130): the Voices rows carry the voice and the count; the band over the
+   manuscript names the block being read. */
+.fy-ch__who-count { font-size: 9.5px; width: 46px; text-align: right; flex: none; }
+.fy-ch__who-where--warn { color: var(--warning); }
+.fy-ch__band-line { font: 400 11.5px var(--font-sans); color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.fy-ch__scope { margin: -3px 0 0; font-size: 10px; }
+.fy-ch__moved--line { display: flex; border-radius: 8px; padding: 5px 9px; }
+.fy-ch__who { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.fy-ch__who > li { padding: 7px 0; border-bottom: 1px solid var(--border); }
+.fy-ch__who-head { display: flex; align-items: center; gap: 8px; }
+.fy-ch__who-name { font: 500 12px var(--font-sans); flex: 1; min-width: 0; }
+.fy-ch__who-where { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; }
+.fy-ch__line { position: relative; padding-left: 14px; margin-top: 3px; font: 400 11px/1.45 var(--font-sans); color: var(--muted-foreground); }
+.fy-ch__line::before { content: "·"; position: absolute; left: 2px; top: 0; color: var(--neutral-400); }
+.fy-ch__line--more { color: var(--neutral-400); }
+.fy-ch__stamp { margin: 6px 0 0; font-size: 9.5px; }
+.fy-cont__meta { margin-top: 8px; font: 400 10.5px var(--font-mono); color: var(--neutral-400); }
+.fy-cont { margin-top: 18px; overflow-x: auto; }
+.fy-cont__table { border-collapse: collapse; width: 100%; }
+.fy-cont__th { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font: 500 10.5px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
+.fy-cont__th--chapter { padding-left: 0; }
+.fy-cont__row { cursor: pointer; }
+.fy-cont__row:hover .fy-cont__title, .fy-cont__row:focus-visible .fy-cont__title { text-decoration: underline; }
+.fy-cont__chapter { padding: 8px 10px 8px 0; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.fy-cont__chapter > .fy-mono { font-size: 10px; margin-right: 8px; }
+.fy-cont__chapter > .fy-mono:last-child { margin: 0 0 0 8px; font-size: 9.5px; }
+.fy-cont__title { font: 500 12px var(--font-sans); }
+.fy-cont__cell { padding: 8px 10px; border-bottom: 1px solid var(--border); font: 400 11.5px var(--font-sans); white-space: nowrap; }
+.fy-cont__cell--none { font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-cont__cell--carried { color: var(--muted-foreground); }
+.fy-cont__cell--warn, .fy-cont__cell--warn .fy-cont__since { color: var(--warning); }
+.fy-cont__since { font-size: 9.5px; margin-left: 6px; }
+.fy-cont__stamp { padding: 8px 0 8px 10px; border-bottom: 1px solid var(--border); font-size: 9.5px; white-space: nowrap; text-align: right; }
+.fy-cont__stamp--warn { color: var(--warning); }
 @container (max-width: 900px) {
   .fy-ch__body { flex-direction: column; }
   .fy-ch__side { width: auto; }
@@ -7471,6 +7558,16 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-exsheet__status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9.5px; }
 .fy-exsheet__foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; font-size: 10px; color: var(--muted-foreground); border-top: 1px solid var(--border); }
 
+/* The manuscript sheets (turn 131): mono lines that wrap as the design draws them, a label with no flex basis of its own, and a compact delivered list. */
+.fy-ms__line { font: 400 10.5px/1.7 var(--font-mono); color: var(--neutral-400); white-space: normal; }
+.fy-ms__line--warn { color: var(--warning); }
+.fy-ms__label { font: 600 9.5px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); }
+.fy-ms__delivered { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
+.fy-ms__row { display: flex; align-items: center; gap: 8px; font-size: 10.5px; }
+.fy-ms__row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px var(--font-sans); }
+.fy-ms__row-mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 10.5px var(--font-mono); }
+.fy-ms__row-meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+
 /* Lanes as the target draws them (SPEC-039 R-13): a mark beside the name, a refusal while a wrong drag hovers, a strip for a new lane. */
 .fy-track__icon { display: inline-flex; align-items: center; color: var(--neutral-400); margin-right: 4px; flex: none; }
 .fy-trackbtns__remove { color: var(--neutral-400); }
@@ -7904,3 +8001,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swrow__fields input[type="number"] { width: 110px; }
 
 .fy-worldcard__empty { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 10px; background: var(--muted); color: var(--muted-foreground); font: 400 13px var(--font-sans); }
+
+.fy-swstage__construction { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; }
+.fy-swstage__construction input { flex: 1; min-width: 180px; }
+.fy-swstage__construction > span { font-size: 11px; opacity: .7; }
+.fy-swstage__construction details { width: 100%; }
+
+.fy-swstage__motion-mark { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
+.fy-swstage__motion-mark label { display:flex; flex-direction:column; max-width:80px; }
+.fy-swstage__motion-mark input, .fy-swstage__row input { width:72px; }
+.fy-swstage__set > label { display:inline-flex; flex-direction:column; max-width:72px; margin:4px; }
+.fy-swstage__set > label input { max-width:64px; }

@@ -4,6 +4,7 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ChapterSummary, ClientState } from "@arke-studio/contracts";
 import { ChapterTreeScreen } from "../src/screens/production.js";
+import { rememberChaptersView } from "../src/lib/continuity.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -24,7 +25,7 @@ function withChapters(chapters: ChapterSummary[]): ClientState {
       ...world,
       productions: [
         ...world.productions,
-        { ...salt, meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" }, chapters },
+        { ...salt, meta: { ...salt.meta, id: "inkbound", format: "story" as const, title: "Inkbound" }, story: { version: 3 }, chapters },
       ],
     },
   };
@@ -42,9 +43,21 @@ function render(chapters: ChapterSummary[]): string {
 }
 
 const CHAPTERS: ChapterSummary[] = [
-  { id: "the-same-ink", file: "02-the-same-ink", order: 1, title: "The same ink", status: "drafted", version: 4, words: 2930 },
-  { id: "neap", file: "01-neap", order: 2, title: "Neap", status: "drafted", version: 4, words: 3120 },
-  { id: "her-own-hand", file: "04-her-own-hand", order: 3, title: "Her own hand", status: "planned", version: 1 },
+  {
+    id: "the-same-ink",
+    file: "02-the-same-ink",
+    order: 1,
+    title: "The same ink",
+    status: "drafted",
+    version: 4,
+    words: 2930,
+    synopsis: "Odile's hand and the correction's are one hand.",
+    pov: "maren-kest",
+    when: "Neap · second night",
+    draftedAgainst: 2,
+  },
+  { id: "neap", file: "01-neap", order: 2, title: "Neap", status: "drafted", version: 4, words: 3120, draftedAgainst: 3 },
+  { id: "her-own-hand", file: "04-her-own-hand", order: 3, title: "Her own hand", status: "planned", version: 1, synopsis: "Maren writes the seventh bell in." },
 ];
 
 describe("the chapter tree renders resolved order", () => {
@@ -70,9 +83,65 @@ describe("the chapter tree renders resolved order", () => {
     assert.match(html, />New chapter</, "New chapter is a press on the door");
   });
 
+  it("is the outline: the plan under the title, and the mark for an overview that moved (turn 127)", () => {
+    const html = render(CHAPTERS);
+    assert.match(html, /Odile&#x27;s hand and the correction&#x27;s are one hand\./, "a drafted chapter shows its synopsis");
+    assert.match(html, /Maren writes the seventh bell in\./, "a planned chapter is its synopsis with no words");
+    assert.match(html, /Maren Kest/, "the point of view is shown by name, not by slug");
+    assert.match(html, /Neap · second night/);
+    assert.equal((html.match(/overview moved/g) ?? []).length, 1, "only the chapter drafted below the overview's version is marked");
+    assert.match(html, /overview moved · v2 → v3/, "the row says both versions, as the chip does");
+    assert.match(html, /2 drafted/, "the meta counts drafted chapters");
+  });
+
   it("a chapter without words shows its status instead", () => {
     const html = render(CHAPTERS);
     assert.match(html, /planned/, "the planned chapter says so");
     assert.match(html, /3,120 words/, "a drafted chapter shows its words, formatted");
+  });
+});
+
+/**
+ * Where everyone is (design turn 129, SPEC-012 R-43): the door's second view, remembered for
+ * the session, computed from the summaries' placings alone.
+ */
+describe("the door's continuity view (turn 129)", () => {
+  const H = (c: string) => `sha256:${c.repeat(64)}`;
+  const record = (hash: string, placed: Array<{ character: string; sheet?: string; present: boolean; where?: string }>) => ({
+    version: 4,
+    hash,
+    derivedAt: "2026-09-06T12:00:00.000Z",
+    passes: 1,
+    dropped: 0,
+    omitted: 0,
+    cut: 0,
+    placed,
+  });
+  const ROWS: ChapterSummary[] = [
+    { ...CHAPTERS[0]!, order: 1, bodyHash: H("a"), continuity: record(H("a"), [{ character: "Maren Kest", sheet: "maren-kest", present: true, where: "The Vigil" }]) },
+    { ...CHAPTERS[1]!, order: 2, bodyHash: H("b"), continuity: record(H("c"), []) },
+    { ...CHAPTERS[2]!, order: 3, bodyHash: H("d") },
+  ];
+
+  it("remembers the view; draws the cast across and the chapters down; carries a cell naming its chapter; stamps each row", () => {
+    rememberChaptersView("inkbound", "continuity");
+    const html = render(ROWS);
+    assert.match(html, /Where everyone is/);
+    assert.match(html, /fy-seg__item fy-seg__item--active[^>]*>Continuity/);
+    assert.match(html, /<th[^>]*>Maren Kest<\/th>/, "the cast across");
+    assert.match(html, /The Vigil/);
+    assert.match(html, /since 01/, "carried from the chapter that placed it, naming it");
+    assert.match(html, /derived · v4/);
+    assert.match(html, /chapter moved · derived against v4/);
+    assert.match(html, /not derived/);
+    assert.match(html, /3 chapters, 2 derived/);
+    assert.match(html, /nothing carries past a chapter not derived/);
+    assert.doesNotMatch(html, /role="progressbar"/, "the outline's bar is the outline's");
+
+    rememberChaptersView("inkbound", "outline");
+    const outline = render(ROWS);
+    assert.match(outline, /<h1[^>]*>Chapters<\/h1>/);
+    assert.doesNotMatch(outline, /continuity-table/);
+    assert.match(outline, /fy-seg__item fy-seg__item--active[^>]*>Outline/);
   });
 });

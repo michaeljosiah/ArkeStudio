@@ -117,6 +117,8 @@ export const SheetSchema = z
     role: z.string().optional(),
     /** Characters: e.g. "lead" | "support". Display vocabulary, not an enum the gate owns. */
     billing: z.string().optional(),
+    /** Characters whose identity must never be pictured (#905). Absence permits depiction. */
+    neverDepicted: z.boolean().optional(),
     /** Locations only. */
     region: z.string().optional(),
     /** Own monotonic version, independent of canon and of every other sheet (§2.4). */
@@ -442,6 +444,70 @@ export const StoryOverviewSchema = z
 export type StoryOverview = z.infer<typeof StoryOverviewSchema>;
 
 /**
+ * The style the book is written in (design turn 128): `productions/<id>/prose-style.json`.
+ *
+ * Its own file rather than fields on the overview, because it has its own version: a chapter is
+ * stamped with the overview version it was drafted against and called stale when that moves, and
+ * settling a sample passage must not mark every chapter in the book as written against an older
+ * plan. Read by every draft and every revision through `get_story`; applied to prose by nothing.
+ * The read schema bounds nothing (a long voice never drops the production from the scan); the
+ * action below carries the sizes turn 128 fixes.
+ */
+export const ProseStyleSchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** `first`, `close third`, `omniscient`, or the author's own words. */
+    pov: z.string().optional(),
+    tense: z.string().optional(),
+    voice: z.string().optional(),
+    samples: z.array(z.string()).optional(),
+  })
+  .strict();
+export type ProseStyle = z.infer<typeof ProseStyleSchema>;
+
+/**
+ * A fact a chapter's prose implies about the world and the world does not yet hold (turn 127).
+ *
+ * Kept on the chapter until proposed or dismissed: SPEC-012 R-6 has such facts proposed
+ * separately from the prose that surfaced them, and a list with a press is how they are
+ * proposed. The read schema bounds nothing — a chapter never vanishes from the scan for a long
+ * sentence — while the write schema below is the size the screen and the action accept.
+ */
+export const ChapterImpliedKindSchema = z.enum(["canon", "character", "location", "faction"]);
+export type ChapterImpliedKind = z.infer<typeof ChapterImpliedKindSchema>;
+/**
+ * Each item carries an id and a state (codex on turn 127): a reload keeps what was pressed, two
+ * facts in the same words stay two items, and Propose cannot stage one twice. Both are read as
+ * optional, so a chapter written before they existed still scans; the coordinator mints an id
+ * for any item that arrives without one.
+ */
+export const ChapterImpliedStateSchema = z.enum(["open", "proposed"]);
+export const ChapterImpliesSchema = z.array(
+  z
+    .object({
+      id: z.string().min(1).optional(),
+      kind: ChapterImpliedKindSchema,
+      what: z.string().min(1),
+      state: ChapterImpliedStateSchema.optional(),
+    })
+    .strict(),
+);
+export type ChapterImplies = z.infer<typeof ChapterImpliesSchema>;
+/** What a writer may put on the chapter: at most 12 facts of at most 300 characters (turn 127). */
+export const ChapterImpliesWriteSchema = z
+  .array(
+    z
+      .object({
+        id: z.string().min(1).max(40).optional(),
+        kind: ChapterImpliedKindSchema,
+        what: z.string().trim().min(1).max(300),
+        state: ChapterImpliedStateSchema.optional(),
+      })
+      .strict(),
+  )
+  .max(12);
+
+/**
  * A chapter's frontmatter as read off disk (§8.3; SPEC-012 R-4/D3). `order` is the one order
  * authority; `number` is the legacy shipped shape, read only when `order` is absent. Neither is
  * required — a chapter whose order cannot be resolved still parses and falls back to filename
@@ -465,6 +531,18 @@ export const ChapterFrontmatterSchema = z
       })
       .strict()
       .optional(),
+    /*
+     * The plan on the chapter (turn 127): what it is for, who sees it, when it is, what the
+     * draft implied, and which overview version the accepted draft was written against. Read
+     * unbounded, like every other field here.
+     */
+    synopsis: z.string().optional(),
+    pov: SlugSchema.optional(),
+    when: z.string().optional(),
+    implies: ChapterImpliesSchema.optional(),
+    draftedAgainst: z.number().int().min(1).optional(),
+    /** The file an imported chapter came from (turn 131); the first editor save drops it. */
+    source: z.string().min(1).optional(),
     created: z.string().optional(),
     updated: z.string().optional(),
   })
@@ -478,6 +556,197 @@ export type ChapterFrontmatter = z.infer<typeof ChapterFrontmatterSchema>;
  * not have to match it (fixture chapters are `01-neap.md` with `id: neap`). Prose is the body and
  * is not carried on the summary.
  */
+/**
+ * Continuity after a chapter (design turn 129, SPEC-012 §2.4.1): who is where and what they
+ * learn, derived from the prose in SPEC-015's extraction discipline and never authored. Each
+ * `knows` entry, and each `placed`, is a span of the chapter verified character for character
+ * — the quote is the line, so what the panel shows is what the check proved (R-40). Keyed to
+ * the chapter's `version` and body `hash`; the hash decides staleness, because a direct save
+ * keeps the version (R-39). The read schema bounds nothing; the derivation enforces the sizes
+ * turn 129 fixes (12 characters, 6 lines of 300) and counts what it cut.
+ */
+export const ChapterContinuityCharacterSchema = z
+  .object({
+    /** The name as the chapter gives it. */
+    character: z.string().min(1),
+    /** The cast's sheet, when one matches by id or name; a slug-shaped name is never mistaken for one. */
+    sheet: SlugSchema.optional(),
+    /** False only when the chapter says they have gone, evidenced by `placed` like a placing, with no `where`. */
+    present: z.boolean(),
+    /** A placing or a departure the check dropped: the chapter said they moved and could not prove where. Carried as nothing. */
+    unsure: z.literal(true).optional(),
+    /** A location slug, or the chapter's own words. */
+    where: z.string().optional(),
+    /** The span of the chapter that puts them where `where` says, or that says they have gone; without one, the claim is dropped. */
+    placed: z.string().optional(),
+    knows: z.array(z.string().min(1)),
+  })
+  .strict()
+  // A place, or a departure, with no words of the chapter behind it is no record of either,
+  // and a departure has no place (codex on PR 907): a file that claims otherwise is unreadable,
+  // not a source for the table.
+  .refine(
+    (entry) =>
+      entry.unsure
+        ? entry.present && entry.where === undefined && entry.placed === undefined
+        : entry.present
+          ? entry.where === undefined || (entry.placed !== undefined && entry.placed.length > 0)
+          : entry.where === undefined && entry.placed !== undefined && entry.placed.length > 0,
+    { message: "a placing or a departure needs the span of the chapter behind it; a departure has no place, and neither does an unsure entry" },
+  );
+export const ChapterContinuitySchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** The hash of the prose read — the body, not the file — compared with the summary's `bodyHash` (R-39). */
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    /** Passes the chapter was read in (R-41): one, unless it was longer than the model's window. */
+    passes: z.number().int().min(1),
+    /** Lines and placings the check dropped for not being in the chapter, counted so the stamp can say so. */
+    dropped: z.number().int().min(0),
+    /** Characters beyond the cap, counted rather than silently cut (R-40). */
+    omitted: z.number().int().min(0),
+    /** Lines beyond a character's sixth, verified or not, counted rather than silently cut (R-40). */
+    cut: z.number().int().min(0),
+    /** At most twelve (R-40): a record holding more is not one this build wrote, and reads as unreadable. */
+    characters: z.array(ChapterContinuityCharacterSchema).max(12),
+  })
+  .strict();
+export type ChapterContinuity = z.infer<typeof ChapterContinuitySchema>;
+export type ChapterContinuityCharacter = z.infer<typeof ChapterContinuityCharacterSchema>;
+
+/**
+ * The stamp and the placings, which is all the bundle carries (R-42): what the continuity table
+ * needs, and nothing a snapshot broadcast after every autosave should carry a book's worth of.
+ * The lines travel with the chapter on open and on the finished event.
+ */
+export const ChapterContinuitySummarySchema = z
+  .object({
+    version: z.number().int().min(1),
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    dropped: z.number().int().min(0),
+    omitted: z.number().int().min(0),
+    cut: z.number().int().min(0),
+    placed: z.array(
+      z
+        .object({
+          character: z.string().min(1),
+          sheet: SlugSchema.optional(),
+          present: z.boolean(),
+          unsure: z.literal(true).optional(),
+          where: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ChapterContinuitySummary = z.infer<typeof ChapterContinuitySummarySchema>;
+
+/**
+ * A record on disk that cannot be read — cut short, hand-edited, or written by a newer build —
+ * is not no record: it is a paid run the author may want to keep, so the summary says so and
+ * only a derivation replaces it. Nothing deletes it.
+ */
+export const ChapterContinuityStateSchema = z.union([ChapterContinuitySummarySchema, z.object({ unreadable: z.literal(true) }).strict()]);
+export type ChapterContinuityState = z.infer<typeof ChapterContinuityStateSchema>;
+
+export function summariseContinuity(record: ChapterContinuity): ChapterContinuitySummary {
+  return {
+    version: record.version,
+    hash: record.hash,
+    derivedAt: record.derivedAt,
+    passes: record.passes,
+    dropped: record.dropped,
+    omitted: record.omitted,
+    cut: record.cut,
+    placed: record.characters.map((entry) => ({
+      character: entry.character,
+      ...(entry.sheet !== undefined ? { sheet: entry.sheet } : {}),
+      present: entry.present,
+      ...(entry.unsure ? { unsure: true as const } : {}),
+      ...(entry.where !== undefined ? { where: entry.where } : {}),
+    })),
+  };
+}
+
+/**
+ * The cast of lines (design turn 130, SPEC-012 §2.4.2): each spoken line of a chapter as a
+ * verified span attributed to the character who speaks it, derived from the prose the way
+ * continuity is and never authored (R-44, R-45). A line names its paragraph and its occurrence
+ * in that paragraph, so a stale cast can tell one "No" from another. Keyed to the chapter's
+ * version and the hash of its prose (R-48).
+ */
+export const ChapterVoiceLineSchema = z
+  .object({
+    /** The name as the chapter gives it. */
+    speaker: z.string().min(1),
+    /** The cast's sheet, by exact id or a name exactly one sheet carries; a name otherwise. */
+    sheet: SlugSchema.optional(),
+    /** The paragraph the line is in, counted from 0 as `chapterParagraphs` counts. */
+    paragraph: z.number().int().min(0),
+    /** The n-th occurrence of the quote in that paragraph, from 0. */
+    occurrence: z.number().int().min(0),
+    /** The line, a span of the chapter verified character for character with whitespace folded. */
+    quote: z.string().min(1),
+  })
+  .strict();
+export const ChapterVoicesSchema = z
+  .object({
+    version: z.number().int().min(1),
+    /** The hash of the prose read — the body, not the file — compared with the summary's `bodyHash`. */
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    /** Lines the check dropped for not being in the chapter, or longer than a line. */
+    dropped: z.number().int().min(0),
+    /** Lines beyond the cap, counted rather than silently cut; they read as narration. */
+    omitted: z.number().int().min(0),
+    /** At most four hundred (R-45): a record holding more is not one this build wrote, and reads as unreadable. */
+    lines: z.array(ChapterVoiceLineSchema).max(400),
+  })
+  .strict();
+export type ChapterVoices = z.infer<typeof ChapterVoicesSchema>;
+export type ChapterVoiceLine = z.infer<typeof ChapterVoiceLineSchema>;
+
+/** The stamp, which is all the bundle carries (R-48): the lines come with the chapter. */
+export const ChapterVoicesSummarySchema = z
+  .object({
+    version: z.number().int().min(1),
+    hash: z.string().min(1),
+    derivedAt: IsoDateTimeSchema,
+    passes: z.number().int().min(1),
+    dropped: z.number().int().min(0),
+    omitted: z.number().int().min(0),
+    lines: z.number().int().min(0),
+    speakers: z.array(z.object({ speaker: z.string().min(1), sheet: SlugSchema.optional(), lines: z.number().int().min(1) }).strict()),
+  })
+  .strict();
+export type ChapterVoicesSummary = z.infer<typeof ChapterVoicesSummarySchema>;
+export const ChapterVoicesStateSchema = z.union([ChapterVoicesSummarySchema, z.object({ unreadable: z.literal(true) }).strict()]);
+export type ChapterVoicesState = z.infer<typeof ChapterVoicesStateSchema>;
+
+export function summariseVoices(record: ChapterVoices): ChapterVoicesSummary {
+  const speakers = new Map<string, { speaker: string; sheet?: string; lines: number }>();
+  for (const line of record.lines) {
+    const key = line.sheet ?? line.speaker;
+    const held = speakers.get(key);
+    if (held !== undefined) held.lines += 1;
+    else speakers.set(key, { speaker: line.speaker, ...(line.sheet !== undefined ? { sheet: line.sheet } : {}), lines: 1 });
+  }
+  return {
+    version: record.version,
+    hash: record.hash,
+    derivedAt: record.derivedAt,
+    passes: record.passes,
+    dropped: record.dropped,
+    omitted: record.omitted,
+    lines: record.lines.length,
+    speakers: [...speakers.values()].sort((a, b) => b.lines - a.lines || a.speaker.localeCompare(b.speaker)),
+  };
+}
+
 export const ChapterSummarySchema = z
   .object({
     id: SlugSchema,
@@ -486,6 +755,21 @@ export const ChapterSummarySchema = z
     title: z.string().min(1),
     status: z.string().min(1),
     version: z.number().int().min(1),
+    /**
+     * The file's content hash from the scan (turn 128): what a read of one chapter is fenced
+     * on, so a receipt for `get_chapter` can be re-observed from the bundle without the body,
+     * and what says a direct save moved the chapter while its version stayed.
+     */
+    hash: z.string().optional(),
+    /**
+     * The hash of the prose alone (turn 129, SPEC-012 R-39): what a continuity record is keyed
+     * to, so a plan typed into the frontmatter moves the file's hash and not this one.
+     */
+    bodyHash: z.string().optional(),
+    /** The stamp and the placings of the continuity record beside the chapter (turn 129), when one has been derived — or that the one there cannot be read. */
+    continuity: ChapterContinuityStateSchema.optional(),
+    /** The stamp of the cast of lines beside the chapter (turn 130), when one has been cast — or that the one there cannot be read. */
+    voices: ChapterVoicesStateSchema.optional(),
     words: z.number().int().min(0).optional(),
     draws: z
       .object({
@@ -494,6 +778,14 @@ export const ChapterSummarySchema = z
       })
       .strict()
       .optional(),
+    /** The plan (turn 127), so the door, the dashboard and Arke's `list_chapters` read one record. */
+    synopsis: z.string().optional(),
+    pov: SlugSchema.optional(),
+    when: z.string().optional(),
+    implies: ChapterImpliesSchema.optional(),
+    draftedAgainst: z.number().int().min(1).optional(),
+    /** The file an imported chapter came from (turn 131), while it is still the import's. */
+    source: z.string().min(1).optional(),
   })
   .strict();
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;

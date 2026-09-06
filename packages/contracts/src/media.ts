@@ -13,6 +13,9 @@ export const MediaInfoSchema = z
   .object({
     durationSec: z.number().positive(),
     hasAudio: z.boolean(),
+    width: z.number().int().positive().optional(),
+    height: z.number().int().positive().optional(),
+    frameRate: z.number().finite().positive().optional(),
     audioChannels: z.number().int().positive().optional(),
     audioSampleRateHz: z.number().int().positive().optional(),
   })

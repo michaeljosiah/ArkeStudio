@@ -89,6 +89,9 @@ export const StagingKeySchema = z
     p: z.tuple([z.number(), z.number(), z.number()]),
     /** Where the lens points — world metres, or an offset from `anchor`. */
     l: z.tuple([z.number(), z.number(), z.number()]),
+    anchorSpace: z.enum(["world", "local"]).optional(),
+    roll: z.number().finite().min(-180).max(180).optional(),
+    focalMm: z.number().finite().positive().max(1000).optional(),
     /** The cast sheet the position rides with. */
     anchor: SlugSchema.optional(),
     /** The cast sheet the aim follows live. */
@@ -106,6 +109,10 @@ export const StagingFigureSchema = z
     sheetId: SlugSchema,
     x: z.number(),
     z: z.number(),
+    parent: SlugSchema.optional(),
+    facing: z.number().finite().optional(),
+    y: z.number().finite().optional(),
+    height: z.number().finite().positive().max(20).optional(),
     /** Static greybox posture; absent is standing. */
     pose: z.enum(["sit", "lie"]).optional(),
     /** Where the figure ends the shot; absent holds still. */
@@ -123,6 +130,13 @@ export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 export const StagingSetSchema = z
   .object({
     name: z.string().min(1),
+    shape: z.enum(["box", "sphere", "cylinder", "mesh"]).optional(),
+    group: SlugSchema.optional(),
+    vertices: z.array(z.tuple([z.number().finite(),z.number().finite(),z.number().finite()])).min(3).max(2048).optional(),
+    triangles: z.array(z.number().int().nonnegative()).min(3).max(12288).optional(),
+    y: z.number().finite().optional(),
+    rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
+    solid: z.boolean().optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),
@@ -145,7 +159,33 @@ export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
 export const StageRigSchema = z.enum(["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"]);
 export type StageRig = z.infer<typeof StageRigSchema>;
 
+export const StagePerformanceKeySchema = z.object({
+  t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
+  y: z.number().finite().optional(), facing: z.number().finite().optional(),
+  pose: z.enum(["stand", "sit", "lie"]).optional(),
+}).strict();
+export type StagePerformanceKey = z.infer<typeof StagePerformanceKeySchema>;
+export const StagePerformanceSchema = z.object({
+  sheetId: SlugSchema, keys: z.array(StagePerformanceKeySchema).min(1).max(120),
+}).strict();
+export type StagePerformance = z.infer<typeof StagePerformanceSchema>;
+export const StageObjectMotionSchema = z.object({
+  group: SlugSchema,
+  keys: z.array(z.object({ t: z.number().finite().nonnegative(), p: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]), rotation: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]).optional(), easeIn: z.number().min(0).max(1).optional(), easeOut: z.number().min(0).max(1).optional() }).strict()).min(1).max(120),
+}).strict();
+export type StageObjectMotion = z.infer<typeof StageObjectMotionSchema>;
+export const StageAuthorshipSchema = z.object({
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  instruction: z.string().max(4000).optional(),
+  model: z.string().min(1), sourceVersion: z.number().int().positive(),
+  assumptions: z.array(z.string().max(1000)).max(20),
+  assessment: z.string().max(4000), inspectedFrames: z.number().int().nonnegative().max(24),
+}).strict();
+
 const ShotRigShape = {
+  objectMotions: z.array(StageObjectMotionSchema).max(30).optional(),
+  performances: z.array(StagePerformanceSchema).max(30).optional(),
+  authorship: StageAuthorshipSchema.optional(),
   rig: StageRigSchema.optional(),
   seed: z.number().int().min(0).optional(),
   rigIntensity: z.number().min(0).max(2).optional(),
@@ -182,6 +222,7 @@ export const ShotStagingSchema = z
      */
     playblast: z
       .object({
+        sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         artifactId: ArtifactIdSchema,
         openingFrameArtifactId: ArtifactIdSchema.optional(),
         version: z.number().int().min(1),
@@ -207,6 +248,13 @@ export const ShotStagingSchema = z
     }
   });
 export type ShotStaging = z.infer<typeof ShotStagingSchema>;
+
+/**
+ * The title a shot is born with. A title cannot be blank on disk, so this literal is how "no
+ * title yet" is stored — which means prompt assembly has to know it, or the words `Untitled
+ * shot.` reach the image model as content on every shot nobody has named (issue 910).
+ */
+export const UNTITLED_SHOT = "Untitled shot";
 
 export const ShotSchema = z
   .object({

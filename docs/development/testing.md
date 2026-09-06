@@ -13,7 +13,7 @@ npm run build
 npm test
 ```
 
-Lint runs the source-text checker and oxlint over packages/apps; it does not lint all maintenance scripts. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
+Lint checks source text, rejects duplicate `specId` declarations under `docs/specifications/`, and runs oxlint over packages/apps; it does not lint all maintenance scripts. Run `node scripts/check-spec-ids.mjs` to check specification identity alone, including new files before staging them. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
 
 For one workspace, run these from the repository root:
 
@@ -66,3 +66,16 @@ For an actual encode/decode of the zero-scene import, detach and edit journey, s
 [ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.
+
+## AI Stage and camera-reference changes
+
+Follow [Stage evaluation](stage-evaluation.md) for fixture constraints, the actual WebGL/MP4 gate
+and separate live-model cinematic evaluation. Focused regression set from the repository root:
+
+```powershell
+node --import tsx --test packages/contracts/test/staging.test.ts packages/contracts/test/stage-scenes.test.ts packages/coordinator/test/productions/stage-construction.test.ts packages/coordinator/test/productions/stage-playblast.test.ts
+```
+
+Use the client scene-workspace tests for Keep/Discard and scope controls, and coordinator scene
+commands/bench tests for versioning, restore and reference admission. No paid generation is part
+of the normal gate.

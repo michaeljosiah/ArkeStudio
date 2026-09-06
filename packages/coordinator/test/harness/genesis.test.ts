@@ -125,7 +125,7 @@ function talkingAdapter(json = DRAFT_JSON): HarnessAdapter & { prompts: string[]
     async dispatchAsync(input) {
       const text = input.parts.map((p) => p.text).join("");
       adapter.prompts.push(text);
-      const asked = adapter.prompts.length > 1;
+      const asked = text.startsWith("Now write ./draft.json");
       void (async () => {
         push({
           type: "message.completed",
@@ -375,6 +375,22 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     assert.equal(adapter.prompts.length, 2, "one conversation turn, then one narrow ask");
     const statuses = events.filter((e) => e.type === "genesis.status").map((e) => (e.type === "genesis.status" ? e.status : ""));
     assert.deepEqual(statuses, ["running", "completed"]);
+
+    const followUp = "The entry is in his own hand, dated three days from now. What does it cost him?";
+    await genesis.run(dir, "gen-talk", followUp);
+    for (const prompt of [adapter.prompts[0]!, adapter.prompts[2]!]) {
+      assert.match(prompt, /answer what they actually asked/);
+      assert.match(prompt, /costs and consequences/);
+      assert.match(prompt, /never report file writes[\s\S]*internal filenames, sandbox\npaths/);
+      assert.match(prompt, /Resume this conversation even if the previous turn was a private request/);
+    }
+    assert.ok(adapter.prompts[2]!.endsWith(followUp), "the follow-up remains the author's own words");
+    assert.ok(!adapter.prompts[2]!.includes("./draft/characters/"), "the file contract is only sent once");
+    assert.deepEqual(
+      events.flatMap((e) => e.type === "genesis.turn" && e.role === "gate" ? [e.text] : []),
+      ["The Pallid Beacon — pale stone in black water.", "The Pallid Beacon — pale stone in black water."],
+      "private recovery JSON never becomes an author-facing turn",
+    );
   });
 
   it("tells the agent what it has been handed, once, and not again after that", async () => {

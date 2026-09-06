@@ -31,12 +31,15 @@ import {
   type ScenePlan,
   type Season,
   type Series,
+  type ProseStyle,
   type StoryOverview,
   type SceneRecord,
   type WorldBundle,
   type Capability,
   orderedShots,
   countWords,
+  ChapterFrontmatterSchema,
+  type ChapterImplies,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -380,18 +383,37 @@ export async function productionCreatedBy(worldDir: string, requestId: string): 
  * helper so scene drafting and chapter drafting steer from the same accepted facts — the UI
  * says the overview steers drafting, and this is where that claim is made true.
  */
-export function overviewSteer(story: StoryOverview | null | undefined): string {
-  if (!story) return "";
+export function overviewSteer(story: StoryOverview | null | undefined, style?: ProseStyle | null): string {
+  const lines = story
+    ? [
+        ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
+        ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
+        ...(story.acts ?? []).map(
+          (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
+        ),
+        ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+      ]
+    : [];
+  const overview = story && lines.length > 0
+    ? `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`
+    : "";
+  return overview + proseStyleSteer(style);
+}
+
+/**
+ * The style the book is written in, as a drafting instruction (turn 128), or "" when none is
+ * settled. Every draft and every revision reads it; nothing applies it to prose by itself.
+ */
+export function proseStyleSteer(style: ProseStyle | null | undefined): string {
+  if (!style) return "";
   const lines = [
-    ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
-    ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
-    ...(story.acts ?? []).map(
-      (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
-    ),
-    ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+    ...(style.pov !== undefined ? [`- point of view: ${style.pov}`] : []),
+    ...(style.tense !== undefined ? [`- tense: ${style.tense}`] : []),
+    ...(style.voice !== undefined ? [`- voice: ${style.voice}`] : []),
+    ...(style.samples ?? []).map((sample) => `- sounds like: "${sample}"`),
   ];
   if (lines.length === 0) return "";
-  return `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`;
+  return `\n\nThe prose style (v${style.version}) is how this book is written — hold to it in every sentence:\n${lines.join("\n")}`;
 }
 
 /**
@@ -692,7 +714,7 @@ export async function createChapter(
 }
 
 /** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
-async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
+export async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
   let highest = 0;
   for (const file of files) {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
@@ -721,6 +743,8 @@ export async function saveChapter(
   // `words` (the chapter tree, the story dashboard) would otherwise report the count the
   // chapter had when it was last stamped by hand, indefinitely.
   doc.setData({ words: countWords(body) });
+  // An imported chapter is the author's from its first save (turn 131): the mark comes off.
+  doc.dropData("source");
   // The base is the file the editor read when the caller says so (turn 126), not the file as
   // it is now: hashing the live bytes here would make every save pass, including one written
   // over an accepted draft the editor never saw. The committer refuses a moved base.
@@ -752,7 +776,7 @@ export async function openChapter(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; versions: number[] }> {
+): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; bodyHash: string; versions: number[] }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
@@ -776,7 +800,67 @@ export async function openChapter(
     .map((match) => Number(match[1]))
     .filter((candidate) => candidate >= 1 && candidate < version)
     .sort((a, b) => a - b);
-  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), versions };
+  // The hash of the prose alone beside the file's (turn 129): what a continuity record is keyed
+  // to, normalised exactly as the scanner normalises it for the summary's `bodyHash`.
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), bodyHash: sha256(body), versions };
+}
+
+/**
+ * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+ * the draft implied, saved in place like the prose — no proposal, no version cut (SPEC-012
+ * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
+ * as a null the read schema would refuse.
+ */
+export async function editChapterPlan(
+  store: WorldStore,
+  productionId: string,
+  chapterFile: string,
+  changes: {
+    title?: string;
+    synopsis?: string | null;
+    pov?: string | null;
+    when?: string | null;
+    implies?: ChapterImplies | null;
+  },
+): Promise<void> {
+  const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = MarkdownFile.parse(live);
+  const next: Record<string, unknown> = { ...doc.data };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) continue;
+    if (value === null || (typeof value === "string" && value.trim() === "")) delete next[key];
+    else next[key] = value;
+  }
+  if (Array.isArray(next["implies"])) next["implies"] = withImpliedIds(next["implies"] as ChapterImplies);
+  // A point of view must be a character the world holds; anything else is a typo written into
+  // frontmatter with the confidence of a fact.
+  if (typeof next["pov"] === "string" && !store.getBundle().sheets.some((sheet) => sheet.id === next["pov"] && sheet.type === "character")) {
+    throw new Error(`sheet ${String(next["pov"])} is not a character in this world`);
+  }
+  doc.data = next;
+  doc.setData({});
+  ChapterFrontmatterSchema.parse(doc.data);
+  await store.commit({
+    kind: "chapter-plan",
+    source: "editor",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true }],
+  });
+}
+
+/**
+ * Every implied fact carries an id and a state (codex on turn 127). Minted here, at the write,
+ * for any item that arrives without one — Arke's action and the screen both send bare facts —
+ * and kept for any that has one, so a state written by Propose survives the next edit.
+ */
+export function withImpliedIds(implies: ChapterImplies): ChapterImplies {
+  const seen = new Set<string>();
+  return implies.map((fact, index) => {
+    let id = fact.id ?? `if_${createHash("sha256").update(`${fact.kind}\n${fact.what}\n${index}`).digest("hex").slice(0, 10)}`;
+    while (seen.has(id)) id = `${id}-${index}`;
+    seen.add(id);
+    return { ...fact, id, state: fact.state ?? "open" };
+  });
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */
