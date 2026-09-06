@@ -249,6 +249,13 @@ export const ShotStagingSchema = z
   });
 export type ShotStaging = z.infer<typeof ShotStagingSchema>;
 
+/**
+ * The title a shot is born with. A title cannot be blank on disk, so this literal is how "no
+ * title yet" is stored — which means prompt assembly has to know it, or the words `Untitled
+ * shot.` reach the image model as content on every shot nobody has named (issue 910).
+ */
+export const UNTITLED_SHOT = "Untitled shot";
+
 export const ShotSchema = z
   .object({
     visualFacts: ShotVisualFactsSchema.optional(),

@@ -38,7 +38,7 @@ import {
 import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
-import { effectiveFraming } from "./scene.js";
+import { effectiveFraming, UNTITLED_SHOT } from "./scene.js";
 import { packBoards, packShotsFor } from "./boards.js";
 import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
@@ -298,7 +298,14 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
       ? sheets.find((s) => s.id === scene.inherits!.location)
       : undefined;
 
-  // 1 — summary: what the clip is, led by the art direction (R-6).
+  // 1 — summary: who and where, then the shot's name. The art direction is not said here: it
+  // used to lead this line as well as close the prompt, and measured on a real production that
+  // made ~40% of every image prompt an exact duplicate of another 40%, biasing the model toward
+  // the repeated look and away from the one block that differs between shots (issue 910). It is
+  // said once, in the trailing block, where D6 says these models look for what must not drift.
+  //
+  // A shot still carrying its birth title has no name, and contributes none: the literal
+  // `Untitled shot.` was reaching the model as content on every unnamed shot in a scene.
   const who = cast.map((c) => c.sheet.name);
   const whoClause =
     who.length === 0
@@ -307,10 +314,10 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
         ? who[0]!
         : `${who.slice(0, -1).join(", ")} and ${who[who.length - 1]!}`;
   const where = [location?.name, scene.inherits?.timeOfDay].filter((s): s is string => !!s).join(", ");
+  const title = shot.title.trim() === UNTITLED_SHOT ? "" : shot.title;
   const summary = [
-    sentence(style),
     whoClause && where ? sentence(`${whoClause} at ${where}`) : sentence(whoClause || where),
-    sentence(shot.title),
+    sentence(title),
   ]
     .filter((s) => s.length > 0)
     .join(" ");
@@ -443,13 +450,15 @@ export function assembleBoardPrompt(input: {
       capability: "video",
     }),
   );
+  // The look leads the head and is not also carried as each shot's `Throughout:` block — the two
+  // are different strings, so the dedupe below never caught the repeat (issue 910).
   const context = [
-    input.artDirection,
+    styleFor(input.world, input.artDirection),
     location?.name,
     input.scene.inherits?.timeOfDay,
     input.scene.defaults?.lighting,
     input.aspect,
-    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing, blocks.persistent]),
+    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing]),
   ].filter((part, index, all): part is string =>
     typeof part === "string" && part.trim().length > 0 && all.indexOf(part) === index,
   );

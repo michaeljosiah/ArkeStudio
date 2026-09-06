@@ -6,6 +6,7 @@ import {
   resolveCast,
   stagingMoveWord,
   effectiveStageBlocking,
+  UNTITLED_SHOT,
   type ArtifactSidecar,
   type ClientMessage,
   type ProductionBundle,
@@ -620,7 +621,7 @@ export function SceneFlow({
             onCommand({
               kind: "insert-shot",
               at: last === undefined ? { atStart: true } : { after: last.id },
-              shot: { title: "Untitled shot", description: "" },
+              shot: { title: UNTITLED_SHOT, description: "" },
             });
           },
         },
@@ -954,7 +955,7 @@ export function SceneFlow({
                 onClick={() => onCommand({
                   kind: "insert-shot",
                   at: { atStart: true },
-                  shot: { title: "Untitled shot", description: "" },
+                  shot: { title: UNTITLED_SHOT, description: "" },
                 })}
               >
                 Add first shot

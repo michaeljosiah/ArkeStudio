@@ -17,6 +17,7 @@ import {
   resolveCast,
   assembleBlocks,
   assemblePrompt,
+  UNTITLED_SHOT,
   assemblePassBlocks,
   joinBlocks,
   spatialLayoutFor,
@@ -1308,7 +1309,24 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
-  it("states the art direction twice for a pass and never once per beat", async () => {
+  it("states the art direction once per shot, and an unnamed shot contributes no title (issue 910)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const named = shot(1, 6, "@maren-kest grips the rail");
+    const unnamed: Shot = { ...named, title: UNTITLED_SHOT };
+    const look = bundle.artDirection.description;
+
+    const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([named]), named, bundle.artDirection.description);
+    assert.equal(prompt.split(look).length - 1, 1, "the look leads nothing and trails once (R-6)");
+    assert.match(prompt, /Throughout: /, "it is the trailing block that survives (D6)");
+    assert.match(prompt, /Shot 1\./, "a named shot still says its name");
+
+    const untitled = assemblePrompt(bundle.meta, bundle.sheets, scene([unnamed]), unnamed, bundle.artDirection.description);
+    assert.ok(!untitled.includes(UNTITLED_SHOT), "the birth title is not content");
+    await store.close();
+  });
+
+  it("states the art direction once for a pass and never once per beat", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
     const production = bundle.productions[0]!;
@@ -1341,7 +1359,7 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     const prompt = (request!.params as { prompt: string }).prompt;
     const look = bundle.artDirection.description;
     const occurrences = prompt.split(look).length - 1;
-    assert.equal(occurrences, 2, "once leading the summary, once as the standing constraint (R-6)");
+    assert.equal(occurrences, 1, "once as the standing constraint, not also leading the summary (R-6, issue 910)");
     assert.equal(prompt.match(/\[shot \d+ · /g)?.length, 4, "all four beats are present");
     await store.close();
   });
