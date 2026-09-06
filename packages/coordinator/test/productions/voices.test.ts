@@ -64,6 +64,14 @@ describe("what the model said, held to the chapter (R-45)", () => {
     assert.deepEqual(merged.lines.map((line) => `${line.paragraph}:${line.occurrence}`), ["1:0", "1:1", "2:0"], "in reading order");
   });
 
+  it("the same words said in several paragraphs are placed in each of them, in order (codex on PR 914)", () => {
+    const body = "“No.”\n\n“No.”\n\n“No.”";
+    const raw: RawVoices = { lines: ["A", "B", "C", "D"].map((speaker) => ({ speaker, quote: "“No.”" })) };
+    const verified = verifyVoices(raw, body, body);
+    assert.deepEqual(verified.lines.map((line) => [line.speaker, line.paragraph, line.occurrence]), [["A", 0, 0], ["B", 1, 0], ["C", 2, 0]]);
+    assert.equal(verified.dropped, 1, "a fourth No the chapter does not hold");
+  });
+
   it("the cap keeps the first four hundred lines in reading order and counts the rest as omitted", () => {
     const body = Array.from({ length: 450 }, (_, i) => `Line ${i} was said.`).join("\n\n");
     const pass = { lines: Array.from({ length: 450 }, (_, i) => ({ speaker: "Maren Kest", paragraph: i, occurrence: 0, quote: `Line ${i} was said.` })), dropped: 0 };

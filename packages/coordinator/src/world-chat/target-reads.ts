@@ -11,10 +11,12 @@ import {
   spineTimelineFingerprint,
   storyShotFrames,
   storyTimelineFingerprint,
+  summariseVoices,
   type ArkeReadRequirement,
   type ArkeReadTarget,
   type ArkeTargetReadPage,
   type ArkeTargetReadTool,
+  type ChapterVoices,
   type DispatchPlan,
   type Job,
   type ProductionBundle,
@@ -406,6 +408,20 @@ function chunks(text: string): Row[] {
   return rows;
 }
 
+/**
+ * A cast in bounded rows (codex on PR 914): the stamp, then the lines fifty at a time, so the
+ * row limit and the cursor can split a record of four hundred lines that would otherwise reach
+ * a turn as one row twice the fallback budget.
+ */
+function voiceRows(voices: ChapterVoices): Row[] {
+  const rows: Row[] = [{ key: "voices", value: summariseVoices(voices) }];
+  for (let offset = 0; offset < voices.lines.length; offset += VOICE_ROW_LINES) {
+    rows.push({ key: `voices:${padded(offset)}`, value: { offset, lines: voices.lines.slice(offset, offset + VOICE_ROW_LINES) } });
+  }
+  return rows;
+}
+const VOICE_ROW_LINES = 50;
+
 function productionOf(bundle: WorldBundle, productionId: string): ProductionBundle | undefined {
   return bundle.productions.find((production) => production.meta.id === productionId);
 }
@@ -666,7 +682,7 @@ export class WorldChatTargetReads {
           ? [
               { key: "metadata", value: chapter },
               ...(continuity !== null ? [{ key: "continuity", value: continuity }] : []),
-              ...(voices !== null ? [{ key: "voices", value: voices }] : []),
+              ...(voices !== null ? voiceRows(voices) : []),
               ...chunks(body ?? ""),
             ]
           : [];

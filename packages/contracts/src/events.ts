@@ -687,6 +687,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       characterCount: z.number().int().min(0),
       estimatedMicroUsd: z.number().int().min(0),
       confirmationToken: z.string().min(1).optional(),
+      /** The cloud voices a priced page would send its words to, by label and provider (R-47). */
+      voices: z.array(z.object({ label: z.string().min(1), provider: z.string().min(1) }).strict()).optional(),
       error: z.string().optional(),
     })
     .strict(),

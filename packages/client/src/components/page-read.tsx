@@ -8,8 +8,9 @@ import {
   playbackSnapshot,
   useQueueAt,
 } from "../lib/audio.js";
-import { readProsePage, useStore, useVoiceAudio, useVoiceParts, stopProsePage } from "../lib/store.js";
+import { readProsePage, subscribeVoiceUploadConfirmations, useStore, useVoiceAudio, useVoiceParts, stopProsePage } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
+import { RemoteVoiceUploadConfirmation } from "./remote-voice-upload-confirmation.js";
 import { Button } from "./ui.js";
 
 /**
@@ -33,8 +34,10 @@ export interface PageRead {
   at: number | null;
   count: number;
   failure: string | null;
-  /** Present only while a charged read is waiting to be answered. */
-  cost: { characters: number; priced: string; confirm: () => void } | null;
+  /** Present only while a charged read is waiting to be answered; `voices` names each cloud voice the words would go to. */
+  cost: { characters: number; priced: string; voices: string[]; confirm: () => void } | null;
+  /** Present while a cloned voice's recording waits for leave to go to a remote engine (turn 130). */
+  upload: { destination: string; confirm: () => void } | null;
   begin: () => void;
   stop: () => void;
   skip: (direction: 1 | -1) => void;
@@ -52,8 +55,8 @@ export function usePageRead(input: {
   worldSlug: string | undefined;
   /** The blocks this screen reads, in the order it reads them. Empty ones never get here. */
   blocks: readonly PageReadBlock[];
-  /** Ask for the page. Called again with the token when a charged read is confirmed. */
-  start: (requestId?: string, confirmationToken?: string) => string;
+  /** Ask for the page. Called again with the token when a charged read is confirmed, and with the engine a cloned voice's recording may go to once that is allowed. */
+  start: (requestId?: string, confirmationToken?: string, voiceUploadConfirmedFor?: string) => string;
   /** Tell the coordinator to stop making the page (codex, PR 879); absent, stopping is local. */
   cancel?: (requestId: string) => void;
   /** What the player calls a block's voice (turn 130); absent, the narrator's label. */
@@ -72,6 +75,13 @@ export function usePageRead(input: {
    * charged read is a second charge.
    */
   const [confirmed, setConfirmed] = useState<string | null>(null);
+  /*
+   * A cloned voice on the page needs its recording sent to a remote engine (codex on PR 914):
+   * the coordinator asks once, by request, before anything is priced or queued; the answer is
+   * kept for the run, because the price asked next is answered by the same frame.
+   */
+  const [upload, setUpload] = useState<{ destination: string; token: string } | null>(null);
+  const uploadAllowed = useRef<string | null>(null);
   const voiceAudio = useVoiceAudio();
   const parts = useVoiceParts()[run ?? ""];
   const result = run ? voiceAudio[run] : undefined;
@@ -93,21 +103,33 @@ export function usePageRead(input: {
     queued.current = 0;
     setRun(null);
     setConfirmed(null);
+    setUpload(null);
+    uploadAllowed.current = null;
     if (id === null) return;
     cancel.current?.(id);
     if (playbackSnapshot().clip?.id === id) dismissPlayback();
     clearQueue();
   }, []);
   useEffect(() => stop, [stop, pageId]);
+  useEffect(
+    () =>
+      subscribeVoiceUploadConfirmations((confirmation) => {
+        if (confirmation.requestId !== live.current) return;
+        setUpload({ destination: confirmation.destinationLabel, token: confirmation.confirmationToken });
+      }),
+    [],
+  );
 
   const begin = useCallback(() => {
     clearQueue();
     dismissPlayback();
     queued.current = 0;
+    uploadAllowed.current = null;
     const requestId = start();
     live.current = requestId;
     setRun(requestId);
     setConfirmed(null);
+    setUpload(null);
   }, [start]);
 
   // Blocks land in whatever order they finish, so this counts what exists rather than how far
@@ -145,9 +167,21 @@ export function usePageRead(input: {
         ? {
             characters: result?.characterCount ?? 0,
             priced: formatMicroUsd(result?.estimatedMicroUsd ?? 0),
+            voices: (result?.voices ?? []).map((voice) => `${voice.label} · ${voice.provider}`),
             confirm: () => {
               setConfirmed(run);
-              start(run, token);
+              start(run, token, uploadAllowed.current ?? undefined);
+            },
+          }
+        : null,
+    upload:
+      run !== null && upload !== null
+        ? {
+            destination: upload.destination,
+            confirm: () => {
+              uploadAllowed.current = upload.token;
+              setUpload(null);
+              start(run, undefined, upload.token);
             },
           }
         : null,
@@ -196,12 +230,13 @@ export function useProsePageRead(input: {
     worldSlug: world?.meta.slug,
     blocks: input.blocks,
     ...(input.voiceOf !== undefined ? { voiceOf: input.voiceOf } : {}),
-    start: (requestId, confirmationToken) =>
+    start: (requestId, confirmationToken, voiceUploadConfirmedFor) =>
       readProsePage(
         world?.meta.worldId ?? "",
         input.sources ?? input.blocks.map((block) => block.source),
         requestId,
         confirmationToken,
+        voiceUploadConfirmedFor,
       ),
     cancel: (requestId) => stopProsePage(world?.meta.worldId ?? "", requestId),
   });
@@ -212,11 +247,15 @@ const ROW = { display: "inline-flex", alignItems: "center", gap: "var(--space-2)
 /** The page-scale control: one press to start, then position and movement while it reads. */
 export function PageReadControl({ read, label }: { read: PageRead; label: string }) {
   if (!read.reading) return <Button onClick={read.begin}>{label}</Button>;
+  if (read.upload) {
+    return <RemoteVoiceUploadConfirmation destinationLabel={read.upload.destination} onCancel={read.stop} onConfirm={read.upload.confirm} />;
+  }
   if (read.cost) {
     return (
       <span style={ROW}>
         <Button onClick={read.cost.confirm}>
           Confirm {read.cost.characters} characters · {read.cost.priced}
+          {read.cost.voices.map((voice) => ` · ${voice}`).join("")}
         </Button>
         {/* What leaves the machine is said before it does (codex on turn 130): the words and the
             voice go to the provider, and the text stays in Activity, as a table read's does. */}

@@ -168,17 +168,29 @@ export function voicedBlocks(
   const blocks: VoicedBlock[] = [];
   let ambiguous = 0;
   const fold = (text: string) => text.replace(/\s+/g, " ").trim();
+  const lines = record?.lines ?? [];
+  // How often the whole chapter holds each quoted line, against how often the cast names it
+  // (codex on PR 914): a line copied into another paragraph while the original stands is two
+  // spans for one attribution, and neither is the one the cast meant.
+  const held = new Map<string, number>();
+  const named = new Map<string, number>();
+  for (const line of lines) {
+    const key = fold(line.quote);
+    named.set(key, (named.get(key) ?? 0) + 1);
+    if (!held.has(key)) held.set(key, paragraphs.reduce((sum, paragraph) => sum + occurrencesOf(paragraph, line.quote).length, 0));
+  }
   for (const [index, paragraph] of paragraphs.entries()) {
     const spans: Array<{ start: number; end: number; speaker: string; sheet?: string }> = [];
-    const here = (record?.lines ?? []).filter((line) => line.paragraph === index);
+    const here = lines.filter((line) => line.paragraph === index);
     for (const line of here) {
       // The paragraph must hold these words exactly as many times as the cast says it does
-      // (codex on turn 130): with one of two identical lines deleted, the survivor is either
-      // speaker's, and presence at an occurrence would put it in the wrong voice. So neither is
-      // voiced, and both are counted.
-      const twins = here.filter((other) => fold(other.quote) === fold(line.quote)).length;
+      // (codex on turn 130), and so must the chapter: with one of two identical lines deleted,
+      // the survivor is either speaker's, and presence at an occurrence would put it in the
+      // wrong voice. So neither is voiced, and both are counted.
+      const key = fold(line.quote);
+      const twins = here.filter((other) => fold(other.quote) === key).length;
       const hits = occurrencesOf(paragraph, line.quote);
-      const hit = hits.length === twins ? hits[line.occurrence] : undefined;
+      const hit = hits.length === twins && held.get(key) === named.get(key) ? hits[line.occurrence] : undefined;
       // Not there, not at that occurrence, or the same bytes already spoken for: narration.
       if (hit === undefined || spans.some((span) => hit.start < span.end && span.start < hit.end)) {
         ambiguous += 1;

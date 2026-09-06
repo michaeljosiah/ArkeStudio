@@ -203,4 +203,11 @@ describe("the cast of lines (turn 130, SPEC-012 §2.4.2)", () => {
     ]);
     assert.equal(ambiguous, 0);
   });
+
+  it("a line copied into another paragraph while the original stands is nobody's (codex on PR 914)", () => {
+    const record = { lines: [{ speaker: "Maren Kest", sheet: "maren-kest", paragraph: 0, occurrence: 0, quote: "“No,”" }] };
+    const copied = voicedBlocks("“No,” she said.\n\n“No,” he said.", record);
+    assert.deepEqual(copied.blocks.map((block) => block.speaker ?? null), [null, null], "two spans for one attribution: narration");
+    assert.equal(copied.ambiguous, 1);
+  });
 });

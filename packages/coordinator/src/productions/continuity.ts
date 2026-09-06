@@ -132,6 +132,9 @@ export function makeAdapterJsonDeriver<T>(
           if (event.type === "session.error") throw new Error(event.message);
         }
       })();
+      // Handled from the start: the abort in the cleanup below can end the listener after the
+      // race has already settled the other way, and that rejection must land nowhere loud.
+      void collected.catch(() => {});
       let deadline: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_, reject) => {
         deadline = setTimeout(() => {
@@ -142,10 +145,16 @@ export function makeAdapterJsonDeriver<T>(
         }, WALL_CLOCK_MS);
       });
       try {
-        // Dispatch under the same cleanup as collection (codex on PR 907, round five): a harness
-        // that refuses the turn must not leave the listener and the iterator alive behind it.
-        await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-        await Promise.race([collected, timeout]);
+        // Dispatch under the same cleanup as collection (codex on PR 907, round five) and under
+        // the same clock (codex on PR 914): a dispatch that hangs past the deadline would
+        // otherwise reject the timer into nothing, no handler attached yet, and hold this await.
+        await Promise.race([
+          (async () => {
+            await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
+            await collected;
+          })(),
+          timeout,
+        ]);
       } finally {
         clearTimeout(deadline);
         signal?.removeEventListener("abort", onStop);

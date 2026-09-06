@@ -2999,6 +2999,7 @@ export function readProsePage(
   sources: readonly ProseReadSource[],
   requestId = queueRequest("read-prose-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose-page",
@@ -3006,6 +3007,7 @@ export function readProsePage(
     sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }

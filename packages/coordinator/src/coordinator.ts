@@ -1419,6 +1419,7 @@ export class Coordinator {
     worldId: string;
     requestId: string;
     confirmationToken?: string;
+    voiceUploadConfirmedFor?: string;
     blocks: readonly { heading: string; text: string; subjectId: string; voice?: { provider: string; model?: string; voiceId: string; label?: string } }[];
     subject: { id: string; version: number };
     fail: (error: string, characters?: number) => void;
@@ -1434,23 +1435,33 @@ export class Coordinator {
     });
     const narratorSettings = this.appSettings ? await this.appSettings.load() : null;
     const clonedVoices = store.getBundle().clonedVoices ?? [];
-    const narrationCatalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability())).filter(
-      (voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined,
-    );
+    // The catalogue is what says whether a concrete voice can speak now (codex on PR 914): the
+    // manifest still lists a model whose key was removed, whose voice was withdrawn or whose
+    // engine is down, and a block sent that way fails instead of falling to the narrator.
+    const catalogue = (await this.voiceService.catalogue(clonedVoices, await this.comfyUiVoiceAvailability()).catch(() => null)) ?? [];
+    const narrationCatalogue = catalogue.filter((voice) => supportsVoiceUse(voice, "narration") && voice.unavailableReason === undefined);
     const narrator = narratorFor(narratorSettings?.narrator ?? null, narrationCatalogue);
     const manifest = this.opts.manifest;
     const modelOf = (voice: { provider: string; model: string }) =>
       manifest?.models.find((candidate) => candidate.provider === voice.provider && candidate.id === voice.model && candidate.capability === "voice-tts") ?? null;
-    // Each block's voice: the sheet's assignment when the manifest knows its model, else the narrator.
-    const speaking = blocks.map((block) => {
-      const assigned = block.voice;
-      if (assigned === undefined) return { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
-      const model = assigned.model ?? legacyVoiceModel(assigned.provider, assigned.voiceId, clonedVoices) ?? undefined;
-      if (model === undefined || modelOf({ provider: assigned.provider, model }) === null) {
-        return { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId };
-      }
-      return { provider: assigned.provider, model, voiceId: assigned.voiceId };
-    });
+    const narration = { provider: narrator.provider, model: narrator.model, voiceId: narrator.voiceId, label: narrator.label ?? narrator.voiceId, cloned: false };
+    // Each block's voice: the sheet's assignment when the manifest knows its model, the
+    // catalogue says it can speak now and, for a cloned voice, its recording is still there;
+    // else the narrator (R-46).
+    const speaking = await Promise.all(
+      blocks.map(async (block) => {
+        const assigned = block.voice;
+        if (assigned === undefined) return narration;
+        const model = assigned.model ?? legacyVoiceModel(assigned.provider, assigned.voiceId, clonedVoices) ?? undefined;
+        if (model === undefined || modelOf({ provider: assigned.provider, model }) === null) return narration;
+        const listed = catalogue.find((voice) => voice.provider === assigned.provider && voice.model === model && voice.voiceId === assigned.voiceId);
+        if (listed === undefined || listed.unavailableReason !== undefined) return narration;
+        const source = voiceSourceFor(clonedVoices, assigned.provider, model, assigned.voiceId);
+        if (source.kind === "missing-clone") return narration;
+        if (source.kind === "cloned" && (await clipFor(store, source.voice)) === null) return narration;
+        return { provider: assigned.provider, model, voiceId: assigned.voiceId, label: assigned.label ?? listed.label, cloned: source.kind === "cloned" };
+      }),
+    );
     const isLocal = (voice: { provider: string; model: string }) => voice.provider === "kokoro" && voice.model === "kokoro-82m";
     const ready = (index: number, file: string, cached: boolean, provider: string, model: string, voiceId: string, format: string, estimated = 0) =>
       this.emit({
@@ -1491,6 +1502,18 @@ export class Coordinator {
     }
     let queuedInputs: EnqueueInput[] = [];
     if (misses.length > 0) {
+      // A cloned voice's recording goes with its job (SPEC-022): a remote engine is confirmed as
+      // the table read confirms it, once, before anything is priced or queued (codex on PR 914).
+      if (
+        misses.some((index) => speaking[index]!.cloned) &&
+        this.requireVoiceUploadConfirmation({
+          worldId,
+          requestId,
+          command: input.frameKind,
+          ...(input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
+        })
+      )
+        return;
       const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: blocks[index]!.text.length }), 0);
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
@@ -1518,6 +1541,10 @@ export class Coordinator {
           },
           estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: blocks[index]!.text.length }),
           landing: { dir: ".cache/voice-previews", name: entry.file.split("/").pop()! },
+          // The marker the dispatcher resolves the recording by, and the engine it was allowed
+          // to go to (codex on PR 914): without them every uncached cloned line fails.
+          ...(voice.cloned ? { voiceReference: true } : {}),
+          ...(voice.cloned && input.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: input.voiceUploadConfirmedFor } : {}),
         };
       });
       // Priced once before anything plays, and asked only when there is a price (R-47): a free
@@ -1525,6 +1552,13 @@ export class Coordinator {
       if (estimate > 0 && input.confirmationToken !== token) {
         this.pendingVoiceReads.set(requestId, { token, inputs: queuedInputs });
         const first = cloud[misses[0]!]!;
+        // Every cloud voice the words would go to, named once (R-47, codex on PR 914): the
+        // approval is the last point before a paid call leaves, and a page can span providers.
+        const named = new Map<string, { label: string; provider: string }>();
+        for (const index of misses) {
+          const voice = speaking[index]!;
+          named.set(`${voice.provider}\n${voice.label}`, { label: voice.label, provider: voice.provider });
+        }
         this.emit({
           at: new Date().toISOString(),
           type: "voice.audio",
@@ -1540,6 +1574,7 @@ export class Coordinator {
           characterCount: misses.reduce((sum, index) => sum + blocks[index]!.text.length, 0),
           estimatedMicroUsd: estimate,
           confirmationToken: token,
+          voices: [...named.values()],
         } as DomainEvent);
         return;
       }
@@ -1575,7 +1610,13 @@ export class Coordinator {
     }
     if (queuedInputs.length === 0) return;
     const queued = await this.enqueueBatch(requestId, input.frameKind, queuedInputs);
-    if (!queued.accepted) fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+    if (queued.jobIds.length < queuedInputs.length) {
+      // One block refused is a page with a hole in it (codex on PR 914): playback would wait on
+      // a part no event fills, after the rest was queued and perhaps charged. None of it stands.
+      for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
+      fail(queued.reason ?? "Voice synthesis could not be queued.", characters);
+      return;
+    }
     if (this.stoppedReads.has(requestId)) {
       this.stoppedReads.delete(requestId);
       for (const jobId of queued.jobIds) await this.jobQueue?.cancel(jobId).catch(() => {});
@@ -11280,8 +11321,16 @@ export class Coordinator {
           const expanded: ProseReadSource[] = [];
           if (source.of === "chapter-voiced" && source.block === undefined) {
             try {
-              const opened = await openChapter(store, source.productionId, source.chapterId);
-              const record = await readVoices(store, source.productionId, opened.file);
+              // The reads that count the blocks are the reads that resolve them (codex on PR
+              // 914): a chapter saved or recast in between would be counted one way and read
+              // another, and the addresses would miss or truncate.
+              const key = `${source.productionId}/${source.chapterId}`;
+              const opening = chapters.get(key) ?? openChapter(store, source.productionId, source.chapterId);
+              chapters.set(key, opening);
+              const opened = await opening;
+              const reading = casts.get(key) ?? readVoices(store, source.productionId, opened.file);
+              casts.set(key, reading);
+              const record = await reading;
               const count = voicedBlocks(opened.body, record === "unreadable" ? null : record).blocks.length;
               for (let block = 0; block < count; block += 1) expanded.push({ ...source, block });
             } catch {
@@ -11313,6 +11362,7 @@ export class Coordinator {
             worldId: msg.worldId,
             requestId: msg.requestId,
             ...(msg.confirmationToken !== undefined ? { confirmationToken: msg.confirmationToken } : {}),
+            ...(msg.voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor: msg.voiceUploadConfirmedFor } : {}),
             blocks,
             subject: { id: blocks[0]!.subjectId, version },
             fail: failPage,

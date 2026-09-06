@@ -110,17 +110,17 @@ export function verifyVoices(
       continue;
     }
     const holders = paragraphs.map((paragraph, index) => ({ index, count: occurrencesOf(paragraph, quote).length })).filter((entry) => entry.count > 0);
-    const home = holders.find((entry) => inPass[entry.index]) ?? holders[0];
+    // The first paragraph with an occurrence still unspoken for, those the pass held first
+    // (codex on PR 914): "No." said in three paragraphs is three lines in three homes, not one
+    // line and two drops.
+    const ordered = [...holders.filter((entry) => inPass[entry.index]), ...holders.filter((entry) => !inPass[entry.index])];
+    const home = ordered.find((entry) => claimed(entry.index, quote) < entry.count);
     if (home === undefined) {
+      // Not in the chapter, or claimed more times than the chapter says it: not a line it holds.
       dropped += 1;
       continue;
     }
     const occurrence = claimed(home.index, quote);
-    if (occurrence >= home.count) {
-      // Claimed more times than the paragraph says it: the extra is not a line the chapter holds.
-      dropped += 1;
-      continue;
-    }
     const sheet = sheetOf(speaker, cast);
     lines.push({ speaker, ...(sheet !== undefined ? { sheet } : {}), paragraph: home.index, occurrence, quote });
   }

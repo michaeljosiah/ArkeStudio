@@ -11,6 +11,7 @@ import {
   type ChapterSummary,
   type ChapterVoices,
   DEFAULT_NARRATOR,
+  legacyVoiceModel,
   voicedBlocks,
   type ProductionBundle,
   type ProseReadSource,
@@ -42,6 +43,7 @@ import {
   stopContinuity,
   useDeriving,
   castVoices,
+  requestVoiceCatalogue,
   stopVoices,
   useCasting,
 } from "../lib/store.js";
@@ -669,6 +671,22 @@ export function ChapterWorkspace({
   }, [voicesRecord]);
   const narrationBlocks = voiced.blocks.filter((block) => block.speaker === undefined).length;
   const narratorName = useStore().state?.app.narrator?.label ?? DEFAULT_NARRATOR.label;
+  // The catalogue says whether an assigned voice can speak now (turn 130's rule, codex on PR
+  // 914): asked for once a cast is shown, and a voice it lacks or marks reads in the
+  // narrator's, said so in the row rather than found out when the block fails.
+  const catalogue = useStore().voiceCatalogue;
+  const castShown = voicesRecord !== null;
+  useEffect(() => {
+    if (castShown && connection === "open") requestVoiceCatalogue(worldId);
+  }, [castShown, connection, worldId]);
+  const voiceUnavailable = (voice: { provider: string; model?: string; voiceId: string }): boolean => {
+    if (catalogue === null) return false;
+    const model = voice.model ?? legacyVoiceModel(voice.provider, voice.voiceId, world.clonedVoices ?? []);
+    const listed = catalogue.find(
+      (candidate) => candidate.provider === voice.provider && candidate.voiceId === voice.voiceId && (model === null || candidate.model === model),
+    );
+    return listed === undefined || listed.unavailableReason !== undefined;
+  };
   // A read under way when a draft arrives is stopped with it: the manuscript now shows the
   // draft, and the accepted prose must not go on sounding under it (codex, PR 879).
   const drafted = stagedDraft !== undefined;
@@ -1142,7 +1160,9 @@ export function ChapterWorkspace({
                       <li key={who.sheet ?? who.speaker}>
                         <div className="fy-ch__who-head">
                           <span className="fy-ch__who-name">{sheet?.name ?? who.speaker}</span>
-                          {voice !== undefined ? (
+                          {voice !== undefined && voiceUnavailable(voice) ? (
+                            <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">voice unavailable · narrator</span>
+                          ) : voice !== undefined ? (
                             <span className="fy-ch__who-where fy-mono">{voice.label ?? voice.voiceId} · {voice.provider}</span>
                           ) : who.sheet === undefined ? (
                             <span className="fy-ch__who-where fy-mono fy-ch__who-where--warn">no sheet · narrator</span>

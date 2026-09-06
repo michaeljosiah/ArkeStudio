@@ -215,6 +215,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice on a voiced page (turn 130): the remote engine its recording may go to. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**

@@ -738,6 +738,25 @@ describe("the voiced read (turn 130)", () => {
     assert.deepEqual(read.sources, [{ of: "chapter-voiced", productionId: "inkbound", chapterId: "neap" }], "the chapter named once; the coordinator expands it");
   });
 
+  it("a voice the catalogue cannot speak now reads in the narrator's, and the row says so (codex on PR 914)", async () => {
+    const m = await mount(withBodyHash(inkbound(), HASH));
+    await answerOpenCast(m, { voices: CAST });
+    assert.ok(m.sent.some((message) => message.kind === "voice-catalogue"), "the catalogue is asked for once a cast is shown");
+    assert.match(text(m), /Low tide · elevenlabs/, "the assignment stands until the catalogue answers");
+    await act(async () => {
+      __applyEventForTest({
+        at: "2026-09-06T12:00:05Z",
+        type: "voice.catalogue",
+        worldId: FIXTURE_WORLD_ID,
+        voices: [
+          { provider: "elevenlabs", model: "eleven_multilingual_v2", voiceId: "v_8Kq2", label: "Low tide", attributes: [], local: false, canClone: false, unavailableReason: "the key was refused", usedBy: [] },
+        ],
+      });
+    });
+    assert.match(text(m), /voice unavailable · narrator/);
+    assert.doesNotMatch(text(m), /Low tide · elevenlabs/);
+  });
+
   it("stale: the cast was read against an earlier body, the rows stay, and Cast again is a press under the dock", async () => {
     const m = await mount(withBodyHash(inkbound(), `sha256:${"b".repeat(64)}`));
     await answerOpenCast(m, { voices: CAST });
