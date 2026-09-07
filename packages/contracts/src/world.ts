@@ -431,6 +431,11 @@ export const EpisodeSchema = z
   .strict();
 export type Episode = z.infer<typeof EpisodeSchema>;
 
+/** Daily positive word-count deltas from direct chapter saves; never reconstructed from history. */
+export const StoryProgressSchema = z.object({
+  days: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.number().int().min(0)),
+}).strict();
+
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z
   .object({

@@ -3,6 +3,7 @@ import {
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
+  storyProgressDay,
   overviewMoved,
 } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -1550,6 +1551,13 @@ export function ProductionDashboardScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newScene = useSharedNewScene(worldId, prodId);
+  const [today, setToday] = useState(() => storyProgressDay(new Date()));
+  useEffect(() => {
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timer = setTimeout(() => setToday(storyProgressDay(new Date())), midnight.getTime() - now.getTime() + 100);
+    return () => clearTimeout(timer);
+  }, [today]);
   if (!world || !production) {
     return (
       <Screen id="production-dashboard">
@@ -1563,7 +1571,10 @@ export function ProductionDashboardScreen() {
     const chapters = production.chapters.filter((c) => !c.retired);
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
-    const inHand = chapters.find((c) => !c.words) ?? null;
+    const inHand = chapters.find((c) => !c.words) ?? chapters.at(-1) ?? null;
+    const target = targetWords(production.story?.targetLength);
+    const progress = production.progress;
+    const wordsToday = progress && "unreadable" in progress ? null : progress?.days[today] ?? 0;
     const inHandIdx = inHand ? chapters.indexOf(inHand) : -1;
     // The design shows the neighbourhood of the chapter in hand, not the whole book —
     // the chapter tree is one click away for that.
@@ -1584,13 +1595,17 @@ export function ProductionDashboardScreen() {
                 } · ${totalWords.toLocaleString()} words`}
           </span>
         </div>
+        <div className="fy-h1row__meta">
+          {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
+          {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
+        </div>
         <div className="fy-threadcard" style={{ flex: "none" }}>
           <div className="fy-threadcard__head">
             <span className="fy-threadcard__label">
               {chapters.length === 0
                 ? "THE SPINE COMES FIRST"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.order} OF ${chapters.length}`
+                  ? `IN HAND · CHAPTER ${inHand.order}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
@@ -1601,12 +1616,12 @@ export function ProductionDashboardScreen() {
             {chapters.length === 0
               ? "Talk the story into an overview; chapters hang beneath it."
               : inHand
-                ? `${inHand.status}${production.story ? ` · against the overview at v${production.story.version}` : ""}`
+                ? <ChapterPlan chapter={inHand} world={world} story={production.story} />
                 : "Every chapter has words. The overview steers whatever comes next."}
           </div>
           <div className="fy-threadcard__actions">
-            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-              {chapters.length === 0 ? "Open Production Chat" : "Continue in Production Chat"}
+            <Button variant="primary" onClick={() => navigate(inHand ? `/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(inHand.id)}` : `/w/${worldId}/p/${prodId}/story`)}>
+              {inHand ? "Continue chapter" : "Open Production Chat"}
             </Button>
           </div>
         </div>
@@ -1622,16 +1637,8 @@ export function ProductionDashboardScreen() {
                 All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
               </button>
             </div>
-            {nearby.map((c) => (
-              <div key={c.id} className="fy-listrow">
-                <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
-                  {c.title}
-                </span>
-                <Badge tone="outline">v{c.version}</Badge>
-                <span className="fy-mono">{c.words ? `${c.words.toLocaleString()} words` : c.status}</span>
-              </div>
-            ))}
+            {nearby.map((c) => <ChapterOutlineRow key={c.id} chapter={c} world={world} story={production.story} inHand={c === inHand}
+              onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />)}
           </div>
         )}
       </div>
@@ -2324,6 +2331,32 @@ function OverviewStoryScreen() {
  * count as a band under the title, and `New chapter` as a press. The screen is called by the
  * rail's word; "Chapter tree" was a title nobody pressed.
  */
+function ChapterPlan({ chapter, world, story }: { chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"] }) {
+  const pov = chapter.pov === undefined ? null : world?.sheets.find((sheet) => sheet.id === chapter.pov)?.name ?? chapter.pov;
+  const moved = overviewMoved(chapter, story);
+  return <>
+    {chapter.synopsis && <span className="fy-row__syn">{chapter.synopsis}</span>}
+    {(pov || chapter.when || moved) && <span className="fy-row__marks">
+      {pov && <span className="fy-mono">{pov}</span>}
+      {chapter.when && <span className="fy-mono">{pov ? "· " : ""}{chapter.when}</span>}
+      {moved && <span className="fy-row__moved">overview moved · v{chapter.draftedAgainst} → v{story?.version}</span>}
+    </span>}
+  </>;
+}
+
+function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: {
+  chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
+}) {
+  return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
+    <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
+    <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    {c.source !== undefined && <Badge tone="outline">imported</Badge>}
+    <Badge tone="outline">v{c.version}</Badge>
+    <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
+    <span className="fy-row__chev"><ChevronRight size={15} /></span>
+  </button>;
+}
+
 export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
@@ -2380,7 +2413,7 @@ export function ChapterTreeScreen() {
   const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production?.story?.targetLength);
-  // The same "in hand" the dashboard derives: the first chapter with no words yet.
+  // The outline marks the first chapter with no words yet.
   const inHand = chapters.find((c) => !c.words) ?? null;
   /*
    * The door's two views (turn 129): Outline is turn 127's; Continuity is where everyone is,
@@ -2538,43 +2571,10 @@ export function ChapterTreeScreen() {
       ) : production && chapters.length > 0 ? (
         <div className="fy-ledger">
           {chapters.map((c, index) => {
-            // The outline (turn 127): the plan under the title, and the overview having moved.
-            const stale = overviewMoved(c, production?.story);
-            const pov = c.pov === undefined ? null : (world?.sheets.find((s) => s.id === c.pov)?.name ?? c.pov);
             return (
             <div key={c.id} style={{ display: "flex", alignItems: "center" }}>
-            <button
-              style={{ flex: 1, minWidth: 0 }}
-              type="button"
-              className={cx("fy-row", c === inHand && "fy-row--inhand")}
-              onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)}
-            >
-              <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-              <span className="fy-row__plan">
-                <span className="fy-row__name">{c.title}</span>
-                {c.synopsis !== undefined && c.synopsis !== "" && <span className="fy-row__syn">{c.synopsis}</span>}
-                {(pov !== null || c.when !== undefined || stale) && (
-                  <span className="fy-row__marks">
-                    {pov !== null && <span className="fy-mono">{pov}</span>}
-                    {c.when !== undefined && <span className="fy-mono">{pov !== null ? "· " : ""}{c.when}</span>}
-                    {stale && (
-                      <span className="fy-row__moved">
-                        overview moved · v{c.draftedAgainst} → v{production?.story?.version}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </span>
-              {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-              <Badge tone="outline">v{c.version}</Badge>
-              <span className="fy-row__meta">
-                {c.words ? `${c.words.toLocaleString()} words` : c.status}
-                {c === inHand ? " · in hand" : ""}
-              </span>
-              <span className="fy-row__chev">
-                <ChevronRight size={15} />
-              </span>
-            </button>
+            <ChapterOutlineRow chapter={c} world={world} story={production.story} inHand={c === inHand}
+              onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
             <Button aria-label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}>↑</Button>
             <Button aria-label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}>↓</Button>
             <Button aria-label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}>Retire</Button>

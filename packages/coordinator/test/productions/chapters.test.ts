@@ -339,3 +339,29 @@ describe("chapter retirement (issue 888)", () => {
     assert.equal((await openChapter(store, productionId, "neap")).body, before.body);
   });
 });
+
+
+it("commits daily progress with successful saves, without counting refused or unchanged saves (issue 891)", async () => {
+  const { dir, store } = await open();
+  await createProduction(store, { title: "Inkbound", format: "story" });
+  await createChapter(store, "inkbound", { title: "First", order: 1 });
+  await createChapter(store, "inkbound", { title: "Second", order: 2 });
+  const before = await openChapter(store, "inkbound", "first");
+  await Promise.all([
+    saveChapter(store, "inkbound", "first", "One two three four", { baseHash: before.hash }),
+    saveChapter(store, "inkbound", "second", "Five six seven"),
+  ]);
+  const path = join(dir, "productions", "inkbound", "progress.json");
+  const progress = await readFile(path, "utf8");
+  assert.equal(Object.values(JSON.parse(progress).days)[0], 7);
+  await assert.rejects(saveChapter(store, "inkbound", "first", "One two three four five six", { baseHash: before.hash }));
+  assert.equal(await readFile(path, "utf8"), progress, "a stale save cannot increase progress");
+  await saveChapter(store, "inkbound", "first", "One two three four");
+  await saveChapter(store, "inkbound", "second", "Five");
+  assert.equal(await readFile(path, "utf8"), progress, "unchanged saves and deletions add nothing");
+  const scanned = (await scanWorld(dir)).bundle.productions.find((p) => p.meta.id === "inkbound")!;
+  assert.deepEqual(scanned.progress, JSON.parse(progress), "the dashboard reads the persisted record");
+  await writeFile(path, "damaged", "utf8");
+  await assert.rejects(saveChapter(store, "inkbound", "first", "One two three four five"));
+  assert.equal((await openChapter(store, "inkbound", "first")).body.trim(), "One two three four");
+});

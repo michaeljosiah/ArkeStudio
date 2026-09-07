@@ -46,6 +46,7 @@ import {
   type ChapterVoicesState,
   ProseStyleSchema,
   StoryOverviewSchema,
+  StoryProgressSchema,
   summariseContinuity,
   type ChapterContinuityState,
   TakeSchema,
@@ -787,6 +788,9 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       meta: metaDoc,
       story,
       proseStyle,
+      ...((await exists(join(pdir, "progress.json"))) ? {
+        progress: await tryParse(`productions/${id}/progress.json`, (raw) => StoryProgressSchema.parse(JSON.parse(raw))) ?? { unreadable: true as const },
+      } : {}),
       season,
       routing,
       treatment,
