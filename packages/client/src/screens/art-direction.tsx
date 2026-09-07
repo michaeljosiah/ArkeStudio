@@ -416,7 +416,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         lede="One picture of this world, for the app to show it by."
         prompt={prompt}
         onPrompt={setDraft}
-        promptHint="The creative body sent on Generate. Fixed constraints appear separately below. Drafting an alternative never generates an image."
+        promptHint="The Art Director rewrites the assembled prompt for you to compare. Use assembled keeps the original; Use candidate selects the rewrite. Only Generate makes an image."
         extra={<div style={{overflowWrap:"anywhere"}}>
           <Button disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
           {pendingReview!==null&&<Button onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}

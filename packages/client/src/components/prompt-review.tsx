@@ -17,13 +17,32 @@ export function ShotPromptProposalDiff({ before, after }: { before: string | nul
   return result?.before === before && result.after === after ? <PromptReviewDetails review={result.review} /> : <p role="status">Calculating exact prompt changes…</p>;
 }
 export function PromptReviewDetails({ review }: {review:PromptReview}) {
-  return <div aria-label="Creative prompt diff" style={{overflowWrap:"anywhere"}}>
+  const [open,setOpen]=useState(false),[limit,setLimit]=useState(30);
+  const additions=review.hunks.filter(h=>h.op==="add");
+  const unverified=additions.filter(h=>h.support==="unverified"&&/[\p{L}\p{N}]/u.test(h.text));
+  const ordered=[...unverified,...review.hunks.filter(h=>!unverified.some(u=>u===h))];
+  const added=additions.reduce((sum,h)=>sum+Array.from(h.text).length,0);
+  const removed=review.hunks.filter(h=>h.op==="delete").reduce((sum,h)=>sum+Array.from(h.text).length,0);
+  return <div className="fy-prompt-review" aria-label="Creative prompt diff" style={{overflowWrap:"anywhere"}}>
     <p>{review.candidate.characters} Unicode characters · {review.candidate.utf8Bytes} UTF-8 bytes. Change: {review.characterDelta>=0?"+":""}{review.characterDelta} characters.</p>
-    <p>Unverified means the application found no exact quotation in the supplied sources. It does not mean false.</p>
-    {review.hunks.length===0?<p>No textual changes.</p>:review.hunks.map((h,i)=><div key={i} style={{marginBlock:8}}>
-      {h.op==="delete"?<p>Removed: <del>{h.text}</del></p>:<><p>Added: <ins>{h.text}</ins> · {h.support}</p>
-      {h.sources.map((source,j)=><p key={j}>Exact source: {source.ref} · “{source.quote}”</p>)}
-      {h.warnings.map(w=><p key={w}>{w}</p>)}</>}
-    </div>)}
+    {review.hunks.length===0?<p>No textual changes.</p>:<>
+      <p>Added {added} characters; removed {removed}. {unverified.length} {unverified.length===1?"addition is":"additions are"} unverified.</p>
+      {unverified.length>0&&<p>Unverified means the application found no exact quotation in the supplied sources. It does not mean false.</p>}
+      <details onToggle={event=>setOpen(event.currentTarget.open)}>
+        <summary>Review changes · unverified additions first</summary>
+        {open&&<div className="fy-prompt-review__hunks">
+          {ordered.slice(0,limit).map((h,i)=><div key={i}>
+            {h.op==="delete"?<p>Removed: <del>{h.text}</del></p>:<>
+              <p>Added: <ins>{h.text}</ins> · {h.support}</p>
+              {h.sources.length>0&&<details><summary>{h.sources.length} exact sources</summary>
+                {h.sources.map((source,j)=><p key={j}>Exact source: {source.ref} · “{source.quote}”</p>)}
+              </details>}
+              {h.warnings.map(w=><p key={w}>{w}</p>)}
+            </>}
+          </div>)}
+          {ordered.length>limit&&<button type="button" onClick={()=>setLimit(limit+30)}>Show more changes ({ordered.length-limit} remaining)</button>}
+        </div>}
+      </details>
+    </>}
   </div>;
 }

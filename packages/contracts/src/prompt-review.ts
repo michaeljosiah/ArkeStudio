@@ -71,7 +71,17 @@ export async function reviewPrompt(baseText:string,candidateText:string,sources:
   }
   const hunks:PromptReview["hunks"]=groups.map(g=>{
     if(g.op==="delete")return {op:"delete",text:g.text,beforeStart:g.start,beforeEnd:g.end};
-    const quote=g.text.trim(), evidence=quote?verified.filter(s=>s.text.includes(quote)).map(s=>({kind:s.kind,ref:s.ref,sourceHash:s.hash,quote})):[];
+    const quote=g.text.trim(),characters=Array.from(quote);
+    // Certify phrases, not punctuation or fragments of a longer word.
+    const phrase=characters.length>=12&&(quote.match(/[\p{L}\p{N}]+/gu)?.length??0)>=2;
+    const boundary=/[\p{L}\p{N}_'-]/u;
+    const evidence=phrase?verified.filter(s=>{
+      for(let at=s.text.indexOf(quote);at!==-1;at=s.text.indexOf(quote,at+1)){
+        const before=Array.from(s.text.slice(Math.max(0,at-2),at)).at(-1)??"",after=Array.from(s.text.slice(at+quote.length,at+quote.length+2))[0]??"";
+        if(!(boundary.test(characters[0]!)&&boundary.test(before))&&!(boundary.test(characters.at(-1)!)&&boundary.test(after)))return true;
+      }
+      return false;
+    }).map(s=>({kind:s.kind,ref:s.ref,sourceHash:s.hash,quote})):[];
     const added=terms(g.text), warnings=PROMPT_WARNING_TERMS.filter(term=>added.has(term)&&!sourceTerms.has(term)).map(term=>`Added style term: "${term}"`);
     return {op:"add",text:g.text,afterStart:g.start,afterEnd:g.end,support:evidence.length?"exact-source":"unverified",sources:evidence,warnings};
   });
