@@ -2,12 +2,15 @@ import {
   TimelineOperationRefused,
   applyTimelineCommands,
   orderedTrackClips,
+  secondsToFrames,
+  type FrameRate,
   type ProductionTimeline,
   type SourceLengthFrames,
   type TimelineClip,
   type TimelineClipCommand,
   type TimelineClipId,
 } from "@arke-studio/contracts";
+import { parseTimecode } from "./timeline-drag.js";
 
 /**
  * What a pointer gesture on a Picture clip becomes (SPEC-037 R-23, SPEC-039 R-18).
@@ -92,6 +95,46 @@ export function trackDragCommand(
   if (clip === undefined || deltaFrames === 0) return null;
   const startFrame = Math.max(0, clip.startFrame + deltaFrames);
   return startFrame === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame };
+}
+
+/** The Inspector's timing rows: where the clip sits, its two edges, and how long it runs. */
+export type TimingField = "position" | "in" | "out" | "duration";
+
+/**
+ * The one command a typed timecode becomes, or null. Typing is the keyboard path of the same
+ * edges the grips drag, so an edge reduces through the same clamp: a value past the source or
+ * into a neighbour lands on the nearest legal frame rather than being refused, and the row then
+ * shows where it landed. Text that is not a timecode, or a value that changes nothing, sends
+ * nothing — a write with no change is not an edit.
+ */
+export function timingEntryCommand(
+  clips: readonly TimelineClip[],
+  clipId: TimelineClipId,
+  field: TimingField,
+  text: string,
+  frameRate: FrameRate,
+  sourceLength: SourceLengthFrames = () => undefined,
+): TimelineClipCommand | null {
+  const clip = clips.find((candidate) => candidate.id === clipId);
+  const seconds = parseTimecode(text, frameRate);
+  if (clip === undefined || seconds === null) return null;
+  let frames: number;
+  try {
+    frames = secondsToFrames(seconds, frameRate);
+  } catch {
+    // A run of digits too long to be a frame count is not a time anyone meant.
+    return null;
+  }
+  switch (field) {
+    case "position":
+      return frames === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame: frames };
+    case "in":
+      return pictureDragCommand(clips, clipId, "trim-start", frames - clip.startFrame, sourceLength);
+    case "out":
+      return pictureDragCommand(clips, clipId, "trim-end", frames - (clip.startFrame + clip.durationFrames), sourceLength);
+    case "duration":
+      return pictureDragCommand(clips, clipId, "trim-end", frames - clip.durationFrames, sourceLength);
+  }
 }
 
 /** The timeline as it would read after `commands`, or null when the batch would be refused. */

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TimelineClip } from "@arke-studio/contracts";
-import { clipAtFrame, frameAtPixel, framesFromDelta, pictureDragCommand } from "../src/lib/picture-edit.js";
+import { clipAtFrame, frameAtPixel, framesFromDelta, pictureDragCommand, timingEntryCommand } from "../src/lib/picture-edit.js";
 
 /**
  * A completed gesture is one command or none (SPEC-037 R-23): the pointer measures pixels and
@@ -59,5 +59,37 @@ describe("pointer deltas become single Picture commands (#679)", () => {
     assert.equal(clipAtFrame(clips, 50)?.id, "cl_b");
     assert.equal(clipAtFrame(clips, 90), null);
     assert.equal(clipAtFrame(clips, 200), null);
+  });
+});
+
+describe("a typed timecode becomes the one command a drag would", () => {
+  // A 3:47 song at 25fps, alone on its lane, with its whole source in play.
+  const song = [clip("cl_s", 0, 5675)];
+  const source = () => 5675;
+
+  it("sets Out and Duration by trimming the tail, and In by trimming the head", () => {
+    assert.deepEqual(timingEntryCommand(song, "cl_s", "out", "0:48", 25, source), { kind: "trim", clipId: "cl_s", edge: "end", deltaFrames: -4475 });
+    assert.deepEqual(timingEntryCommand(song, "cl_s", "duration", "00:00:10:00", 25, source), { kind: "trim", clipId: "cl_s", edge: "end", deltaFrames: -5425 });
+    assert.deepEqual(timingEntryCommand(song, "cl_s", "in", "10", 25, source), { kind: "trim", clipId: "cl_s", edge: "start", deltaFrames: 250 });
+    assert.deepEqual(timingEntryCommand(song, "cl_s", "position", "1:00", 25, source), { kind: "move-to-frame", clipId: "cl_s", startFrame: 1500 });
+  });
+
+  it("clamps to the source and the clip the way the grips do", () => {
+    const short = [clip("cl_s", 0, 1200)];
+    // Out past the measured source lands on the source's last frame; already there, nothing goes.
+    assert.deepEqual(timingEntryCommand(short, "cl_s", "out", "9:59", 25, source), { kind: "trim", clipId: "cl_s", edge: "end", deltaFrames: 4475 });
+    assert.equal(timingEntryCommand(song, "cl_s", "out", "9:59", 25, source), null);
+    // In past the tail keeps one frame; a head with no source behind it cannot move earlier.
+    assert.deepEqual(timingEntryCommand(short, "cl_s", "in", "9:59", 25, source), { kind: "trim", clipId: "cl_s", edge: "start", deltaFrames: 1199 });
+    assert.equal(timingEntryCommand([clip("cl_s", 100, 1200)], "cl_s", "in", "0", 25, source), null);
+  });
+
+  it("sends nothing for the same value, for text that is not a time, or for a clip it cannot find", () => {
+    assert.equal(timingEntryCommand(song, "cl_s", "out", "00:03:47:00", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "position", "0", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "three minutes", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "9".repeat(40), 25, source), null, "digits past the frame range are not a time");
+    assert.equal(timingEntryCommand(song, "cl_zz", "out", "0:48", 25, source), null);
   });
 });

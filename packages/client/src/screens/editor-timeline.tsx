@@ -24,7 +24,9 @@ import {
   framesFromDelta,
   pictureDragCommand,
   previewTimeline,
+  timingEntryCommand,
   type PictureGesture,
+  type TimingField,
 } from "../lib/picture-edit.js";
 import { Film } from "../components/icons.js";
 import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
@@ -392,20 +394,26 @@ export function PictureTrack({
   );
 }
 
-/** Frame steppers: the keyboard path of a trim drag (R-23), one command per press. */
-function FrameStepper({
+/**
+ * One timing row: the keyboard path of a trim drag (R-23). The value is typed as timecode and
+ * committed on Enter or blur, or nudged a frame at a time; either way one command per edit.
+ */
+function TimingRow({
   label,
   value,
   frameRate,
   onStep,
+  onEnter,
   disabled,
 }: {
   label: string;
   value: number;
   frameRate: FrameRate;
   onStep: (deltaFrames: number) => void;
+  onEnter: (text: string) => void;
   disabled: boolean;
 }) {
+  const shown = formatFrames(value, frameRate);
   return (
     <div className="fy-cutinspect__row fy-framestep">
       <span>{label}</span>
@@ -413,7 +421,32 @@ function FrameStepper({
         <button type="button" className="fy-trim__step" aria-label={`${label} one frame earlier`} disabled={disabled} onClick={() => onStep(-1)}>
           −
         </button>
-        <span className="fy-mono">{formatFrames(value, frameRate)}</span>
+        <input
+          // Remounted when the record moves, so the field always starts from what was written.
+          key={shown}
+          className="fy-timecode"
+          defaultValue={shown}
+          aria-label={`${label} timecode`}
+          disabled={disabled}
+          spellCheck={false}
+          onFocus={(event) => event.currentTarget.select()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              event.currentTarget.value = shown;
+              event.currentTarget.blur();
+            }
+          }}
+          onBlur={(event) => {
+            const text = event.currentTarget.value.trim();
+            if (text !== shown) onEnter(text);
+            // Whatever was sent, the row shows the record: a clamped or refused value must not
+            // stay on screen as typed, reading as if it had landed.
+            event.currentTarget.value = shown;
+          }}
+        />
         <button type="button" className="fy-trim__step" aria-label={`${label} one frame later`} disabled={disabled} onClick={() => onStep(1)}>
           +
         </button>
@@ -478,41 +511,48 @@ export function TakePicker({
   );
 }
 
-/** A Picture clip's timing, as the target Inspector states it and as the keyboard trims it. */
+/**
+ * A clip's timing, as the target Inspector states it and as the keyboard edits it. A typed edge
+ * reduces through the drag's clamp, so it never asks the coordinator for a range it would refuse;
+ * a stepped one goes as it is, one frame being the finest thing there is to refuse.
+ */
 export function PictureClipTiming({
   clip,
+  clips,
   frameRate,
   disabled,
   onCommands,
+  sourceLength,
 }: {
   clip: TimelineClip;
+  /** The clip's track, so a typed edge stops where its neighbours and its source do. */
+  clips: readonly TimelineClip[];
   frameRate: FrameRate;
   disabled: boolean;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+  sourceLength: SourceLengthFrames;
 }) {
   const end = clip.startFrame + clip.durationFrames;
+  const typed = (field: TimingField, label: string) => (text: string) => {
+    const command = timingEntryCommand(clips, clip.id, field, text, frameRate, sourceLength);
+    if (command !== null) onCommands([command], label);
+  };
+  const trimEnd = (delta: number) => onCommands([{ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }], "Trim clip tail");
   return (
     <div className="fy-cutinspect__rows">
-      <FrameStepper label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
-        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")} />
-      <FrameStepper
+      <TimingRow label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
+        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")}
+        onEnter={typed("position", "Move clip")} />
+      <TimingRow
         label="In"
         value={clip.startFrame}
         frameRate={frameRate}
         disabled={disabled}
         onStep={(delta) => onCommands([{ kind: "trim", clipId: clip.id, edge: "start", deltaFrames: delta }], "Trim clip head")}
+        onEnter={typed("in", "Trim clip head")}
       />
-      <FrameStepper
-        label="Out"
-        value={end}
-        frameRate={frameRate}
-        disabled={disabled}
-        onStep={(delta) => onCommands([{ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }], "Trim clip tail")}
-      />
-      <div className="fy-cutinspect__row">
-        <span>Duration</span>
-        <strong>{formatFrames(clip.durationFrames, frameRate)}</strong>
-      </div>
+      <TimingRow label="Out" value={end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
+      <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
       <div className="fy-cutinspect__row">
         <span>Source in</span>
         <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>

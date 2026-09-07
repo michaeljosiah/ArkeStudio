@@ -243,7 +243,7 @@ describe("semantic Picture editing (#679)", () => {
       assert.ok(shot12);
       await act(async () => shot12.click());
       assert.match(screen.container.querySelector(".fy-takepick")?.textContent ?? "", /TAKES · 1/);
-      assert.ok(screen.container.textContent?.includes("00:00:06:00"), "In point in HH:MM:SS:FF");
+      assert.equal(screen.container.querySelector<HTMLInputElement>('input[aria-label="In timecode"]')?.value, "00:00:06:00", "In point in HH:MM:SS:FF");
       await act(async () => button(screen, "Use").click());
       const sent = commandsSent(screen).at(-1)!;
       assert.deepEqual(sent.commands, [{ kind: "switch-take", shotId: "sh_12", takeId: "tk_01J8F0000000000000000000B2" }]);
