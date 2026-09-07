@@ -331,7 +331,7 @@ import {
 import { atomicWriteFile } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
-import { classify, CommitPlanError } from "./world/commit.js";
+import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
 import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
@@ -3439,6 +3439,11 @@ export class Coordinator {
         const ledgerEntry = this.ledger
           ? (await this.ledger.readAll()).find((entry) => entry.jobId === job.id)
           : undefined;
+        // The session log is appended outside the commit funnel that fences sidecars, and a
+        // measurement carrying `hasVideo` is a strict field a build older than it parses as a
+        // failure — which, in a fold, drops the completion of a paid take. So the world is fenced
+        // here first, and that build refuses it by name instead (codex on PR 944).
+        if (info?.hasVideo !== undefined) await store.ensureSchemaVersion(MEDIA_HAS_VIDEO_SCHEMA_VERSION, "bench");
         await benchStore.append({
           type: "take-completed",
           takeId: benchTakeId as never,

@@ -255,6 +255,31 @@ export const TURN_CONSTRAINTS_SCHEMA_VERSION = 12;
  * world past the constraints' boundary and the older build refuses it by name (codex on PR 916).
  */
 export const CHAPTER_SOURCE_SCHEMA_VERSION = 13;
+/**
+ * A measured `hasVideo` on an artifact sidecar (PR 944). `MediaInfoSchema` is strict, so a build
+ * older than the field parses such a sidecar as a failure and drops the artifact on scan — and
+ * with it every timeline clip that cites it. Encoded video metadata was fenced at eleven for the
+ * same reason; this field arrives on every measurement, including the audio-only ones that
+ * carry no width, so it needs a boundary of its own past the chapter's.
+ */
+export const MEDIA_HAS_VIDEO_SCHEMA_VERSION = 14;
+
+/** The boundary a written sidecar's measurement needs: eleven for encoded video metadata, fourteen for `hasVideo`. */
+function mediaInfoBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
+  let boundary = 0;
+  for (const file of files) {
+    if (!file.newContent || !file.path.endsWith(".json")) continue;
+    try {
+      const info = (JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown> } | null)?.mediaInfo;
+      if (info == null) continue;
+      if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
+      else if (["width", "height", "frameRate"].some((field) => field in info)) boundary = Math.max(boundary, 11);
+    } catch {
+      /* not JSON, so not a sidecar */
+    }
+  }
+  return boundary;
+}
 
 /**
  * Would writing this actually change what the world says?
@@ -674,14 +699,8 @@ export class Committer {
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
-      // Extended probe metadata is also written by ordinary artifact filing/backfill.
-      files.some(file => {
-        if(!file.newContent || !file.path.endsWith(".json")) return false;
-        try {
-          const value=JSON.parse(file.newContent) as {mediaInfo?:Record<string,unknown>} | null;
-          return value?.mediaInfo != null && ["width","height","frameRate"].some(field=>field in value.mediaInfo!);
-        } catch { return false; }
-      }) ? 11 : 0,
+      // Probe metadata is also written by ordinary artifact filing/backfill.
+      mediaInfoBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
     );
     if (raiseSchemaVersion > 0) {

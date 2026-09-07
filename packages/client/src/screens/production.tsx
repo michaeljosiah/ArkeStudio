@@ -75,6 +75,7 @@ import {
   orderedTrackClips,
   secondsToFrames,
   sourceLengthFramesFor,
+  type SourceLengthFrames,
   storyOrderDrift,
   ulid,
   AUDIO_TRACK_KINDS,
@@ -5580,6 +5581,7 @@ function CutInspector({
   onTranscribe,
   onFill,
   mintClipId,
+  sourceLength,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
@@ -5603,6 +5605,8 @@ function CutInspector({
   /** A gap in the `Needs a decision` list selects its clip, where the takes are chosen (R-22). */
   onFill: (clipId: TimelineClipId) => void;
   mintClipId: () => TimelineClipId;
+  /** Measured source lengths, so a typed Out stops where the source does. */
+  sourceLength: SourceLengthFrames;
 }) {
   const selectedCue =
     selection?.kind === "cue" && timeline !== null
@@ -5681,7 +5685,7 @@ function CutInspector({
             <InspectorRow label="Voice">{selectedClip.source.sheetId}{selectedClip.source.voiceAssignedAtVersion !== undefined ? ` · sheet v${selectedClip.source.voiceAssignedAtVersion}` : ""}</InspectorRow>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} sourceLength={sourceLength} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
           <AudioClipSettings clip={selectedClip} track={selectedTrack} disabled={commandsDisabled} onCommands={onCommands} />
@@ -5712,7 +5716,7 @@ function CutInspector({
             </div>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} sourceLength={sourceLength} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
     );
@@ -5738,7 +5742,7 @@ function CutInspector({
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
         {selectedClip && (<>
-          <PictureClipTiming clip={selectedClip} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} />
+          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} sourceLength={sourceLength} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
         </>)}
         {selectedShotId && !savedPictureOrder && (
@@ -7514,6 +7518,7 @@ export function CutScreen() {
                 if (clip) transport.seek(clip.clip.startFrame / frameRate);
               }}
               mintClipId={mintClipId}
+              sourceLength={sourceLength}
             />
           </div>
         <div className="fy-cutside__panel fy-cutside__panel--arke" id="cut-arke-panel">

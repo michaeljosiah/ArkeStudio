@@ -99,7 +99,9 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
  */
 // Thirteen is a chapter's `source` (turn 131): an imported chapter's strict frontmatter names
 // the file it came from, and a build without the field would drop the chapter on scan.
-export const SUPPORTED_SCHEMA_VERSION = 13;
+// Fourteen is a measured `hasVideo` on an artifact sidecar (PR 944): the strict sidecar parse
+// fails on a build without the field, which drops the artifact and every clip that cites it.
+export const SUPPORTED_SCHEMA_VERSION = 14;
 
 export class WorldOpenError extends Error {
   constructor(
