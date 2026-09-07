@@ -13,6 +13,12 @@ export const MediaInfoSchema = z
   .object({
     durationSec: z.number().positive(),
     hasAudio: z.boolean(),
+    /**
+     * Whether a picture stream was found, cover art aside. Optional because it was not always
+     * recorded: absent means unknown, and a filing decision is made only on a measured `false`,
+     * the same distinction `hasAudio` needs between silence and a probe that could not say.
+     */
+    hasVideo: z.boolean().optional(),
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
     frameRate: z.number().finite().positive().optional(),

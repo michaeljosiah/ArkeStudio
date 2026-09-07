@@ -77,6 +77,38 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
   assert.equal(saved(production()).tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_sound-right")!.startFrame, 36);
 });
 
+it("files an mp4 that carries only sound as audio, so Import media lands it on a sound lane", async t => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const id = await createProduction(store, { title: "A song and a film", medium: "video", frameRate: 24 });
+  const production = () => store.getBundle().productions.find(p => p.meta.id === id)!;
+  const song = join(dir, "song.mp4"), film = join(dir, "film.mp4");
+  await writeFile(song, "aac in an mp4 box"); await writeFile(film, "a real film");
+  // The container says video for both; only the probe can tell them apart. (Matched on the
+  // filename: the fixture world's own path contains "song".)
+  const byStream: MediaProbe = {
+    async durationSec() { return 3; },
+    async info(path) { return { durationSec: 3, hasAudio: true, hasVideo: !path.endsWith("song.mp4") }; },
+  };
+  assert.deepEqual(await importEditorMedia(store, [song, film], {
+    productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "append",
+  }, { mediaProbe: byStream, abandoned: () => false }), []);
+  const kinds = Object.fromEntries(store.getBundle().artifacts.filter(a => a.file.endsWith(".mp4")).map(a => [a.file, a.kind]));
+  assert.deepEqual(kinds, { "song.mp4": "audio", "film.mp4": "video" });
+  const timeline = saved(production());
+  const picture = timeline.tracks.find(track => track.id === "tr_picture")!;
+  const sound = timeline.tracks.find(track => track.kind === "audio")!;
+  assert.deepEqual(picture.clips.map(clip => clip.source.label), ["film.mp4"], "the film is the picture");
+  assert.deepEqual(sound.clips.map(clip => [clip.source.label, clip.startFrame, clip.durationFrames, clip.gainDb]), [["song.mp4", 0, 72, 0]]);
+  // Dropped at a frame on the Picture track, the same song is refused as sound rather than placed as a black picture.
+  const dropped = await importEditorMedia(store, [song], {
+    productionId: id, baseRevision: timeline.revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: 12,
+  }, { mediaProbe: byStream, abandoned: () => false });
+  assert.equal(dropped.length, 1);
+  assert.match(dropped[0]!.reason, /has no picture/);
+  assert.equal(saved(production()).revision, timeline.revision, "a refused drop writes nothing");
+});
+
 it("preserves filed media on a stale import and reports partial filing without changing prior clips", async t => {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); t.after(() => store.close());
   const id = await createProduction(store, { title: "Import fences", medium: "video" });

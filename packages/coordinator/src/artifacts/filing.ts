@@ -58,6 +58,18 @@ export function kindForFile(name: string): ArtifactKind {
 }
 
 /**
+ * What a media artifact is once it has been measured. The extension decides at filing time
+ * because nothing has read the bytes yet, and `.mp4` is a container as happy holding a song as a
+ * film. A measured file with sound and no picture stream is audio: it belongs on a sound lane,
+ * where gain and role live, and placed as picture it is a black clip the render plan refuses.
+ * Decided only on a measured `false` — a record that never said is left as filed, and so is a
+ * file with neither, which the cut cannot use either way.
+ */
+export function measuredKind(kind: ArtifactKind, info: MediaInfo): ArtifactKind {
+  return kind === "video" && info.hasVideo === false && info.hasAudio ? "audio" : kind;
+}
+
+/**
  * What the attach dialog offers — derived from the kinds above rather than written twice, so
  * the picker and the sidecar can never disagree about what this app can hold. Dropping a file
  * the dialog does not list still files it; the filter is a courtesy, not the gate.
@@ -590,7 +602,9 @@ async function measureInto(
       // malformed sidecars without rewriting them, and this has no better claim to overwrite one.
       const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
-      await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
+      // The first measurement is the only one, so this is the one moment the kind can follow it:
+      // the file was just copied in and nothing has placed it yet.
+      await writeSidecar(store, { ...parsed.data, kind: measuredKind(parsed.data.kind, info), mediaInfo: info }, raw);
       return true;
     })
     .catch(() => false);
@@ -768,6 +782,9 @@ export async function backfillMediaInfo(
             continue;
           }
           if (current.mediaInfo !== undefined) continue;
+          // The kind stays as filed here, unlike at filing time: this world may already cut with
+          // the artifact, and a Picture clip citing something that has become audio turns its
+          // working render plan into a refusal on the next open.
           files.push({
             path: `artifacts/${file}.json`,
             action: "replace",
