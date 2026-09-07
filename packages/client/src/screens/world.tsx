@@ -4377,6 +4377,10 @@ export function ArtifactsScreen() {
   const retiringArtifact = artifacts.find(a => a.id === retireId) ?? null;
   const uses = world && retiringArtifact ? artifactUses(world, retiringArtifact) : [];
   const openTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeRetirement = () => {
+    setRetireId(null);
+    openTrigger.current?.focus();
+  };
   // Whatever made it, not the bench alone (issue 475): a character's generated references are
   // filed here too, and the chip that counts what this application made counts those as well.
   const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
@@ -4642,7 +4646,7 @@ export function ArtifactsScreen() {
                 }}
               />
               <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
-                onClick={() => setRetireId(a.id)}>Remove</button>
+                onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
               {isImage ? (
                 <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
                   <Portrait
@@ -4753,14 +4757,14 @@ export function ArtifactsScreen() {
         }}
       />
       <EditorDialog open={retiringArtifact !== null} title="Remove from shelf?" subtitle={retiringArtifact?.file}
-        onClose={() => setRetireId(null)}>
+        onClose={closeRetirement}>
         <p>This retires the artifact from the shelf and file pickers. Its file and provenance stay in the world;
           existing clips, references and exports keep working. No disk space is freed.</p>
         <p>Import the same file again to restore it.</p>
         <p>{uses.length ? "Current uses — kept intact:" : "No current uses found in the loaded world records. History is kept."}</p>
         {uses.length > 0 && <ul style={{ maxHeight: 200, overflowY: "auto" }}>{uses.map(use => <li key={use}>{use}</li>)}</ul>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <Button variant="outline" onClick={() => setRetireId(null)}>Cancel</Button>
+          <Button variant="outline" onClick={closeRetirement}>Cancel</Button>
           <Button variant="primary" onClick={() => {
             if (worldId && retiringArtifact) retireArtifact(worldId, retiringArtifact.id);
             setRetireId(null);

@@ -78,6 +78,13 @@ it("names current uses, confirms retirement from the card and viewer, and waits 
     await click("Cancel");
     assert.equal(sent.some(message => message.kind === "retire-artifact"), false);
     await open(mounted, PICTURE);
+    const opener = mounted.container.querySelector<HTMLButtonElement>(".fy-gridcard__open")!;
+    let focused = false;
+    opener.focus = () => { focused = true; };
+    await click("Remove from shelf");
+    await click("Cancel");
+    assert.equal(focused, true, "cancelling after closing the viewer returns focus to its shelf card");
+    await open(mounted, PICTURE);
     await click("Remove from shelf");
     assert.match(mounted.container.textContent!, /No disk space is freed/);
     await click("Remove from shelf");
