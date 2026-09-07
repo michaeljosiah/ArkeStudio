@@ -3,12 +3,14 @@ import { lstat, readdir, readFile, realpath, stat, statfs } from "node:fs/promis
 import { basename, extname, join, sep } from "node:path";
 import {
   ArtifactSidecarSchema,
+  audioSourceOf,
   pickableArtifacts,
   ulid,
   type ArtifactGeneration,
   type ArtifactKind,
   type ArtifactSidecar,
   type MediaInfo,
+  type WorldBundle,
 } from "@arke-studio/contracts";
 import { measureMediaInfo, type MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
@@ -67,6 +69,28 @@ export function kindForFile(name: string): ArtifactKind {
  */
 export function measuredKind(kind: ArtifactKind, info: MediaInfo): ArtifactKind {
   return kind === "video" && info.hasVideo === false && info.hasAudio ? "audio" : kind;
+}
+
+/**
+ * Whether anything in the world plays this artifact: a timeline clip, a legacy cut placement or
+ * lane entry, or a spine's master track. A kind may follow its measurement only while nothing
+ * does — a Picture clip citing something that became audio is a render plan refused. Library
+ * membership is not a citation: relabelling a Library row's lane is the point of measuring.
+ */
+export function artifactCited(bundle: WorldBundle, artifactId: string): boolean {
+  return bundle.productions.some((production) => {
+    if (production.spine?.trackArtifactId === artifactId) return true;
+    if (production.cut.overlays.some((overlay) => overlay.artifactId === artifactId)) return true;
+    const inLane = production.cut.audio.some((lane) =>
+      lane.entries.some((entry) => {
+        const source = audioSourceOf(entry);
+        return source?.kind === "artifact" && source.artifactId === artifactId;
+      }),
+    );
+    if (inLane) return true;
+    const timeline = production.timeline?.status === "ready" ? production.timeline.timeline : null;
+    return timeline !== null && timeline.tracks.some((track) => track.clips.some((clip) => clip.source.kind === "artifact" && clip.source.artifactId === artifactId));
+  });
 }
 
 /**
@@ -372,7 +396,12 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
    */
   if ((outcome.outcome === "filed" || outcome.outcome === "deduplicated") &&
       outcome.artifact.mediaInfo === undefined && (outcome.artifact.kind === "audio" || outcome.artifact.kind === "video")) {
-    await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned, outcome.outcome === "filed");
+    if (await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned)) {
+      // The measurement may have re-kinded the sidecar; every filing surface reports what is on
+      // disk now, not the record from before the probe (codex on PR 944).
+      const measured = store.getBundle().artifacts.find((artifact) => artifact.id === outcome.artifact.id);
+      if (measured !== undefined) return { ...outcome, artifact: measured };
+    }
   }
   return outcome;
 }
@@ -491,8 +520,8 @@ export async function fileGeneratedArtifact(
     await writeSidecar(store, created, null);
     return { artifact: created, created: true };
   });
-  if (filed.created && (kind === "audio" || kind === "video")) {
-    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned, true);
+  if (filed.created && (kind === "audio" || kind === "video") && (await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned))) {
+    return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
   }
   return filed.artifact;
 }
@@ -581,17 +610,16 @@ export async function importFolder(
  * and the wrong thing to write down: stored, it cannot be told from a measured silence, and spine
  * export would refuse a real audio track on a machine that could have measured it properly.
  *
- * `fresh` says the file was copied in by this very call. Only then may the measurement change
- * the artifact's kind: a deduplicated hit is an artifact that has been in the world for as long
- * as its bytes have, possibly on a Picture track already, and a kind that changes under a
- * placement turns a working render plan into a refusal (codex on PR 944).
+ * The measurement may change the artifact's kind only while nothing in the world cites it
+ * (`artifactCited`), and that is read inside the gate rather than decided by the caller: two
+ * imports of the same new file both probe outside the gate, and whichever lands first has to
+ * reach the same answer as the one that copied the bytes in (codex on PR 944).
  */
 async function measureInto(
   store: WorldStore,
   file: string,
   probe: MediaProbe | null,
   abandoned: () => boolean = () => false,
-  fresh = false,
 ): Promise<boolean> {
   if (!probe?.info) return false;
   const info = await measureMediaInfo(store, `artifacts/${file}`, probe);
@@ -609,8 +637,8 @@ async function measureInto(
       const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
       // The first measurement is the only one, so this is the one moment the kind can follow it —
-      // and only when the file was just copied in and nothing has placed it yet.
-      const kind = fresh ? measuredKind(parsed.data.kind, info) : parsed.data.kind;
+      // and only while nothing plays the artifact yet.
+      const kind = artifactCited(store.getBundle(), parsed.data.id) ? parsed.data.kind : measuredKind(parsed.data.kind, info);
       await writeSidecar(store, { ...parsed.data, kind, mediaInfo: info }, raw);
       return true;
     })

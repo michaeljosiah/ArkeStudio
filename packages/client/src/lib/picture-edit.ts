@@ -2,7 +2,6 @@ import {
   TimelineOperationRefused,
   applyTimelineCommands,
   orderedTrackClips,
-  secondsToFrames,
   type FrameRate,
   type ProductionTimeline,
   type SourceLengthFrames,
@@ -10,7 +9,6 @@ import {
   type TimelineClipCommand,
   type TimelineClipId,
 } from "@arke-studio/contracts";
-import { parseTimecode } from "./timeline-drag.js";
 
 /**
  * What a pointer gesture on a Picture clip becomes (SPEC-037 R-23, SPEC-039 R-18).
@@ -101,6 +99,31 @@ export function trackDragCommand(
 export type TimingField = "position" | "in" | "out" | "duration";
 
 /**
+ * `HH:MM:SS:FF`, `MM:SS:FF`, `MM:SS` or `SS` to whole frames, or null. Strict where the scrub
+ * bar's parser is forgiving: that one strips whatever it does not understand, so "1.5" would
+ * read as fifteen seconds, and "00:00:00:99" as nearly four — and here a misread commits a trim.
+ * Digits and colons only, seconds under sixty once minutes are named, minutes under sixty once
+ * hours are, frames under the rate.
+ */
+export function timecodeFrames(text: string, frameRate: FrameRate): number | null {
+  const trimmed = text.trim();
+  if (!/^\d+(?::\d+){0,3}$/.test(trimmed)) return null;
+  const parts = trimmed.split(":").map(Number);
+  if (parts.some((part) => !Number.isSafeInteger(part))) return null;
+  const at = (index: number): number => parts[index] ?? 0;
+  const [hours, minutes, seconds, frames] =
+    parts.length === 1 ? [0, 0, at(0), 0]
+    : parts.length === 2 ? [0, at(0), at(1), 0]
+    : parts.length === 3 ? [0, at(0), at(1), at(2)]
+    : [at(0), at(1), at(2), at(3)];
+  if (parts.length > 1 && seconds >= 60) return null;
+  if (parts.length > 3 && minutes >= 60) return null;
+  if (frames >= frameRate) return null;
+  const total = ((hours * 60 + minutes) * 60 + seconds) * frameRate + frames;
+  return Number.isSafeInteger(total) ? total : null;
+}
+
+/**
  * The one command a typed timecode becomes, or null. Typing is the keyboard path of the same
  * edges the grips drag, so an edge reduces through the same clamp: a value past the source or
  * into a neighbour lands on the nearest legal frame rather than being refused, and the row then
@@ -116,18 +139,8 @@ export function timingEntryCommand(
   sourceLength: SourceLengthFrames = () => undefined,
 ): TimelineClipCommand | null {
   const clip = clips.find((candidate) => candidate.id === clipId);
-  // Digits and colons only, checked before the parser sees it: the parser strips whatever else
-  // it finds, so "1.5" would read as fifteen seconds and trim far more than anyone typed.
-  if (!/^\d+(?::\d+){0,3}$/.test(text.trim())) return null;
-  const seconds = parseTimecode(text, frameRate);
-  if (clip === undefined || seconds === null) return null;
-  let frames: number;
-  try {
-    frames = secondsToFrames(seconds, frameRate);
-  } catch {
-    // A run of digits too long to be a frame count is not a time anyone meant.
-    return null;
-  }
+  const frames = timecodeFrames(text, frameRate);
+  if (clip === undefined || frames === null) return null;
   switch (field) {
     case "position":
       return frames === clip.startFrame ? null : { kind: "move-to-frame", clipId, startFrame: frames };

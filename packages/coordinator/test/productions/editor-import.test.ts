@@ -110,21 +110,39 @@ it("files an mp4 that carries only sound as audio, so Import media lands it on a
   assert.equal(saved(production()).revision, timeline.revision, "a refused drop writes nothing");
   // The measurement is a strict field an older build cannot parse, so the world is fenced past it.
   assert.equal(store.getBundle().meta.schemaVersion, MEDIA_HAS_VIDEO_SCHEMA_VERSION, "hasVideo fences the world");
-  // An artifact that was in the world before it was measured keeps its kind: it may already be
-  // on a Picture track, and a kind that changes under a placement refuses the render plan.
-  const older = join(dir, "old-song.mp4");
-  await writeFile(older, "filed before anyone could measure it");
+  // An artifact filed before anyone could measure it follows a later measurement only while
+  // nothing plays it. Placed on a Picture track, its kind stands: a Picture clip citing something
+  // that became audio is a render plan refused. In the Library alone, it follows the measurement.
   const narrow: MediaProbe = { async durationSec() { return 3; } };
-  assert.deepEqual(await importEditorMedia(store, [older], {
-    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
-  }, { mediaProbe: narrow, abandoned: () => false }), []);
-  const unmeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
-  assert.deepEqual([unmeasured.kind, unmeasured.mediaInfo], ["video", undefined]);
-  await importEditorMedia(store, [older], {
-    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
-  }, { mediaProbe: byStream, abandoned: () => false });
-  const remeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
-  assert.deepEqual([remeasured.kind, remeasured.mediaInfo?.hasVideo], ["video", false], "measured on re-filing, but the kind it was filed with stands");
+  const shelve = async (name: string, probe: MediaProbe) => {
+    const path = join(dir, name);
+    await writeFile(path, `filed as ${name}`);
+    assert.deepEqual(await importEditorMedia(store, [path], {
+      productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+    }, { mediaProbe: probe, abandoned: () => false }), []);
+    return store.getBundle().artifacts.find(a => a.file === name)!;
+  };
+  const placed = await shelve("old-song.mp4", narrow), loose = await shelve("loose-song.mp4", narrow);
+  assert.deepEqual([placed.kind, placed.mediaInfo, loose.kind, loose.mediaInfo], ["video", undefined, "video", undefined]);
+  await applyTimelineCommand(store, id, {
+    kind: "commands", baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()),
+    commands: [{ kind: "place", trackId: "tr_picture", clip: {
+      id: "cl_old", startFrame: 72, durationFrames: 48, sourceInFrames: 0, audio: "keep",
+      source: { kind: "artifact", artifactId: placed.id, label: "old-song.mp4" },
+    } }],
+  });
+  await shelve("old-song.mp4", byStream); await shelve("loose-song.mp4", byStream);
+  const after = (name: string) => { const a = store.getBundle().artifacts.find(a => a.file === name)!; return [a.kind, a.mediaInfo?.hasVideo]; };
+  assert.deepEqual(after("old-song.mp4"), ["video", false], "measured on re-filing, but placed, so the kind it was filed with stands");
+  assert.deepEqual(after("loose-song.mp4"), ["audio", false], "measured on re-filing and played by nothing, so the kind follows");
+  // Filing itself hands back the measured record, so a surface that never re-reads the bundle
+  // (the attach chip, a folder import's report) still says what is on disk.
+  const direct = join(dir, "another-song.mp4");
+  await writeFile(direct, "a third song");
+  const filed = await fileArtifact(store, { sourcePath: direct, production: null, mediaProbe: byStream, abandoned: () => false });
+  assert.equal(filed.outcome, "filed");
+  if (filed.outcome !== "filed") throw new Error("unreachable");
+  assert.deepEqual([filed.artifact.kind, filed.artifact.mediaInfo?.hasVideo], ["audio", false]);
 });
 
 it("preserves filed media on a stale import and reports partial filing without changing prior clips", async t => {
