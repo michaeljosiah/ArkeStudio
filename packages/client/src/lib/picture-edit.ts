@@ -116,6 +116,9 @@ export function timingEntryCommand(
   sourceLength: SourceLengthFrames = () => undefined,
 ): TimelineClipCommand | null {
   const clip = clips.find((candidate) => candidate.id === clipId);
+  // Digits and colons only, checked before the parser sees it: the parser strips whatever else
+  // it finds, so "1.5" would read as fifteen seconds and trim far more than anyone typed.
+  if (!/^\d+(?::\d+){0,3}$/.test(text.trim())) return null;
   const seconds = parseTimecode(text, frameRate);
   if (clip === undefined || seconds === null) return null;
   let frames: number;

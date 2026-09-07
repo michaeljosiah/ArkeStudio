@@ -89,6 +89,10 @@ describe("a typed timecode becomes the one command a drag would", () => {
     assert.equal(timingEntryCommand(song, "cl_s", "position", "0", 25, source), null);
     assert.equal(timingEntryCommand(song, "cl_s", "duration", "three minutes", 25, source), null);
     assert.equal(timingEntryCommand(song, "cl_s", "duration", "", 25, source), null);
+    // The parser would read "1.5" as fifteen seconds; a value with anything but digits and colons is not a time.
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "1.5", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "0:48s", 25, source), null);
+    assert.equal(timingEntryCommand(song, "cl_s", "duration", "00:00:48;00", 25, source), null);
     assert.equal(timingEntryCommand(song, "cl_s", "duration", "9".repeat(40), 25, source), null, "digits past the frame range are not a time");
     assert.equal(timingEntryCommand(song, "cl_zz", "out", "0:48", 25, source), null);
   });

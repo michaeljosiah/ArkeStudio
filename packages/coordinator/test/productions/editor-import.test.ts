@@ -15,6 +15,7 @@ import { fileArtifact } from "../../src/artifacts/filing.js";
 import { assembleTimelineScene, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
+import { MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import type { MediaProbe } from "../../src/media/probe.js";
 
@@ -107,6 +108,23 @@ it("files an mp4 that carries only sound as audio, so Import media lands it on a
   assert.equal(dropped.length, 1);
   assert.match(dropped[0]!.reason, /has no picture/);
   assert.equal(saved(production()).revision, timeline.revision, "a refused drop writes nothing");
+  // The measurement is a strict field an older build cannot parse, so the world is fenced past it.
+  assert.equal(store.getBundle().meta.schemaVersion, MEDIA_HAS_VIDEO_SCHEMA_VERSION, "hasVideo fences the world");
+  // An artifact that was in the world before it was measured keeps its kind: it may already be
+  // on a Picture track, and a kind that changes under a placement refuses the render plan.
+  const older = join(dir, "old-song.mp4");
+  await writeFile(older, "filed before anyone could measure it");
+  const narrow: MediaProbe = { async durationSec() { return 3; } };
+  assert.deepEqual(await importEditorMedia(store, [older], {
+    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+  }, { mediaProbe: narrow, abandoned: () => false }), []);
+  const unmeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
+  assert.deepEqual([unmeasured.kind, unmeasured.mediaInfo], ["video", undefined]);
+  await importEditorMedia(store, [older], {
+    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+  }, { mediaProbe: byStream, abandoned: () => false });
+  const remeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
+  assert.deepEqual([remeasured.kind, remeasured.mediaInfo?.hasVideo], ["video", false], "measured on re-filing, but the kind it was filed with stands");
 });
 
 it("preserves filed media on a stale import and reports partial filing without changing prior clips", async t => {

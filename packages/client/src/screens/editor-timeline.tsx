@@ -437,6 +437,9 @@ function TimingRow({
             } else if (event.key === "Escape") {
               event.currentTarget.value = shown;
               event.currentTarget.blur();
+              // Escape here drops the edit and nothing more: left to bubble, the Cut's pane
+              // listener reads it as "close the Inspector" on a compact layout.
+              event.stopPropagation();
             }
           }}
           onBlur={(event) => {
