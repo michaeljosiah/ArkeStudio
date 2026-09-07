@@ -8,6 +8,7 @@ import {
   deriveCapabilityAvailability,
   engineOfProvider,
   modelPriceCopy,
+  modelCapabilityCopy,
   type Capability,
   type EngineId,
   type ManifestModel,
@@ -387,6 +388,9 @@ function LocalTile({ facts }: { facts: LocalFacts }) {
           <RuntimeStatus tone={facts.tone}>{facts.word}</RuntimeStatus>
         </div>
         <div className="fy-mtile__does">{facts.controls}</div>
+        {((facts.model.accepts.referenceVideos ?? 0) > 0 || (facts.model.accepts.referenceAudio ?? 0) > 0) && (
+          <div className="fy-mtile__meta">{modelCapabilityCopy(facts.model)}</div>
+        )}
         {facts.reason !== undefined && (
           <div className="fy-set__why">
             <span className={cx("fy-set__dot", facts.reason.warn && "fy-set__dot--warn")} />

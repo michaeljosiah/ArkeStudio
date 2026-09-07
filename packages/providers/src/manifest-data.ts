@@ -14,9 +14,9 @@ import { FAL_MODELS, FAL_ENDPOINTS, FAL_EDIT_ENDPOINTS } from "./fal-catalogue.g
  * Prices are integer micro-dollars (R-14).
  */
 export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
-  manifestVersion: 23,
+  manifestVersion: 24,
   dialogueGuidance: [],
-  generated: "2026-09-06",
+  generated: "2026-09-07",
   /**
    * Which local model to reach for first, per capability (SPEC-033 R-33). Authored, and about
    * the models rather than about any machine: the gate filters this order by what was measured

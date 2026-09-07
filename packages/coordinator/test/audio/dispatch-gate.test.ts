@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { AudioRightsEvent } from "@arke-studio/contracts";
-import { clearAudioDispatch } from "../../src/audio/dispatch-gate.js";
+import { clearAudioDispatch, checkAudioDispatchEvidence } from "../../src/audio/dispatch-gate.js";
 import { effectiveAudioRights } from "../../src/audio/rights.js";
 import { analyzePcmWav, audioHash } from "../../src/audio/qc.js";
 import { wav } from "./helpers.js";
@@ -14,6 +14,13 @@ const acknowledgement: AudioRightsEvent = { schemaVersion: 1, action: "acknowled
 const input = () => ({ bytes, hash, report: analyzePcmWav(bytes), scope: "cloud-reference-upload" as const,
   rights: [acknowledgement], warningCodes: [], attestations: [{ audioHash: hash, kind: "single-speaker" as const,
     statementVersion: 1, acknowledgedAt: at }], requiredAttestations: ["single-speaker" as const], statementVersion: 1 });
+
+it("local reference evidence verifies QC and bytes without authorizing cloud upload", () => {
+  const local = { ...input(), rights: [] };
+  assert.equal(checkAudioDispatchEvidence(local).report.sourceHash, hash);
+  assert.throws(() => clearAudioDispatch(local), /rights-required/);
+  assert.throws(() => checkAudioDispatchEvidence({ ...local, bytes: wav([4]) }), /source-changed/);
+});
 
 it("clears exact bytes and freezes independent rights quality and attestations", () => {
   const clearance = clearAudioDispatch(input());

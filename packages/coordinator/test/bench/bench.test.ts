@@ -26,8 +26,51 @@ import {
 } from "../../src/bench/service.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const CLOCK = () => "2026-08-16T12:00:00.000Z";
+
+it("local H3 bench references freeze multimedia identities and use native ordered tags", async () => {
+  const { dir, store } = await open();
+  const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-h3-reference-video")!;
+  await store.ownedWrite(async () => {
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    for (const [file, kind] of [["picture.png", "image"], ["motion.mp4", "video"], ["tone.wav", "audio"]] as const) {
+      const bytes = Buffer.from(`fixture ${file}`);
+      await writeFile(join(dir, "artifacts", file), bytes);
+      await writeFile(join(dir, "artifacts", `${file}.json`), JSON.stringify({ id: newId("ar"), kind, file,
+        hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, origin: { by: "user" }, links: [], created: CLOCK(),
+        ...(kind === "image" ? {} : { mediaInfo: { durationSec: 2, hasAudio: true } }) }));
+    }
+  });
+  const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
+  assert.ok(opened);
+  await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: model.id,
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" }, brief: "A red cube moves." }, { at: CLOCK() });
+  const empty = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "empty", at: CLOCK() });
+  assert.equal(empty.ok, false);
+  if (!empty.ok) assert.match(empty.reason, /at least one/);
+  for (const file of ["picture.png", "motion.mp4", "tone.wav"]) {
+    const artifact = store.getBundle().artifacts.find(row => row.file === file)!;
+    const outcome = await addBenchReference((await refolded(opened))!, store.getBundle(), model,
+      { source: { source: "artifact", artifactId: artifact.id }, requestId: `attach-${file}`, at: CLOCK() });
+    assert.notEqual(outcome.outcome, "refused", JSON.stringify(outcome));
+  }
+  await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: model.id,
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" },
+    brief: "Use @Image 1 for color, @Video 1 for motion and @Audio 1 for sound." }, { at: CLOCK() });
+  const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "dispatch", at: CLOCK() });
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  if (!plan.ok) return;
+  const params = plan.inputs[0]!.params;
+  assert.match(String(params.prompt), /<Picture 1>.*<Video 1>.*<Audio 2>/);
+  assert.deepEqual(params.references, ["artifacts/picture.png"]);
+  assert.deepEqual(params.videoReferences, ["artifacts/motion.mp4"]);
+  assert.deepEqual((params.referenceMedia as Array<{ kind: string }>).map(ref => ref.kind), ["video", "audio"]);
+  assert.equal(plan.reserved[0]!.request.brief, "Use @Image 1 for color, @Video 1 for motion and @Audio 1 for sound.");
+});
 
 const IMAGE_MODEL: ManifestModel = {
   id: "test-image",

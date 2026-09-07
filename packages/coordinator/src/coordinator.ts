@@ -1,3 +1,5 @@
+import { referenceInputProblem } from "@arke-studio/contracts";
+import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
@@ -2022,6 +2024,16 @@ export class Coordinator {
               if (!store || store.worldId !== job.worldId) throw new Error("The owning world is unavailable.");
               return readCharacterAudioInputs(store, job);
             },
+            prepareReferences: async (job, videos, signal) => {
+              const model = this.opts.manifest?.models.find(row => row.id === job.model && row.provider === job.provider);
+              if (model?.limits.referenceSyntax !== "minimax-h3" && job.params.referenceMedia === undefined) return { videos, audio: [] };
+              const prepare = (store: WorldStore) => prepareReferences(store, job, model, videos,
+                { ffmpeg: this.opts.ffmpeg, probe: this.opts.mediaProbe }, signal);
+              if (this.opts.provider.withWorldStore) return this.opts.provider.withWorldStore(job.worldId, prepare);
+              const store = this.opts.provider.openStore?.();
+              if (!store || store.worldId !== job.worldId) throw new Error("The owning world is unavailable.");
+              return prepare(store);
+            },
             readImageReferences: async (worldId, paths) => {
               const read = async (store: WorldStore) => {
                 assertStageReferencesCurrent(store,paths);
@@ -2130,6 +2142,17 @@ export class Coordinator {
               if (!recipe) return { ok: false, reason: `"${input.model}" is not a shipped recipe` };
               if (recipe.state === "disabled") {
                 return { ok: false, reason: recipe.reason ?? "the recipe is not ready on this machine" };
+              }
+              const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
+              if (model?.limits.referenceSyntax === "minimax-h3") {
+                const referenceProblem = referenceInputProblem(model, input.params);
+                if (referenceProblem) return { ok: false, reason: referenceProblem };
+                const audioPlan = input.params.audioReferences as { references?: unknown[] } | undefined;
+                const needsPreparation = (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) ||
+                  (Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) || input.params.continuedFrom !== undefined;
+                const hasMedia = needsPreparation || (audioPlan?.references?.length ?? 0) > 0;
+                if (hasMedia && service.engineIdentity()?.locality !== "local") return { ok: false, reason: "Audio and video references require a local engine." };
+                if (needsPreparation && (!this.opts.ffmpeg || !this.opts.mediaProbe?.info)) return { ok: false, reason: "H3 multimedia references need the local media tools." };
               }
               return { ok: true };
             },

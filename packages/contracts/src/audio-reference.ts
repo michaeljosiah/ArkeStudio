@@ -102,10 +102,12 @@ export function referenceAudioAsset(ref: CharacterAudioPlan["references"][number
 
 /** Verified fal reference-to-video contract; neither frame nor continuation routes declare audio. */
 export function characterAudioRoute(model: { provider: string; id: string }, taskMode = "generate") {
-  if (model.provider !== "fal" || !["generate", "keyframe-sequence"].includes(taskMode) ||
-    !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)) return null;
-  return { endpoint: model.id === "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video", field: "audio_urls", maxFiles: 3,
-    maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxCombinedReferences: 12,
+  const local = model.provider === "comfyui" && model.id === "comfyui-h3-reference-video";
+  if (!(["generate", "keyframe-sequence"].includes(taskMode)) || (!local && (model.provider !== "fal" ||
+    !["seedance-2.0", "seedance-2.0-fast"].includes(model.id)))) return null;
+  return { endpoint: local ? model.id : model.id === "seedance-2.0-fast" ? "bytedance/seedance-2.0/fast/reference-to-video" : "bytedance/seedance-2.0/reference-to-video", field: local ? "ref_audios" : "audio_urls", maxFiles: 3,
+    local, requiresImages: !local, supportsPerformanceSync: !local, maxFileDurationSec: local ? 5.2 : 15,
+    maxBytesPerFile: 15_000_000, maxTotalDurationSec: 15, maxImages: 9, maxCombinedReferences: local ? 15 : 12,
     formats: ["audio/wav", "audio/mpeg"], incrementalInputMicroUsd: 0, providerDurationMode: "requested",
     effects: { wording: "prompt-guided", timing: "not-preserved", identity: "guidance", cadence: "guidance",
       lipSync: "generated", generatedAudio: true, suppliedAudioPreserved: false, separateAudioArtifact: false } } as const;
@@ -153,18 +155,20 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
     if (!sample) continue;
     if (!route) { plan.problems.push(`${sheet.name}: this route cannot carry the assigned voice reference. Choose a compatible route or explicitly continue without audio references.`); continue; }
     if (!("schemaVersion" in sample)) { plan.problems.push(`${sheet.name}: revalidate the legacy sample before cloud reuse.`); continue; }
-    if (!sample.acknowledgementId) plan.problems.push(`${sheet.name}: the sample is local-only; authorize cloud reference reuse before dispatch.`);
+    if (!route.local && !sample.acknowledgementId) plan.problems.push(`${sheet.name}: the sample is local-only; authorize cloud reference reuse before dispatch.`);
     if (sample.provenance.outputTechnical.sizeBytes > route.maxBytesPerFile) plan.problems.push(`${sheet.name}: sample exceeds the route's 15 MB file limit.`);
     plan.references.push({ intent: "voice-reference", sheetId: id, characterName: sheet.name, label: `@Audio${plan.references.length + 1}`, sample });
   }
   if (new Set(plan.references.map(ref => ref.intent)).size > 1) plan.problems.push("A dispatch cannot mix voice guidance and performance synchronization. Disable assigned samples or use one intent throughout the pass.");
   if (plan.references.length && route) {
+    if (!route.supportsPerformanceSync && plan.references.some(ref => ref.intent === "performance-sync")) plan.problems.push("This route provides voice guidance, not performance synchronization.");
     plan.effects = { ...route.effects, generatedAudio: plan.references[0]!.intent !== "performance-sync" };
     for (const ref of plan.references) {
       if (referenceAudioAsset(ref).provenance.outputTechnical.sizeBytes > route.maxBytesPerFile) plan.problems.push(`${ref.characterName}: audio exceeds the route's 15 MB file limit.`);
+      if ((referenceAudioAsset(ref).provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) plan.problems.push(`${ref.characterName}: audio exceeds the route's ${route.maxFileDurationSec} second file limit.`);
     }
-    if (!input.imageCount) plan.problems.push("Voice references require character imagery on this route.");
-    if (input.imageCount > route!.maxImages || plan.references.length > 3 || plan.references.length + input.imageCount > 12) plan.problems.push("The complete character reference set exceeds this route's shared input budget.");
+    if (route.requiresImages && !input.imageCount) plan.problems.push("Voice references require character imagery on this route.");
+    if (input.imageCount > route.maxImages || plan.references.length > route.maxFiles || plan.references.length + input.imageCount > route.maxCombinedReferences) plan.problems.push("The complete character reference set exceeds this route's shared input budget.");
     if (plan.references.reduce((n, r) => n + (referenceAudioAsset(r).provenance.outputTechnical.durationSec ?? Infinity), 0) > 15) plan.problems.push("Voice samples exceed the route's combined 15 second limit. Review shorter samples or explicitly disable references.");
   }
   return plan;
