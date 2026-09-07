@@ -45,6 +45,12 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   assert.match(brief, /Spare sentences, concrete images/);
   assert.match(brief, /Draft from the synopsis/);
   assert.match(brief, /Draft the rest/);
+  assert.match(brief, /production-chapter action in the turn result's actions array/);
+  assert.ok(brief.includes(`change.chapterId ${JSON.stringify(chapter.id)}`));
+  assert.match(brief, /change.changes.body containing the complete proposed manuscript/);
+  assert.match(brief, /changes.implies for separate decisions/);
+  assert.match(brief, /Each changes.implies item is an object with kind/);
+  assert.match(brief, /Do not use plain strings or title\/statement fields/);
   assert.ok(receipts.some((r) => r.target?.id.endsWith(":plan")));
   const ending = receipts.find((r) => r.target?.id.endsWith(":ending"))!;
   assert.ok(ending.complete);

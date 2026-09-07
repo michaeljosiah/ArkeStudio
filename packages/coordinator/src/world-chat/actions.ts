@@ -3814,7 +3814,10 @@ export function worldChatActionAdapters(
       if (candidates.length > 0 && candidates.every((candidate) => candidate.status === "accepted")) {
         return { status: "completed", receipt: { kind: "proposal", id: action.authority.id, summary: "The proposal was accepted." } };
       }
-      if (candidates.some((candidate) => candidate.status === "discarded")) {
+      const discarded = (await readChanges(join(store.dir, "changes.jsonl"))).some(
+        (record) => record.entity === `.proposals/${action.authority.id}` && record.discarded === true,
+      );
+      if (discarded || candidates.some((candidate) => candidate.status === "discarded")) {
         return { status: "cancelled", detail: "The proposal was discarded outside this card." };
       }
       return null;

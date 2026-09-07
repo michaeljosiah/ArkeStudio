@@ -204,8 +204,8 @@ afterEach(async () => {
 const text = (m: Mounted): string => m.container.textContent ?? "";
 const q = (m: Mounted, selector: string): HTMLElement | null => m.container.querySelector(selector) as HTMLElement | null;
 
-async function answerOpen(m: Mounted, body = BODY): Promise<void> {
-  const ask = m.sent.find((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
+async function answerOpen(m: Mounted, body = BODY, hash = HASH): Promise<void> {
+  const ask = m.sent.findLast((message) => message.kind === "open-chapter") as Extract<ClientMessage, { kind: "open-chapter" }>;
   assert.ok(ask, "opening asks for the body");
   await act(async () => {
     __applyEventForTest({
@@ -218,11 +218,123 @@ async function answerOpen(m: Mounted, body = BODY): Promise<void> {
       disposition: "opened",
       body,
       version: 4,
-      hash: HASH,
+      hash,
       versions: [1, 2, 3],
     });
   });
 }
+
+function sourceProps(m: Mounted): { value: string; onChange: (event: { target: { value: string } }) => void } {
+  const area = q(m, "textarea.fy-ch__source")!;
+  const key = Object.keys(area).find((key) => key.startsWith("__reactProps$"))!;
+  return (area as unknown as Record<string, ReturnType<typeof sourceProps>>)[key]!;
+}
+
+async function typeProse(m: Mounted, value: string) {
+  await act(async () => sourceProps(m).onChange({ target: { value } }));
+}
+
+async function answerSave(request: Extract<ClientMessage, { kind: "save-chapter" }>, disposition: "saved" | "refused", hash = HASH) {
+  const requestId = request.requestId;
+  assert.ok(requestId);
+  await act(async () => __applyEventForTest({ type: "chapter.save-result", at: "2026-09-07T12:00:00Z",
+    worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterFile: "01-neap", requestId,
+    disposition, ...(disposition === "saved" ? { hash, version: 4 } : { reason: "base moved" }) }));
+}
+
+async function leave(m: Mounted) {
+  await act(async () => m.root.unmount());
+  open.splice(open.indexOf(m), 1);
+  m.container.remove();
+}
+
+describe("chapter autosave recovery (#954)", () => {
+  it("retries a refused save when the refreshed record only changed the plan", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = `${BODY}\n\nKeep this paragraph.`;
+    await typeProse(m, value);
+    const read = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent === "Read the chapter")!;
+    await act(async () => read.click());
+    const save = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    await answerSave(save, "refused");
+    const nextHash = `sha256:${"e".repeat(64)}`;
+    await answerOpen(m, BODY, nextHash);
+    const retry = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.notEqual(retry.requestId, save.requestId);
+    assert.equal(retry.baseHash, nextHash);
+    assert.equal(retry.body, value);
+    await answerSave(retry, "saved", nextHash);
+  });
+  it("refreshes a plan-only hash change and saves current typing against the new base", async () => {
+    const state = inkbound();
+    const m = await mount(state);
+    await answerOpen(m);
+    const value = `${BODY}\n\nMy new paragraph.`;
+    await typeProse(m, value);
+    const nextHash = `sha256:${"b".repeat(64)}`;
+    const updated = structuredClone(state);
+    updated.world!.productions.find((p) => p.meta.id === "inkbound")!.chapters[1]!.hash = nextHash;
+    await act(async () => __setStateForTest(updated, { connection: "open" }));
+    assert.equal(m.sent.filter((m) => m.kind === "open-chapter").length, 2);
+    await answerOpen(m, BODY, nextHash);
+    const save = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.equal(save.baseHash, nextHash);
+    assert.equal(save.body, value);
+    assert.equal(sourceProps(m).value, value);
+    await answerSave(save, "saved", nextHash);
+  });
+
+  it("keeps a refused draft through navigation and requires a choice before overwriting saved prose", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = `${BODY}\n\nRecover this paragraph.`;
+    await typeProse(m, value);
+    // The save is sent by the unmount flush; its refusal arrives with no editor mounted.
+    await leave(m);
+    const save = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.ok(save);
+    await answerSave(save, "refused");
+    const returned = await mount(inkbound());
+    const disk = `${BODY}\n\nSomeone else's paragraph.`;
+    const nextHash = `sha256:${"c".repeat(64)}`;
+    await answerOpen(returned, disk, nextHash);
+    assert.equal(sourceProps(returned).value, value);
+    assert.match(text(returned), /Not saved · your draft is kept/);
+    assert.equal(returned.sent.some((m) => m.kind === "save-chapter"), false);
+    const keep = Array.from(returned.container.querySelectorAll("button")).find((b) => b.textContent === "Save my draft")!;
+    await act(async () => keep.click());
+    const retry = returned.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.equal(retry.baseHash, nextHash);
+    assert.equal(retry.body, value);
+    await answerSave(retry, "saved", nextHash);
+  });
+
+  it("retains newer typing when an in-flight save is refused and the user leaves", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    await typeProse(m, `${BODY}\n\nFirst edit.`);
+    const read = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent === "Read the chapter")!;
+    await act(async () => read.click());
+    const save = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.ok(save);
+    const newest = `${BODY}\n\nFirst edit. More words while saving.`;
+    await typeProse(m, newest);
+    await answerSave(save, "refused");
+    await answerOpen(m, `${BODY}\n\nCompeting prose.`, `sha256:${"d".repeat(64)}`);
+    assert.equal(sourceProps(m).value, newest);
+    assert.match(text(m), /Not saved/);
+    assert.equal(m.sent.filter((m) => m.kind === "save-chapter").length, 1, "a refusal is not retried automatically");
+    await leave(m);
+    const returned = await mount(inkbound());
+    await answerOpen(returned);
+    assert.equal(sourceProps(returned).value, newest);
+    const useSaved = Array.from(returned.container.querySelectorAll("button")).find((b) => b.textContent === "Use saved chapter")!;
+    await act(async () => useSaved.click());
+    assert.equal(sourceProps(returned).value, BODY);
+    assert.equal(returned.sent.some((m) => m.kind === "save-chapter"), false);
+  });
+});
 
 describe("the chapter, opened (turn 126)", () => {
   it("asks for the body on open, never reads it off the summary, and then shows it", async () => {

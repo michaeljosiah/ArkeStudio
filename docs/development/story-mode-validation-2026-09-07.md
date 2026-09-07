@@ -46,3 +46,13 @@ The detailed reproductions and log excerpts are in the three linked follow-up is
 - The immediately following open-result returned an empty body and version 1. The independent fresh save at `2026-09-07T10:47:48.279Z` returned `disposition: saved` and persisted the 73-word test passage.
 
 The scratch production and its conversation are retained for reproduction. No test canon cards were accepted. Keep #893 open until the blocked steps and engine cancellation have been checked on an installed build containing the fixes.
+
+## Follow-up implementation — #952–#954
+
+On `codex/story-893-fixes`, the drafting brief now explicitly requests a chapter action and the existing Implies schema (#952); proposal-manager decisions reconcile their conversation cards, including pending cards (#953); and chapter autosave refreshes same-version bases while retaining refused drafts across navigation with explicit recovery choices (#954). Each issue was committed and pushed separately after focused regression checks.
+
+Further installed-app validation for #893 is assigned to the user's separate app-testing agent. A brief follow-up attempt produced a chapter action with malformed Implies items; the prompt now supplies the required `kind`/`what` fields. That correction has focused automated coverage but has not been retested in the app. The installed app's original archive and client resources were restored after closing the temporary build.
+
+The scratch chapter `productions/story-validation-893/chapters/untitled-2.md` remains for the app-testing agent. Its draft run `run_01M1YBYC84T1S80QZ86PYEJ8TZ` ended as failed after schema validation; no generated chapter was accepted. Keep #893 open for the end-to-end checks above.
+
+Automated follow-up validation: full `npm run lint`, `npm run typecheck`, `npm run build`, and `npm test` passed (5,894 tests: 5,892 passed, two skipped). The desktop main-bundle smoke also passed. Each full gate ran once; the final Implies prompt clarification then passed its focused chapter-brief test, affected lint, and coordinator typecheck. The build retains the existing client bundle-size warning. Windows/Node 24.11.1 results do not replace Linux CI or the delegated app validation.

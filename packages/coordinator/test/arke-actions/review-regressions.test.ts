@@ -12,7 +12,7 @@ import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { jobsFence, sceneFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
+import { jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -39,6 +39,45 @@ async function setup(ffmpeg?: FfmpegRunner) {
     useMasterLookForConversationAction(store: WorldStore, index: number, mutation: { source: string; requestId: string; precondition: () => string | null }): Promise<boolean>;
   };
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
+}
+
+for (const decision of ["accept", "discard", "journal-discard"] as const) {
+  it(`reconciles an overview card after ${decision} through the proposal panel (#953)`, async () => {
+    const w = await setup();
+    await w.coordinator.openWorld(WORLD_ID);
+    const production = w.store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+    const conversationId = newId("cv");
+    const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append({ type: "conversation.created", title: "Overview", entryContext: { kind: "production", productionId: production.meta.id } }, { at: AT });
+    const lifecycle = w.internal.conversationActionLifecycle(w.store);
+    const action = await lifecycle.prepare({
+      conversationId, turnId: newId("turn"), worldId: WORLD_ID,
+      actionKind: "world-chat-production-overview", productionId: production.meta.id,
+      targets: [{ kind: "story", id: production.meta.id }],
+      payload: { kind: "world-chat-production-overview", worldId: WORLD_ID,
+        action: { kind: "production-overview", productionId: production.meta.id,
+          changes: { logline: "The last watch finds a missing page." }, checkReceiptIds: [newId("check")] } },
+      baseObservations: [{ requirement: "story", target: production.meta.id, revisionOrDigest: storyFence(production), complete: true }],
+      createdAt: AT,
+    });
+    await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+    if (decision === "journal-discard") {
+      // The authority landed, but no best-effort conversation resolution was recorded.
+      await w.gate.discard(action.authority.id);
+      w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: "discarded" });
+    } else {
+      await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
+    }
+    await Promise.all(w.internal.backgroundWork);
+    const folded = () => log.read().then(({ events }) => foldConversation(conversationId, AT, events).view);
+    assert.equal((await folded()).actions[0]!.status, decision === "accept" ? "completed" : "cancelled");
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, decision === "accept" ? "completed" : "cancelled", "the open card updates without navigation");
+    const count = (await log.read()).events.length;
+    w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: decision === "accept" ? "accepted" : "discarded" });
+    await Promise.all(w.internal.backgroundWork);
+    assert.equal((await log.read()).events.length, count, "duplicate notifications do not settle or execute twice");
+  });
 }
 
 describe("PR 815 coordinator regressions", () => {
