@@ -425,6 +425,7 @@ const CLIENT_COMMAND_METADATA = {
     execution: blocked(["typed-audio-command"], "The audio cut has no semantic command seam for an action adapter."),
   }),
   "upload-artifacts": action("world", "host-action", "host", "host-file-access", ["artifacts"]),
+  "retire-artifact": humanOnly("Retire artifacts from the shelf's current-use confirmation."),
   "place-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),
   "move-overlay": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts"], { reads: COMPLETE_TIMELINE_READ }),
   "split-overlay-audio": action("production", "command", "timeline", "authored-change", ["timeline", "artifacts", "audio"], { reads: COMPLETE_TIMELINE_READ }),

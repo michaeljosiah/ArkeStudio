@@ -263,14 +263,18 @@ export const CHAPTER_SOURCE_SCHEMA_VERSION = 13;
  * carry no width, so it needs a boundary of its own past the chapter's.
  */
 export const MEDIA_HAS_VIDEO_SCHEMA_VERSION = 14;
+/** Older strict sidecar readers omit retired artifacts, breaking retained citations. */
+export const ARTIFACT_RETIREMENT_SCHEMA_VERSION = 18;
 
-/** The boundary a written sidecar's measurement needs: eleven for encoded video metadata, fourteen for `hasVideo`. */
-function mediaInfoBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
+/** Fence strict sidecar fields atomically with the bytes that introduce them. */
+function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
   let boundary = 0;
   for (const file of files) {
     if (!file.newContent || !file.path.endsWith(".json")) continue;
     try {
-      const info = (JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown> } | null)?.mediaInfo;
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown } | null;
+      if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
+      const info = record?.mediaInfo;
       if (info == null) continue;
       if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
       else if (["width", "height", "frameRate"].some((field) => field in info)) boundary = Math.max(boundary, 11);
@@ -700,7 +704,7 @@ export class Committer {
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
-      mediaInfoBoundary(files),
+      sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
       // Any presence of this strict field needs the retirement-aware scanner, including
       // retired: false adopted from a portable chapter (issue 888).

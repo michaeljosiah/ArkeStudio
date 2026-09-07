@@ -169,6 +169,21 @@ async function currentSidecar(
   }
 }
 
+/** Retirement changes only shelf membership; every reference still resolves to the same bytes. */
+export async function retireArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await store.gateOp(async () => {
+    const artifact = store.getBundle().artifacts.find(a => a.id === artifactId);
+    if (!artifact) throw new Error("This artifact is no longer in the world.");
+    if (basename(artifact.file) !== artifact.file || artifact.file === "..") throw new Error("Invalid artifact file.");
+    const current = await currentSidecar(store, artifact);
+    if (!current?.raw || current.sidecar.id !== artifactId || current.sidecar.file !== artifact.file) {
+      throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
+    }
+    if (current.sidecar.retiredAt !== undefined) return;
+    await writeSidecar(store, { ...current.sidecar, retiredAt: new Date().toISOString() }, current.raw);
+  });
+}
+
 /** A dedup candidate is reusable only while its media still has the hash its metadata claims. */
 async function artifactMediaMatches(
   store: WorldStore,
@@ -326,6 +341,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     // Dedup and allocation happen after this filing owns the same world mutation gate as clone
     // provenance. Neither writer may choose from a bundle that predates the other's media copy.
     const candidates = store.getBundle().artifacts.filter((artifact) => artifact.hash === hash);
+    // Generated occurrences may share bytes while keeping distinct provenance. Restore the
+    // retired filename the user chose before falling back to another occurrence of those bytes.
+    const restorationRank = (artifact: ArtifactSidecar) => artifact.retiredAt === undefined ? 0
+      : artifact.file === original || artifact.file === `${stem}${ext}` ? 2 : 1;
+    candidates.sort((a, b) => restorationRank(b) - restorationRank(a));
     for (const existing of candidates) {
       const current = await currentSidecar(store, existing);
       if (
@@ -339,6 +359,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
         const links = [...new Set([...current.sidecar.links, ...(input.links ?? [])])];
         const next = { ...current.sidecar, links };
         let changed = links.length !== current.sidecar.links.length;
+        // An explicit re-import restores the same record instead of copying its media again.
+        if (next.retiredAt !== undefined) { delete next.retiredAt; changed = true; }
         if (input.production !== undefined && (current.sidecar.production ?? null) !== input.production) {
           changed = true;
           if (input.production === null) delete next.production;

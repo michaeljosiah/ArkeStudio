@@ -5531,6 +5531,10 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * and Space come for free — and the controls that were already there are lifted above it.
  */
 .fy-gridcard--openable { position: relative; }
+.fy-artifact-retire { position: absolute; top: 14px; right: 46px; z-index: 3; opacity: 0; border: 1px solid var(--border); border-radius: var(--radius-control); padding: 4px 8px; background: var(--card); color: var(--foreground); cursor: pointer; }
+.fy-gridcard--openable:hover .fy-artifact-retire,
+.fy-gridcard--openable:focus-within .fy-artifact-retire { opacity: 1; }
+@media (hover: none) { .fy-artifact-retire { opacity: 1; } }
 .fy-gridcard__open {
   position: absolute;
   inset: 0;

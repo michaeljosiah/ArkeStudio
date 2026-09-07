@@ -2638,6 +2638,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
+  /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
+  z
+    .object({
+      kind: z.literal("retire-artifact"),
+      worldId: UlidSchema,
+      artifactId: ArtifactIdSchema,
+    })
+    .strict(),
   /** SPEC-015 R-1/R-6: file one artifact; large files come back needing stated-size consent. */
   z
     .object({

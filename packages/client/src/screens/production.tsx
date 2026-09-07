@@ -1298,7 +1298,7 @@ export function ProductionCastScreen() {
     pendingGuestsOf(pendingSheets(world.proposals, kind, world.conversations), production.meta.id),
   );
   // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
-  const owned = world.artifacts.filter((a) => a.production === production.meta.id);
+  const owned = world.artifacts.filter((a) => a.production === production.meta.id && a.retiredAt === undefined);
   const kindLabel = (sheet: Sheet) =>
     sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction";
 

@@ -8,9 +8,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ArtifactSidecar, ClientState } from "@arke-studio/contracts";
+import { applyTimelineCommands, orderedShots, seedEmptyPictureTimeline, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { artifactIsServable, artifactOpenLabel, artifactViewer } from "../src/lib/artifact-view.js";
+import { CharacterVoiceSamplePanel } from "../src/components/character-voice-sample.js";
+import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } from "../src/lib/artifact-view.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -29,6 +30,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 // linkedom has no layout and no frame loop; the app-wide toaster asks for both before it draws.
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(dom.HTMLElement.prototype, { focus() {} });
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -44,6 +46,56 @@ const source = (file: string): string => readFileSync(join(here, "../src", file)
 const VIEWER = source("components/artifact-viewer.tsx");
 const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 const W = `/w/${FIXTURE_WORLD_ID}`;
+
+it("names current uses, confirms retirement from the card and viewer, and waits for the snapshot", async () => {
+  const state = structuredClone(shelf([PICTURE]));
+  const world = state.world!, production = world.productions[0]!;
+  world.keyArt = `artifacts/${PICTURE.file}`;
+  world.canon[0]!.links.push(PICTURE.id);
+  world.referenceKits[0]!.anchor = `artifacts/${PICTURE.file}`;
+  production.selections[orderedShots(production.scenes[0]!)[0]!.id] = { startFrameArtifactId: PICTURE.id, trimInSec: 0 };
+  production.timeline = { status: "ready", timeline: applyTimelineCommands(seedEmptyPictureTimeline(production), [{ kind: "place", trackId: "tr_picture", clip: {
+    id: "cl_retirement", startFrame: 0, durationFrames: 48, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: PICTURE.id, label: "Opening plate" },
+  } }]) };
+  const uses = artifactUses(world, PICTURE);
+  assert.ok(uses.includes("World key art"));
+  assert.ok(uses.some(use => use.includes("Canon: Tide-calling")));
+  assert.ok(uses.some(use => use.includes("Reference kit:")));
+  assert.ok(uses.some(use => use.includes("shot ")));
+  assert.ok(uses.some(use => use.includes("Opening plate (cl_retirement)")));
+  const sent: Array<{ kind: string; artifactId?: string }> = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } });
+  const mounted = await mountShelf([PICTURE]);
+  try {
+    await act(async () => __setStateForTest(state));
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>(".fy-artifact-retire")!.click());
+    assert.match(mounted.container.textContent!, /Opening plate \(cl_retirement\)/);
+    const click = async (text: string) => {
+      const button = [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === text)!;
+      assert.ok(button, text);
+      await act(async () => button.click());
+    };
+    await click("Cancel");
+    assert.equal(sent.some(message => message.kind === "retire-artifact"), false);
+    await open(mounted, PICTURE);
+    const opener = mounted.container.querySelector<HTMLButtonElement>(".fy-gridcard__open")!;
+    let focused = false;
+    opener.focus = () => { focused = true; };
+    await click("Remove from shelf");
+    await click("Cancel");
+    assert.equal(focused, true, "cancelling after closing the viewer returns focus to its shelf card");
+    await open(mounted, PICTURE);
+    await click("Remove from shelf");
+    assert.match(mounted.container.textContent!, /No disk space is freed/);
+    await click("Remove from shelf");
+    assert.deepEqual(sent.filter(message => message.kind === "retire-artifact"), [{ kind: "retire-artifact", worldId: FIXTURE_WORLD_ID, artifactId: PICTURE.id }]);
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"), "no optimistic deletion");
+    world.artifacts[0] = { ...world.artifacts[0]!, retiredAt: "2026-09-07T12:00:00Z" };
+    await act(async () => __setStateForTest(structuredClone(state)));
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+  } finally { await unmount(mounted); __setBridgeForTest(null); }
+});
 
 it("adds shelf files with the picker or desktop drop and reports unsupported drops", async () => {
   const sent: Array<{ kind: string; worldId: string; editor?: unknown }> = [];
@@ -96,7 +148,7 @@ function artifact(over: Partial<ArtifactSidecar>): ArtifactSidecar {
   } as ArtifactSidecar;
 }
 
-const PICTURE = artifact({ id: "ar_01J8G0000000000000000000I1", kind: "image", file: "key-art.png", links: ["the-vigil"] });
+const PICTURE = artifact({ id: "ar_01J8G0000000000000000000E1", kind: "image", file: "key-art.png", links: ["the-vigil"] });
 const BOARD = artifact({ id: "ar_01J8G0000000000000000000B1", kind: "board", file: "board-v2.png" });
 const CLIP = artifact({
   id: "ar_01J8G0000000000000000000V1",
@@ -111,6 +163,27 @@ const BIBLE = artifact({ id: "ar_01J8G0000000000000000000P1", file: "series-bibl
 const PROJECT = artifact({ id: "ar_01J8G0000000000000000000O1", kind: "other", file: "session.psd" });
 
 const SHELF = [PICTURE, BOARD, CLIP, BELLS, TREATMENT, NOTES, BIBLE, PROJECT];
+
+it("keeps retired extraction review reachable while hiding retired voice sources", async () => {
+  const pending = artifact({ ...NOTES, retiredAt: "2026-09-07T12:00:00Z", extraction: { pending: [{ hash: "pending", kind: "canon", name: "Remember this", body: "A fact", quote: "A fact" }], decided: [], droppedCount: 0 } });
+  const mounted = await mountShelf([pending]);
+  try {
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+    assert.match(mounted.container.textContent!, /Remember this/);
+    assert.ok([...mounted.container.querySelectorAll("button")].some(button => button.textContent === "Accept — commits on its own"));
+    const world = structuredClone(FIXTURE_STATE.world!);
+    world.artifacts = [{ ...BELLS, retiredAt: "2026-09-07T12:00:00Z" }, CLIP];
+    const html = renderToString(<CharacterVoiceSamplePanel world={world} sheet={world.sheets.find(sheet => sheet.type === "character")!} />);
+    assert.ok(!html.includes(`value="artifact:${BELLS.id}"`));
+    assert.ok(html.includes(`value="artifact:${CLIP.id}"`));
+  } finally { await unmount(mounted); }
+});
+
+it("retiring a replacement does not bring its superseded predecessor back onto the shelf", async () => {
+  const mounted = await mountShelf([PICTURE, artifact({ id: BOARD.id, file: "replacement.png", supersedes: PICTURE.id, retiredAt: "2026-09-07T12:00:00Z" })]);
+  try { assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null); }
+  finally { await unmount(mounted); }
+});
 
 function shelf(artifacts: readonly ArtifactSidecar[]): ClientState {
   const world = FIXTURE_STATE.world!;
@@ -433,7 +506,7 @@ describe("the frame itself", () => {
     const mounted = await mountShelf();
     await open(mounted, PICTURE);
     const meta = panel(mounted)?.querySelector(".fy-artview__meta")?.textContent ?? "";
-    assert.match(meta, /ar_01J8G0000000000000000000I1/, "id");
+    assert.ok(meta.includes(PICTURE.id), "id");
     assert.match(meta, /image/, "kind");
     assert.match(meta, /filed by hand/, "origin");
     assert.match(meta, /sha256:/, "hash");
