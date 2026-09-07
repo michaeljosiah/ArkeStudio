@@ -592,7 +592,7 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
       limits: { maxDurationSec: 5 }, requires: { vramMb: 10000 } };
     const state = stateWith();
     state.app.manifest!.models.push(model);
-    state.app.runtime!.models.push({ modelId: model.id, provider: "comfyui", displayName: model.displayName, capability: "video", locality: "local", fit: "runs-slow" });
+    state.app.runtime!.models.push({ modelId: model.id, provider: "comfyui", displayName: model.displayName, capability: "video", locality: "local", fit: "runs-slowly" });
     state.app.setup!.components.push(component({ id: comfyUiWeightsComponentId(model.id), state: "available", sizeMb: 42371 }));
     const html = plain(tileFor(renderEngine(state, "comfyui"), model.displayName));
     assert.match(html, /refs ×9.*video refs ×3.*audio refs ×3.*5s/);
