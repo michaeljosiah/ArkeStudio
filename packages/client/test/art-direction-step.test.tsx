@@ -20,6 +20,8 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const scrolled: HTMLElement[] = [];
+dom.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this); };
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
 Object.assign(globalThis, {
   window: dom.window,
@@ -244,10 +246,18 @@ describe("the chat-to-build handoff (issue 666)", () => {
   it("treats Begin as approval of the look already proposed in conversation", async () => {
     const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
     try {
+      scrolled.length = 0;
       await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.equal(scrolled.length, 1, "the pending card is brought into view");
+      assert.ok(scrolled[0]?.querySelector(".fy-actioncard"));
+      assert.ok(mounted.container.querySelector(".fy-working__elapsed"), "sizing shows elapsed time");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy")?.textContent, "sizing the build…");
       assert.ok(mounted.container.textContent?.includes("sizing the build"), "a cached review is not actionable");
       assert.ok(!mounted.container.textContent?.includes("Build Glass Harbor"));
       await answerPlan(mounted);
+      assert.equal(scrolled.length, 2, "the completed card is brought into view too");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
       assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
       // A card in the thread, not a route of its own (issue 920): the conversation that reached
       // the decision stays on screen under it.
@@ -260,6 +270,30 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Not yet").click());
       assert.ok(!mounted.container.textContent?.includes("One press makes Glass Harbor."), "set aside, the card goes");
       assert.equal(button(mounted.container, "Begin in this world").disabled, false);
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("clears sizing on refusal or dismissal and ignores a dismissed result", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      scrolled.length = 0;
+      await emitBuildPlan(latestPlanRequest(mounted).requestId, null, "The plan could not be sized.");
+      assert.equal(scrolled.length, 1, "the refusal is brought into view");
+      assert.ok(scrolled[0]?.textContent?.includes("The plan could not be sized."));
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      await act(async () => button(mounted.container, "Not yet").click());
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const request = latestPlanRequest(mounted);
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      scrolled.length = 0;
+      await emitBuildPlan(request.requestId, BUILD_REVIEW);
+      assert.equal(scrolled.length, 0, "a dismissed reply cannot move the author's view");
+      assert.equal(mounted.container.querySelector(".fy-actioncard[aria-label='Build Glass Harbor']"), null);
     } finally {
       await unmountGenesis(mounted);
     }
