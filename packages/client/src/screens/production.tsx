@@ -146,7 +146,15 @@ import { clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
-import { acceptedTakeId, isDayOne, mediaTakeFor, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import {
+  acceptedTakeId,
+  isDayOne,
+  mediaTakeFor,
+  nextEpisodeOrder,
+  takeDecisions,
+  takesForShot,
+  useProduction,
+} from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
 import { isVideoMedia, posterize, posterNameFor } from "../lib/poster.js";
@@ -778,6 +786,11 @@ export function ProductionLayout() {
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
   const episodes = [...(production?.episodes ?? [])].sort((a, b) => a.order - b.order);
+  // A duplicate order should never be minted (issue 947), but if one lands on disk the rail
+  // says so rather than drawing two rows both reading "Episode 1".
+  const episodeOrderCounts = new Map<number, number>();
+  for (const episode of episodes) episodeOrderCounts.set(episode.order, (episodeOrderCounts.get(episode.order) ?? 0) + 1);
+  const duplicateEpisodeOrders = new Set([...episodeOrderCounts].filter(([, count]) => count > 1).map(([order]) => order));
   const orderedScenes = sortScenes(production?.scenes ?? []);
   const scenesById = new Map(orderedScenes.map((scene) => [scene.id, scene]));
   const assignedSceneIds = new Set(episodes.flatMap((episode) => episode.scenes));
@@ -873,19 +886,21 @@ export function ProductionLayout() {
                 {episodes.map((episode) => {
                   const expansionKey = `${prodId ?? ""}:${episode.id}`;
                   const open = episodeExpansion[expansionKey] ?? episode.id === currentEpisodeId;
+                  const duplicateOrder = duplicateEpisodeOrders.has(episode.order);
                   return (
                     <div key={episode.id} className="fy-prodrail__episode">
                       <button
                         type="button"
                         className="fy-prodrail__episode-toggle"
                         aria-expanded={open}
-                        aria-label={`${open ? "Collapse" : "Expand"} Episode ${episode.order}: ${episode.title}`}
+                        aria-label={`${open ? "Collapse" : "Expand"} Episode ${episode.order}: ${episode.title}${duplicateOrder ? " · duplicate number" : ""}`}
                         onClick={() =>
                           setEpisodeExpansion((current) => ({ ...current, [expansionKey]: !open }))
                         }
                       >
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                         <span className="fy-prodrail__episode-name">
+                          {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
                           Episode {episode.order} · {episode.title}
                         </span>
                         <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
@@ -944,7 +959,9 @@ export function ProductionLayout() {
                     className="fy-prodrail__new-episode"
                     onClick={() => {
                       if (!worldId || !prodId) return;
-                      const order = Math.max(0, ...production.episodes.map((episode) => episode.order)) + 1;
+                      // Order has to count episodes staged but not yet accepted too, or this
+                      // and a season wrap-up can each land the same number (issue 947).
+                      const order = nextEpisodeOrder(world, prodId, production);
                       createEpisode(worldId, prodId, {
                         title: `Episode ${String(order).padStart(2, "0")}`,
                         order,
@@ -6030,9 +6047,15 @@ function ExportSheet({
                 scope: { kind: "episode", episodeId: episode.id }, preset }) : null;
               const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : null;
               const episodeAudio = episodePlan?.ok ? exportAudioStatus(episodePlan.plan) : null;
+              // A duplicate order should never be minted (issue 947), but a person reading this
+              // list still needs to tell two same-numbered rows apart at a glance.
+              const duplicateOrder = production.episodes.filter((e) => e.order === episode.order).length > 1;
               return (
                 <div key={episode.id} className="fy-exsheet__episode">
-                  <span className="fy-mono">{String(episode.order).padStart(2, "0")}</span>
+                  <span className="fy-mono">
+                    {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
+                    {String(episode.order).padStart(2, "0")}
+                  </span>
                   <span className="fy-exsheet__eptitle">{episode.release?.title ?? episode.title}</span>
                   {episodeAudio && <span className="fy-exsheet__refused" role="status">
                     {episodeAudio}

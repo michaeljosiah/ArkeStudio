@@ -561,12 +561,18 @@ function newEpisodeRecord(
     id = `ep_${slug}-${n}`;
     stem = `${slug}-${n}`;
   }
+  // Same reasoning as the id above (issue 947): a caller's order can be stale by the time this
+  // runs inside the serialised region, so the record actually written never doubles one already
+  // on disk, whatever number was asked for.
+  const takenOrders = new Set(production.episodes.map((e) => e.order));
+  let order = episode.order ?? production.episodes.length + 1;
+  while (takenOrders.has(order)) order += 1;
   const content =
     JSON.stringify(
       EpisodeSchema.parse({
         id,
         version: 1,
-        order: episode.order ?? production.episodes.length + 1,
+        order,
         title,
         ...(episode.promise !== undefined ? { promise: episode.promise } : {}),
         scenes: episode.scenes ?? [],
