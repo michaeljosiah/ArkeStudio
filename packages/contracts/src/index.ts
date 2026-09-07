@@ -1,5 +1,5 @@
 export * from "./ids.js";
-export { ReferenceMediaBindingsSchema, type ReferenceMediaBindings } from "./media-reference.js";
+export { ReferenceMediaBindingsSchema, referenceInputProblem, type ReferenceMediaBindings } from "./media-reference.js";
 export * from "./world.js";
 export * from "./production-shape.js";
 export * from "./scene-findings.js";

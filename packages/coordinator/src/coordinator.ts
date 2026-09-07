@@ -1,3 +1,4 @@
+import { referenceInputProblem } from "@arke-studio/contracts";
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { StageConstructor } from "./productions/stage-construction.js";
@@ -2144,6 +2145,8 @@ export class Coordinator {
               }
               const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
               if (model?.limits.referenceSyntax === "minimax-h3") {
+                const referenceProblem = referenceInputProblem(model, input.params);
+                if (referenceProblem) return { ok: false, reason: referenceProblem };
                 const audioPlan = input.params.audioReferences as { references?: unknown[] } | undefined;
                 const hasMedia = (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) ||
                   (Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) || input.params.continuedFrom !== undefined || (audioPlan?.references?.length ?? 0) > 0;

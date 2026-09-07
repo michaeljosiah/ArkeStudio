@@ -1,5 +1,5 @@
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
-import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt } from "@arke-studio/contracts";
+import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -840,7 +840,8 @@ export function planBenchDispatch(
     taskMode, disabled: params.audioReferencesDisabled })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
-  if (model.accepts.referenceAudio !== undefined && standaloneAudioCount + (audioReferences?.references.length ?? 0) > model.accepts.referenceAudio) return { ok: false, reason: "Standalone audio and character voices exceed the route's audio reference budget." };
+  const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
+  if (referenceProblem) return { ok: false, reason: referenceProblem };
   const wirePrompt = [referencePrompt([preamble, body].filter(Boolean).join("\n\n"), model, videoPaths.length),
     audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
 

@@ -26,6 +26,13 @@ FFmpeg and ffprobe must be configured for multimedia references. Audio/video ref
 is currently local-engine-only; selecting a remote ComfyUI URL does not authorize transferring
 locally reviewed recordings. Images can use the existing remote-engine path.
 
+ComfyUI retains uploaded references in its `input` directory, including recordings and normalized
+clips, after successful, failed and cancelled jobs. Arke removes its own preparation copies but
+does not delete engine uploads. Native ComfyUI 0.33.1 has no public physical-file deletion API;
+its asset-delete endpoint only hides database records. Clean engine inputs only while the engine
+is idle and no queued job still needs them. Automatic per-job reclamation needs a separately
+designed engine lifecycle contract; this preset does not promise ephemeral engine storage.
+
 ## Reference meaning and ordering
 
 The bench preserves the author's stable `@Image N`, `@Video N`, and `@Audio N` tokens. It resolves

@@ -46,7 +46,11 @@ it("local H3 bench references freeze multimedia identities and use native ordere
   const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
   assert.ok(opened);
   await opened.store.append({ type: "composer-set", mode: "video", provider: "comfyui", model: model.id,
-    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" }, brief: "" }, { at: CLOCK() });
+    params: { kind: "video", durationSec: 5, aspect: "16:9", resolution: "480p" }, brief: "A red cube moves." }, { at: CLOCK() });
+  const empty = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "empty", at: CLOCK() });
+  assert.equal(empty.ok, false);
+  if (!empty.ok) assert.match(empty.reason, /at least one/);
   for (const file of ["picture.png", "motion.mp4", "tone.wav"]) {
     const artifact = store.getBundle().artifacts.find(row => row.file === file)!;
     const outcome = await addBenchReference((await refolded(opened))!, store.getBundle(), model,
