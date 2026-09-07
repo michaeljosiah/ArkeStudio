@@ -11889,6 +11889,10 @@ export class Coordinator {
           return;
         }
         const chosen = msg.sourcePaths ?? await pick!({ accept: [...ATTACHABLE_EXTENSIONS] }).catch(() => []);
+        if (chosen.length > 16) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "Import up to 16 files at a time.");
+          return;
+        }
         // A closed dialog is not a failure. Nothing was filed and nothing is said.
         if (chosen.length === 0) {
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);

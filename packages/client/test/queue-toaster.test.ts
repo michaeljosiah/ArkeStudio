@@ -211,7 +211,7 @@ describe("queue notification", () => {
     assert.equal(note?.action, undefined);
   });
 
-  it("confirms files added to the Library without inventing a queue job", () => {
+  it("confirms imports without claiming a Library destination or inventing a queue job", () => {
     const note = enqueueNote(
       result({
         command: "upload-artifacts",
@@ -223,7 +223,7 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "back");
-    assert.equal(note?.title, "2 files added to the Library");
+    assert.equal(note?.title, "2 files imported");
     assert.equal(note?.meta, "ready to use");
     assert.equal(note?.action, undefined);
   });
@@ -241,7 +241,7 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "warning");
-    assert.equal(note?.title, "1 of 2 files added to the Library");
+    assert.equal(note?.title, "1 of 2 files imported");
     assert.equal(note?.meta, "1 file not added");
     assert.equal(note?.reason, "broken.m4a: Unsupported audio container.");
   });
@@ -262,7 +262,7 @@ describe("queue notification", () => {
       manifest,
     );
     assert.equal(note?.tone, "refused");
-    assert.equal(note?.title, "No files added to the Library");
+    assert.equal(note?.title, "No files imported");
     assert.equal(note?.meta, "nothing spent");
     assert.match(note?.reason ?? "", /broken\.mp4.*broken\.m4a/);
     assert.doesNotMatch(note?.title ?? "", /image/i);
