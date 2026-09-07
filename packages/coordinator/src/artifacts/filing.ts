@@ -58,6 +58,18 @@ export function kindForFile(name: string): ArtifactKind {
 }
 
 /**
+ * What a media artifact is once it has been measured. The extension decides at filing time
+ * because nothing has read the bytes yet, and `.mp4` is a container as happy holding a song as a
+ * film. A measured file with sound and no picture stream is audio: it belongs on a sound lane,
+ * where gain and role live, and placed as picture it is a black clip the render plan refuses.
+ * Decided only on a measured `false` — a record that never said is left as filed, and so is a
+ * file with neither, which the cut cannot use either way.
+ */
+export function measuredKind(kind: ArtifactKind, info: MediaInfo): ArtifactKind {
+  return kind === "video" && info.hasVideo === false && info.hasAudio ? "audio" : kind;
+}
+
+/**
  * What the attach dialog offers — derived from the kinds above rather than written twice, so
  * the picker and the sidecar can never disagree about what this app can hold. Dropping a file
  * the dialog does not list still files it; the filter is a courtesy, not the gate.
@@ -360,7 +372,7 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
    */
   if ((outcome.outcome === "filed" || outcome.outcome === "deduplicated") &&
       outcome.artifact.mediaInfo === undefined && (outcome.artifact.kind === "audio" || outcome.artifact.kind === "video")) {
-    await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned, outcome.outcome === "filed");
   }
   return outcome;
 }
@@ -480,7 +492,7 @@ export async function fileGeneratedArtifact(
     return { artifact: created, created: true };
   });
   if (filed.created && (kind === "audio" || kind === "video")) {
-    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned, true);
   }
   return filed.artifact;
 }
@@ -568,12 +580,18 @@ export async function importFolder(
  * `hasAudio: false`, which is the right conservative reading for a decision made in the moment
  * and the wrong thing to write down: stored, it cannot be told from a measured silence, and spine
  * export would refuse a real audio track on a machine that could have measured it properly.
+ *
+ * `fresh` says the file was copied in by this very call. Only then may the measurement change
+ * the artifact's kind: a deduplicated hit is an artifact that has been in the world for as long
+ * as its bytes have, possibly on a Picture track already, and a kind that changes under a
+ * placement turns a working render plan into a refusal (codex on PR 944).
  */
 async function measureInto(
   store: WorldStore,
   file: string,
   probe: MediaProbe | null,
   abandoned: () => boolean = () => false,
+  fresh = false,
 ): Promise<boolean> {
   if (!probe?.info) return false;
   const info = await measureMediaInfo(store, `artifacts/${file}`, probe);
@@ -590,7 +608,10 @@ async function measureInto(
       // malformed sidecars without rewriting them, and this has no better claim to overwrite one.
       const parsed = ArtifactSidecarSchema.safeParse(JSON.parse(raw));
       if (!parsed.success || parsed.data.mediaInfo !== undefined) return false;
-      await writeSidecar(store, { ...parsed.data, mediaInfo: info }, raw);
+      // The first measurement is the only one, so this is the one moment the kind can follow it —
+      // and only when the file was just copied in and nothing has placed it yet.
+      const kind = fresh ? measuredKind(parsed.data.kind, info) : parsed.data.kind;
+      await writeSidecar(store, { ...parsed.data, kind, mediaInfo: info }, raw);
       return true;
     })
     .catch(() => false);
@@ -768,6 +789,9 @@ export async function backfillMediaInfo(
             continue;
           }
           if (current.mediaInfo !== undefined) continue;
+          // The kind stays as filed here, unlike at filing time: this world may already cut with
+          // the artifact, and a Picture clip citing something that has become audio turns its
+          // working render plan into a refusal on the next open.
           files.push({
             path: `artifacts/${file}.json`,
             action: "replace",

@@ -22,6 +22,7 @@ describe("reading what a media file actually is (#253)", () => {
     assert.deepEqual(parseFfprobeJson(answer()), {
       durationSec: 222.14,
       hasAudio: true,
+      hasVideo: true,
       audioChannels: 2,
       audioSampleRateHz: 48000,
     });
@@ -29,7 +30,27 @@ describe("reading what a media file actually is (#253)", () => {
 
   it("says a silent file is silent rather than assuming a track", () => {
     const silent = parseFfprobeJson(JSON.stringify({ streams: [{ codec_type: "video" }], format: { duration: "8.0" } }));
-    assert.deepEqual(silent, { durationSec: 8, hasAudio: false });
+    assert.deepEqual(silent, { durationSec: 8, hasAudio: false, hasVideo: true });
+  });
+
+  it("tells a song's cover art from a picture stream", () => {
+    // An `.mp4` holding only sound, and a music file whose album art rides along as a video
+    // stream with a width and a height: neither has a picture the cut can place.
+    const song = parseFfprobeJson(JSON.stringify({ streams: [{ codec_type: "audio", channels: 2, sample_rate: "44100" }], format: { duration: "227" } }));
+    assert.deepEqual(song, { durationSec: 227, hasAudio: true, hasVideo: false, audioChannels: 2, audioSampleRateHz: 44100 });
+    const covered = parseFfprobeJson(JSON.stringify({
+      streams: [
+        { codec_type: "audio", channels: 2, sample_rate: "44100" },
+        { codec_type: "video", width: 600, height: 600, avg_frame_rate: "0/0", disposition: { attached_pic: 1 } },
+      ],
+      format: { duration: "227" },
+    }));
+    assert.deepEqual(covered, { durationSec: 227, hasAudio: true, hasVideo: false, audioChannels: 2, audioSampleRateHz: 44100 });
+    const film = parseFfprobeJson(JSON.stringify({
+      streams: [{ codec_type: "video", width: 1920, height: 1080, avg_frame_rate: "24/1", disposition: { attached_pic: 0 } }],
+      format: { duration: "8" },
+    }));
+    assert.deepEqual(film, { durationSec: 8, hasAudio: false, hasVideo: true, width: 1920, height: 1080, frameRate: 24 });
   });
 
   it("answers null for everything it cannot honestly measure", () => {
@@ -48,13 +69,14 @@ describe("reading what a media file actually is (#253)", () => {
     const odd = parseFfprobeJson(
       JSON.stringify({ streams: [{ codec_type: "audio", channels: 0, sample_rate: "0" }], format: { duration: "5" } }),
     );
-    assert.deepEqual(odd, { durationSec: 5, hasAudio: true });
+    assert.deepEqual(odd, { durationSec: 5, hasAudio: true, hasVideo: false });
   });
 
   it("asks ffprobe for JSON and named entries, never for prose", () => {
     const args = ffprobeArgs("C:/w/artifacts/forgive-me.mp3");
     assert.deepEqual(args.slice(0, 2), ["-v", "error"]);
     assert.ok(args.includes("json"), "localized human output changes between versions and locales");
+    assert.ok(args.some((arg) => arg.includes("stream_disposition=attached_pic")), "cover art is only visible through the disposition");
     assert.equal(args.at(-1), "C:/w/artifacts/forgive-me.mp3", "the path is the last argument, never interpolated");
   });
 });

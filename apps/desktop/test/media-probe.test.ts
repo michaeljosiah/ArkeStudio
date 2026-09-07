@@ -39,7 +39,7 @@ describe("running ffprobe (#253, issue 288)", () => {
     const pending = createFfprobe("ffprobe.exe", spawn).info!("C:\\a world\\artifacts\\bed.wav");
     children[0]!.stdout.emit("data", Buffer.from(ANSWER));
     children[0]!.emit("close", 0);
-    assert.deepEqual(await pending, { durationSec: 4.5, hasAudio: true, audioChannels: 2, audioSampleRateHz: 48000 });
+    assert.deepEqual(await pending, { durationSec: 4.5, hasAudio: true, hasVideo: false, audioChannels: 2, audioSampleRateHz: 48000 });
   });
 
   it("kills the process when the measurement is cancelled", async () => {

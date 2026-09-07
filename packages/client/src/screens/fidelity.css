@@ -6115,6 +6115,10 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-timeline__tools { display: inline-flex; gap: 1px; padding: 1px; border: 1px solid var(--border); border-radius: 6px; }
 .fy-driftchip { display: inline-flex; align-items: center; gap: 6px; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
 .fy-framestep > strong { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.fy-timecode { width: 12ch; min-width: 0; text-align: center; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--muted-foreground); font: 400 10.5px var(--font-mono); padding: 2px 3px; transition: var(--transition-control); }
+.fy-timecode:hover:not(:disabled) { border-color: var(--border); color: var(--foreground); }
+.fy-timecode:focus { outline: none; border-color: var(--foreground); background: var(--background); color: var(--foreground); }
+.fy-timecode:disabled { opacity: 0.35; }
 .fy-takepick { margin-top: 14px; }
 .fy-takepick__row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 5px 0; border-bottom: 1px solid var(--line-soft); font-size: 10.5px; }
 .fy-takepick__row--current { color: var(--foreground); }

@@ -15,6 +15,7 @@ import { fileArtifact } from "../../src/artifacts/filing.js";
 import { assembleTimelineScene, applyTimelineCommand } from "../../src/productions/timeline.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
+import { MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import type { MediaProbe } from "../../src/media/probe.js";
 
@@ -75,6 +76,55 @@ it("imports a zero-scene film, detaches a trimmed video's sound, edits it indepe
   assert.deepEqual(saved(production()), beforeClose);
   await applyTimelineCommand(store, id, { kind: "undo", baseRevision: saved(production()).revision });
   assert.equal(saved(production()).tracks.flatMap(track => track.clips).find(clip => clip.id === "cl_sound-right")!.startFrame, 36);
+});
+
+it("files an mp4 that carries only sound as audio, so Import media lands it on a sound lane", async t => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const id = await createProduction(store, { title: "A song and a film", medium: "video", frameRate: 24 });
+  const production = () => store.getBundle().productions.find(p => p.meta.id === id)!;
+  const song = join(dir, "song.mp4"), film = join(dir, "film.mp4");
+  await writeFile(song, "aac in an mp4 box"); await writeFile(film, "a real film");
+  // The container says video for both; only the probe can tell them apart. (Matched on the
+  // filename: the fixture world's own path contains "song".)
+  const byStream: MediaProbe = {
+    async durationSec() { return 3; },
+    async info(path) { return { durationSec: 3, hasAudio: true, hasVideo: !path.endsWith("song.mp4") }; },
+  };
+  assert.deepEqual(await importEditorMedia(store, [song, film], {
+    productionId: id, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "append",
+  }, { mediaProbe: byStream, abandoned: () => false }), []);
+  const kinds = Object.fromEntries(store.getBundle().artifacts.filter(a => a.file.endsWith(".mp4")).map(a => [a.file, a.kind]));
+  assert.deepEqual(kinds, { "song.mp4": "audio", "film.mp4": "video" });
+  const timeline = saved(production());
+  const picture = timeline.tracks.find(track => track.id === "tr_picture")!;
+  const sound = timeline.tracks.find(track => track.kind === "audio")!;
+  assert.deepEqual(picture.clips.map(clip => clip.source.label), ["film.mp4"], "the film is the picture");
+  assert.deepEqual(sound.clips.map(clip => [clip.source.label, clip.startFrame, clip.durationFrames, clip.gainDb]), [["song.mp4", 0, 72, 0]]);
+  // Dropped at a frame on the Picture track, the same song is refused as sound rather than placed as a black picture.
+  const dropped = await importEditorMedia(store, [song], {
+    productionId: id, baseRevision: timeline.revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: 12,
+  }, { mediaProbe: byStream, abandoned: () => false });
+  assert.equal(dropped.length, 1);
+  assert.match(dropped[0]!.reason, /has no picture/);
+  assert.equal(saved(production()).revision, timeline.revision, "a refused drop writes nothing");
+  // The measurement is a strict field an older build cannot parse, so the world is fenced past it.
+  assert.equal(store.getBundle().meta.schemaVersion, MEDIA_HAS_VIDEO_SCHEMA_VERSION, "hasVideo fences the world");
+  // An artifact that was in the world before it was measured keeps its kind: it may already be
+  // on a Picture track, and a kind that changes under a placement refuses the render plan.
+  const older = join(dir, "old-song.mp4");
+  await writeFile(older, "filed before anyone could measure it");
+  const narrow: MediaProbe = { async durationSec() { return 3; } };
+  assert.deepEqual(await importEditorMedia(store, [older], {
+    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+  }, { mediaProbe: narrow, abandoned: () => false }), []);
+  const unmeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
+  assert.deepEqual([unmeasured.kind, unmeasured.mediaInfo], ["video", undefined]);
+  await importEditorMedia(store, [older], {
+    productionId: id, baseRevision: saved(production()).revision, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library",
+  }, { mediaProbe: byStream, abandoned: () => false });
+  const remeasured = store.getBundle().artifacts.find(a => a.file === "old-song.mp4")!;
+  assert.deepEqual([remeasured.kind, remeasured.mediaInfo?.hasVideo], ["video", false], "measured on re-filing, but the kind it was filed with stands");
 });
 
 it("preserves filed media on a stale import and reports partial filing without changing prior clips", async t => {

@@ -104,7 +104,9 @@ export function ffprobeArgs(absolutePath: string): string[] {
     "-v",
     "error",
     "-show_entries",
-    "format=duration:stream=codec_type,channels,sample_rate,width,height,avg_frame_rate",
+    // The disposition is what tells a music file's embedded cover from a picture stream: both
+    // arrive as `codec_type: "video"` with a width and a height.
+    "format=duration:stream=codec_type,channels,sample_rate,width,height,avg_frame_rate:stream_disposition=attached_pic",
     "-of",
     "json",
     absolutePath,
@@ -118,6 +120,13 @@ interface FfprobeStream {
   avg_frame_rate?: unknown;
   channels?: unknown;
   sample_rate?: unknown;
+  disposition?: unknown;
+}
+
+/** An `attached_pic` stream is album art riding in a music file, not a picture anyone can cut. */
+function isCoverArt(stream: FfprobeStream): boolean {
+  const disposition = stream.disposition;
+  return typeof disposition === "object" && disposition !== null && Number((disposition as { attached_pic?: unknown }).attached_pic) === 1;
 }
 
 /**
@@ -140,7 +149,7 @@ export function parseFfprobeJson(stdout: string): MediaInfo | null {
   if (!Number.isFinite(durationSec) || durationSec <= 0) return null;
 
   const streams: FfprobeStream[] = Array.isArray(doc.streams) ? (doc.streams as FfprobeStream[]) : [];
-  const video = streams.find(stream => stream.codec_type === "video");
+  const video = streams.find(stream => stream.codec_type === "video" && !isCoverArt(stream));
   const width = Number(video?.width), height = Number(video?.height);
   const rate = typeof video?.avg_frame_rate === "string" ? video.avg_frame_rate.split("/").map(Number) : [];
   const frameRate = rate[1] ? rate[0]! / rate[1] : 0;
@@ -150,6 +159,7 @@ export function parseFfprobeJson(stdout: string): MediaInfo | null {
   return {
     durationSec,
     hasAudio: audio !== undefined,
+    hasVideo: video !== undefined,
     ...(Number.isInteger(width) && width > 0 ? { width } : {}),
     ...(Number.isInteger(height) && height > 0 ? { height } : {}),
     ...(Number.isFinite(frameRate) && frameRate > 0 ? { frameRate } : {}),
