@@ -234,6 +234,8 @@ export const ArtifactSidecarSchema = z
     /** Present exactly on boundary stills cut from accepted footage (issue 154). */
     boundaryExtraction: BoundaryExtractionSchema.optional(),
     created: IsoDateTimeSchema,
+    /** Removed from shelves and pickers; bytes and existing citations remain intact (#957). */
+    retiredAt: IsoDateTimeSchema.optional(),
   })
   .strict()
   // A boundary frame is a picture by definition (issue 154): a video filed with extraction
@@ -251,7 +253,7 @@ export type ArtifactSidecar = z.infer<typeof ArtifactSidecarSchema>;
  */
 export function pickableArtifacts(artifacts: readonly ArtifactSidecar[]): ArtifactSidecar[] {
   const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
-  return artifacts.filter((a) => !superseded.has(a.id));
+  return artifacts.filter((a) => a.retiredAt === undefined && !superseded.has(a.id));
 }
 
 /**

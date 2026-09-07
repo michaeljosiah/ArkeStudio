@@ -211,7 +211,7 @@ export function authoritativeSheetSpeech(sheet: Sheet, heading: string): { text:
  */
 export function authoritativeProseSpeech(
   bundle: WorldBundle,
-  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" }>,
+  source: Exclude<ProseReadSource, { of: "reply" } | { of: "chapter" } | { of: "chapter-voiced" }>,
 ): { text: string; heading: string; version: number; subjectId: string } {
   const production = (id: string) => {
     const found = bundle.productions.find((candidate) => candidate.meta.id === id);
@@ -253,6 +253,19 @@ export function authoritativeProseSpeech(
       if (source.field === "treatment") {
         return spoken(found.treatment ?? undefined, "Treatment", story?.version ?? 1, subjectId);
       }
+      // The style's two readable pieces (turn 128) carry the style record's own version.
+      if (source.field === "voice") {
+        return spoken(found.proseStyle?.voice, "Voice", found.proseStyle?.version ?? 1, subjectId);
+      }
+      if (source.field === "samples") {
+        const samples = found.proseStyle?.samples ?? [];
+        // One sample when one is named (codex on turn 128): read whole, six at their bound
+        // outrun a narrator's prompt cap; the Overview reads them one block at a time.
+        if (source.sample !== undefined) {
+          return spoken(samples[source.sample], `Sample ${source.sample + 1}`, found.proseStyle?.version ?? 1, `${subjectId}/${source.sample}`);
+        }
+        return spoken(samples.join(" "), "Samples", found.proseStyle?.version ?? 1, subjectId);
+      }
       if (!story) throw new Error("Nothing has been settled about this production yet.");
       if (source.field === "acts") {
         const acts = (story.acts ?? [])
@@ -260,7 +273,7 @@ export function authoritativeProseSpeech(
           .join(". ");
         return spoken(acts, "Acts", story.version, subjectId);
       }
-      return spoken(story[source.field], source.field === "logline" ? "Logline" : "Spine", story.version, subjectId);
+      return spoken(story[source.field], ({ logline: "Logline", spine: "Spine", question: "Dramatic question", ending: "Ending" })[source.field], story.version, subjectId);
     }
     case "season": {
       const season = production(source.productionId).season;

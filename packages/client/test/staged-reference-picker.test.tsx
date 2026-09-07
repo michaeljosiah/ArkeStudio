@@ -25,8 +25,8 @@ it("browses another world, labels its thumbnail, ignores stale results and copie
   try {
     await act(async () => root.render(<StagedReferencePicker worldId={current.worldId} referenceKey="world-image"
       onClose={() => { closed = true; }} onUpload={() => {}} />));
-    const first = sent.find(message => message.kind === "browse-reference-images")!;
-    assert.equal(first.kind, "browse-reference-images");
+    assert.equal(sent.length, 0, "local images use the current world projection");
+    const first = { kind: "browse-reference-images", requestId: "01J8F3K2QW9VZX4N7M0RTYB61B" } as const;
     const select = container.querySelector("select")!;
     assert.match(select.textContent!, /This world/);
     assert.equal(select.querySelector("optgroup")?.getAttribute("label"), "Other worlds");

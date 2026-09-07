@@ -294,10 +294,19 @@ export interface HarnessAdapter {
   sendMessage(input: SendMessageInput): Promise<SendReceipt>;
   /** Fire-and-watch: must not block while the turn runs. */
   dispatchAsync(input: SendMessageInput): Promise<SendReceipt>;
+  interrupt?(sessionId: string): Promise<void>;
+  usageTokens?(sessionId: string): number;
 
   // ---- gated ----
   /** Async iterator of normalised, schema-validated harness events (capability: events). */
   streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent>;
+  /**
+   * Stop what a session is doing now, from outside its turn (turn 129, codex on PR 907): a Stop
+   * on a derivation, a world closing, or shutdown must reach the model's generation and not only
+   * the listener, or a stopped run goes on spending until the adapter is disposed. Optional,
+   * because a mock has nothing to stop; a caller treats absence as a stop that could not reach.
+   */
+  interrupt?(sessionId: string): Promise<void>;
   listModels?(): Promise<ModelInfo[]>;
   /** Adapter-owned action vocabulary checked against the exact session's captured confinement. */
   assessPermission?(request: PermissionRequest): PermissionAssessment;

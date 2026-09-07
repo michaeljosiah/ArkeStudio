@@ -1,4 +1,47 @@
-import { mediaExtension, type ArtifactSidecar } from "@arke-studio/contracts";
+import { mediaExtension, orderedShots, type ArtifactSidecar, type WorldBundle } from "@arke-studio/contracts";
+
+/** Advisory uses from the live snapshot. Retirement never depends on this being a history index. */
+export function artifactUses(world: WorldBundle, artifact: ArtifactSidecar): string[] {
+  const identities = new Set([artifact.id, `artifacts/${artifact.file}`]);
+  if (artifact.generation?.source === "character-reference") {
+    identities.add(artifact.generation.sourceFile);
+    if (artifact.generation.takeId) identities.add(artifact.generation.takeId);
+  }
+  const cites = (value: unknown, base: string): boolean => {
+    if (typeof value === "string") {
+      const path = value.replaceAll("\\", "/");
+      return identities.has(path) || identities.has(`${base}/${path}`);
+    }
+    if (Array.isArray(value)) return value.some(item => cites(item, base));
+    return value !== null && typeof value === "object" && Object.values(value).some(item => cites(item, base));
+  };
+  const uses: string[] = [];
+  const add = (label: string, value: unknown, base = "") => { if (cites(value, base)) uses.push(label); };
+  add("World key art", world.keyArt);
+  add("Art direction", world.artDirection);
+  add("World bible", world.bible);
+  for (const link of artifact.links) uses.push(`Filed against: ${world.sheets.find(sheet => sheet.id === link)?.name ?? world.canon.find(entry => entry.id === link)?.title ?? link}`);
+  for (const sheet of world.sheets) add(`${sheet.type}: ${sheet.name}`, sheet);
+  for (const entry of world.canon) add(`Canon: ${entry.title}`, entry);
+  for (const kit of world.referenceKits) add(`Reference kit: ${world.sheets.find(sheet => sheet.id === kit.sheetId)?.name ?? kit.sheetId}`, kit, `references/${kit.sheetId}`);
+  for (const prop of world.props) add(`Prop: ${prop.name}`, prop);
+  for (const production of world.productions) {
+    const name = production.meta.title;
+    add(`${name}: key art`, production.meta);
+    add(`${name}: Library`, production.timeline?.status === "ready" ? production.timeline.timeline.library : null);
+    if (production.timeline?.status === "ready") for (const track of production.timeline.timeline.tracks) {
+      for (const clip of track.clips) add(`${name}: ${track.name} · ${clip.source.label || clip.id} (${clip.id})`, clip);
+    }
+    add(`${name}: audio and overlays`, production.cut);
+    add(`${name}: master track`, production.spine);
+    for (const scene of production.scenes) for (const shot of orderedShots(scene)) {
+      add(`${name}: ${scene.title} · shot ${shot.id}`, [shot, production.selections[shot.id]]);
+    }
+    for (const take of production.takes) add(`${name}: take ${take.id}`, take);
+  }
+  for (const other of world.artifacts) if (other.id !== artifact.id) add(`Artifact: ${other.file}`, other);
+  return [...new Set(uses)];
+}
 
 /**
  * Which viewer opens an artifact (issue 477).

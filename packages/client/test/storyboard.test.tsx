@@ -83,8 +83,8 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
     const video = render(withTiming, SHOT_PATH, <ShotSheetScreen />, ROUTE);
     assert.ok(video.includes("infer unset camera choices from this"));
     assert.ok(video.includes("Shot timing 0–4s"), "video preview includes its authored timing");
-    assert.ok(!video.includes("SPATIAL LAYOUT"), "editable video text excludes generated pass context");
-    assert.ok(!video.includes("CAMERA ANCHOR"), "editable video text cannot duplicate an anchor in an override");
+    assert.ok(video.includes("SPATIAL LAYOUT"), "the video seed includes the room the author is editing");
+    assert.ok(video.includes("CAMERA ANCHOR"), "the video seed includes its camera; saved overrides are not wrapped again");
 
     const stills: ClientState = {
       ...withTiming,
@@ -114,7 +114,7 @@ describe("the full shot behind the card (turn 97, 14d)", () => {
       },
     };
     const productionPreview = render(overridden, SHOT_PATH, <ShotSheetScreen />, ROUTE);
-    assert.ok(productionPreview.includes(productionLook));
+    assert.ok(!productionPreview.includes(productionLook), "the look informs the writer, not the editable prompt seed");
     assert.ok(!productionPreview.includes(world.artDirection.description), "the editor shows the nearest look");
   });
 

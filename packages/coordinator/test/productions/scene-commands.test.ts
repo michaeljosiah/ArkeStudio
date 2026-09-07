@@ -436,9 +436,10 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     const before = await sceneOnDisk(store);
     const target = orderedShots(before)[1]!;
     const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    await applySceneCommand(store, { ...base, baseVersion: before.version, command: {kind:"edit-shot",shotId:target.id,change:{durationSec:4}} });
     await applySceneCommand(store, {
       ...base,
-      baseVersion: before.version,
+      baseVersion: (await sceneOnDisk(store)).version,
       command: {
         kind: "edit-stage",
         shotId: target.id,
@@ -831,4 +832,25 @@ describe("scene blocking and shot cameras share one Stage command (issue 754)", 
 
     assert.equal(await worldPrint(dir), print);
   });
+});
+
+
+it("saves an authored shot prompt with its route and location source, refusing stale replacement (#942)", async () => {
+  const { store } = await open();
+  const before = await sceneOnDisk(store);
+  const shot = orderedShots(before)[0]!;
+  const text = "A close view of the register in amber lamplight; the paper trembles as the camera inches forward.";
+  const input = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+    command: { kind: "set-prompt-override" as const, shotId: shot.id, text, capability: "video" as const } };
+  await applySceneCommand(store, input);
+  const after = await sceneOnDisk(store);
+  const saved = orderedShots(after).find(candidate => candidate.id === shot.id)!.promptOverride!;
+  assert.equal(saved.text, text);
+  assert.equal(saved.capability, "video");
+  const location = store.getBundle().sheets.find(sheet => sheet.id === before.inherits?.location);
+  assert.ok(location, "the scene cites a real location");
+  assert.equal(saved.sheetVersions[location.id], location.version);
+  await assert.rejects(applySceneCommand(store, { ...input, command: { ...input.command, text: "Stale rewrite" } }), SceneVersionMoved);
+  assert.deepEqual(await sceneOnDisk(store), after);
+  await store.close();
 });

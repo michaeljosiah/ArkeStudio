@@ -1277,6 +1277,15 @@ function BenchWorkspace({
 
         {/* ---- composer -------------------------------------------------- */}
         <div className="fy-bench__composer">
+          {draft.mode === "video" && subject?.kind === "shot" && session.tokenRegistry.some(ref => ref.label?.startsWith("Staging")) ? (
+            <p role="status" data-testid="stage-guidance-mode">
+              {session.tokenRegistry.some(ref => ref.kind === "video" && ref.label?.startsWith("Staging") && session.composer.activeTokens.includes(ref.token))
+                ? "Camera guidance: motion video and timed instructions. Review the generated take for adherence."
+                : session.tokenRegistry.some(ref=>ref.kind==="image" && ref.label?.startsWith("Staging") && [...session.composer.activeTokens,...session.composer.keyframeTokens].includes(ref.token))
+                  ? "Camera guidance: opening frame and timed instructions only. This route is not receiving the motion video."
+                  : "Camera guidance: timed instructions only. This route is not receiving Stage images or motion video."}
+            </p>
+          ) : null}
           <div className="fy-bench__composerbar">
             {subject !== undefined ? (
               /* Two text tabs on the design's track (2616-2621). A shot's other tab opens the

@@ -1,3 +1,4 @@
+import { stageArtifactProblem } from "../productions/stage-playblast.js";
 import { planSubjectCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
@@ -322,6 +323,8 @@ export function resolveTokenEntry(
   const source = entry.source;
   if (source.source === "artifact") {
     const artifact = bundle.artifacts.find((a) => a.id === source.artifactId);
+    const problem = artifact ? stageArtifactProblem(bundle,artifact) : null;
+    if(problem) return {refused:problem};
     return artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
   }
   if (source.source === "world-file") return resolveWorldFileSource(source);

@@ -4,6 +4,7 @@ import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
+import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { JobRow } from "../domain/domain.js";
 import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
@@ -531,33 +532,11 @@ export function WorldPickerScreen() {
             </div>
           )}
         </div>
-        {worlds.length === 0 ? (
-          <div style={{ padding: "54px 88px" }}>
-            <EmptyState
-              title="No worlds yet"
-              hint={
-                sample?.available === true
-                  ? "Create one, install ours to pull apart, or drop an existing world folder into your ArkeStudio directory."
-                  : "Create one, or drop an existing world folder into your ArkeStudio directory."
-              }
-              action={
-                <span style={{ display: "inline-flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-                  <Button onClick={() => navigate("/first-run")}>Start</Button>
-                  {sample?.available === true && (
-                    <Button
-                      variant="ghost"
-                      disabled={sample.installing}
-                      onClick={() => installSampleWorld()}
-                    >
-                      {sample.installing ? "Installing…" : "Install the sample world"}
-                    </Button>
-                  )}
-                </span>
-              }
-            />
-          </div>
-        ) : (
-          <div className="fy-home-cards">
+        <div className="fy-home-cards">
+          <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
+            <span className="fy-worldcard__frame fy-worldcard__empty" aria-hidden="true"><Plus size={28} /></span>
+            <span className="fy-worldcard__name">Create a world</span>
+          </button>
             {worlds.map((w, i) => (
               <div
                 key={w.worldId}
@@ -570,7 +549,8 @@ export function WorldPickerScreen() {
                   onClick={() => navigate(`/w/${w.worldId}`)}
                 >
                   <div className="fy-worldcard__frame">
-                    <Portrait worldSlug={w.slug} path={w.keyArt ?? ""} label={`${w.name}: key art`} radius={10} />
+                    {w.keyArt ? <Portrait worldSlug={w.slug} path={w.keyArt} label={w.name} radius={10} /> :
+                      <div className="fy-worldcard__empty">No key art yet.</div>}
                   </div>
                   {/* Archiving is two clicks and no dialog: the second click is the consent,
                       and the words say what actually happens to the folder. */}
@@ -624,23 +604,12 @@ export function WorldPickerScreen() {
                 </div>
               </div>
             ))}
-            {/* The card is the target, not the control — the same shape the first-run cards
-                already use. It was a <button> holding another one, which is invalid HTML: the
-                inner control is unreachable in the accessibility tree, and React refuses to
-                hydrate it. The whole card still takes a click; what a keyboard and a screen
-                reader land on is the one thing here that names what it does. */}
-            <div className="fy-newworldcard" onClick={() => navigate("/worlds/new")}>
-              <span className="fy-newprodcard__ring" style={{ width: 46, height: 46 }}>
-                <Plus size={20} />
-              </span>
-              <span style={{ font: "600 17px var(--font-sans)" }}>New world</span>
-              <span style={{ font: "400 13px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center", maxWidth: 190 }}>
-                Name it. We'll hold the rest.
-              </span>
-              <span style={{ marginTop: 6 }}>
-                <Button>Create a world</Button>
-              </span>
-            </div>
+        </div>
+        {worlds.length === 0 && sample?.available === true && (
+          <div style={{ padding: "0 64px 24px" }}>
+            <Button variant="ghost" disabled={sample.installing} onClick={() => installSampleWorld()}>
+              {sample.installing ? "Installing…" : "Install the sample world"}
+            </Button>
           </div>
         )}
       </div>
@@ -665,111 +634,92 @@ function parseSeed(raw: string): { name: string; sentence: string } | null {
  * The review before the press (SPEC-031 R-12): what will be created counted by kind, how
  * many generations that is, spend as one figure — and every precondition that failed,
  * stated on the way in rather than discovered at item nine of fifteen (R-11).
+ *
+ * A card in the founding conversation, not a route of its own (issue 920). The decision was
+ * reached in the thread; a second screen for it was a second stop for a yes already given,
+ * and the one spend in the whole flow that left the chat every other decision is made in.
+ * The press is still one aggregate authorization (R-13) — the same yes, asked where the
+ * author is.
  */
-function BuildReviewStep({
+function BuildCard({
   plan: entry,
+  startedAt,
   pressed,
-  onBack,
+  settling,
+  onDismiss,
   onBuild,
 }: {
   plan: { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string } | undefined;
+  startedAt: string | null;
   pressed: boolean;
-  onBack: () => void;
+  /** A turn is in flight: the blueprint under the card is moving, so the press waits. */
+  settling: boolean;
+  onDismiss: () => void;
   onBuild: () => void;
 }) {
-  if (!entry) return <Loading label="sizing the build" />;
-  if (entry.plan === null) {
-    return (
-      <>
-        <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
-        <Callout tone="danger">{entry.reason ?? "the build could not be sized"}</Callout>
-        <div className="fy-artstep__foot">
-          <Button variant="ghost" onClick={onBack}>
-            Back
-          </Button>
-        </div>
-      </>
-    );
-  }
-  const plan = entry.plan;
-  const counts: Array<[number, string]> = [
-    [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
-    [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
-    [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
-    [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
-  ];
+  const plan = entry?.plan ?? null;
+  const counts: Array<[number, string]> = plan
+    ? [
+        [plan.counts.characters, plan.counts.characters === 1 ? "character" : "characters"],
+        [plan.counts.locations, plan.counts.locations === 1 ? "place" : "places"],
+        [plan.counts.factions, plan.counts.factions === 1 ? "faction" : "factions"],
+        [plan.counts.threads, plan.counts.threads === 1 ? "open thread" : "open threads"],
+      ]
+    : [];
+  const estimate = plan === null ? null : `${formatMicroUsd(plan.estimateMicroUsd)} generation budget`;
   return (
-    <>
-      <div className="fy-eyebrow-sm">NEW WORLD · THE BUILD</div>
-      <h1 className="fy-artstep__h1">One press makes {plan.worldName}.</h1>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {counts
-          .filter(([count]) => count > 0)
-          .map(([count, label]) => (
-            <div
-              key={label}
-              style={{ flex: 1, minWidth: 120, border: "1px solid var(--border)", borderRadius: 11, padding: "13px 15px" }}
-            >
-              <div style={{ font: "650 20px var(--font-sans)" }}>{count}</div>
-              <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
-                {label.toUpperCase()}
-              </div>
-            </div>
-          ))}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          border: "1px solid var(--border)",
-          borderRadius: 11,
-          padding: "13px 15px",
-        }}
-      >
+    <article
+      className="fy-actioncard"
+      data-status={entry !== undefined && plan === null ? "failed" : pressed ? "running" : "pending"}
+      aria-label={plan ? `Build ${plan.worldName}` : "The founding build"}
+    >
+      <div className="fy-actioncard__head">
         <div>
-          <div style={{ font: "650 21px var(--font-sans)" }}>
-            {plan.generations === 0 ? "$0.00" : `~${formatMicroUsd(plan.estimateMicroUsd)}`}
-          </div>
-          <div className="fy-mono" style={{ fontSize: 10, marginTop: 3 }}>
+          <div className="fy-actioncard__reason">new world · the build</div>
+          <h3>{plan ? `One press makes ${plan.worldName}.` : "The founding build"}</h3>
+        </div>
+        {estimate !== null && <span className="fy-actioncard__status">{estimate}</span>}
+      </div>
+      {entry === undefined ? (
+        <Working label="Sizing the build" startedAt={startedAt} />
+      ) : plan === null ? (
+        <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
+      ) : (
+        <>
+          <p className="fy-actioncard__consequence">
+            {counts
+              .filter(([count]) => count > 0)
+              .map(([count, label]) => `${count} ${label}`)
+              .join(" · ")}
+          </p>
+          <div className="fy-mono" style={{ fontSize: 10 }}>
             {plan.generations} GENERATION{plan.generations === 1 ? "" : "S"}
-            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""} · THE CAP
+            {plan.imageModel ? ` · ${plan.imageModel.toUpperCase()}` : ""}
           </div>
-        </div>
-        <span style={{ flex: 1 }} />
-        <span style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", maxWidth: 260, textAlign: "right" }}>
-          Everything lands settled. Nothing waits for a decision.
-        </span>
-      </div>
-      {plan.notes.length > 0 && (
-        <div
-          style={{
-            borderLeft: "2px solid var(--border)",
-            padding: "9px 13px",
-            font: "400 11.5px/1.6 var(--font-sans)",
-            color: "var(--muted-foreground)",
-          }}
-        >
+          <p className="fy-actioncard__notice">Work that would exceed this estimate is skipped.</p>
           {plan.notes.map((note, index) => (
-            <div key={index}>{note}</div>
+            <p key={index} className="fy-actioncard__notice">
+              {note}
+            </p>
           ))}
-        </div>
+        </>
       )}
-      <div className="fy-artstep__foot">
-        <Button variant="ghost" onClick={onBack} disabled={pressed}>
-          Back
-        </Button>
-        <span style={{ flex: 1 }} />
-        <span className="fy-artstep__note">yes once · nothing asks again</span>
-        <Button variant="primary" disabled={pressed} onClick={onBuild}>
-          {pressed
-            ? "Building…"
-            : plan.generations === 0
-              ? `Build ${plan.worldName}`
-              : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+      <div className="fy-actioncard__actions">
+        {plan !== null && (
+          <Button variant="primary" disabled={pressed || settling} onClick={onBuild}>
+            {pressed
+              ? "Building…"
+              : plan.generations === 0
+                ? `Build ${plan.worldName}`
+                : `Build ${plan.worldName} · ~${formatMicroUsd(plan.estimateMicroUsd)}`}
+          </Button>
+        )}
+        <Button variant="ghost" disabled={pressed} onClick={onDismiss}>
+          Not yet
         </Button>
       </div>
-    </>
+      <div className="fy-actioncard__audit">yes once · nothing asks again</div>
+    </article>
   );
 }
 
@@ -788,14 +738,16 @@ export function NewWorldScreen() {
   // thing before the world exists, because it is the one answer that applies to every image the
   // world will ever make, and asking it while the logline is still being written would be asking
   // about a world nobody has described yet.
-  const [step, setStep] = useState<"draft" | "look" | "words" | "review">("draft");
+  const [step, setStep] = useState<"draft" | "look" | "words">("draft");
   const [presetId, setPresetId] = useState<string | null>(null);
   const [look, setLook] = useState("");
-  // The founding build (SPEC-031): a conversation that settled a name goes through the
-  // review and one press; a bare form still creates and seeds the old way.
+  // The founding build (SPEC-031): a conversation that settled a name is sized into a card in
+  // the thread and founded in one press there; a bare form still creates and seeds the old way.
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
+  const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
+  const buildCardRef = useRef<HTMLDivElement>(null);
   const [buildRequestId, setBuildRequestId] = useState<string | null>(null);
   const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
@@ -835,8 +787,13 @@ export function NewWorldScreen() {
   const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
   const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
   const railCharacters = [
-    ...(charSeed ? [{ ...charSeed, brief: false }] : []),
-    ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c), brief: hasBrief(c) })),
+    ...(charSeed ? [{ ...charSeed, brief: false, neverDepicted: false }] : []),
+    ...draftCharacters.map((c) => ({
+      name: c.name,
+      sentence: oneLine(c),
+      brief: hasBrief(c),
+      neverDepicted: c.neverDepicted === true,
+    })),
   ];
   const railLocations = [
     ...(locSeed ? [{ ...locSeed, brief: false }] : []),
@@ -920,31 +877,54 @@ export function NewWorldScreen() {
     }
   }, [buildPressed, buildResponse]);
 
-  // A preview can settle while the review is open, and it is the review's own answer that
-  // changes: an unsettled preview carries if it lands before the press (SPEC-031 R-54). The
-  // plan is asked again so the screen never states a loss the build is about to contradict.
-  const previewStatusAtPlan = useRef<string | null>(null);
+  // The card is open once a plan has been asked for. It sits in the thread, so the
+  // conversation goes on under it.
+  const buildCardOpen = planRequestId !== null;
+  const sizingBuild = buildCardOpen && visibleBuildPlan === undefined;
   useEffect(() => {
-    if (step !== "review" || buildPressed) return;
-    const status = previewJob?.status ?? null;
-    if (previewStatusAtPlan.current === status) return;
-    previewStatusAtPlan.current = status;
+    if (buildCardOpen) buildCardRef.current?.scrollIntoView({ block: "start" });
+  }, [buildCardOpen, planRequestId, visibleBuildPlan]);
+  // A plan is a picture of one blueprint and one preview state, and the card must never state
+  // a count or a loss the build is about to contradict: an unsettled preview carries if it
+  // lands before the press (SPEC-031 R-54), and a blueprint that moved under the card is
+  // exactly what the coordinator would refuse the press for. Either change asks the plan
+  // again. A look the conversation proposed follows the conversation; words the author edited
+  // or chose from a preset stay theirs.
+  const plannedAgainst = useRef<{ blueprint: typeof blueprint; preview: string | null } | null>(null);
+  useEffect(() => {
+    if (!buildCardOpen || buildPressed) return;
+    const preview = previewJob?.status ?? null;
+    const last = plannedAgainst.current;
+    if (last !== null && last.blueprint === blueprint && last.preview === preview) return;
+    let lookText = lookForBuild;
+    if (lookSource === "conversation" && look.trim() === conversationLookRef.current) {
+      lookText = blueprint?.look?.trim() ?? "";
+      conversationLookRef.current = lookText;
+      setLook(lookText);
+      setLookForBuild(lookText);
+    }
+    plannedAgainst.current = { blueprint, preview };
     const requestId = ulid();
     setPlanRequestId(requestId);
-    planFoundingBuild(genesisId, requestId, lookForBuild);
-  }, [step, buildPressed, previewJob?.status, lookForBuild, genesisId]);
+    setPlanStartedAt(new Date().toISOString());
+    // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
+    setBuildRequestId(null);
+    planFoundingBuild(genesisId, requestId, lookText);
+  }, [buildCardOpen, buildPressed, previewJob?.status, blueprint, lookForBuild, look, lookSource, genesisId]);
 
-  const enterReview = (lookText: string) => {
+  const openBuildCard = (lookText: string) => {
     setLookForBuild(lookText);
     setBuildRequestId(null);
-    previewStatusAtPlan.current = previewJob?.status ?? null;
+    plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null };
     const requestId = ulid();
     setPlanRequestId(requestId);
+    setPlanStartedAt(new Date().toISOString());
     planFoundingBuild(genesisId, requestId, lookText);
-    setStep("review");
+    setStep("draft");
   };
 
-  const returnToDraft = () => {
+  // Back from the look steps, or the card set aside: the conversation is untouched either way.
+  const leaveBuild = () => {
     if (buildPressed) return;
     // A proposal copied verbatim is conversation state, not an override. Let the next turn's
     // proposal replace it; words the author edited or chose from a preset remain their choice.
@@ -953,6 +933,7 @@ export function NewWorldScreen() {
       setLookSource(null);
       conversationLookRef.current = null;
     }
+    plannedAgainst.current = null;
     setPlanRequestId(null);
     setBuildRequestId(null);
     setStep("draft");
@@ -987,8 +968,7 @@ export function NewWorldScreen() {
         <AppChrome
           back={{
             label: genMode === "chat" ? "Back to chat" : "Back to form",
-            onClick: returnToDraft,
-            disabled: buildPressed,
+            onClick: leaveBuild,
           }}
           context={{ label: "new world · art direction" }}
         />
@@ -1038,23 +1018,11 @@ export function NewWorldScreen() {
                 <span style={{ flex: 1 }} />
                 {/* Skippable, but not hidden: a world with no look is a real state, and it is
                     better said out loud than arrived at by closing a screen. */}
-                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? enterReview("") : begin())}>
+                <Button variant="ghost" disabled={!canCreate} onClick={() => (buildMode ? openBuildCard("") : begin())}>
                   Decide later
                 </Button>
               </div>
             </>
-          ) : step === "review" ? (
-            <BuildReviewStep
-              plan={visibleBuildPlan}
-              pressed={buildPressed}
-              onBack={() => setStep(lookForBuild === "" ? "look" : "words")}
-              onBuild={() => {
-                if (buildRequestRef.current === null) buildRequestRef.current = ulid();
-                setBuildRequestId(buildRequestRef.current);
-                setBuildPressed(true);
-                beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
-              }}
-            />
           ) : (
             <>
               <div className="fy-artstep__steps">
@@ -1095,7 +1063,7 @@ export function NewWorldScreen() {
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
-                  onClick={() => (buildMode ? enterReview(look.trim()) : begin(look))}
+                  onClick={() => (buildMode ? openBuildCard(look.trim()) : begin(look))}
                 >
                   {submittedName ? "Creating…" : "Looks right"}
                 </Button>
@@ -1157,9 +1125,99 @@ export function NewWorldScreen() {
                 )}
                 {turns.map((turn, i) => (
                   <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
-                    {turn.text}
+                    {/* The author's words are shown exactly as typed; only Arke writes markdown (issue 911). */}
+                    {turn.role === "user" ? turn.text : renderInlineMarkdown(turn.text)}
                   </div>
                 ))}
+                {/* The look, previewable while the conversation is still a conversation (SPEC-031
+                    §1.10): the agent proposed the words; the press and the spend are the author's.
+                    Asked in the thread, not in the rail beside it — spend is decided where every
+                    other decision here is (issue 920). Build mode only: the legacy create path
+                    sweeps the sandbox without a carry, and the card must not promise one. */}
+                {buildMode && blueprint?.look !== undefined && (
+                  <article
+                    className="fy-actioncard"
+                    data-status={previewFile !== undefined && !previewStale ? "completed" : "pending"}
+                    aria-label="The look"
+                  >
+                    <div className="fy-actioncard__head">
+                      <div>
+                        <div className="fy-actioncard__reason">proposed in conversation</div>
+                        <h3>The look</h3>
+                      </div>
+                    </div>
+                    <p className="fy-actioncard__consequence">{blueprint.look}</p>
+                    {previewFile !== undefined && (
+                      <>
+                        <img
+                          className="fy-actioncard__media"
+                          src={genesisMediaUrl(genesisId, previewFile)}
+                          alt="The look, previewed"
+                        />
+                        <div className="fy-mono" style={{ fontSize: 9.5 }}>
+                          {previewStale
+                            ? "the look changed since this was made · it will not carry"
+                            : "carries in as the master look at Begin"}
+                        </div>
+                      </>
+                    )}
+                    {previewRunning && <Loading inline label="making the look" />}
+                    {(previewJob?.status === "failed" ||
+                      previewJob?.status === "cancelled" ||
+                      previewJob?.status === "needs-reconciliation") && (
+                      <div className="fy-mono" style={{ fontSize: 9.5 }}>
+                        {previewJob.status === "cancelled"
+                          ? "the preview was cancelled"
+                          : previewJob.status === "needs-reconciliation"
+                            ? "the preview is held in Activity"
+                            : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
+                      </div>
+                    )}
+                    {!previewRunning &&
+                      (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
+                        <>
+                          {/* The build never makes a master look (SPEC-031 R-18): the world gets
+                              this preview or none. Said beside the control that answers it, not
+                              left for an empty plate on Art direction months later (issue 521). */}
+                          <div className="fy-mono" style={{ fontSize: 9.5 }}>
+                            without one, this world has no master look
+                          </div>
+                          <div className="fy-actioncard__actions" style={{ alignItems: "center" }}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={previewEstimate === null}
+                              onClick={() => generateLookPreview(genesisId)}
+                            >
+                              See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
+                            </Button>
+                            {previewEstimate === null && (
+                              <span className="fy-mono" style={{ fontSize: 9.5 }}>
+                                needs an image provider
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      )}
+                  </article>
+                )}
+                {buildMode && buildCardOpen && (
+                  <div ref={buildCardRef}>
+                    <BuildCard
+                      plan={visibleBuildPlan}
+                      startedAt={planStartedAt}
+                      pressed={buildPressed}
+                      settling={chatRunning}
+                      onDismiss={leaveBuild}
+                      onBuild={() => {
+                        if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                        setBuildRequestId(buildRequestRef.current);
+                        setBuildPressed(true);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
+                      }}
+                    />
+                  </div>
+                )}
                 {/* The turn in flight, verb by verb — the same working surface world chat has.
                     A silent stretch while the model reads and writes is indistinguishable from
                     a hang, and this is the first conversation anyone has with the studio. */}
@@ -1172,8 +1230,8 @@ export function NewWorldScreen() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning}
-                    busyLabel="shaping the draft…"
+                    busy={chatRunning || buildPressed || sizingBuild}
+                    busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     {...(hostCanAttach()
@@ -1321,12 +1379,18 @@ export function NewWorldScreen() {
             </div>
           )}
           <div className="fy-draftcard" style={{ padding: "10px 10px 16px" }}>
+            {/*
+              Semantic tokens only (issue 911). Painted from the neutral ramp this was the
+              brightest thing on the world door in dark mode — .dark leaves --neutral-* alone,
+              so a ramp surface stays white on a near-black page. Same dashed-and-unfilled
+              language as the pending frames, which paint from the same two tokens.
+            */}
             <div
               style={{
                 height: 118,
                 borderRadius: 8,
-                border: "1.5px dashed var(--neutral-300)",
-                background: "var(--neutral-50)",
+                border: "1.5px dashed var(--border)",
+                background: "var(--muted)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -1382,7 +1446,12 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      {c.brief ? "sketch · brief kept" : "sketch · no face yet"}
+                      {/*
+                       * "no face yet" promises a face, which is the opposite of the rule for a
+                       * character the author has ruled out (issue 945). The build card names the
+                       * same rule as "never depicted"; the two surfaces say it the same way.
+                       */}
+                      {c.neverDepicted ? "sketch · never depicted" : c.brief ? "sketch · brief kept" : "sketch · no face yet"}
                     </span>
                   </div>
                 </div>
@@ -1420,74 +1489,11 @@ export function NewWorldScreen() {
               </div>
             </div>
           )}
-          {/* The look, previewable while the conversation is still a conversation (SPEC-031
-              §1.10): the agent proposed the words; the press and the spend are the author's.
-              Build mode only — the legacy create path sweeps the sandbox without a carry,
-              and the card must not promise one. */}
-          {buildMode && blueprint?.look !== undefined && (
-            <div className="fy-draftcard" style={{ padding: "12px 14px" }}>
-              <div className="fy-mono" style={{ fontSize: 10 }}>
-                THE LOOK
-              </div>
-              <div style={{ font: "400 11.5px/1.5 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {blueprint.look}
-              </div>
-              {previewFile !== undefined && (
-                <>
-                  <img
-                    src={genesisMediaUrl(genesisId, previewFile)}
-                    alt="The look, previewed"
-                    style={{ width: "100%", borderRadius: 8, marginTop: 9, display: "block" }}
-                  />
-                  <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
-                    {previewStale
-                      ? "the look changed since this was made · it will not carry"
-                      : "carries in as the master look at Begin"}
-                  </div>
-                </>
-              )}
-              {previewRunning && <Loading inline label="making the look" />}
-              {(previewJob?.status === "failed" ||
-                previewJob?.status === "cancelled" ||
-                previewJob?.status === "needs-reconciliation") && (
-                <div className="fy-mono" style={{ fontSize: 9.5, marginTop: 6 }}>
-                  {previewJob.status === "cancelled"
-                    ? "the preview was cancelled"
-                    : previewJob.status === "needs-reconciliation"
-                      ? "the preview is held in Activity"
-                      : `the preview failed${previewJob.error ? ` — ${previewJob.error}` : ""}`}
-                </div>
-              )}
-              {!previewRunning && (previewJob === null || previewJob.status === "failed" || previewJob.status === "cancelled" || previewStale) && (
-                <div style={{ marginTop: 9 }}>
-                  {/* The build never makes a master look (SPEC-031 R-18): the world gets this
-                      preview or none. Said beside the control that answers it, not left for an
-                      empty plate on Art direction months later (issue 521). */}
-                  <div className="fy-mono" style={{ fontSize: 9.5, marginBottom: 7 }}>
-                    without one, this world has no master look
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={previewEstimate === null}
-                    onClick={() => generateLookPreview(genesisId)}
-                  >
-                    See the look{previewEstimate !== null ? ` · ~${formatMicroUsd(previewEstimate)}` : ""}
-                  </Button>
-                  {previewEstimate === null && (
-                    <span className="fy-mono" style={{ fontSize: 9.5, marginLeft: 8 }}>
-                      needs an image provider
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
           <div style={{ flex: 1, minHeight: 16 }} />
           <div style={{ display: "grid", gap: 8 }}>
             <Button
               variant="primary"
-              disabled={!canCreate}
+              disabled={!canCreate || buildCardOpen}
               onClick={() => {
                 const proposed = blueprint?.look?.trim();
                 const approvedLook = look.trim() || proposed;
@@ -1500,7 +1506,7 @@ export function NewWorldScreen() {
                     conversationLookRef.current = approvedLook;
                     setPresetId(null);
                   }
-                  if (buildMode) enterReview(approvedLook);
+                  if (buildMode) openBuildCard(approvedLook);
                   else begin(approvedLook);
                 } else {
                   setStep("look");

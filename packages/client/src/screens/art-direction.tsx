@@ -13,7 +13,6 @@ import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
-import { StagedReferencePicker } from "../components/staged-reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -433,6 +432,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("world-image"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("world-image")] ?? ""]?.worldName }}
         referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
         onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("world-image"), file) }}
         onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("world-image"))}
         workflow="main-photo"
         // The request carries no output spec at all, so the provider's own size is what runs.
@@ -503,7 +503,6 @@ export function ArtDirectionScreen() {
   const [count, setCount] = useState(1);
   const [picked, setPicked] = useState<string | null>(null);
   // The reference picker takes over the dialog's own panel — never a dialog over it (issue 305).
-  const [pickingReference, setPickingReference] = useState(false);
   const generateRef = useRef<HTMLButtonElement>(null);
   if (!world || world.meta.worldId !== worldId) return null;
   const direction = world.artDirection;
@@ -575,37 +574,10 @@ export function ArtDirectionScreen() {
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("master-look"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("master-look")] ?? ""]?.worldName }}
-        referenceHint={
-          <>
-            Optional. A palette, a frame or a lighting study for the model to look at while it works.{" "}
-            <button
-              type="button"
-              className="fy-gendialog__reset"
-              style={{ position: "static" }}
-              onClick={() => setPickingReference(true)}
-            >
-              Browse images
-            </button>
-          </>
-        }
+        referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
-        {...(pickingReference
-          ? {
-              panel: (
-                <StagedReferencePicker
-                  worldId={world.meta.worldId}
-                  referenceKey={stagedReferenceKey("master-look")}
-                  onUpload={() => {
-                    pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"));
-                    setPickingReference(false);
-                  }}
-                  onClose={() => setPickingReference(false)}
-                />
-              ),
-              onPanelClose: () => setPickingReference(false),
-            }
-          : {})}
         // "main-photo" is borrowed for its price band only — a master look is not a portrait, and
         // the coordinator builds this request landscape, so the orientation is stated rather than
         // inferred from the workflow. Without it the dialog would default to a portrait shape and

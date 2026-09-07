@@ -1,4 +1,4 @@
-import { inflateRawSync, inflateSync } from "node:zlib";
+import { crc32, inflateRawSync, inflateSync } from "node:zlib";
 import { extname } from "node:path";
 
 /**
@@ -195,7 +195,7 @@ export function wordXmlToText(xml: string): string {
   return out;
 }
 
-function decodeXmlEntities(text: string): string {
+export function decodeXmlEntities(text: string): string {
   if (!text.includes("&")) return text;
   return text.replace(/&(#x?[0-9A-Fa-f]+|[a-z]+);/g, (whole, body: string) => {
     if (body.startsWith("#x") || body.startsWith("#X")) {
@@ -211,8 +211,16 @@ function decodeXmlEntities(text: string): string {
   });
 }
 
+/**
+ * As much as one entry may be before it is refused (codex on PR 916): a document part past this
+ * is not a manuscript, and inflating it whole to find that out would be the harm. The archive's
+ * declared size is checked first, and the inflater is told the same ceiling in case the
+ * declaration lied.
+ */
+export const MAX_ZIP_ENTRY_BYTES = 32 * 1024 * 1024;
+
 /** One entry out of a zip, by name. Stored and deflated only — a .docx uses nothing else. */
-function zipEntry(zip: Uint8Array, wanted: string): Uint8Array | null {
+export function zipEntry(zip: Uint8Array, wanted: string): Uint8Array | null {
   if (zip.byteLength < 22) return null;
   const dv = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
   let eocd = -1;
@@ -232,7 +240,9 @@ function zipEntry(zip: Uint8Array, wanted: string): Uint8Array | null {
   for (let i = 0; i < count; i++) {
     if (at + 46 > zip.byteLength || dv.getUint32(at, true) !== 0x0201_4b50) return null;
     const method = dv.getUint16(at + 10, true);
+    const checksum = dv.getUint32(at + 16, true);
     const compressedSize = dv.getUint32(at + 20, true);
+    const declaredSize = dv.getUint32(at + 24, true);
     const nameLength = dv.getUint16(at + 28, true);
     const extraLength = dv.getUint16(at + 30, true);
     const commentLength = dv.getUint16(at + 32, true);
@@ -245,9 +255,17 @@ function zipEntry(zip: Uint8Array, wanted: string): Uint8Array | null {
     // The local header's own name and extra lengths, which need not match the directory's.
     const dataAt = localAt + 30 + dv.getUint16(localAt + 26, true) + dv.getUint16(localAt + 28, true);
     const data = zip.subarray(dataAt, dataAt + compressedSize);
-    if (method === 0) return data;
-    if (method !== 8) return null;
-    return new Uint8Array(inflateRawSync(Buffer.from(data.buffer, data.byteOffset, data.byteLength)));
+    if (method !== 0 && method !== 8) return null;
+    if (declaredSize > MAX_ZIP_ENTRY_BYTES || compressedSize > MAX_ZIP_ENTRY_BYTES) throw new Error("zip entry too large");
+    const bytes =
+      method === 0
+        ? data
+        : new Uint8Array(inflateRawSync(Buffer.from(data.buffer, data.byteOffset, data.byteLength), { maxOutputLength: MAX_ZIP_ENTRY_BYTES }));
+    // The archive says what its entry's bytes add up to (codex on PR 916): a file with a bit
+    // flipped can still inflate and still parse, and the words that come out are not the words
+    // that went in. Checked here so a corrupted manuscript is refused as damaged, never imported.
+    if (crc32(bytes) !== checksum) throw new Error("zip entry checksum mismatch");
+    return bytes;
   }
   return null;
 }
