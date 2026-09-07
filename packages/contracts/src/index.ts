@@ -1,4 +1,5 @@
 export * from "./ids.js";
+export { ReferenceMediaBindingsSchema, type ReferenceMediaBindings } from "./media-reference.js";
 export * from "./world.js";
 export * from "./production-shape.js";
 export * from "./scene-findings.js";
@@ -95,3 +96,4 @@ export * from "./shot-visual-facts.js";
 export * from "./provider-guidance.js";
 export * from "./dialogue-assessment.js";
 export * from "./take-feedback.js";
+export { referencePrompt } from "./reference-prompt.js";

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
 import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
+import { H3_REFERENCE, H3_REFERENCE_MODEL } from "./h3-reference-recipe.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -101,9 +102,12 @@ export interface ComfyUiRecipe {
     nodes: readonly string[];
     /** The optional input slot they feed, cleared with them. */
     slot: readonly [nodeId: string, inputKey: string];
+    extraSlots?: ReadonlyArray<readonly [nodeId: string, inputKey: string]>;
   };
   /** Ordered optional reference inputs; absent pictures remove only their declared carriers. */
   referenceImages?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
+  referenceVideos?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
+  referenceAudio?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
   /** Use ordinary text conditioning when no references were supplied. Both paths are authored. */
   referenceConditioning?: {
     nodes: readonly string[];
@@ -745,7 +749,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, H3_REFERENCE, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -782,6 +786,10 @@ function sha256Hex(text: string): string {
 }
 
 export function recipeTemplateDigest(recipe: ComfyUiRecipe): string {
+  if (recipe.referenceVideos || recipe.referenceAudio) {
+    return sha256Hex(canonicalJson({ graph: recipe.graph, referenceImages: recipe.referenceImages ?? [],
+      referenceVideos: recipe.referenceVideos ?? [], referenceAudio: recipe.referenceAudio ?? [] }));
+  }
   if (recipe.referenceImages !== undefined) {
     return sha256Hex(canonicalJson({
       graph: recipe.graph,
@@ -976,9 +984,11 @@ export const VIDEO_DERIVATIONS: Record<
   [DRAFT_VIDEO.id]: { dimensions: WAN_DIMENSIONS, framesBySeconds: WAN_FRAMES_BY_SECONDS },
   [H3_VIDEO.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: H3_FRAMES_BY_SECONDS },
   [H3_VIDEO_768.id]: { dimensions: H3_768_DIMENSIONS, framesBySeconds: H3_768_FRAMES_BY_SECONDS },
+  [H3_REFERENCE.id]: { dimensions: H3_DIMENSIONS, framesBySeconds: { "5": 124 } },
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
+  H3_REFERENCE_MODEL,
   {
     id: KREA2_IMAGE.id,
     provider: "comfyui",

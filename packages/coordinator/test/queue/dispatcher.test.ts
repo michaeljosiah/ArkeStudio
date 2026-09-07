@@ -54,6 +54,7 @@ async function makeHarness(
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     readVideoSource?: JobQueueOptions["readVideoSource"];
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
+    prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -81,6 +82,7 @@ function build(
     readVoiceReference?: JobQueueOptions["readVoiceReference"];
     readVideoSource?: JobQueueOptions["readVideoSource"];
     readVideoReferences?: JobQueueOptions["readVideoReferences"];
+    prepareReferences?: JobQueueOptions["prepareReferences"];
     admit?: JobQueueOptions["admit"];
     backoffBaseMs?: number;
     backoffCapMs?: number;
@@ -125,6 +127,7 @@ function build(
     ...(opts.readVoiceReference ? { readVoiceReference: opts.readVoiceReference } : {}),
     ...(opts.readVideoSource ? { readVideoSource: opts.readVideoSource } : {}),
     ...(opts.readVideoReferences ? { readVideoReferences: opts.readVideoReferences } : {}),
+    ...(opts.prepareReferences ? { prepareReferences: opts.prepareReferences } : {}),
     ...(opts.admit ? { admit: opts.admit } : {}),
     maxAttempts: 3,
     backoffBaseMs: 5,
@@ -2552,6 +2555,53 @@ describe("a result fetch the provider refuses is not re-fetched (#630)", () => {
     // Several backoff caps' worth of quiet: a poller still orphaned from its job would fetch again.
     await new Promise((resolve) => setTimeout(resolve, 120));
     assert.equal(fetches, settled, "a cancelled job's poller stops");
+    h.queue.dispose();
+  });
+});
+
+describe("multimedia preparation stays before the submission boundary", () => {
+  it("carries prepared audio ephemerally without writing it to the journal", async () => {
+    const fake = new FakeProvider({});
+    const data = Uint8Array.from(Buffer.from("private-reference-audio"));
+    const h = await makeHarness({ fake }, { prepareReferences: async (_job, videos) => ({ videos,
+      audio: [{ name: "tone.wav", contentType: "audio/wav", data, durationSec: 2 }] }) });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "succeeded", "prepared reference to land", FOLD_MS);
+    assert.deepEqual(fake.submittedMediaAudioReferences[0]!.data, data);
+    const log = await readFile(h.journalPath, "utf8");
+    assert.equal(log.includes("private-reference-audio"), false);
+    assert.equal(log.includes("mediaAudioReferences"), false);
+    h.queue.dispose();
+  });
+  it("does not journal or submit media bytes when preparation fails", async () => {
+    const fake = new FakeProvider({});
+    const h = await makeHarness({ fake }, { prepareReferences: async () => { throw new Error("reference changed since review"); } });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => foldedJob(h, job.id)?.status === "failed", "preparation failure", FOLD_MS);
+    assert.equal(fake.submitCount, 0);
+    const log = await readFile(h.journalPath, "utf8");
+    assert.equal(log.includes('"status":"submitting"'), false);
+    assert.match(foldedJob(h, job.id)?.error ?? "", /changed since review/);
+    h.queue.dispose();
+  });
+
+  it("cancels an in-progress preparation without submitting or misclassifying it as failed", async () => {
+    const fake = new FakeProvider({});
+    let started = false, aborted = false;
+    const h = await makeHarness({ fake }, { prepareReferences: async (_job, videos, signal) => {
+      started = true;
+      await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => { aborted = true; reject(new Error("cancelled")); }, { once: true }));
+      return { videos, audio: [] };
+    } });
+    await h.queue.start();
+    const job = await h.queue.enqueue(INPUT);
+    await until(() => started, "preparation to begin", FOLD_MS);
+    await h.queue.cancel(job.id);
+    await until(() => foldedJob(h, job.id)?.status === "cancelled", "cancelled preparation", FOLD_MS);
+    assert.equal(aborted, true);
+    assert.equal(fake.submitCount, 0);
     h.queue.dispose();
   });
 });

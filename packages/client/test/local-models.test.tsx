@@ -586,6 +586,19 @@ describe("Voxa states three readable voice lines, once (R-48, rows 18, 19)", () 
 });
 
 describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)", () => {
+  it("shows multimedia capacities and one recipe download without inventing first-frame support", () => {
+    const model: ManifestModel = { ...DRAFT_VIDEO, id: "comfyui-h3-reference-video", displayName: "Local · H3 Reference Video",
+      accepts: { referenceImages: 9, referenceVideos: 3, referenceAudio: 3, startFrame: false, endFrame: false },
+      limits: { maxDurationSec: 5 }, requires: { vramMb: 10000 } };
+    const state = stateWith();
+    state.app.manifest!.models.push(model);
+    state.app.runtime!.models.push({ modelId: model.id, provider: "comfyui", displayName: model.displayName, capability: "video", locality: "local", fit: "runs-slow" });
+    state.app.setup!.components.push(component({ id: comfyUiWeightsComponentId(model.id), state: "available", sizeMb: 42371 }));
+    const html = plain(tileFor(renderEngine(state, "comfyui"), model.displayName));
+    assert.match(html, /refs ×9.*video refs ×3.*audio refs ×3.*5s/);
+    assert.doesNotMatch(html, /start frame/);
+    assert.match(html, /Install/);
+  });
   /** The engine has answered for Draft video, so the recipe list is where it belongs. */
   const answered = (over: Partial<RecipeReadiness> = {}): ClientState =>
     stateWith({

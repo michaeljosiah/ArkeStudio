@@ -1,3 +1,4 @@
+import { modelCapabilityCopy } from "@arke-studio/contracts";
 import { useState } from "react";
 import { useParams } from "react-router";
 import {
@@ -291,7 +292,9 @@ export function modelDetail(
   aspect?: string,
 ): string {
   const references =
-    model.unverified === true || model.accepts.referenceImages === 0
+    model.unverified !== true && ((model.accepts.referenceVideos ?? 0) > 0 || (model.accepts.referenceAudio ?? 0) > 0)
+      ? modelCapabilityCopy(model)
+      : model.unverified === true || model.accepts.referenceImages === 0
       ? "no references"
       : `up to ${model.accepts.referenceImages} references`;
   const size = tier ?? "provider default";

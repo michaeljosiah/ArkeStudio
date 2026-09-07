@@ -56,6 +56,8 @@ export interface DispatchVoiceReference {
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
 export interface DispatchVideoSource {
+  durationSec?: number;
+  referenceVideo24fps?: true;
   contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
@@ -75,6 +77,7 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       audioReferences?: DispatchVoiceReference[];
+      mediaAudioReferences?: Array<DispatchVoiceReference & { durationSec: number }>;
       audioInputs?: PreparedAudioInput[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
@@ -160,6 +163,9 @@ export interface JobQueueOptions {
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
   readAudioInputs?: (job: Job) => Promise<PreparedAudioInput[]>;
   readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
+  prepareReferences?: (job: Job, videos: DispatchVideoSource[], signal: AbortSignal) => Promise<{
+    videos: DispatchVideoSource[]; audio: Array<DispatchVoiceReference & { durationSec: number }>;
+  }>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
   readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
@@ -772,6 +778,7 @@ export class JobQueue {
 
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
+    let mediaAudioReferences: Array<DispatchVoiceReference & { durationSec: number }> | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
     let videoSource: DispatchVideoSource | undefined;
@@ -909,6 +916,25 @@ export class JobQueue {
       if (!this.stillQueued(job)) return;
     }
 
+    // Host preparation has no provider side effect. Keep it on the queued side of the outbox
+    // boundary, and let cancellation terminate its bounded encoder before any submission.
+    if (this.opts.prepareReferences) {
+      const preparing = new AbortController();
+      this.submitAborts.set(job.id, preparing);
+      try {
+        const prepared = await this.opts.prepareReferences(job, videoReferences ?? [], preparing.signal);
+        videoReferences = prepared.videos;
+        mediaAudioReferences = prepared.audio;
+      } catch (error) {
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Reference preparation failed.");
+        return;
+      } finally { if (this.submitAborts.get(job.id) === preparing) this.submitAborts.delete(job.id); }
+      if (this.disposed || !this.stillQueued(job)) return;
+    } else if (job.params.referenceMedia !== undefined) {
+      await this.terminalize(job, "failed", "Multimedia reference preparation is unavailable.");
+      return;
+    }
+
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
@@ -939,6 +965,7 @@ export class JobQueue {
           params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaAudioReferences ? { mediaAudioReferences } : {}),
           ...(audioInputs ? { audioInputs } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),

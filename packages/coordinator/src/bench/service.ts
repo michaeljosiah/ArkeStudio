@@ -1,4 +1,4 @@
-import { planSubjectCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
+import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -744,6 +744,10 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
+  const mediaReferences = model.limits.referenceSyntax === "minimax-h3" ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+    kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
+  })) : [];
+  const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
 
   const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
@@ -833,7 +837,9 @@ export function planBenchDispatch(
     taskMode, disabled: params.audioReferencesDisabled })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
-  const wirePrompt = [preamble, body, audioReferences ? characterAudioInstructions(audioReferences) : null].filter(Boolean).join("\n\n");
+  if (model.accepts.referenceAudio !== undefined && standaloneAudioCount + (audioReferences?.references.length ?? 0) > model.accepts.referenceAudio) return { ok: false, reason: "Standalone audio and character voices exceed the route's audio reference budget." };
+  const wirePrompt = [referencePrompt([preamble, body].filter(Boolean).join("\n\n"), model, videoPaths.length),
+    audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
@@ -1003,6 +1009,7 @@ export function planBenchDispatch(
         params: {
           prompt: wirePrompt,
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaReferences.length ? { referenceMedia: mediaReferences } : {}),
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the

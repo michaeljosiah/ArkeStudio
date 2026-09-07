@@ -93,6 +93,13 @@ conversion and analysis. The 255/111 workflow and provider payload tests remain 
 
 ## Character sample consumer (#255)
 
+Local H3 R2V also consumes designated samples as voice guidance. It reuses the same byte/QC
+evidence checks through `checkAudioDispatchEvidence`, without treating a cloud-upload scope as
+a prerequisite for local use. The provider rejects audio/video reference transfer to a remote
+ComfyUI engine. Cloud consumers continue through `clearAudioDispatch`, which additionally checks
+current rights. H3 does not declare performance synchronization; see the
+[local reference workflow](../development/h3-reference-video.md).
+
 The character Voice screen now contains a separate reference-sample panel above TTS. Speaking-video
 requests use the durable queue and verified Seedance 2.0 reference routes, with an explicit quote,
 accepted imagery and independent script. Reference finalization files every video as an immutable

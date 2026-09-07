@@ -234,7 +234,7 @@ export function multimediaCapacity(carried: readonly MultimediaReference[], mode
     // (issue 852): an allowance with nowhere to put the bytes would admit a clip at the tile
     // and never send it, which is the failure this budget exists to prevent.
     videoCeilingSec:
-      model.unverified === true || model.limits.referenceVideoField === undefined
+      model.unverified === true || !((model.accepts.referenceVideos ?? 0) > 0 || model.limits.referenceVideoField !== undefined)
         ? 0
         : (model.limits.maxReferenceVideoSec ?? 0),
     videoUsedSec: video,
@@ -250,7 +250,7 @@ export function carriesVideoReferences(model: ManifestModel, mapped: readonly Re
   return (
     mapped.includes("video") &&
     model.unverified !== true &&
-    model.limits.referenceVideoField !== undefined &&
+    ((model.accepts.referenceVideos ?? 0) > 0 || model.limits.referenceVideoField !== undefined) &&
     (model.limits.maxReferenceVideoSec ?? 0) > 0
   );
 }
@@ -277,6 +277,13 @@ export function admitReference(
   model: ManifestModel,
 ): MultimediaRefusal {
   const capacity = multimediaCapacity(carried, model);
+  if (model.limits.maxCombinedReferences !== undefined && carried.length >= model.limits.maxCombinedReferences) {
+    return { ok: false, binding: "unsupported-kind", reason: `at most ${model.limits.maxCombinedReferences} combined references` };
+  }
+  const countLimit = item.kind === "video" ? model.accepts.referenceVideos : item.kind === "audio" ? model.accepts.referenceAudio : undefined;
+  if (countLimit !== undefined && carried.filter(ref => ref.kind === item.kind).length >= countLimit) {
+    return { ok: false, binding: "unsupported-kind", reason: `at most ${countLimit} ${item.kind} references` };
+  }
   if (item.kind === "image") {
     if (capacity.imageCeiling === 0) {
       return { ok: false, binding: "unsupported-kind", reason: `${model.displayName} accepts no reference images` };
@@ -298,8 +305,13 @@ export function admitReference(
       reason: item.kind === "audio" ? "this model takes no audio" : "this model takes no video",
     };
   }
-  if (typeof item.durationSec !== "number") {
+  if (typeof item.durationSec !== "number" || !Number.isFinite(item.durationSec) || item.durationSec <= 0) {
     return { ok: false, binding: "unknown-duration", reason: "duration could not be read" };
+  }
+  const minimum = item.kind === "video" ? model.limits.minReferenceVideoFileSec : undefined;
+  const maximum = item.kind === "video" ? model.limits.maxReferenceVideoFileSec : model.limits.maxReferenceAudioFileSec;
+  if ((minimum !== undefined && item.durationSec < minimum) || (maximum !== undefined && item.durationSec > maximum)) {
+    return { ok: false, binding: item.kind === "video" ? "video-seconds" : "audio-seconds", reason: `${item.kind} reference must be ${minimum ?? 0}–${maximum ?? "unlimited"} seconds` };
   }
   const used = item.kind === "audio" ? capacity.audioUsedSec : capacity.videoUsedSec;
   if (used + item.durationSec > ceiling) {
