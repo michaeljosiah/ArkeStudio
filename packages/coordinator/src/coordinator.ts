@@ -2148,10 +2148,11 @@ export class Coordinator {
                 const referenceProblem = referenceInputProblem(model, input.params);
                 if (referenceProblem) return { ok: false, reason: referenceProblem };
                 const audioPlan = input.params.audioReferences as { references?: unknown[] } | undefined;
-                const hasMedia = (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) ||
-                  (Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) || input.params.continuedFrom !== undefined || (audioPlan?.references?.length ?? 0) > 0;
+                const needsPreparation = (Array.isArray(input.params.referenceMedia) && input.params.referenceMedia.length > 0) ||
+                  (Array.isArray(input.params.videoReferences) && input.params.videoReferences.length > 0) || input.params.continuedFrom !== undefined;
+                const hasMedia = needsPreparation || (audioPlan?.references?.length ?? 0) > 0;
                 if (hasMedia && service.engineIdentity()?.locality !== "local") return { ok: false, reason: "Audio and video references require a local engine." };
-                if (hasMedia && (!this.opts.ffmpeg || !this.opts.mediaProbe?.info)) return { ok: false, reason: "H3 multimedia references need the local media tools." };
+                if (needsPreparation && (!this.opts.ffmpeg || !this.opts.mediaProbe?.info)) return { ok: false, reason: "H3 multimedia references need the local media tools." };
               }
               return { ok: true };
             },

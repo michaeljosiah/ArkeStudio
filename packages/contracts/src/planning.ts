@@ -2418,7 +2418,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
     const videos = entry.continuation?.kind === "carry" ? 1 : 0;
-    entry.parts.preamble = entry.parts.preamble ? referencePrompt(entry.parts.preamble, model, videos) : null;
+    entry.parts.preamble = entry.parts.preamble ? referencePrompt(entry.parts.preamble, model, videos, 0, true) : null;
     entry.parts.body = referencePrompt(entry.parts.body, model, videos);
   }
   for (const reference of passReferences) {

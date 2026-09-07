@@ -842,7 +842,8 @@ export function planBenchDispatch(
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
   if (referenceProblem) return { ok: false, reason: referenceProblem };
-  const wirePrompt = [referencePrompt([preamble, body].filter(Boolean).join("\n\n"), model, videoPaths.length),
+  const wirePrompt = [preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+    referencePrompt(body, model, videoPaths.length),
     audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what

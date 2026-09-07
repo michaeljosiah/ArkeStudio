@@ -539,7 +539,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           }),
           // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
           // numbers its assets. Never both — the route carries one or the other.
-          preamble: chained ? START_FRAME_PREAMBLE : referencePrompt([bindingPreamble(passReferencePlan.bound), passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"), model),
+          preamble: chained ? START_FRAME_PREAMBLE : referencePrompt([bindingPreamble(passReferencePlan.bound), passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"), model, 0, 0, true),
           body: referencePrompt(passBody, model),
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
           // be the same request (R-9).

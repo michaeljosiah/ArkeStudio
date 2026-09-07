@@ -110,10 +110,12 @@ test("file counts and per-file duration constrain admission, including unknown m
 });
 
 test("prompt vocabulary accounts for video soundtracks and standalone audio before character voices", () => {
-  assert.equal(referencePrompt("Image 1: Ada. @Image 2 matches image 1. @Video 1. @Audio 1", H3_REFERENCE_MODEL, 1),
+  assert.equal(referencePrompt("Image 1: Ada. @Image 2 matches image 1. @Video 1. @Audio 1", H3_REFERENCE_MODEL, 1, 0, true),
     "<Picture 1>: Ada. <Picture 2> matches <Picture 1>. <Video 1>. <Audio 2>");
   assert.equal(referencePrompt("Ada uses @Audio1", H3_REFERENCE_MODEL, 2, 1), "Ada uses <Audio 4>");
   assert.equal(referencePrompt("Already <Audio 2>", H3_REFERENCE_MODEL, 2), "Already <Audio 2>");
+  assert.equal(referencePrompt("Audio 1 should fade. Video 1 shows image 1; use @Image 1.", H3_REFERENCE_MODEL),
+    "Audio 1 should fade. Video 1 shows image 1; use <Picture 1>.");
 });
 
 test("soundtrack attachment changes invalidate frozen recipe identity", () => {

@@ -22,7 +22,7 @@ five-second take. The aggregate budget still applies. Audio files are WAV or
 MP3 and at most 15 MB each. Video input currently inherits the world reader's 48 MiB aggregate
 byte ceiling. Longer and 768p output require separate measured recipe presets.
 
-FFmpeg and ffprobe must be configured for multimedia references. Audio/video reference upload
+FFmpeg and ffprobe must be configured for video and standalone audio preparation. Frozen character voice samples already carry reviewed technical evidence and need neither tool at dispatch. Audio/video reference upload
 is currently local-engine-only; selecting a remote ComfyUI URL does not authorize transferring
 locally reviewed recordings. Images can use the existing remote-engine path.
 
@@ -37,7 +37,7 @@ designed engine lifecycle contract; this preset does not promise ephemeral engin
 
 The bench preserves the author's stable `@Image N`, `@Video N`, and `@Audio N` tokens. It resolves
 them to dense transmitted order and renders H3's `<Picture N>`, `<Video N>`, and `<Audio N>`
-syntax. Production prompt assembly uses the same translation. Voice guidance appears after
+syntax. Bare authored prose is preserved; implicit image labels are translated only in generated bindings. Production prompt assembly uses the same translation. Voice guidance appears after
 standalone audio and video soundtrack slots, so adding a motion clip cannot silently change
 which voice an audio tag names.
 
