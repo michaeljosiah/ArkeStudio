@@ -643,12 +643,14 @@ function parseSeed(raw: string): { name: string; sentence: string } | null {
  */
 function BuildCard({
   plan: entry,
+  startedAt,
   pressed,
   settling,
   onDismiss,
   onBuild,
 }: {
   plan: { requestId: string; plan: import("@arke-studio/contracts").BuildReview | null; reason?: string } | undefined;
+  startedAt: string | null;
   pressed: boolean;
   /** A turn is in flight: the blueprint under the card is moving, so the press waits. */
   settling: boolean;
@@ -679,7 +681,7 @@ function BuildCard({
         {estimate !== null && <span className="fy-actioncard__status">{estimate}</span>}
       </div>
       {entry === undefined ? (
-        <Loading inline label="sizing the build" />
+        <Working label="Sizing the build" startedAt={startedAt} />
       ) : plan === null ? (
         <p className="fy-actioncard__notice">{entry.reason ?? "the build could not be sized"}</p>
       ) : (
@@ -744,6 +746,8 @@ export function NewWorldScreen() {
   const [lookForBuild, setLookForBuild] = useState("");
   const [buildPressed, setBuildPressed] = useState(false);
   const [planRequestId, setPlanRequestId] = useState<string | null>(null);
+  const [planStartedAt, setPlanStartedAt] = useState<string | null>(null);
+  const buildCardRef = useRef<HTMLDivElement>(null);
   const [buildRequestId, setBuildRequestId] = useState<string | null>(null);
   const buildRequestRef = useRef<string | null>(null);
   // Where the words came from: the conversation's own proposal, or a preset seed. The look
@@ -871,6 +875,10 @@ export function NewWorldScreen() {
   // The card is open once a plan has been asked for. It sits in the thread, so the
   // conversation goes on under it.
   const buildCardOpen = planRequestId !== null;
+  const sizingBuild = buildCardOpen && visibleBuildPlan === undefined;
+  useEffect(() => {
+    if (buildCardOpen) buildCardRef.current?.scrollIntoView({ block: "start" });
+  }, [buildCardOpen, planRequestId, visibleBuildPlan]);
   // A plan is a picture of one blueprint and one preview state, and the card must never state
   // a count or a loss the build is about to contradict: an unsettled preview carries if it
   // lands before the press (SPEC-031 R-54), and a blueprint that moved under the card is
@@ -893,6 +901,7 @@ export function NewWorldScreen() {
     plannedAgainst.current = { blueprint, preview };
     const requestId = ulid();
     setPlanRequestId(requestId);
+    setPlanStartedAt(new Date().toISOString());
     // A refusal answered the blueprint that moved; the fresh plan is the review it asked for.
     setBuildRequestId(null);
     planFoundingBuild(genesisId, requestId, lookText);
@@ -904,6 +913,7 @@ export function NewWorldScreen() {
     plannedAgainst.current = { blueprint, preview: previewJob?.status ?? null };
     const requestId = ulid();
     setPlanRequestId(requestId);
+    setPlanStartedAt(new Date().toISOString());
     planFoundingBuild(genesisId, requestId, lookText);
     setStep("draft");
   };
@@ -1187,18 +1197,21 @@ export function NewWorldScreen() {
                   </article>
                 )}
                 {buildMode && buildCardOpen && (
-                  <BuildCard
-                    plan={visibleBuildPlan}
-                    pressed={buildPressed}
-                    settling={chatRunning}
-                    onDismiss={leaveBuild}
-                    onBuild={() => {
-                      if (buildRequestRef.current === null) buildRequestRef.current = ulid();
-                      setBuildRequestId(buildRequestRef.current);
-                      setBuildPressed(true);
-                      beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
-                    }}
-                  />
+                  <div ref={buildCardRef}>
+                    <BuildCard
+                      plan={visibleBuildPlan}
+                      startedAt={planStartedAt}
+                      pressed={buildPressed}
+                      settling={chatRunning}
+                      onDismiss={leaveBuild}
+                      onBuild={() => {
+                        if (buildRequestRef.current === null) buildRequestRef.current = ulid();
+                        setBuildRequestId(buildRequestRef.current);
+                        setBuildPressed(true);
+                        beginFoundingBuild(genesisId, buildRequestRef.current, lookForBuild);
+                      }}
+                    />
+                  </div>
                 )}
                 {/* The turn in flight, verb by verb — the same working surface world chat has.
                     A silent stretch while the model reads and writes is indistinguishable from
@@ -1212,8 +1225,8 @@ export function NewWorldScreen() {
                     onSubmit={sendGenesis}
                     placeholder="Keep going, or ask it to surprise you…"
                     agentLabel="world author"
-                    busy={chatRunning || buildPressed}
-                    busyLabel={buildPressed ? "founding the world…" : "shaping the draft…"}
+                    busy={chatRunning || buildPressed || sizingBuild}
+                    busyLabel={buildPressed ? "founding the world…" : sizingBuild ? "sizing the build…" : "shaping the draft…"}
                     onAttach={() => genesisAttachFiles(genesisId)}
                     onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
                     {...(hostCanAttach()
