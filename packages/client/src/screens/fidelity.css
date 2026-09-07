@@ -8020,3 +8020,15 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__motion-mark input, .fy-swstage__row input { width:72px; }
 .fy-swstage__set > label { display:inline-flex; flex-direction:column; max-width:72px; margin:4px; }
 .fy-swstage__set > label input { max-width:64px; }
+
+.fy-prompt-review { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+.fy-prompt-review p { margin: 6px 0; }
+.fy-prompt-review summary { cursor: pointer; }
+.fy-prompt-review__hunks { max-height: 280px; overflow-y: auto; }
+
+.fy-gendialog__info { margin-left: 6px; cursor: help; letter-spacing: normal; }
+.fy-gendialog__promptbox--counted .fy-gendialog__prompt { padding-bottom: 30px; }
+.fy-gendialog__count { position: absolute; bottom: 8px; right: 12px; font: 400 10px var(--font-mono); color: var(--neutral-400); pointer-events: auto; }
+.fy-key-art-review > p { margin: 6px 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+.fy-key-art-review > button { margin: 0 6px 6px 0; }
+.fy-prompt-review abbr { cursor: help; text-decoration: underline dotted; }

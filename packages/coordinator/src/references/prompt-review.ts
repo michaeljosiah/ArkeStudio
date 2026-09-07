@@ -47,7 +47,9 @@ export function keyArtReviewContext(bundle:WorldBundle,model:ManifestModel,base:
   add("art-direction",bundle.artDirection.description);
   if(bundle.bible.present)add("bible",bundle.bible.text);
   for(const canon of bundle.canon.filter(c=>c.status!=="open").slice(0,6))add(`canon/${canon.id}`,canon.title);
-  for(const sheet of bundle.sheets.filter(s=>s.type==="character"||s.type==="location"))add(`sheet/${sheet.id}`,JSON.stringify(sheet));
+  for(const sheet of bundle.sheets.filter(s=>s.type==="character"||s.type==="location")){
+    add(`sheet/${sheet.id}`, [sheet.name,sheet.role,...sheet.sections.map(section=>section.body)].filter(Boolean).join("\n\n"));
+  }
   add("key-art/brief",briefText,"user-instruction");
   return {worldId:bundle.meta.worldId,model,base:keyArtCreativeBody(base),sources,references,
     fixed:` No text, no logos${hasCast?"":", no character portraits"}.${imageConstraintSuffix(bundle.artDirection)}`};

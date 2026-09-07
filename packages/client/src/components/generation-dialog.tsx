@@ -1,4 +1,4 @@
-import { worldImageReferences, type WorldBundle, type ManifestModel } from "@arke-studio/contracts";
+import { normalizePrompt, worldImageReferences, type WorldBundle, type ManifestModel } from "@arke-studio/contracts";
 import { ReferencePickerBody } from "./reference-picker.js";
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
@@ -61,6 +61,7 @@ export function GenerationDialog({
   onPrompt,
   promptLabel = "Prompt",
   promptHint,
+  promptMetadata,
   promptPlaceholder,
   onResetPrompt,
   resetTitle,
@@ -109,6 +110,8 @@ export function GenerationDialog({
   promptLabel?: string;
   /** What the app will do to these words before they are sent, said rather than left to trust. */
   promptHint?: ReactNode;
+  /** Key-art constraints and an optional assembled baseline once a comparison exists. */
+  promptMetadata?: { constraints: string; baseline?: string };
   /** Shown in an empty box — only useful where empty is a state the surface allows. */
   promptPlaceholder?: string;
   /**
@@ -252,6 +255,8 @@ export function GenerationDialog({
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();
+  const normalizedPrompt=normalizePrompt(prompt),promptCharacters=Array.from(normalizedPrompt).length;
+  const promptDelta=promptMetadata?.baseline===undefined?undefined:promptCharacters-Array.from(normalizePrompt(promptMetadata.baseline)).length;
   /*
    * The press itself, said back immediately.
    *
@@ -335,8 +340,9 @@ export function GenerationDialog({
         <div className="fy-gendialog__compose">
         <label className="fy-gendialog__label" htmlFor={promptId}>
           {promptLabel}
+          {promptMetadata&&<span className="fy-gendialog__info" tabIndex={0} role="img" aria-label={`Fixed constraints: ${promptMetadata.constraints}`} title={`Fixed constraints: ${promptMetadata.constraints}`}>ⓘ</span>}
         </label>
-        <div className="fy-gendialog__promptbox">
+        <div className={`fy-gendialog__promptbox${promptMetadata?" fy-gendialog__promptbox--counted":""}`}>
           <Textarea
             id={promptId}
             className="fy-gendialog__prompt"
@@ -345,6 +351,9 @@ export function GenerationDialog({
             {...(promptPlaceholder !== undefined ? { placeholder: promptPlaceholder } : {})}
             onChange={(event) => onPrompt(event.target.value)}
           />
+          {promptMetadata&&<span className="fy-gendialog__count" title={`${promptCharacters} Unicode characters · ${new TextEncoder().encode(normalizedPrompt).length} UTF-8 bytes`}>
+            {promptCharacters}{promptDelta!==undefined&&<> · {promptDelta>=0?"+":""}{promptDelta}</>}
+          </span>}
           {onResetPrompt && (
             <button
               type="button"
