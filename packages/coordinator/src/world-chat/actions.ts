@@ -486,8 +486,9 @@ function currentWorldObservation(
     }
     case "series": return { target: store.worldId, fence: seriesFence(bundle) };
     case "story": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      const targetId = target ?? store.worldId;
+      const [productionId, section] = targetId.split(":");
+      return { target: targetId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), section === "overview" ? section : undefined) };
     }
     case "seasons": {
       const productionId = target ?? store.worldId;
@@ -715,7 +716,9 @@ function worldActionObservations(
   if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
   const wrongTarget = productionActionTargets(store, action).find((required) =>
     !observations.some((observation) =>
-      observation.requirement === required.requirement && observation.target === required.target));
+      observation.requirement === required.requirement &&
+      (observation.target === required.target ||
+        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
   if (wrongTarget) {
     throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
   }

@@ -206,11 +206,11 @@ export function bibleFence(bundle: WorldBundle): string {
   return fence(bundle.bible, bundle.bible.version);
 }
 
-export function storyFence(production: ProductionBundle | undefined): string {
+export function storyFence(production: ProductionBundle | undefined, section?: "overview"): string {
   // The style is in the read, so it is in the fence: a draft asked for against a style that has
   // since been settled reads again rather than drafting against the old one.
   return fence(
-    { story: production?.story ?? null, style: production?.proseStyle ?? null, treatment: production?.treatment ?? null },
+    { story: production?.story ?? null, style: production?.proseStyle ?? null, ...(section === "overview" ? {} : { treatment: production?.treatment ?? null }) },
     `${production?.story ? `v${production.story.version}` : "absent"}+${production?.proseStyle ? `v${production.proseStyle.version}` : "absent"}`,
   );
 }
@@ -628,18 +628,20 @@ export class WorldChatTargetReads {
         break;
       }
       case "get_story": {
-        assertArgs(args, ["productionId"]);
+        assertArgs(args, ["productionId", "section"]);
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
-        readTarget = target("story", productionId);
+        const section = args["section"];
+        if (section !== undefined && section !== "overview") throw new TargetReadError("section must be overview");
+        readTarget = target("story", `${productionId}${section === "overview" ? ":overview" : ""}`);
         rows = [
           ...(production?.story ? [{ key: "overview", value: production.story }] : []),
           // The style the book is written in rides with the overview (turn 128), so every draft
           // and every revision reads it in the one read they already make.
           ...(production?.proseStyle ? [{ key: "style", value: production.proseStyle }] : []),
-          ...chunks(production?.treatment ?? ""),
+          ...(section === "overview" ? [] : chunks(production?.treatment ?? "")),
         ];
-        revisionOrDigest = storyFence(production);
+        revisionOrDigest = storyFence(production, section);
         break;
       }
       case "get_season": {

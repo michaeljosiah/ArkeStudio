@@ -831,3 +831,31 @@ it("puts the leased chapter brief into the model prompt and preserves the chapte
   assert.match(prompts[0]!, /previous chapter ends with the bell stopping/);
   assert.match(prompts.at(-1)!, /previous chapter ends with the bell stopping/);
 });
+
+
+it("durably interrupts a turn cancelled while its chapter brief is being read", async () => {
+  let releaseBrief!: () => void;
+  let briefStarted!: () => void;
+  const started = new Promise<void>((resolve) => { briefStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { releaseBrief = resolve; });
+  const createdModels: Array<string | undefined> = [];
+  const h = await setup(fakeAdapter([JSON.stringify({ reply: "Ready.", candidateOperations: [], groupOperations: [] })]), {
+    entryContext: { kind: "production", productionId: "the-ledger-of-nights" },
+    createdModels,
+    chapterBrief: async () => { briefStarted(); await blocked; return "The plan."; },
+  });
+  const pending = h.runner.send(h.store, h.conversationId, "Draft", [], { kind: "chapter", chapterId: "neap" });
+  await started;
+  assert.equal(h.runner.cancel(h.conversationId), true);
+  releaseBrief();
+  assert.equal((await pending).status, "cancelled");
+  assert.equal(createdModels.length, 0);
+  const meta = (await h.store.readMeta())!;
+  const folded = foldConversation(meta.id, meta.createdAt, (await h.store.read()).events);
+  assert.equal(folded.needsInterruptedRunRepair, false);
+  const finished = (await h.store.read()).events.find((e) => e.event.type === "run.finished")!.event;
+  assert.ok(finished.type === "run.finished");
+  assert.equal(finished.run.status, "interrupted");
+  assert.equal(h.released.length, 1);
+  assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
+});

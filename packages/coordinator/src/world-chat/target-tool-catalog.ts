@@ -53,7 +53,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_productions", "Read every production identity and metadata record.", {}),
   tool("list_series", "Read complete Series records.", {}),
   tool("get_production_metadata", "Read one production's complete metadata.", PRODUCTION, ["productionId"]),
-  tool("get_story", "Read one production's story overview, the prose style every draft and revision holds to, and the treatment in bounded chunks.", PRODUCTION, ["productionId"]),
+  tool("get_story", "Read one production's story overview, prose style, and treatment in bounded chunks. The overview section excludes the treatment and supports chapter proposals; other story actions require the full read.", { ...PRODUCTION, section: { type: "string", enum: ["overview"], description: "Overview and prose style only. Omit for the full story." } }, ["productionId"]),
   tool("get_season", "Read one production's complete season, including every arc.", PRODUCTION, ["productionId"]),
   tool("list_episodes", "Read every episode and scene membership in explicit order.", PRODUCTION, ["productionId"]),
   tool("list_chapters", "Read every chapter summary in explicit order.", PRODUCTION, ["productionId"]),

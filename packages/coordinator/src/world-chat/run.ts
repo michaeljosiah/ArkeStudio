@@ -584,7 +584,10 @@ export class WorldChatRunner {
       const brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
         ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget })
         : "";
-      if (controller.signal.aborted) return { status: "cancelled" };
+      if (controller.signal.aborted) {
+        await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
+        return { status: "cancelled" };
+      }
       const session = this.deps.createSession
         ? await this.deps.createSession({
             cwd,

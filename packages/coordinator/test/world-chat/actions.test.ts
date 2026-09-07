@@ -39,6 +39,10 @@ import {
   type WorldChatActionAdapterDeps,
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
+import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
+import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -2173,4 +2177,55 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
     // The file stem names the same chapter as its id; the guard resolves both before comparing.
     assert.throws(() => held(revision("01-neap", "the 1820 volume", 2)), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "the stem is the chapter, so only the read is missing");
   });
+});
+
+
+it("stages a chapter with only the brief's eligible receipts and keeps section reads scoped", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const bundle = w.store.getBundle();
+  const production = bundle.productions.find((p) => p.meta.id === context.productionId)!;
+  const chapter = production.chapters[0]!;
+  const openBefore = (await w.gate.listOpen()).length;
+  const leases = new QueryLeaseRegistry(() => w.store.worldId);
+  const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null,
+  });
+  const receipts: WorldChatCheckReceipt[] = [];
+  const read = async (tool: string, args: Record<string, unknown>) => {
+    const outcome = await retrieval.call(lease.token, tool, args);
+    receipts.push(outcome.receipt);
+    return outcome;
+  };
+  const brief = await chapterDraftingBrief(bundle, context.productionId, chapter.id, read, 60_000);
+  const eligible = [...brief.matchAll(/"proposalCheckReceiptId":"([^"]+)"/g)].map((match) => match[1]!);
+  assert.equal(eligible.length, 2, "plan and overview are complete target reads");
+  const draws = receipts.filter((r) => r.tool !== "target-read");
+  assert.equal(draws.length, 4);
+  assert.ok(draws.every((r) => !eligible.includes(r.id) && brief.includes(r.id)), "draw provenance is retained, but not offered as proposal receipts");
+  const chapters = await read("list_chapters", { productionId: context.productionId });
+  const action = {
+    kind: "production-chapter" as const, productionId: context.productionId,
+    change: { operation: "edit" as const, chapterId: chapter.id, changes: { body: "The bell stopped." } },
+    checkReceiptIds: [...eligible, chapters.receipt.id],
+  };
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  await appendTurn(w.log, oneTurn, prepared);
+  await bindAll(w.lifecycle, prepared);
+  assert.equal((await w.gate.listOpen()).length, openBefore + 1);
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
+  }), /final receipt from a complete target read/);
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
+  }), /requires the complete current story read/);
+  const overview = receipts.find((r) => r.target?.id.endsWith(":overview"))!;
+  const current = w.store.getBundle().productions.find((p) => p.meta.id === context.productionId)!;
+  current.treatment += "A later treatment edit.";
+  assert.equal((await read("get_story", { productionId: context.productionId, section: "overview" })).receipt.observedRevisionOrDigest, overview.observedRevisionOrDigest);
+  current.proseStyle = { version: 1, voice: "A changed style." };
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
 });

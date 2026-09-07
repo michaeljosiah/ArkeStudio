@@ -20,6 +20,7 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
   chapter.pov = "maren-kest";
   chapter.when = "The second watch";
   chapter.draws = { sheets: ["maren-kest"], canon: [bundle.canon[0]!.id] };
+  production.treatment = "Unrelated treatment. ".repeat(10_000);
   production.proseStyle = { version: 1, voice: "Spare sentences, concrete images." };
   const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
   const lease = leases.mint({ worldId: bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run"), allowedAttachmentIds: [] });
@@ -35,6 +36,7 @@ it("assembles the plan, bounded previous ending, resolved draws and style with d
     return outcome;
   };
   const brief = await chapterDraftingBrief(bundle, production.meta.id, chapter.id, read, 60_000);
+  assert.doesNotMatch(brief, /Unrelated treatment/);
   assert.match(brief, /Maren finds the missing page/);
   assert.match(brief, /The second watch/);
   assert.match(brief, /The bell stopped/);
