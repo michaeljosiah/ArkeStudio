@@ -249,7 +249,7 @@ export function CharacterReferenceScreen() {
           <div className="fy-reference-card__image fy-reference-card__image--photo fy-imghost">
             {/*
              * "Outstanding" is owed work. A never-depicted character is not waiting for a photo —
-             * the author ruled one out and the build skipped it deliberately (#905, issue 945).
+             * the author ruled one out and the build skipped it deliberately (issue 905, issue 945).
              * Say the rule, not a shortfall.
              */}
             <ImageDialog
