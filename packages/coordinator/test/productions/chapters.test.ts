@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ClientMessageSchema } from "@arke-studio/contracts";
 import { MarkdownFile } from "../../src/world/text-files.js";
 import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -364,4 +365,46 @@ it("commits daily progress with successful saves, without counting refused or un
   await writeFile(path, "damaged", "utf8");
   await assert.rejects(saveChapter(store, "inkbound", "first", "One two three four five"));
   assert.equal((await openChapter(store, "inkbound", "first")).body.trim(), "One two three four");
+});
+
+
+it("raises the retirement boundary when an external chapter edit is adopted", async () => {
+  for (const retired of [true, false]) {
+    const { dir, store } = await open();
+    const path = "productions/the-ledger-of-nights/chapters/01-neap.md";
+    assert.ok(store.getBundle().meta.schemaVersion < 15);
+    await store.close();
+    const doc = MarkdownFile.parse(await readFile(join(dir, path), "utf8"));
+    doc.setData({ retired });
+    await writeFile(join(dir, path), doc.serialize(), "utf8");
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => reopened.close());
+    await reopened.reconcileExternalEdit(path);
+    assert.equal(reopened.getBundle().meta.schemaVersion, 15);
+    assert.equal(JSON.parse(await readFile(join(dir, "world.json"), "utf8")).schemaVersion, 15);
+    assert.equal((await chaptersOf(dir, "the-ledger-of-nights"))[0]!.retired, retired);
+  }
+});
+
+it("retires and restores a scanned non-slug filename through the chapter wire contract", async () => {
+  const dir = await makeTempWorld();
+  const productionId = "the-ledger-of-nights";
+  const chapterFile = "My Chapter_One";
+  const doc = MarkdownFile.parse(await readFile(join(dir, "productions", productionId, "chapters", "01-neap.md"), "utf8"));
+  doc.setData({ id: "portable-one", title: "Portable one" });
+  await writeFile(join(dir, "productions", productionId, "chapters", `${chapterFile}.md`), doc.serialize(), "utf8");
+  const store = await WorldStore.open(dir, { clock: CLOCK });
+  closeOnCleanup(() => store.close());
+  for (const kind of ["retire-chapter", "restore-chapter-retired"] as const) {
+    const message = ClientMessageSchema.parse({ kind, worldId: store.worldId, productionId, chapterFile });
+    assert.ok(message.kind === "retire-chapter" || message.kind === "restore-chapter-retired");
+    await setChapterRetired(store, message.productionId, message.chapterFile, message.kind === "retire-chapter");
+    const chapter = (await chaptersOf(dir, productionId)).find((c) => c.file === chapterFile)!;
+    assert.ok(chapter);
+    assert.equal(chapter.retired === true, kind === "retire-chapter");
+    assert.equal((await openChapter(store, productionId, chapterFile)).body, doc.body);
+  }
+  const foreign = ClientMessageSchema.parse({ kind: "retire-chapter", worldId: store.worldId, productionId, chapterFile: "../story" });
+  assert.ok(foreign.kind === "retire-chapter");
+  await assert.rejects(setChapterRetired(store, foreign.productionId, foreign.chapterFile, true), /no longer/);
 });
