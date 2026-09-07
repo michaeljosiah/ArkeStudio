@@ -52,6 +52,13 @@ it("redacts a local filesystem path rather than passing it through", () => {
   assert.equal(describeError(posix), GENERIC_ERROR_COPY);
 });
 
+it("redacts a UNC path in both its plain and extended-length forms", () => {
+  const unc = new Error("EIO: i/o error, read '\\\\studio-nas\\worlds\\w1\\performance.json'");
+  assert.equal(describeError(unc), GENERIC_ERROR_COPY);
+  const extended = new Error("EIO: i/o error, read '\\\\?\\UNC\\studio-nas\\worlds\\w1\\performance.json'");
+  assert.equal(describeError(extended), GENERIC_ERROR_COPY);
+});
+
 it("does not mistake an ordinary slash-bearing sentence for a path", () => {
   assert.equal(describeError(new Error("choose either/or, not both")), "choose either/or, not both");
 });

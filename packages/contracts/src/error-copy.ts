@@ -33,15 +33,17 @@ export const GENERIC_ERROR_COPY = "Something went wrong. Try again.";
 const MAX_LENGTH = 300;
 
 /**
- * A filesystem path — Windows drive-letter, or a multi-segment POSIX-shaped run — inside a
- * message. Node's own fs errors (`readFile`, `open`, ...) interpolate the full path by default,
- * quoted, with no space before it; an fs failure whose code isn't one of `SYSTEM_ERROR_COPY`'s
- * known set (`EIO`, `EMFILE`, ...) would otherwise fall through to the "trust it, it's already
- * plain" branch below and hand a local disk layout — this machine's username, the world's folder
- * location — to whoever reads the screen. The POSIX half asks for two full segments before the
- * last, not merely one slash, so an ordinary sentence's "either/or" doesn't trip it.
+ * A filesystem path — Windows drive-letter, UNC (`\\server\share\...` and its extended form
+ * `\\?\UNC\server\share\...`, both supported per `world/paths.ts`), or a multi-segment
+ * POSIX-shaped run — inside a message. Node's own fs errors (`readFile`, `open`, ...) interpolate
+ * the full path by default, quoted, with no space before it; an fs failure whose code isn't one
+ * of `SYSTEM_ERROR_COPY`'s known set (`EIO`, `EMFILE`, ...) would otherwise fall through to the
+ * "trust it, it's already plain" branch below and hand a local disk layout — this machine's
+ * username, a network share's name, the world's folder location — to whoever reads the screen.
+ * The POSIX half asks for two full segments before the last, not merely one slash, so an ordinary
+ * sentence's "either/or" doesn't trip it.
  */
-const HAS_PATH = /[A-Za-z]:[\\/]|\/(?:[^\s'"()]+\/){2,}[^\s'"()]+/;
+const HAS_PATH = /[A-Za-z]:[\\/]|\\\\[^\s'"()]+|\/(?:[^\s'"()]+\/){2,}[^\s'"()]+/;
 
 /**
  * The outermost system-error code in the cause chain, or null when the chain names none.
