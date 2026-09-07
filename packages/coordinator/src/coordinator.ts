@@ -2609,6 +2609,12 @@ export class Coordinator {
       void this.changeLog.append({ kind: "event", event: parsed });
     }
     this.transport.broadcast(parsed);
+    if (parsed.type === "proposal.resolved") {
+      const store = this.opts.provider.openStore?.();
+      if (store?.worldId === parsed.worldId && !this.stopping) {
+        this.trackBackground(this.reconcileProposalConversationActions(store, parsed.proposalId));
+      }
+    }
     // Every R-17 source changes through this fold, so this is the whole of SPEC-032 R-33:
     // re-derive when something changed, coalesced to one derivation per tick, never a timer.
     // A tail read that failed transiently (an AV pass holding app.jsonl) would otherwise stick
@@ -14079,6 +14085,20 @@ export class Coordinator {
     const lifecycle = this.conversationActionLifecycle(store);
     for (const action of activeActions) {
       if (action.actionKind !== "world-chat-bench-generation" || action.authority.id !== sessionId) continue;
+      if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
+        await this.refreshConversationOutcome(store, action.conversationId);
+      }
+    }
+  }
+
+  private async reconcileProposalConversationActions(store: WorldStore, proposalId: string): Promise<void> {
+    const { activeActions } = await discoverConversations(store.dir);
+    if (this.stopping || !this.stillOpen(store)) return;
+    const lifecycle = this.conversationActionLifecycle(store);
+    for (const action of activeActions) {
+      if (action.authority.kind !== "proposal-manager" || action.authority.id !== proposalId) continue;
+      // The proposal authority owns the outcome, including no-op accepts. Reconciliation
+      // appends that outcome without asking for a second decision or executing it again.
       if (await lifecycle.reconcileAction(action.conversationId, action.actionId)) {
         await this.refreshConversationOutcome(store, action.conversationId);
       }

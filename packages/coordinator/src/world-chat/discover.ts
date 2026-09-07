@@ -62,7 +62,9 @@ async function summariseOne(dir: string): Promise<{ summary: WorldChatSummary; a
     : foldConversation(meta.id, meta.createdAt, events).view;
   return {
     summary: summarise(view),
-    activeActions: view.actions.filter((action) => ["approved", "queued", "running", "awaiting-host"].includes(action.status)),
+    activeActions: view.actions.filter((action) =>
+      ["approved", "queued", "running", "awaiting-host"].includes(action.status) ||
+      (action.status === "pending" && action.authority.kind === "proposal-manager")),
   };
 }
 
