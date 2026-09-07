@@ -47,6 +47,7 @@ import {
   type ChapterVoicesState,
   ProseStyleSchema,
   StoryOverviewSchema,
+  StoryProgressSchema,
   summariseContinuity,
   type ChapterContinuityState,
   TakeSchema,
@@ -102,7 +103,10 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // the file it came from, and a build without the field would drop the chapter on scan.
 // Fourteen is a measured `hasVideo` on an artifact sidecar (PR 944): the strict sidecar parse
 // fails on a build without the field, which drops the artifact and every clip that cites it.
-export const SUPPORTED_SCHEMA_VERSION = 14;
+// Fifteen adds chapter retirement to strict frontmatter (issue 888).
+// Sixteen adds the dramatic question and ending to the strict story overview (issue 889).
+// Seventeen persists chapter subjects on retriable conversation turns (issue 890).
+export const SUPPORTED_SCHEMA_VERSION = 17;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -560,6 +564,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ...(fm.when !== undefined ? { when: fm.when } : {}),
       ...(fm.implies !== undefined ? { implies: fm.implies } : {}),
       ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
+      ...(fm.retired !== undefined ? { retired: fm.retired } : {}),
       ...(fm.source !== undefined ? { source: fm.source } : {}),
     }));
 
@@ -795,6 +800,9 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       meta: metaDoc,
       story,
       proseStyle,
+      ...((await exists(join(pdir, "progress.json"))) ? {
+        progress: await tryParse(`productions/${id}/progress.json`, (raw) => StoryProgressSchema.parse(JSON.parse(raw))) ?? { unreadable: true as const },
+      } : {}),
       season,
       routing,
       treatment,

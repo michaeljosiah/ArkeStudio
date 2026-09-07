@@ -702,6 +702,16 @@ export class Committer {
       // Probe metadata is also written by ordinary artifact filing/backfill.
       mediaInfoBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
+      // Any presence of this strict field needs the retirement-aware scanner, including
+      // retired: false adopted from a portable chapter (issue 888).
+      files.some((f) => classify(f.path).track === "chapter" && f.newContent != null &&
+        "retired" in MarkdownFile.parse(f.newContent).data) ? 15 : 0,
+      // Older scanners drop an overview with these new strict fields (issue 889).
+      files.some((f) => {
+        if (classify(f.path).track !== "story" || !f.newContent) return false;
+        const record = JsonFile.parse(f.newContent).value;
+        return "question" in record || "ending" in record;
+      }) ? 16 : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

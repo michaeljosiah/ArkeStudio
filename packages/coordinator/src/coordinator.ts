@@ -161,7 +161,6 @@ import {
   draftSceneSkeleton,
   exportBoard,
   landBoard,
-  overviewSteer,
   productionCreatedBy,
   proposeEpisode,
   proposeSeason,
@@ -180,6 +179,7 @@ import {
   openChapter,
   restoreChapter,
   editChapterPlan,
+  setChapterRetired,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -338,6 +338,7 @@ import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
 
@@ -7290,6 +7291,14 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "retire-chapter":
+      case "restore-chapter-retired": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await setChapterRetired(store, msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "edit-chapter-plan": {
         // The plan saves in place like the prose (turn 127): swallowed like every other direct
         // save, world-checked like every other chapter write, and the snapshot says what landed.
@@ -7559,55 +7568,10 @@ export class Coordinator {
         }
         return;
       }
-      case "draft-chapter": {
-        const gate = this.opts.provider.gate?.();
-        const store = this.opts.provider.openStore?.();
-        if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
-        try {
-          const path = `productions/${msg.productionId}/chapters/${msg.chapterFile}.md`;
-          const staged = await gate.stage({
-            kind: "chapter-draft",
-            summary: `Draft: ${msg.chapterFile}`,
-            source: "chat:studio",
-            // There is no client caller or durable chapter conversation. This remains unattended
-            // until a real surface exists; recording an attended owner here would hide dead code.
-            origin: { surface: "coordinator", gesture: "legacy-draft-chapter-command" },
-            targets: [{ path }],
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
-            worldId: msg.worldId,
-            proposalId: staged.id,
-          });
-          const worldQueryUrl = await this.worldQuery.start();
-          this.trackBackground(
-            this.authoring
-              .run(
-                store,
-                gate,
-                {
-                  worldId: msg.worldId,
-                  proposalId: staged.id,
-                  purpose: "drafting",
-                  instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
-                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
-                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.proseStyle,
-                  )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts in the chapter's frontmatter under \`implies\`, each as a kind (canon, character, location or faction) and one sentence, for separate proposal (turn 127). Never put them in the prose.`,
-                },
-                worldQueryUrl,
-              )
-              .then(() => this.refreshWorldSnapshot(msg.worldId)),
-          );
-        } catch {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
       case "reorder-chapters": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await reorderChapters(store, msg.productionId, msg.orderedFiles).catch(() => {});
+        if (!store || store.worldId !== msg.worldId) return;
+        await reorderChapters(store, msg.productionId, msg.orderedFiles);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
@@ -15103,6 +15067,14 @@ export class Coordinator {
         receipts.delete(runId);
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
+      chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars }) => chapterDraftingBrief(
+        store.getBundle(), productionId, chapterId, async (tool, args) => {
+          const outcome = await retrieval.call(leaseToken, tool, args);
+          const seen = receipts.get(outcome.receipt.runId) ?? [];
+          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
+          return outcome;
+        }, budgetChars,
+      ),
       receiptsFor: (runId) => receipts.get(runId) ?? [],
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
       createSession: ({ cwd, runId, model }) => {

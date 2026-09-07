@@ -123,6 +123,7 @@ export type EditorRequestFile = z.infer<typeof EditorRequestFileSchema>;
 
 /** What the person has selected while they talk to Arke (R-26): the subject of "this". */
 export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("chapter"), chapterId: SlugSchema }).strict(),
   z.object({ kind: z.literal("timeline-clip"), clipId: TimelineClipIdSchema }).strict(),
   z.object({ kind: z.literal("timeline-track"), trackId: TimelineTrackIdSchema }).strict(),
   z.object({ kind: z.literal("scene"), sceneId: SceneIdSchema }).strict(),

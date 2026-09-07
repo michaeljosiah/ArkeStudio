@@ -3,6 +3,7 @@ import {
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
+  storyProgressDay,
   overviewMoved,
 } from "@arke-studio/contracts";
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
@@ -230,6 +231,8 @@ import {
   subscribeVoiceUploadConfirmations,
   createChapter,
   subscribeChapterCreateResults,
+  setChapterRetired,
+  reorderChapters,
 } from "../lib/store.js";
 import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedChaptersView, type ChaptersView } from "../lib/continuity.js";
 
@@ -1548,6 +1551,13 @@ export function ProductionDashboardScreen() {
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newScene = useSharedNewScene(worldId, prodId);
+  const [today, setToday] = useState(() => storyProgressDay(new Date()));
+  useEffect(() => {
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    const timer = setTimeout(() => setToday(storyProgressDay(new Date())), midnight.getTime() - now.getTime() + 100);
+    return () => clearTimeout(timer);
+  }, [today]);
   if (!world || !production) {
     return (
       <Screen id="production-dashboard">
@@ -1558,10 +1568,13 @@ export function ProductionDashboardScreen() {
   // The dashboard resumes the format's unit of work (design 54a). For story that is the
   // chapter, and nothing here mentions shots, takes, clips or dispatch.
   if (productionShape(production.meta).hasChapters) {
-    const chapters = production.chapters;
+    const chapters = production.chapters.filter((c) => !c.retired);
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
-    const inHand = chapters.find((c) => !c.words) ?? null;
+    const inHand = chapters.find((c) => !c.words) ?? chapters.at(-1) ?? null;
+    const target = targetWords(production.story?.targetLength);
+    const progress = production.progress;
+    const wordsToday = progress && "unreadable" in progress ? null : progress?.days[today] ?? 0;
     const inHandIdx = inHand ? chapters.indexOf(inHand) : -1;
     // The design shows the neighbourhood of the chapter in hand, not the whole book —
     // the chapter tree is one click away for that.
@@ -1582,13 +1595,17 @@ export function ProductionDashboardScreen() {
                 } · ${totalWords.toLocaleString()} words`}
           </span>
         </div>
+        <div className="fy-h1row__meta">
+          {wordsToday === null ? "Words today unavailable" : `${wordsToday.toLocaleString()} words today`}
+          {` · ${totalWords.toLocaleString()}${target === null ? "" : ` / ${target.toLocaleString()}`} words in the book`}
+        </div>
         <div className="fy-threadcard" style={{ flex: "none" }}>
           <div className="fy-threadcard__head">
             <span className="fy-threadcard__label">
               {chapters.length === 0
                 ? "THE SPINE COMES FIRST"
                 : inHand
-                  ? `IN HAND · CHAPTER ${inHand.order} OF ${chapters.length}`
+                  ? `IN HAND · CHAPTER ${inHand.order}`
                   : `ALL ${chapters.length} CHAPTERS DRAFTED`}
             </span>
           </div>
@@ -1599,12 +1616,12 @@ export function ProductionDashboardScreen() {
             {chapters.length === 0
               ? "Talk the story into an overview; chapters hang beneath it."
               : inHand
-                ? `${inHand.status}${production.story ? ` · against the overview at v${production.story.version}` : ""}`
+                ? <ChapterPlan chapter={inHand} world={world} story={production.story} />
                 : "Every chapter has words. The overview steers whatever comes next."}
           </div>
           <div className="fy-threadcard__actions">
-            <Button variant="primary" onClick={() => navigate(`/w/${worldId}/p/${prodId}/story`)}>
-              {chapters.length === 0 ? "Open Production Chat" : "Continue in Production Chat"}
+            <Button variant="primary" onClick={() => navigate(inHand ? `/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(inHand.id)}` : `/w/${worldId}/p/${prodId}/story`)}>
+              {inHand ? "Continue chapter" : "Open Production Chat"}
             </Button>
           </div>
         </div>
@@ -1620,16 +1637,8 @@ export function ProductionDashboardScreen() {
                 All {chapters.length} chapter{chapters.length === 1 ? "" : "s"}
               </button>
             </div>
-            {nearby.map((c) => (
-              <div key={c.id} className="fy-listrow">
-                <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-                <span className="fy-listrow__text" style={{ font: "600 13px var(--font-sans)" }}>
-                  {c.title}
-                </span>
-                <Badge tone="outline">v{c.version}</Badge>
-                <span className="fy-mono">{c.words ? `${c.words.toLocaleString()} words` : c.status}</span>
-              </div>
-            ))}
+            {nearby.map((c) => <ChapterOutlineRow key={c.id} chapter={c} world={world} story={production.story} inHand={c === inHand}
+              onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />)}
           </div>
         )}
       </div>
@@ -2089,6 +2098,8 @@ function OverviewStoryScreen() {
       [
         ["logline", "Logline", story?.logline ?? ""],
         ["spine", "Spine", story?.spine ?? ""],
+        ["question", "Dramatic question", story?.question ?? ""],
+        ["ending", "Ending", story?.ending ?? ""],
         ["acts", "Acts", actsSpoken],
         ["treatment", "Treatment", production?.treatment ?? ""],
         ["voice", "Voice", style?.voice ?? ""],
@@ -2148,6 +2159,14 @@ function OverviewStoryScreen() {
                   />
                 </div>
               )}
+              {(["question", "ending"] as const).map((field) => story?.[field] ? (
+                <div key={field} className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">{field === "question" ? "DRAMATIC QUESTION" : "ENDING"}</div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{story[field]}</div>
+                  <ReadAloud source={{ of: "story", productionId: prodId ?? "", field }}
+                    title={field === "question" ? "Dramatic question" : "Ending"} text={story[field]} />
+                </div>
+              ) : null)}
               {spineLines.length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">SPINE</div>
@@ -2312,12 +2331,48 @@ function OverviewStoryScreen() {
  * count as a band under the title, and `New chapter` as a press. The screen is called by the
  * rail's word; "Chapter tree" was a title nobody pressed.
  */
+function ChapterPlan({ chapter, world, story }: { chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"] }) {
+  const pov = chapter.pov === undefined ? null : world?.sheets.find((sheet) => sheet.id === chapter.pov)?.name ?? chapter.pov;
+  const moved = overviewMoved(chapter, story);
+  return <>
+    {chapter.synopsis && <span className="fy-row__syn">{chapter.synopsis}</span>}
+    {(pov || chapter.when || moved) && <span className="fy-row__marks">
+      {pov && <span className="fy-mono">{pov}</span>}
+      {chapter.when && <span className="fy-mono">{pov ? "· " : ""}{chapter.when}</span>}
+      {moved && <span className="fy-row__moved">overview moved · v{chapter.draftedAgainst} → v{story?.version}</span>}
+    </span>}
+  </>;
+}
+
+function ChapterOutlineRow({ chapter: c, world, story, inHand, onOpen }: {
+  chapter: ChapterSummary; world: WorldBundle | null; story: ProductionBundle["story"]; inHand: boolean; onOpen: () => void;
+}) {
+  return <button type="button" className={cx("fy-row", inHand && "fy-row--inhand")} style={{ flex: 1, minWidth: 0 }} onClick={onOpen}>
+    <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
+    <span className="fy-row__plan"><span className="fy-row__name">{c.title}</span><ChapterPlan chapter={c} world={world} story={story} /></span>
+    {c.source !== undefined && <Badge tone="outline">imported</Badge>}
+    <Badge tone="outline">v{c.version}</Badge>
+    <span className="fy-row__meta">{c.words ? `${c.words.toLocaleString()} words` : c.status}{inHand ? " · in hand" : ""}</span>
+    <span className="fy-row__chev"><ChevronRight size={15} /></span>
+  </button>;
+}
+
 export function ChapterTreeScreen() {
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
   const newChapter = useSharedNewChapter(worldId, prodId);
-  const chapters = production?.chapters ?? [];
+  const allChapters = production?.chapters ?? [];
+  const chapters = allChapters.filter((c) => !c.retired);
+  const retiredChapters = allChapters.filter((c) => c.retired);
+  const move = (chapter: ChapterSummary, direction: number) => {
+    const neighbour = chapters[chapters.indexOf(chapter) + direction];
+    if (!worldId || !prodId || !neighbour) return;
+    const files = allChapters.map((c) => c.file);
+    const a = files.indexOf(chapter.file), b = files.indexOf(neighbour.file);
+    [files[a], files[b]] = [files[b]!, files[a]!];
+    reorderChapters(worldId, prodId, files);
+  };
   const isStory = production ? productionShape(production.meta).hasChapters : false;
   /*
    * A manuscript out and in (turn 131): two presses beside New chapter and two sheets in the
@@ -2358,7 +2413,7 @@ export function ChapterTreeScreen() {
   const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
   const target = targetWords(production?.story?.targetLength);
-  // The same "in hand" the dashboard derives: the first chapter with no words yet.
+  // The outline marks the first chapter with no words yet.
   const inHand = chapters.find((c) => !c.words) ?? null;
   /*
    * The door's two views (turn 129): Outline is turn 127's; Continuity is where everyone is,
@@ -2515,43 +2570,15 @@ export function ChapterTreeScreen() {
         </div>
       ) : production && chapters.length > 0 ? (
         <div className="fy-ledger">
-          {chapters.map((c) => {
-            // The outline (turn 127): the plan under the title, and the overview having moved.
-            const stale = overviewMoved(c, production?.story);
-            const pov = c.pov === undefined ? null : (world?.sheets.find((s) => s.id === c.pov)?.name ?? c.pov);
+          {chapters.map((c, index) => {
             return (
-            <button
-              key={c.id}
-              type="button"
-              className={cx("fy-row", c === inHand && "fy-row--inhand")}
-              onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)}
-            >
-              <span className="fy-mono">{String(c.order).padStart(2, "0")}</span>
-              <span className="fy-row__plan">
-                <span className="fy-row__name">{c.title}</span>
-                {c.synopsis !== undefined && c.synopsis !== "" && <span className="fy-row__syn">{c.synopsis}</span>}
-                {(pov !== null || c.when !== undefined || stale) && (
-                  <span className="fy-row__marks">
-                    {pov !== null && <span className="fy-mono">{pov}</span>}
-                    {c.when !== undefined && <span className="fy-mono">{pov !== null ? "· " : ""}{c.when}</span>}
-                    {stale && (
-                      <span className="fy-row__moved">
-                        overview moved · v{c.draftedAgainst} → v{production?.story?.version}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </span>
-              {c.source !== undefined && <Badge tone="outline">imported</Badge>}
-              <Badge tone="outline">v{c.version}</Badge>
-              <span className="fy-row__meta">
-                {c.words ? `${c.words.toLocaleString()} words` : c.status}
-                {c === inHand ? " · in hand" : ""}
-              </span>
-              <span className="fy-row__chev">
-                <ChevronRight size={15} />
-              </span>
-            </button>
+            <div key={c.id} style={{ display: "flex", alignItems: "center" }}>
+            <ChapterOutlineRow chapter={c} world={world} story={production.story} inHand={c === inHand}
+              onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
+            <Button aria-label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}>↑</Button>
+            <Button aria-label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}>↓</Button>
+            <Button aria-label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}>Retire</Button>
+            </div>
             );
           })}
         </div>
@@ -2569,6 +2596,13 @@ export function ChapterTreeScreen() {
           }
         />
       )}
+      {retiredChapters.length > 0 && <details>
+        <summary>{retiredChapters.length} retired chapter{retiredChapters.length === 1 ? "" : "s"}</summary>
+        {retiredChapters.map((c) => <div key={c.id} className="fy-row">
+          <span className="fy-row__name">{c.title}</span>
+          <Button onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, false)}>Restore {c.title}</Button>
+        </div>)}
+      </details>}
     </div>
   );
 }

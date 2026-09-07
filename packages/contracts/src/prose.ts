@@ -69,7 +69,7 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     .object({
       of: z.literal("story"),
       productionId: SlugSchema,
-      field: z.enum(["logline", "spine", "acts", "treatment", "voice", "samples"]),
+      field: z.enum(["logline", "spine", "question", "ending", "acts", "treatment", "voice", "samples"]),
       /**
        * One sample, counted from zero, rather than all of them (codex on turn 128): six samples
        * at their bound outrun a narrator's prompt cap read as one, so each is its own block.
@@ -231,6 +231,11 @@ export function countWords(body: string): number {
  * it is words, or the `k` shorthand for thousands of them, draws the band: a bare number or a
  * page count would put a wrong bar under the title with the confidence of a fact (codex, PR 879).
  */
+/** The author's local calendar day, shared by the coordinator and dashboard. */
+export function storyProgressDay(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function targetWords(targetLength: string | undefined): number | null {
   if (!targetLength) return null;
   const match = /(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/i.exec(targetLength);

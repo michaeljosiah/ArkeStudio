@@ -487,8 +487,9 @@ function currentWorldObservation(
     }
     case "series": return { target: store.worldId, fence: seriesFence(bundle) };
     case "story": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      const targetId = target ?? store.worldId;
+      const [productionId, section] = targetId.split(":");
+      return { target: targetId, fence: storyFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), section === "overview" ? section : undefined) };
     }
     case "seasons": {
       const productionId = target ?? store.worldId;
@@ -502,11 +503,11 @@ function currentWorldObservation(
       // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
       // alone; the bare production id is the list (codex on PR 899).
       const targetId = target ?? store.worldId;
-      const [productionId, chapterId] = targetId.split(":");
+      const [productionId, chapterId, section] = targetId.split(":");
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
       }
       return { target: targetId, fence: chaptersFence(production) };
     }
@@ -591,7 +592,7 @@ function productionActionTargets(
         : []),
     ];
     case "production-chapter": {
-      const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      const draws = action.change.operation === "create" ? action.change.draws : action.change.operation === "edit" ? action.change.changes.draws : undefined;
       // A passage is quoted from a read of that chapter (turn 128), so the read is required by
       // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
       // sends the model back to read it again rather than to guess.
@@ -716,7 +717,9 @@ function worldActionObservations(
   if (missing) throw new Error(`A ${action.kind} action requires a complete current ${missing} read.`);
   const wrongTarget = productionActionTargets(store, action).find((required) =>
     !observations.some((observation) =>
-      observation.requirement === required.requirement && observation.target === required.target));
+      observation.requirement === required.requirement &&
+      (observation.target === required.target ||
+        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
   if (wrongTarget) {
     throw new Error(`A ${action.kind} action requires the complete current ${wrongTarget.requirement} read for ${wrongTarget.target}.`);
   }
@@ -1088,7 +1091,9 @@ function worldActionTargets(
       id: action.change.operation === "edit" ? action.change.episodeId : fallbackId,
       label: action.change.operation === "edit" ? action.change.episodeId : action.change.title,
     }];
-    case "production-chapter": return [{
+    case "production-chapter": return action.change.operation === "outline"
+      ? action.change.chapters.map((chapter, index) => ({ kind: "chapter" as const, id: `${fallbackId}-${index}`, label: chapter.title }))
+      : [{
       kind: "chapter",
       id: action.change.operation === "edit" ? action.change.chapterId : fallbackId,
       label: action.change.operation === "edit" ? action.change.chapterId : action.change.title,

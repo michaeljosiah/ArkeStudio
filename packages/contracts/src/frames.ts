@@ -1967,6 +1967,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseHash: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("retire-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
    * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
@@ -2030,16 +2032,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        * card's contract is "send back what you were shown".
        */
       version: z.number().int().min(0),
-    })
-    .strict(),
-  /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
-  z
-    .object({
-      kind: z.literal("draft-chapter"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      chapterFile: z.string().min(1),
-      instruction: z.string().min(1).max(2000),
     })
     .strict(),
   /** SPEC-012 R-4: reorder via frontmatter — no file renamed, no history path moved. */

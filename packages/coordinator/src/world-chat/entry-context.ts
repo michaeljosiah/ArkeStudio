@@ -259,6 +259,7 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
  */
 function describeShape(production: ProductionBundle | undefined, writesTheSeason = false): string | null {
   if (!production) return null;
+  if (production.meta.format === "story") return "This is a story production — one continuous piece, with chapters beneath its overview. Develop the overview's logline, spine, dramatic question, ending and target length through production-overview. When the author asks to lay out the book, use production-chapter with operation outline and an ordered chapters list of title, synopsis, optional pov and when: one card appends planned chapters, no prose yet. A single production-chapter create with body empty and a synopsis is also a planned chapter. Read get_story and list_chapters completely and cite their receipts before proposing.";
   const shape = productionShape(production.meta);
   const bits: string[] = [];
   const defaults = production.season?.defaults;

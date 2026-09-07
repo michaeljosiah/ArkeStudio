@@ -145,3 +145,15 @@ describe("the door's continuity view (turn 129)", () => {
     assert.match(outline, /fy-seg__item fy-seg__item--active[^>]*>Outline/);
   });
 });
+
+
+it("offers order controls and keeps retired chapters behind a restorable count", () => {
+  rememberChaptersView("inkbound", "outline");
+  const html = render(CHAPTERS.map((c, index) => ({ ...c, ...(index === 0 ? { retired: true } : {}) })));
+  assert.match(html, /2 chapters/);
+  assert.match(html, /1 retired chapter/);
+  assert.match(html, /Restore The same ink/);
+  assert.match(html, /aria-label="Move Neap up"[^>]*disabled/);
+  assert.match(html, /aria-label="Move Neap down"/);
+  assert.doesNotMatch(html, /aria-label="Retire The same ink"/);
+});

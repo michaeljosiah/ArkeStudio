@@ -60,6 +60,7 @@ import {
   EpisodeSchema,
   ProductionSchema,
   ProseStyleSchema,
+  StoryProgressSchema,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
@@ -147,6 +148,7 @@ export const ProductionBundleSchema = z
      * Optional rather than defaulted so a bundle from before it existed still types as one.
      */
     proseStyle: ProseStyleSchema.nullable().optional(),
+    progress: z.union([StoryProgressSchema, z.object({ unreadable: z.literal(true) }).strict()]).optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */

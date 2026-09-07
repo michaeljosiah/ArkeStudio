@@ -32,6 +32,8 @@ const OVERVIEW = {
   spine: "The ledger answers whoever keeps it.",
   acts: [{ title: "Neap", summary: "The tide lower than ever." }, { title: "Spring" }],
   targetLength: "90k words",
+  question: "Who owns the missing night?",
+  ending: "Maren writes her own account.",
 };
 
 describe("the story overview through the gate (issue 385)", () => {
@@ -58,6 +60,8 @@ describe("the story overview through the gate (issue 385)", () => {
     const fields = new Map(target.fields.map((f) => [f.field, f.proposed]));
     assert.equal(fields.get("Logline"), OVERVIEW.logline);
     assert.equal(fields.get("Spine"), OVERVIEW.spine);
+    assert.equal(fields.get("Dramatic question"), OVERVIEW.question);
+    assert.equal(fields.get("Ending"), OVERVIEW.ending);
     assert.equal(fields.get("Act 1 · Neap"), "The tide lower than ever.");
     assert.equal(fields.get("Target length"), OVERVIEW.targetLength);
 
@@ -66,6 +70,9 @@ describe("the story overview through the gate (issue 385)", () => {
     const after = await scanWorld(dir);
     const story = after.bundle.productions.find((p) => p.meta.id === "the-ledger-of-nights")!.story!;
     assert.equal(story.logline, OVERVIEW.logline);
+    assert.equal(story.question, OVERVIEW.question);
+    assert.equal(story.ending, OVERVIEW.ending);
+    assert.equal(after.bundle.meta.schemaVersion, 16);
     assert.equal(story.version, before.version + 1, "acceptance cuts a version");
     const history = await readFile(
       join(dir, ".history", "productions", "the-ledger-of-nights", "story", `v${story.version}.json`),

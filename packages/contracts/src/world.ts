@@ -431,9 +431,16 @@ export const EpisodeSchema = z
   .strict();
 export type Episode = z.infer<typeof EpisodeSchema>;
 
+/** Daily positive word-count deltas from direct chapter saves; never reconstructed from history. */
+export const StoryProgressSchema = z.object({
+  days: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.number().int().min(0)),
+}).strict();
+
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z
   .object({
+    question: z.string().optional(),
+    ending: z.string().optional(),
     version: z.number().int().min(1),
     logline: z.string().optional(),
     spine: z.string().optional(),
@@ -541,6 +548,7 @@ export const ChapterFrontmatterSchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131); the first editor save drops it. */
     source: z.string().min(1).optional(),
     created: z.string().optional(),
@@ -784,6 +792,7 @@ export const ChapterSummarySchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131), while it is still the import's. */
     source: z.string().min(1).optional(),
   })

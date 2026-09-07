@@ -1338,7 +1338,7 @@ export function ChapterWorkspace({
           // the coordinator holds a revision that comes back to this chapter, this paragraph
           // and these words, whatever the model retold.
           {...(passage === null
-            ? {}
+            ? { subject: { kind: "chapter" as const, chapterId: chapter.id } }
             : { subject: { kind: "passage" as const, chapterId: chapter.id, ...(selection?.paragraph ? { paragraph: selection.paragraph } : {}), text: passage } })}
           dock={{
             title: `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`,

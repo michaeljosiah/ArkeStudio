@@ -93,3 +93,15 @@ describe("the style the book is written in, on the Overview (turn 128)", () => {
     assert.doesNotMatch(html, /POINT OF VIEW|settled in Develop/);
   });
 });
+
+
+it("shows the dramatic question and ending as readable Overview cards", () => {
+  const state = saltlight(null);
+  const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
+  production.story = { ...production.story!, question: "Who owns the night?", ending: "Maren writes her own account." };
+  const html = overview(state);
+  assert.match(html, /DRAMATIC QUESTION/);
+  assert.match(html, /Who owns the night/);
+  assert.match(html, /ENDING/);
+  assert.match(html, /Maren writes her own account/);
+});

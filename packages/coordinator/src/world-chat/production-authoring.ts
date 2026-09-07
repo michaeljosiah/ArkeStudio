@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { withImpliedIds } from "../productions/ops.js";
+import { readFile, readdir } from "node:fs/promises";
+import { highestChapterRank, withImpliedIds } from "../productions/ops.js";
 import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
@@ -462,6 +462,40 @@ export async function stageWorldChatProductionAuthoredAction(
       throw new Error(`${production.meta.title} does not use chapters`);
     }
     const change = payload.action.change;
+    if (change.operation === "outline") {
+      const chapterTargets = new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`);
+      const onDisk = await readdir(toExtendedLength(join(store.dir, "productions", production.meta.id, "chapters"))).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return [] as string[];
+        throw error;
+      });
+      const taken = [...production.chapters.flatMap((chapter) => [chapter.id, chapter.file]),
+        ...onDisk.filter((name) => name.toLowerCase().endsWith(".md")).map((name) => name.slice(0, -3)),
+        ...proposedTargetStems(store, chapterTargets)];
+      let rank = await highestChapterRank(store, production.meta.id, production.chapters.map((chapter) => chapter.file));
+      // Pending chapter files reserve their ranks as well as their names, just as episodes do.
+      for (const staged of store.getBundle().proposals) {
+        for (const target of staged.proposal.targets) {
+          if (!chapterTargets.test(target.path)) continue;
+          const raw = await readFile(toExtendedLength(join(store.dir, ".proposals", staged.proposal.id, fromPortable(target.path))), "utf8");
+          const chapter = ChapterFrontmatterSchema.parse(MarkdownFile.parse(raw).data);
+          rank = Math.max(rank, chapter.order ?? chapter.number ?? 0);
+        }
+      }
+      const targets = change.chapters.map((chapter, index) => {
+        requirePov(store, chapter.pov);
+        const stem = uniqueSlug(chapter.title, "chapter", taken);
+        taken.push(stem);
+        const doc = MarkdownFile.create({
+          id: stem, title: chapter.title, order: rank + index + 1, status: "planned", version: 1, words: 0,
+          synopsis: chapter.synopsis, ...(chapter.pov ? { pov: chapter.pov } : {}),
+          ...(chapter.when ? { when: chapter.when } : {}),
+          created: store.now().slice(0, 10), updated: store.now().slice(0, 10),
+        }, "");
+        ChapterFrontmatterSchema.parse(doc.data);
+        return { path: `productions/${production.meta.id}/chapters/${stem}.md`, content: doc.serialize(), expectedBaseHash: null };
+      });
+      return gate.stage({ kind: "chapter-draft", summary: `Plan ${targets.length} chapters`, ...context, targets }, precondition);
+    }
     if (change.operation === "create") {
       requireDraws(store, change.draws);
       requirePov(store, change.pov);

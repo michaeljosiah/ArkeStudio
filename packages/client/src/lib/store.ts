@@ -3438,6 +3438,10 @@ export function restoreChapter(worldId: string, productionId: string, chapterFil
 }
 
 /** The plan on the chapter (turn 127): saved in place, no proposal, no version cut. `null` clears. */
+export function setChapterRetired(worldId: string, productionId: string, chapterFile: string, retired: boolean) {
+  send({ kind: retired ? "retire-chapter" : "restore-chapter-retired", worldId, productionId, chapterFile });
+}
+
 export function editChapterPlan(
   worldId: string,
   productionId: string,
@@ -3445,15 +3449,6 @@ export function editChapterPlan(
   changes: Extract<ClientMessage, { kind: "edit-chapter-plan" }>["changes"],
 ): void {
   send({ kind: "edit-chapter-plan", worldId, productionId, chapterFile, changes });
-}
-
-export function draftChapter(
-  worldId: string,
-  productionId: string,
-  chapterFile: string,
-  instruction: string,
-): void {
-  send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
 }
 
 export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
