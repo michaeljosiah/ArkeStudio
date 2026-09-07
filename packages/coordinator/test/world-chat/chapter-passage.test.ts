@@ -295,3 +295,34 @@ it("stages a planned outline as one reviewable proposal and accepts every chapte
     ["Maren finds the page.", 0, undefined], ["She writes the missing night.", 0, undefined],
   ]);
 });
+
+
+it("reserves unreadable chapter files and pending outline ranks before acceptance", async () => {
+  const dir = await makeTempWorld();
+  const path = join(dir, "productions", PRODUCTION, "chapters", "zulu-first.md");
+  const unreadable = "---\nid: [unfinished\n---\nProse that must survive.";
+  await writeFile(path, unreadable, "utf8");
+  const store = await WorldStore.open(dir, { clock: NOW });
+  closeOnCleanup(() => store.close());
+  const gate = new ProposalManager(store);
+  const original = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters;
+  assert.ok(!original.some((c) => c.file === "zulu-first"));
+  const stage = (titles: string[]) => stageWorldChatProductionAuthoredAction(store, gate, { actionId: newId("act"), conversationId: newId("cv") }, {
+    kind: "world-chat-production-chapter", worldId: store.worldId,
+    action: { kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: [],
+      change: { operation: "outline", chapters: titles.map((title) => ({ title, synopsis: `${title} synopsis.` })) },
+    },
+  });
+  const first = await stage(["Zulu first", "Zulu second"]);
+  const second = await stage(["Alpha first", "Alpha second"]);
+  assert.ok(first.targets[0]!.path.endsWith("/zulu-first-2.md"));
+  assert.ok([...first.targets, ...second.targets].every((t) => t.baseHash === null));
+  // Acceptance order must not change the order the two outlines reserved at staging.
+  assert.equal((await gate.accept(second.id)).status, "accepted");
+  assert.equal((await gate.accept(first.id)).status, "accepted");
+  const chapters = (await scanWorld(dir)).bundle.productions.find((p) => p.meta.id === PRODUCTION)!.chapters;
+  assert.deepEqual(chapters.slice(0, original.length), original);
+  assert.deepEqual(chapters.slice(original.length).map((c) => c.title), ["Zulu first", "Zulu second", "Alpha first", "Alpha second"]);
+  assert.equal(new Set(chapters.map((c) => c.order)).size, chapters.length);
+  assert.equal(await readFile(path, "utf8"), unreadable);
+});
