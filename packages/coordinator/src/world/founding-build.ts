@@ -31,6 +31,7 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
@@ -817,12 +818,22 @@ export class FoundingBuildService {
         at: this.ports.nowIso(),
       });
     } catch (err) {
-      // The item fails alone; the run continues to the end (R-23).
+      // The item fails alone; the run continues to the end (R-23). This catch always resolves
+      // normally, so `runItemsWork`'s own `.catch(... this.ports.log(...))` around the call never
+      // fires for a local item — the journal's `detail` used to carry the raw message anyway, but
+      // now that it carries the translated sentence instead, the diagnostic has to be logged here
+      // or it is gone everywhere, not just off the screen.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
     }
@@ -970,7 +981,7 @@ export class FoundingBuildService {
         .then(
           () => undefined,
           (err: unknown) =>
-            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+            `authored from its one-line seed — the drafting agent failed (${describeCoordinatorError(err)})`,
         );
     }
     // The conversation's rule survives even a drafting agent that omits or contradicts it.
@@ -1086,12 +1097,20 @@ export class FoundingBuildService {
     try {
       input = await this.compileDispatch(active, item, store, model);
     } catch (err) {
+      // Same as runOne's catch: this resolves normally, so the journal's translated `detail` is
+      // the failure's only trace unless the raw diagnostic is logged here too.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: item.kind === "sheet-image" && err instanceof AnchorMissing ? "skipped" : "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1126,11 +1145,17 @@ export class FoundingBuildService {
       this.publish(active);
       return job.id;
     } catch (err) {
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1250,11 +1275,17 @@ export class FoundingBuildService {
         await this.landItem(active, item, jobId);
         await this.append(active, { kind: "terminal", key: item.key, outcome: "landed", at: this.ports.nowIso() });
       } catch (err) {
+        this.ports.log({
+          kind: "build.item-failed",
+          worldId: active.record.worldId,
+          key: item.key,
+          message: err instanceof Error ? err.message : String(err),
+        });
         await this.append(active, {
           kind: "terminal",
           key: item.key,
           outcome: "failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: describeCoordinatorError(err),
           at: this.ports.nowIso(),
         });
       }

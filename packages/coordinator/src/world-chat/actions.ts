@@ -131,6 +131,7 @@ import {
   type WorldChatPreparedAction,
 } from "@arke-studio/contracts";
 import { resolveCandidate } from "../artifacts/extraction.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import {
   ATTACHABLE_EXTENSIONS,
   addLinks,
@@ -4202,7 +4203,10 @@ export function worldChatActionAdapters(
       } catch (error) {
         if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
           await removePreparation(store, "world", action.actionId);
-          return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+          return {
+            status: "stale",
+            detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+          };
         }
         throw error;
       }
@@ -4279,7 +4283,10 @@ export function worldChatActionAdapters(
         } catch (error) {
           if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
             await removePreparation(store, "world", action.actionId);
-            return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+            return {
+              status: "stale",
+              detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+            };
           }
           throw error;
         }
@@ -4465,7 +4472,10 @@ export function worldChatActionAdapters(
                   };
                 }
                 if (error instanceof WorldStateStaleError || error instanceof CommitStaleError) {
-                  return { status: "stale", detail: error instanceof WorldStateStaleError ? error.detail : error.message };
+                  return {
+                    status: "stale",
+                    detail: error instanceof WorldStateStaleError ? error.detail : describeCoordinatorError(error),
+                  };
                 }
                 return { status: "failed", detail: "The host could not file the Stage recording." };
               }

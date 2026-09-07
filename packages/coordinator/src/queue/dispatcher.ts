@@ -23,6 +23,7 @@ import {
   type ReconcileAction,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal } from "./journal.js";
 import { imageFormatOf, verifyArtifact } from "./verify.js";
@@ -792,7 +793,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "image references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -821,7 +822,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "video references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -854,7 +855,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "the voice's recording could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -880,7 +881,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "the footage being extended could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -892,7 +893,7 @@ export class JobQueue {
         if (!this.opts.readAudioReferences) throw new Error("Audio reference transport is not configured.");
         audioReferences = await this.opts.readAudioReferences(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Audio references are not cleared for upload.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
@@ -903,7 +904,7 @@ export class JobQueue {
         if (!this.opts.readAudioInputs) throw new Error("Performance conversion input transport is not configured.");
         audioInputs = await this.opts.readAudioInputs(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Performance is not cleared for conversion.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
@@ -968,7 +969,7 @@ export class JobQueue {
           await this.terminalize(
             submitting,
             "failed",
-            `the provider completed, but its artifact could not be made durable: ${error instanceof Error ? error.message : String(error)}`,
+            `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
           );
           return;
         }
@@ -998,7 +999,7 @@ export class JobQueue {
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -1095,7 +1096,7 @@ export class JobQueue {
         const klass = classifyError(err);
         if (klass === "provider-fault") {
           // Keep the job running (the remote work exists); pause the lane for new work.
-          const message = err instanceof Error ? err.message : String(err);
+          const message = describeCoordinatorError(err);
           current = { ...current, failureClass: klass, error: message, updatedAt: this.clock() };
           await this.transition(current);
           this.pauseLane(job.provider, "fault", message);
@@ -1242,7 +1243,7 @@ export class JobQueue {
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
         const klass = classifyError(err);
         if (klass === "terminal") {
-          await this.terminalize(job, "failed", `artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+          await this.terminalize(job, "failed", `artifact fetch failed: ${describeCoordinatorError(err)}`);
         } else {
           // Bounded backoff (R-9) rather than the poll cadence, and the job re-checked before every
           // re-fetch. A cancelled job kept re-fetching every 1.5s for as long as the app ran, its
