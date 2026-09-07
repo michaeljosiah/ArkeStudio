@@ -330,6 +330,8 @@ export const ShotSchema = z
     promptOverride: z
       .object({
         text: z.string().min(1),
+        /** A video prompt must not become the prompt for its storyboard still. */
+        capability: z.enum(["image", "video"]).optional(),
         /** Cited sheet versions at the moment of the edit. */
         sheetVersions: z.record(SlugSchema, z.number().int().min(1)),
       })

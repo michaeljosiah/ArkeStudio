@@ -513,9 +513,7 @@ export function ShotSheetScreen() {
     coverage: shotCoverage(shot, digests),
   });
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  // Video previews stay capability-neutral so generated spatial/anchor blocks cannot be saved
-  // into an override and then repeated by whole-scene assembly. Stills only need the temporal gate.
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
   const assembled = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const current = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const stale = overrideStaleAgainst(shot, world.sheets);
@@ -614,11 +612,12 @@ export function ShotSheetScreen() {
                   kind: "set-prompt-override",
                   shotId: shot.id,
                   text: next === assembled.trim() || next === "" ? null : next,
+                  capability,
                 });
                 setPromptDraft(null);
               }}
             />
-            <div className="fy-mono">{shot.promptOverride ? "prompt · edited by you" : "prompt · auto"}</div>
+            <div className="fy-mono">{shot.promptOverride ? "prompt · authored" : "prompt · auto"}</div>
           </div>
 
           <div className="fy-sheetsec">

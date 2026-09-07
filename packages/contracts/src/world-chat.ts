@@ -848,8 +848,8 @@ const DevelopmentSceneScriptPayload = {
  * how long it runs, how it should feel. What is deliberately absent is everything that is not a
  * creative decision — `id` and `number` are identity and position, minted once and moved only by
  * the storyboard's drag; `covers` is a digest computed at citation time; and `promptOverride` is
- * production output whose whole meaning is that a person typed it in the sheet, so a proposition
- * writing one would forge that provenance.
+ * saved separately through set-prompt-override so a shot amendment never silently replaces
+ * the approved image/video prompt.
  */
 const ShotDraftSchema = z
   .object({
@@ -2512,7 +2512,7 @@ const exampleWorldActions = {
     kind: "production-scene-command",
     productionId: "saltlight",
     sceneId: "sc_04",
-    command: { kind: "set-prompt-override", shotId: "sh_001", text: "Salt-lit close-up of the missing page." },
+    command: { kind: "set-prompt-override", shotId: "sh_001", capability: "video", text: "Close on the missing page under a salt-stained amber lamp. Over six seconds the camera pushes slowly toward the torn edge; the loose paper trembles in a draught. A distant bell sounds once, then only the soft rustle of paper." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-board-compile": {
@@ -2963,7 +2963,6 @@ Actions wait for Approve and cite final complete reads.
 - canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
 - sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
 - sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
-- For key art, read get_world_metadata, get_bible, get_art_direction, list_sheets and list_references; read the chosen character/location sheets before authoring keyArtIntent.prompt. Write one complete image-model prompt (about 300 words or fewer), concrete and present-tense: one frame, subjects, composition, light, materials and treatment. Translate lore into visible choices; omit backstory, invisible stakes, timing and rules for other shots. The prompt is sent intact, with only fixed application constraints appended. Set characters and location to the full sheet names of its subjects, and revise the prompt when its sources change.
 - art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
 - production-* never replans creation; prose uses proposals; order and script ids stay stable.
 

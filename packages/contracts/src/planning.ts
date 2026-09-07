@@ -214,11 +214,7 @@ export interface PromptBlocks {
   body: string;
   /** This shot's cinematic intent, camera, authored timing and audio — part of the beat, in a pass. */
   direction: string;
-  /**
-   * Art direction restated as what must not drift. Stated once per clip and never per beat
-   * (R-6): a four-shot pass repeating the world's look four times spends the model's attention
-   * arguing with itself about which mention is authoritative.
-   */
+  /** Empty for shot prompts: the production look is input to the writer (issue 942). */
   persistent: string;
 }
 
@@ -289,21 +285,15 @@ export function framingClause(framing: ShotFraming): string {
 }
 
 export function assembleBlocks(input: AssembleInput): PromptBlocks {
-  const { world, sheets, scene, shot } = input;
+  const { sheets, scene, shot } = input;
   const carried = input.carriedSheetIds ?? new Set<string>();
   const { cast } = resolveCast(shot.description, sheets);
-  const style = styleFor(world, input.artDirection);
   const location =
     scene.inherits?.location !== undefined
       ? sheets.find((s) => s.id === scene.inherits!.location)
       : undefined;
 
-  // 1 — summary: who and where, then the shot's name. The art direction is not said here: it
-  // used to lead this line as well as close the prompt, and measured on a real production that
-  // made ~40% of every image prompt an exact duplicate of another 40%, biasing the model toward
-  // the repeated look and away from the one block that differs between shots (issue 910). It is
-  // said once, in the trailing block, where D6 says these models look for what must not drift.
-  //
+  // Local subjects and setting remain an editable seed for shots without an authored prompt.
   // A shot still carrying its birth title has no name, and contributes none: the literal
   // `Untitled shot.` was reaching the model as content on every unnamed shot in a scene.
   const who = cast.map((c) => c.sheet.name);
@@ -350,7 +340,7 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // 4 — the camera's own block, when there is a room to place it in. Verbatim: whatever the shot
   // authored is what the anchor says, so a generic "MCU · slow push-in" stays generic rather than
   // being dressed up as a placement nobody wrote.
-  const authoredCamera = shot.camera?.trim() ?? "";
+  const authoredCamera = input.capability === "image" ? "" : (shot.camera?.trim() ?? "");
   /*
    * The structured camera, said out loud (2026-08-23).
    *
@@ -362,7 +352,8 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
    * Resolved against the scene's defaults rather than read raw, because presence is the override
    * flag (turn 97) — a shot that inherits the scene's lens must still say the lens.
    */
-  const framingLine = framingClause(effectiveFraming(scene, shot));
+  const framing = effectiveFraming(scene, shot);
+  const framingLine = framingClause(input.capability === "image" ? { ...framing, movement: undefined, pace: undefined } : framing);
   const cameraLines = [authoredCamera, framingLine].filter((line) => line.length > 0).join("\n");
   const cameraAnchor = spatial.length > 0 && cameraLines.length > 0 ? `CAMERA ANCHOR\n${cameraLines}` : "";
 
@@ -397,7 +388,7 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
       }
     }
   }
-  if (shot.audio?.kind && shot.audio.kind !== "silence") {
+  if (input.capability !== "image" && shot.audio?.kind && shot.audio.kind !== "silence") {
     directionParts.push(
       sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
     );
@@ -414,15 +405,16 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // ambience left behind from before the shot went quiet would otherwise be asked for in the same
   // prompt that `derivedNegatives` ends with "No audio." — a clip told to be silent and to carry
   // a generator. The direction that contradicts the negative is the one that goes.
-  const silent = shot.audio?.kind === "silence";
+  const silent = input.capability === "image" || shot.audio?.kind === "silence";
   const ambience = silent ? "" : (shot.audio?.ambience?.trim() ?? "");
   const effects = silent ? "" : (shot.audio?.effects?.trim() ?? "");
   if (ambience.length > 0) directionParts.push(sentence(`Ambience: ${ambience}`));
   if (effects.length > 0) directionParts.push(sentence(`Sound: ${effects}`));
   const direction = directionParts.filter((s) => s.length > 0).join(" ");
 
-  // 6 — persistent: what must not drift, once at the end (R-6).
-  const persistent = style ? sentence(`Throughout: ${style}`) : "";
+  // The look informs Arke when it writes the shot. Repeating production-wide direction
+  // here drowned out the shot-specific words (issue 942). Mechanical constraints stay outside.
+  const persistent = "";
 
   return { summary, standing, spatial, cameraAnchor, body, direction, persistent };
 }
@@ -447,13 +439,11 @@ export function assembleBoardPrompt(input: {
       scene: input.scene,
       shot,
       ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
-      capability: "video",
+      capability: "image",
     }),
   );
-  // The look leads the head and is not also carried as each shot's `Throughout:` block — the two
-  // are different strings, so the dedupe below never caught the repeat (issue 910).
+  // A board is still imagery. The look is writer context, not a repeated cell instruction.
   const context = [
-    styleFor(input.world, input.artDirection),
     location?.name,
     input.scene.inherits?.timeOfDay,
     input.scene.defaults?.lighting,
@@ -464,6 +454,7 @@ export function assembleBoardPrompt(input: {
   );
   const head = `${context.join(", ")}. Continuous cast, light and grade across every cell.`;
   const beats = input.shots.map((shot, index) => {
+    if (shot.promptOverride && shot.promptOverride.capability !== "video") return `${index + 1}. ${shot.promptOverride.text}`;
     const blocks = contexts[index]!;
     const framing = effectiveFraming(input.scene, shot);
     const camera = [framing.size, framing.lens].filter(Boolean).join(", ");
@@ -524,11 +515,12 @@ export function assemblePassBlocks(input: {
       ...(input.capability !== undefined ? { capability: input.capability } : {}),
     });
   const first = input.entries[0];
-  const lead = first ? blocksFor(first.shot) : null;
+  const lead = first && !first.prompt.overridden ? blocksFor(first.shot) : null;
   // The standing description is the union across the pass, deduplicated: one location look, and
   // each uncarried subject named once however many beats they appear in.
   const standing: string[] = [];
   for (const entry of input.entries) {
+    if (entry.prompt.overridden) continue;
     for (const line of blocksFor(entry.shot).standing.split(/(?<=\.)\s+/)) {
       const trimmed = line.trim();
       if (trimmed.length > 0 && !standing.includes(trimmed)) standing.push(trimmed);
@@ -548,9 +540,8 @@ export function assemblePassBlocks(input: {
   return {
     summary: lead?.summary ?? "",
     standing: standing.join(" "),
-    // Derived from the scene, so a pass keeps its room even when every beat in it is overridden —
-    // the same reason the standing block survives an overridden beat today.
-    spatial: input.scene.inherits?.location !== undefined ? (lead?.spatial ?? spatialFromScene()) : "",
+    // An authored pass already describes its room; only un-authored beats need a seed.
+    spatial: input.entries.some(entry => !entry.prompt.overridden) ? spatialFromScene() : "",
     beats,
     persistent: lead?.persistent ?? "",
   };
@@ -601,7 +592,9 @@ export function promptFor(
 ): { text: string; overridden: boolean } {
   // An override owns every word of its body, including whatever it says about the room and the
   // camera. Nothing generated is merged into it (D10's reasoning, one layer up).
-  if (shot.promptOverride) return { text: shot.promptOverride.text, overridden: true };
+  if (shot.promptOverride && (!capability || !shot.promptOverride.capability || shot.promptOverride.capability === capability)) {
+    return { text: shot.promptOverride.text, overridden: true };
+  }
   return {
     text: assemblePrompt(world, sheets, scene, shot, artDirection, carriedSheetIds, capability),
     overridden: false,

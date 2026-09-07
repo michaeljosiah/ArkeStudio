@@ -1772,6 +1772,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       kind: "set-prompt-override",
       shotId: shots[0]!.id,
       text: "Committed shot draft",
+      capability: "video",
     });
     assert.ok(row.querySelector(".fy-swrow__prompt"), "command admission alone does not close the shot editor");
     assert.equal((row.querySelector(".fy-swrow__prompt button:last-child") as HTMLButtonElement).disabled, true);
