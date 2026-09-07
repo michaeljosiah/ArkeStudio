@@ -99,6 +99,7 @@ import {
   extractArtifact,
   fileArtifactMsg,
   importFolder,
+  uploadArtifacts,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
@@ -4349,6 +4350,11 @@ export function ArtifactsScreen() {
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
+  const [dropActive, setDropActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const upload = (files?: readonly File[]) => {
+    if (worldId) setUploadError(uploadArtifacts(worldId, files).reason ?? null);
+  };
   // The path row appears on request (design 68a puts only the button pair in the header row).
   const [importing, setImporting] = useState(false);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
@@ -4398,6 +4404,7 @@ export function ArtifactsScreen() {
           would quietly become this pair's containing block. A production's Generate has
           shots to answer to, so it never grows one. */}
       <div className="fy-artifacts-door">
+        <Button variant="outline" onClick={() => upload()}>Add files</Button>
         <Button variant="outline" onClick={() => setImporting((v) => !v)}>
           Import folder
         </Button>
@@ -4473,6 +4480,7 @@ export function ArtifactsScreen() {
         )}
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
+        {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}
         {notices.map((n, i) => (
           <Callout
             key={`${n.sourcePath}-${i}`}
@@ -4577,6 +4585,21 @@ export function ArtifactsScreen() {
       <div
         className="fy-cardgrid"
         style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", paddingTop: 24 }}
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+        }}
+        onDrop={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          setDropActive(false);
+          if (event.dataTransfer.files.length) upload(Array.from(event.dataTransfer.files));
+        }}
       >
         {visible.map((a) => {
           const name = a.file.split("/").pop() ?? a.file;
@@ -4671,11 +4694,17 @@ export function ArtifactsScreen() {
           );
         })}
         {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
-        <div
+        <button
+          type="button"
+          aria-label="Add files"
+          onClick={() => upload()}
           className="fy-gridcard fy-gridcard--quiet"
           style={{
-            border: "1.5px dashed var(--neutral-300)",
-            background: "transparent",
+            border: `1.5px dashed ${dropActive ? "var(--foreground)" : "var(--neutral-300)"}`,
+            background: dropActive ? "var(--neutral-100)" : "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            textAlign: "left",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -4688,14 +4717,14 @@ export function ArtifactsScreen() {
             <Plus size={18} />
           </span>
           <div>
-            <div style={{ font: "600 14px var(--font-sans)" }}>Drop anything</div>
+            <div style={{ font: "600 14px var(--font-sans)" }}>{dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
             <div
               style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
             >
-              audio · documents · boards · stems
+              up to 16 files · audio · documents · images
             </div>
           </div>
-        </div>
+        </button>
         {artifacts.length === 0 && (
           <EmptyState
             title="Nothing filed yet"
