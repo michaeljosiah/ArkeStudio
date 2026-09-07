@@ -4394,7 +4394,7 @@ export function ArtifactsScreen() {
   );
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
-  const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
+  const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
   // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
   const linkName = (link: string): string =>

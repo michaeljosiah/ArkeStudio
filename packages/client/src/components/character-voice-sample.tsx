@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
-import { characterSpeakingVideoRoutes, estimateMicroUsd, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, estimateMicroUsd, pickableArtifacts, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
@@ -44,14 +44,14 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
   const pending = useRef<string | null>(null), generation = useRef<string | null>(null);
   const kit = world.referenceKits.find(k => k.sheetId === sheet.id);
   const photo = kit?.mainPhoto?.file ?? kit?.anchor;
-  const selectedArtifact = sourceId.startsWith("artifact:") ? world.artifacts.find(a => a.id === sourceId.slice(9)) : undefined;
+  const artifacts = pickableArtifacts(world.artifacts).filter(a => ["audio", "video"].includes(a.kind));
+  const selectedArtifact = sourceId.startsWith("artifact:") ? artifacts.find(a => a.id === sourceId.slice(9)) : undefined;
   const model = models.find(m => m.id === modelId) ?? models[0];
   // Only lengths this route declares. The coordinator refuses one it does not, and now that a
   // route is admitted by description rather than by name, the offered list cannot stay a constant.
   const durations = [5, 6, 7, 8, 9, 10].filter(n => model?.limits.durations?.[String(n)]);
   const length = durations.includes(durationSec) ? durationSec : durations[0] ?? durationSec;
   const estimate = model ? estimateMicroUsd(model, { durationSec: length, resolution: model.limits.resolutions?.[0] ?? "720p" }) : 0;
-  const artifacts = world.artifacts.filter(a => ["audio", "video"].includes(a.kind) && !world.artifacts.some(other => other.supersedes === a.id));
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   useEffect(() => subscribeVoiceSampleResults(result => {
     if (result.requestId !== pending.current || result.worldId !== world.meta.worldId || result.sheetId !== sheet.id) return;
@@ -122,7 +122,7 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
         <label>Start seconds <input type="number" min={0} step={0.1} value={inSec} onChange={e => { setInSec(Number(e.target.value)); setReview(null); }} /></label>
         <label>End seconds <input type="number" min={0} step={0.1} value={outSec} onChange={e => { setOutSec(Number(e.target.value)); setReview(null); }} /></label>
       </div>}
-      <Button disabled={busy || !sourceId || ((trim || sourceId.startsWith("take:")) && !validRange)} onClick={() => {
+      <Button disabled={busy || !sourceId || (sourceId.startsWith("artifact:") && !selectedArtifact) || ((trim || sourceId.startsWith("take:")) && !validRange)} onClick={() => {
         const parts = sourceId.split(":");
         const source = parts[0] === "artifact" ? { kind: "artifact" as const, artifactId: parts[1]!, ...(trim ? { range: { inSec, outSec } } : {}) }
           : { kind: "production-take" as const, productionId: parts[1]!, takeId: parts[2]!, range: { inSec, outSec } };

@@ -10,6 +10,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { applyTimelineCommands, orderedShots, seedEmptyPictureTimeline, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { CharacterVoiceSamplePanel } from "../src/components/character-voice-sample.js";
 import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } from "../src/lib/artifact-view.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -162,6 +163,21 @@ const BIBLE = artifact({ id: "ar_01J8G0000000000000000000P1", file: "series-bibl
 const PROJECT = artifact({ id: "ar_01J8G0000000000000000000O1", kind: "other", file: "session.psd" });
 
 const SHELF = [PICTURE, BOARD, CLIP, BELLS, TREATMENT, NOTES, BIBLE, PROJECT];
+
+it("keeps retired extraction review reachable while hiding retired voice sources", async () => {
+  const pending = artifact({ ...NOTES, retiredAt: "2026-09-07T12:00:00Z", extraction: { pending: [{ hash: "pending", kind: "canon", name: "Remember this", body: "A fact", quote: "A fact" }], decided: [], droppedCount: 0 } });
+  const mounted = await mountShelf([pending]);
+  try {
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+    assert.match(mounted.container.textContent!, /Remember this/);
+    assert.ok([...mounted.container.querySelectorAll("button")].some(button => button.textContent === "Accept — commits on its own"));
+    const world = structuredClone(FIXTURE_STATE.world!);
+    world.artifacts = [{ ...BELLS, retiredAt: "2026-09-07T12:00:00Z" }, CLIP];
+    const html = renderToString(<CharacterVoiceSamplePanel world={world} sheet={world.sheets.find(sheet => sheet.type === "character")!} />);
+    assert.ok(!html.includes(`value="artifact:${BELLS.id}"`));
+    assert.ok(html.includes(`value="artifact:${CLIP.id}"`));
+  } finally { await unmount(mounted); }
+});
 
 it("retiring a replacement does not bring its superseded predecessor back onto the shelf", async () => {
   const mounted = await mountShelf([PICTURE, artifact({ id: BOARD.id, file: "replacement.png", supersedes: PICTURE.id, retiredAt: "2026-09-07T12:00:00Z" })]);

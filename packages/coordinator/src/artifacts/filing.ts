@@ -341,6 +341,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
     // Dedup and allocation happen after this filing owns the same world mutation gate as clone
     // provenance. Neither writer may choose from a bundle that predates the other's media copy.
     const candidates = store.getBundle().artifacts.filter((artifact) => artifact.hash === hash);
+    // Generated occurrences may share bytes while keeping distinct provenance. Restore the
+    // retired filename the user chose before falling back to another occurrence of those bytes.
+    const restorationRank = (artifact: ArtifactSidecar) => artifact.retiredAt === undefined ? 0
+      : artifact.file === original || artifact.file === `${stem}${ext}` ? 2 : 1;
+    candidates.sort((a, b) => restorationRank(b) - restorationRank(a));
     for (const existing of candidates) {
       const current = await currentSidecar(store, existing);
       if (
