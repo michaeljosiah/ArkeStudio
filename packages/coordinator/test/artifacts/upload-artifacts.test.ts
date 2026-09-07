@@ -57,6 +57,18 @@ const results = (events: DomainEvent[]) =>
   events.filter((e) => e.type === "queue.enqueue-result") as Array<Record<string, unknown>>;
 
 describe("filing artifacts from the panel (82a)", () => {
+  it("retires only in the named open world and publishes the retained record (#957)", async () => {
+    const source = await sourceFile("retirement.png", distinctPng(9));
+    const { provider, send } = await harness(() => [source]);
+    try {
+      await send(upload);
+      const artifact = provider.openStore()!.getBundle().artifacts.find(a => a.file === "retirement.png")!;
+      await assert.rejects(send({ kind: "retire-artifact", worldId: "01J8E1000000000000000000V2", artifactId: artifact.id }), /owning world/);
+      assert.equal(provider.openStore()!.getBundle().artifacts.find(a => a.id === artifact.id)?.retiredAt, undefined);
+      await send({ kind: "retire-artifact", worldId: WORLD_ID, artifactId: artifact.id });
+      assert.ok(provider.openStore()!.getBundle().artifacts.find(a => a.id === artifact.id)?.retiredAt);
+    } finally { await provider.close(); }
+  });
   it("copies what was picked onto the world's shelf, with a sidecar each", async () => {
     const a = await sourceFile("harbour-plate.png", distinctPng(1));
     const b = await sourceFile("bell-market.png", distinctPng(2));

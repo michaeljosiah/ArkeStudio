@@ -155,6 +155,7 @@ Implemented landing directories include:
 |---|---|
 | File artifact | Copies the source to `W\artifacts\<safe-name>` and creates `<safe-name>.json`. The source is untouched. If identical bytes already exist, no binary is copied and the existing sidecar may be replaced to merge links. |
 | Supersede artifact | Creates a new binary and sidecar. The old binary, sidecar, and existing links remain. |
+| Remove artifact from shelf | Replaces the existing sidecar through the world commit path to record `retiredAt`. Keeps the binary, identity, provenance and citations. Re-importing identical bytes clears retirement on the same sidecar without copying another binary (SPEC-015 R-19). |
 | Import folder | Files each visible file separately and flattens the source hierarchy into `W\artifacts\`. The original relative directory is retained in sidecar provenance. Hidden and system files are skipped. |
 | Extract facts | Creates scratch work under `R\.extract\extract-<id>\` and replaces the artifact sidecar as candidates are recorded, accepted, or rejected. Accepted facts additionally create canon or sheet proposals. |
 

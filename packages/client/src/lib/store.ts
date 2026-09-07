@@ -3746,6 +3746,10 @@ export function uploadArtifacts(worldId: string, files?: readonly File[]): { req
   return importEditorMedia(worldId, undefined, files);
 }
 
+export function retireArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "retire-artifact", worldId, artifactId });
+}
+
 export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[],

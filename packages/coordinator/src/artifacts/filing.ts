@@ -169,6 +169,21 @@ async function currentSidecar(
   }
 }
 
+/** Retirement changes only shelf membership; every reference still resolves to the same bytes. */
+export async function retireArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await store.gateOp(async () => {
+    const artifact = store.getBundle().artifacts.find(a => a.id === artifactId);
+    if (!artifact) throw new Error("This artifact is no longer in the world.");
+    if (basename(artifact.file) !== artifact.file || artifact.file === "..") throw new Error("Invalid artifact file.");
+    const current = await currentSidecar(store, artifact);
+    if (!current?.raw || current.sidecar.id !== artifactId || current.sidecar.file !== artifact.file) {
+      throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
+    }
+    if (current.sidecar.retiredAt !== undefined) return;
+    await writeSidecar(store, { ...current.sidecar, retiredAt: new Date().toISOString() }, current.raw);
+  });
+}
+
 /** A dedup candidate is reusable only while its media still has the hash its metadata claims. */
 async function artifactMediaMatches(
   store: WorldStore,
@@ -339,6 +354,8 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
         const links = [...new Set([...current.sidecar.links, ...(input.links ?? [])])];
         const next = { ...current.sidecar, links };
         let changed = links.length !== current.sidecar.links.length;
+        // An explicit re-import restores the same record instead of copying its media again.
+        if (next.retiredAt !== undefined) { delete next.retiredAt; changed = true; }
         if (input.production !== undefined && (current.sidecar.production ?? null) !== input.production) {
           changed = true;
           if (input.production === null) delete next.production;

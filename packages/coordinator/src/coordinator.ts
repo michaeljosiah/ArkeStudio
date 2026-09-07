@@ -237,6 +237,7 @@ import {
   fileArtifact,
   fileGeneratedArtifact,
   importFolder,
+  retireArtifact,
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
@@ -10442,6 +10443,13 @@ export class Coordinator {
           // and that is what re-homes a scoped artifact on dedup (SPEC-020 §2.5).
           ...(msg.production !== undefined ? { production: msg.production } : {}),
         });
+        return;
+      }
+      case "retire-artifact": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is not open.");
+        await retireArtifact(store, msg.artifactId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "attach-files": {

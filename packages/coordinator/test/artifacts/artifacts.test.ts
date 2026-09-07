@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable } from "../../src/artifacts/filing.js";
+import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable, retireArtifact } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -26,6 +26,53 @@ async function sourceFile(name: string, content: string | Buffer): Promise<strin
 }
 
 describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
+  it("retires durably without erasing bytes or provenance, and re-import restores the same identity (#957)", async () => {
+    const { store, dir } = await open();
+    const sourcePath = await sourceFile("retire-me.txt", "durable evidence");
+    try {
+      const filed = await fileArtifact(store, { sourcePath, links: ["the-vigil"] });
+      assert.equal(filed.outcome, "filed");
+      if (filed.outcome !== "filed") return;
+      const artifact = filed.artifact;
+      const path = join(dir, "artifacts", `${artifact.file}.json`);
+      await retireArtifact(store, artifact.id);
+      const retired = store.getBundle().artifacts.find(a => a.id === artifact.id)!;
+      assert.ok(retired.retiredAt);
+      assert.deepEqual({ ...retired, retiredAt: undefined }, { ...artifact, retiredAt: undefined });
+      assert.equal(pickable([retired]).length, 0);
+      assert.equal(await readFile(join(dir, "artifacts", artifact.file), "utf8"), "durable evidence");
+      const raw = await readFile(path, "utf8");
+      await retireArtifact(store, artifact.id);
+      assert.equal(await readFile(path, "utf8"), raw, "repeated retirement does not rewrite history");
+      await addLinks(store, artifact, ["CANON-001"]);
+      assert.equal(store.getBundle().artifacts.find(a => a.id === artifact.id)?.retiredAt, retired.retiredAt, "a stale writer preserves retirement");
+    } finally { await store.close(); }
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      const retired = reopened.getBundle().artifacts.find(a => a.file === "retire-me.txt")!;
+      assert.ok(retired.retiredAt);
+      const restored = await fileArtifact(reopened, { sourcePath });
+      assert.equal(restored.outcome, "deduplicated");
+      if (restored.outcome !== "deduplicated") return;
+      assert.equal(restored.artifact.id, retired.id);
+      assert.equal(restored.artifact.retiredAt, undefined);
+      assert.deepEqual(restored.artifact.links, ["the-vigil", "CANON-001"]);
+    } finally { await reopened.close(); }
+  });
+
+  it("refuses retirement when the on-disk sidecar changed identity or became unreadable (#957)", async () => {
+    const { store, dir } = await open();
+    try {
+      const filed = await fileArtifact(store, { sourcePath: await sourceFile("fragile-retirement.txt", "keep") });
+      assert.equal(filed.outcome, "filed");
+      if (filed.outcome !== "filed") return;
+      const path = join(dir, "artifacts", `${filed.artifact.file}.json`);
+      await writeFile(path, '{"links":[]}');
+      await assert.rejects(retireArtifact(store, filed.artifact.id));
+      assert.equal(await readFile(path, "utf8"), '{"links":[]}');
+      assert.equal(await readFile(join(dir, "artifacts", filed.artifact.file), "utf8"), "keep");
+    } finally { await store.close(); }
+  });
   it("offers in the picker exactly what it can file", async () => {
     // The attach dialog's filter is derived from the kind map, not written a second time — so
     // it cannot come to offer something that files as "other", or hide something it can hold.

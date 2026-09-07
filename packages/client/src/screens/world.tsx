@@ -38,6 +38,7 @@ import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
+import { EditorDialog } from "../components/editor-dialog.js";
 import {
   characterPortraitPath,
   locationPortraitPath,
@@ -51,7 +52,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactOpenLabel } from "../lib/artifact-view.js";
+import { artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -100,6 +101,7 @@ import {
   fileArtifactMsg,
   importFolder,
   uploadArtifacts,
+  retireArtifact,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
@@ -4346,7 +4348,8 @@ export function ArtifactsScreen() {
   const navigate = useNavigate();
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
-  const artifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const shelfArtifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const artifacts = shelfArtifacts.filter(a => a.retiredAt === undefined);
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
@@ -4370,12 +4373,15 @@ export function ArtifactsScreen() {
    * its import report and its scroll position.
    */
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  const [retireId, setRetireId] = useState<string | null>(null);
+  const retiringArtifact = artifacts.find(a => a.id === retireId) ?? null;
+  const uses = world && retiringArtifact ? artifactUses(world, retiringArtifact) : [];
   const openTrigger = useRef<HTMLButtonElement | null>(null);
   // Whatever made it, not the bench alone (issue 475): a character's generated references are
   // filed here too, and the chip that counts what this application made counts those as well.
   const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
-  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
+  const superseded = new Set(shelfArtifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
     (a) =>
       !superseded.has(a.id) &&
@@ -4635,6 +4641,8 @@ export function ArtifactsScreen() {
                   setOpenArtifactId(a.id);
                 }}
               />
+              <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
+                onClick={() => setRetireId(a.id)}>Remove</button>
               {isImage ? (
                 <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
                   <Portrait
@@ -4737,12 +4745,28 @@ export function ArtifactsScreen() {
         artifacts={artifacts}
         worldSlug={world?.meta.slug}
         linkName={linkName}
+        onRetire={(artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
         onClose={() => {
           setOpenArtifactId(null);
           // A dialog that dropped focus leaves the keyboard at the top of the document.
-          openTrigger.current?.focus();
+          if (retireId === null) openTrigger.current?.focus();
         }}
       />
+      <EditorDialog open={retiringArtifact !== null} title="Remove from shelf?" subtitle={retiringArtifact?.file}
+        onClose={() => setRetireId(null)}>
+        <p>This retires the artifact from the shelf and file pickers. Its file and provenance stay in the world;
+          existing clips, references and exports keep working. No disk space is freed.</p>
+        <p>Import the same file again to restore it.</p>
+        <p>{uses.length ? "Current uses — kept intact:" : "No current uses found in the loaded world records. History is kept."}</p>
+        {uses.length > 0 && <ul style={{ maxHeight: 200, overflowY: "auto" }}>{uses.map(use => <li key={use}>{use}</li>)}</ul>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button variant="outline" onClick={() => setRetireId(null)}>Cancel</Button>
+          <Button variant="primary" onClick={() => {
+            if (worldId && retiringArtifact) retireArtifact(worldId, retiringArtifact.id);
+            setRetireId(null);
+          }}>Remove from shelf</Button>
+        </div>
+      </EditorDialog>
     </div>
   );
 }
