@@ -6,6 +6,7 @@ Commands below run from the repository root unless stated otherwise. Read the sc
 |---|---|---|
 | `packages/providers/src/fal-catalogue.generated.ts` | `packages/providers/scripts/sync-fal-catalogue.mjs`; public FAL catalogue plus script-curated capabilities | `node packages/providers/scripts/sync-fal-catalogue.mjs`; review prices, route IDs and curated constraints, then run provider checks. Do not hand-edit generated output. |
 | Shipped model manifest | `packages/providers/src/manifest-data.ts` and generated catalogue | Change the appropriate source; follow registry/provider consumers and tests. |
+| Krea 2 custom node | `vendor/comfyui/ComfyUI-ConditioningKrea2Rebalance/manifest.json` pins the upstream commit and every redistributed file | Keep source, licence and hashes together; update the recipe pin when upgrading. Install with `scripts/install-comfyui-krea2.mjs`; see [Krea 2](krea2.md). |
 | Sample world | `fixtures/worlds/the-undersong`, coordinator `src/world/sample-world.ts` | Shared by tests, dev seeding and desktop sample-world delivery. Validate affected fixtures and installer resources when changing its structure. |
 | Client/desktop build output | Client Vite config; `apps/desktop/scripts/build.mjs` | `npm run build`; edit source, not dist output. Desktop build also builds the client. |
 | Native SQLite | Desktop `scripts/rebuild-native.mjs` and package aliases | `npm run rebuild:native --workspace @arke-studio/desktop`; preserve host-Node versus Electron ABI separation. |

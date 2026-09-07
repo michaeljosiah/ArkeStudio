@@ -103,7 +103,100 @@ function engineFake(routes: Array<{ match: RegExp; status: number; body?: unknow
 // The catalogue and its projection (R-2, R-3)
 // ---------------------------------------------------------------------------
 
+describe("Krea 2 reference dispatch", () => {
+  for (const count of [0, 1, 4]) {
+    it(`binds ${count} images in order and removes every unused carrier`, async () => {
+      const calls: Array<{ url: string; body?: unknown; filename?: string }> = [];
+      let uploaded = 0;
+      const fetch: FetchLike = async (url, init) => {
+        if (init?.body instanceof FormData) {
+          const file = init.body.get("image") as File;
+          calls.push({ url, filename: file.name });
+          return new Response(JSON.stringify({ name: `image-${++uploaded}.png`, subfolder: "refs" }));
+        }
+        calls.push({ url, body: JSON.parse(init?.body as string) });
+        return new Response(JSON.stringify({ prompt_id: "krea-run" }));
+      };
+      const images = Array.from({ length: count }, (_, index) => ({
+        name: "reference.png", contentType: "image/png" as const, data: Uint8Array.from([137, 80, 78, 71, index]),
+      }));
+      await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-krea2-image", capability: "image",
+        params: { prompt: "blue teapot", references: images.map((_, index) => `references/${index}.png`), output: { aspect: "9:16", tier: "2K" }, seed: 12 },
+        imageReferences: images,
+      });
+      const graph = (calls.at(-1)!.body as { prompt: Record<string, { inputs: Record<string, unknown> }> }).prompt;
+      assert.equal(graph["5"]!.inputs["width"], 1152);
+      assert.equal(graph["5"]!.inputs["height"], 2048);
+      assert.equal(graph["3"]!.inputs["steps"], 16);
+      assert.equal(graph["3"]!.inputs["cfg"], 1, "ComfyUI's no-guidance value");
+      assert.equal(graph["3"]!.inputs["seed"], 12);
+      assert.deepEqual(graph["3"]!.inputs["positive"], [count === 0 ? "6" : "16", 0]);
+      assert.equal(graph["16"] !== undefined, count > 0);
+      for (let index = 0; index < 4; index++) {
+        const carrier = graph[String(20 + index)];
+        if (index < count) {
+          assert.equal(carrier!.inputs["image"], `refs/image-${index + 1}.png`);
+          assert.deepEqual(graph["16"]!.inputs[`image${index + 1}`], [String(20 + index), 0]);
+          assert.equal(calls[index]!.filename, `${createHash("sha256").update(images[index]!.data).digest("hex")}.png`);
+        } else {
+          assert.equal(carrier, undefined);
+          assert.equal(graph["16"]?.inputs[`image${index + 1}`], undefined);
+        }
+      }
+      assert.equal(calls.length, count + 1);
+      assert.equal(comfyUiRecipeById("comfyui-krea2-image")!.graph["20"]!.inputs["image"], "", "template stays immutable");
+    });
+  }
+
+  it("refuses excess references, missing prepared bytes and caller-supplied filenames before any upload", async () => {
+    const image = { name: "ref.png", contentType: "image/png" as const, data: Uint8Array.from([1]) };
+    for (const request of [
+      { params: { prompt: "x" }, imageReferences: Array(5).fill(image), error: /up to 4/ },
+      { params: { prompt: "x", references: ["a.png", "b.png"] }, imageReferences: [image], error: /never arrived/ },
+      { params: { prompt: "x", reference1: "outside.png" }, imageReferences: [], error: /not a parameter/ },
+    ]) {
+      const { fetch, calls } = engineFake([]);
+      await assert.rejects(new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).submit("", {
+        model: "comfyui-krea2-image", capability: "image", params: request.params, imageReferences: request.imageReferences,
+      }), request.error);
+      assert.equal(calls.length, 0);
+    }
+  });
+
+  it("does not upload on failed preflight or submit a partially uploaded reference set", async () => {
+    const request = {
+      model: "comfyui-krea2-image", capability: "image" as const, params: { prompt: "x" },
+      imageReferences: [{ name: "ref.png", contentType: "image/png" as const, data: Uint8Array.from([1]) }],
+    };
+    const blocked = engineFake([]);
+    await assert.rejects(new ComfyUiClient(blocked.fetch, BASE, async () => ({ ok: false, reason: "node unverified" })).submit("", request), /node unverified/);
+    assert.equal(blocked.calls.length, 0);
+    const failed = engineFake([{ match: /\/upload\/image$/, status: 500 }]);
+    await assert.rejects(new ComfyUiClient(failed.fetch, BASE, OK_PREFLIGHT).submit("", request));
+    assert.equal(failed.calls.length, 1);
+    assert.ok(failed.calls.every((call) => !call.url.endsWith("/prompt")));
+  });
+});
+
 describe("the recipe catalogue projects into the manifest like any other model", () => {
+  it("Krea 2 has a separate identity, native 2K output and four ordered reference inputs", () => {
+    const krea = comfyUiRecipeById("comfyui-krea2-image")!;
+    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === krea.id)!;
+    assert.equal(row.displayName, "Krea 2");
+    assert.deepEqual(row.limits.tiers, { "2K": "2048" });
+    assert.equal(row.accepts.referenceImages, krea.referenceImages!.length);
+    assert.equal(row.accepts.referenceImages, 4);
+    for (const attachment of krea.referenceImages!) {
+      assert.equal(krea.params[attachment.param]!.internal, true);
+      assert.ok(attachment.nodes.every((id) => krea.graph[id] !== undefined));
+      assert.ok(Array.isArray(krea.graph[attachment.slot[0]]!.inputs[attachment.slot[1]]));
+    }
+    assert.equal(comfyUiRecipeById("comfyui-draft-image")!.graph["4"]!.inputs["ckpt_name"], "sd_xl_base_1.0.safetensors");
+    const changed = structuredClone(krea);
+    changed.referenceConditioning!.textOnly = ["13", 0];
+    assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(krea), "conditioning routing is provenance");
+  });
   it("every recipe has exactly one manifest row, and no row leaks a graph", () => {
     for (const recipe of COMFYUI_RECIPES) {
       const rows = SHIPPED_MANIFEST.models.filter((m) => m.id === recipe.id);
@@ -416,7 +509,7 @@ describe("recipe identity (§2.11)", () => {
 describe("the compatibility probe is the API floor (D14)", () => {
   it("no engine → every capability is unavailable with the remedy, not an ENOENT", async () => {
     const client = new ComfyUiClient(engineFake([]).fetch, () => null, OK_PREFLIGHT);
-    const probes = await client.validateKey("");
+    const probes = await client.validateKey();
     assert.equal(probes.length, 3);
     assert.ok(probes.every((p) => !p.available && /no ComfyUI engine/.test(p.reason ?? "")));
   });
@@ -425,7 +518,7 @@ describe("the compatibility probe is the API floor (D14)", () => {
     const { fetch } = engineFake([
       { match: /system_stats/, status: 200, body: { system: { comfyui_version: "0.2.7" } } },
     ]);
-    const probes = await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey("");
+    const probes = await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey();
     assert.ok(probes.every((p) => !p.available));
     assert.match(probes[0]!.reason!, /0\.2\.7/);
     assert.match(probes[0]!.reason!, new RegExp(COMFYUI_VERSION_FLOOR.replace(/\./g, "\\.")));
@@ -433,7 +526,7 @@ describe("the compatibility probe is the API floor (D14)", () => {
 
   it("an engine that reports no version is below the floor by definition", async () => {
     const { fetch } = engineFake([{ match: /system_stats/, status: 200, body: { system: {} } }]);
-    const probes = await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey("");
+    const probes = await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey();
     assert.ok(probes.every((p) => !p.available && /did not report/.test(p.reason ?? "")));
   });
 
@@ -441,7 +534,7 @@ describe("the compatibility probe is the API floor (D14)", () => {
     const { fetch } = engineFake([
       { match: /system_stats/, status: 200, body: { system: { comfyui_version: "0.33.1" } } },
     ]);
-    assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey(""), [
+    assert.deepEqual(await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).validateKey(), [
       { capability: "image", available: true },
       { capability: "video", available: true },
       { capability: "voice-tts", available: true },
@@ -459,7 +552,7 @@ describe("the compatibility probe is the API floor (D14)", () => {
     const { fetch, calls } = engineFake([
       { match: /system_stats/, status: 200, body: { system: { comfyui_version: "0.33.1" } } },
     ]);
-    const probes = await new ComfyUiClient(fetch, () => "http://127.0.0.1:8188/", OK_PREFLIGHT).validateKey("");
+    const probes = await new ComfyUiClient(fetch, () => "http://127.0.0.1:8188/", OK_PREFLIGHT).validateKey();
     assert.ok(
       probes.every((probe) => probe.available),
       "a reachable engine behind a trailing-slash URL is still reachable",
