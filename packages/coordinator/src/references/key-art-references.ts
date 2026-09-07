@@ -4,7 +4,6 @@ import {
   GenesisKeyArtBriefSchema,
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
-  keyArtBriefProse,
   keyArtBriefSettled,
   orderedLocationViews,
   type GenesisKeyArtBrief,
@@ -22,7 +21,7 @@ import { referenceBudgetFor } from "./generate.js";
 /**
  * Key art is a picture of this world, not of its genre (SPEC-031 §1.11).
  *
- * The prompt draws on the bible and the cast alongside the key-art brief, and the frame
+ * Arke authors the prompt from the world; the frame
  * carries the main photos of the characters the brief names as identity references — which
  * characters appear is the brief's to say, never the model's to guess (R-58, R-59). One
  * assembly, used by the founding build and by the world screen's own Regenerate alike: a
@@ -199,39 +198,17 @@ export function bibleExcerpt(text: string, max = 1500): string {
   return `${(wordEnd > 0 ? cut.slice(0, wordEnd) : cut.slice(0, max)).trim()}…`;
 }
 
-/** One full stop at the end, whatever the text arrived with — `soundtrack..` shipped (issue 906). */
-function sentence(text: string): string {
-  const trimmed = text.trim().replace(/[.\s]+$/, "");
-  if (trimmed === "") return "";
-  return /[!?…]$/.test(trimmed) ? trimmed : `${trimmed}.`;
-}
-
 /**
- * The composed prompt, drawing on more than the world's surface (R-58): the look, the
- * logline, the bible's argument, who is in the frame, and the brief's subject, moment and
- * stakes. Only the floor of `keyArtPrompt`'s precedence — an authored prompt or an art
- * director's rewrite still outranks it.
+ * Authored words travel intact (SPEC-031 R-58, issue 940). Old briefs remain editable seeds;
+ * narrative context and production-wide direction belong to the writer, not the image model.
  */
 export function keyArtComposition(input: {
   meta: WorldMeta;
   direction: ResolvedArtDirection;
   bible: string;
   brief: GenesisKeyArtBrief;
-  /** The characters actually carried, in order — the prompt and the frame must agree. */
   cast: readonly string[];
 }): string {
-  const excerpt = bibleExcerpt(input.bible);
-  const lines = [
-    `Key art for "${input.meta.name}". ${sentence(input.direction.description)}`,
-    sentence(input.meta.logline ?? ""),
-    input.meta.tone?.trim() ? `Tone: ${sentence(input.meta.tone)}` : "",
-    input.meta.genre?.trim() ? `Genre: ${sentence(input.meta.genre)}` : "",
-    excerpt !== "" ? `The story: ${excerpt}` : "",
-    `The image: ${sentence(keyArtBriefProse(input.brief))}`,
-    input.cast.length > 0
-      ? `In frame: ${input.cast.join(", ")} — preserve each supplied identity exactly.`
-      : "",
-    "A single evocative cinematic image of this world and what is at stake in it. No text, no logos.",
-  ];
-  return lines.filter((line) => line !== "").join(" ");
+  const body = input.brief.prompt ?? [input.brief.subject, input.brief.moment].filter((text): text is string => Boolean(text)).map(text => text.trim().replace(/\.+$/, "")).join(". ");
+  return `${body} No text, no logos.`;
 }

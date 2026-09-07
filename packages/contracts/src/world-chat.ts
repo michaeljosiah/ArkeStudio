@@ -2232,6 +2232,7 @@ const exampleWorldActions = {
       audio: { music: "environmental-only", subtitles: "never" },
       failureModes: ["Hands stay whole and countable."],
       keyArtIntent: {
+        prompt: "Maren Kest stands beneath the slack-water bells of The Vigil, salt-stained coat lit by a low amber lamp. Close framing, dark sea beyond, painterly salt-air naturalism.",
         subject: "Maren beneath the slack-water bells",
         characters: ["Maren Kest"],
         location: "The Vigil",
@@ -2962,6 +2963,7 @@ Actions wait for Approve and cite final complete reads.
 - canon-retire uses entryId: string; canon-restore also uses version: integer >= 1.
 - sheet: create/edit/relationship/rename/set-status/duplicate/promote-guest. sheetType is character|location|faction; existing sheets need sheetId. Fields: name/role/billing/region/canonRules/links/sections. Relationships add typed to, add|remove and proseEdits; duplicate adds newName; status is sketch|locked. Sections use {heading: string, body: string}.
 - sheet-retire/restore: sheetType, sheetId, plus version >= 1 for restore.
+- For key art, read get_world_metadata, get_bible, get_art_direction, list_sheets and list_references; read the chosen character/location sheets before authoring keyArtIntent.prompt. Write one complete image-model prompt (about 300 words or fewer), concrete and present-tense: one frame, subjects, composition, light, materials and treatment. Translate lore into visible choices; omit backstory, invisible stakes, timing and rules for other shots. The prompt is sent intact, with only fixed application constraints appended. Set characters and location to the full sheet names of its subjects, and revise the prompt when its sources change.
 - art-direction: {description: string?, masterLook: "keep"|"clear"?, audio: object?, failureModes: string[]?, keyArtIntent: object|null?}; restore version >= 1. Never invent a file.
 - production-* never replans creation; prose uses proposals; order and script ids stay stable.
 

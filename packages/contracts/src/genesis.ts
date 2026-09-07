@@ -58,7 +58,7 @@ export type GenesisKeyArtBrief = z.infer<typeof GenesisKeyArtBriefSchema>;
 
 /** A key-art brief that settles nothing is no brief: the item is not dispatched (R-5). */
 export function keyArtBriefSettled(brief: GenesisKeyArtBrief | undefined): boolean {
-  return brief !== undefined && (brief.subject !== undefined || brief.moment !== undefined);
+  return brief !== undefined && (brief.prompt !== undefined || brief.subject !== undefined || brief.moment !== undefined);
 }
 
 /**
@@ -94,6 +94,7 @@ export function locationBriefProse(brief: GenesisLocationBrief | undefined): str
 }
 
 export function keyArtBriefProse(brief: GenesisKeyArtBrief): string {
+  if (brief.prompt !== undefined) return brief.prompt;
   return [
     brief.subject,
     brief.moment !== undefined ? `The moment: ${brief.moment}` : null,

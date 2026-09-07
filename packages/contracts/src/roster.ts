@@ -174,9 +174,10 @@ Respond with ONLY a JSON object: {"prompt": "..."}
   materials, colour, lens or medium, and mood. Concrete nouns beat adjectives.
 - Stay inside what you were told. Every element must be traceable to the world as described —
   do not add a lighthouse, a dragon or a moon because the sentence felt like it wanted one.
-- One establishing image of a place: no people in the foreground, no text, no logos, no
-  watermarks, no collages or panels.
-- Around 60 words. One paragraph, no line breaks, no lists, no headings.`,
+- One still image, with the characters and place the brief names. Translate world lore and
+  production art direction into visible choices; omit plot exposition, invisible stakes,
+  timing and rules for other shots. No text, logos, watermarks, collages or panels.
+- Up to about 300 words. One paragraph, no lists or headings.`,
   },
   {
     name: "prompt-enhancer",
