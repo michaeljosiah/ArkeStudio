@@ -675,7 +675,7 @@ const ProductionChapterModelActionSchema = z
         chapters: z.array(z.object({
           title: z.string().trim().min(1).max(200),
           synopsis: z.string().trim().min(1).max(600),
-          pov: SlugSchema.optional(),
+          viewpointCharacter: z.string().trim().max(200).optional().describe("Character sheet id from the current cast (lowercase kebab-case), or an unambiguous character name. Omit when unknown; close third is prose style, not a character."),
           when: z.string().trim().max(80).optional(),
         }).strict()).min(1).max(100),
       }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept."),
@@ -688,7 +688,7 @@ const ProductionChapterModelActionSchema = z
           status: z.string().trim().min(1).max(120).default("planned"),
           draws: ChapterDrawsSchema.optional(),
           synopsis: z.string().trim().max(600).optional().describe("What this chapter is for, in a line or two; it steers the draft and the accepted draft keeps it."),
-          pov: SlugSchema.optional().describe("The character sheet whose point of view the chapter holds."),
+          viewpointCharacter: z.string().trim().max(200).optional().describe("Character sheet id from the current cast (lowercase kebab-case), or an unambiguous character name. Omit when unknown. Narrative style such as close third belongs in production-prose-style.pov."),
           when: z.string().trim().max(80).optional().describe("Story-time, in the story's own words."),
           implies: ChapterImpliesWriteSchema.optional().describe(
             "Facts about the world this prose implies but the world does not yet hold, each a kind and one sentence. They are listed on the chapter for the author to propose separately; this action never writes them into the world.",
@@ -706,7 +706,7 @@ const ProductionChapterModelActionSchema = z
               body: z.string().optional(),
               draws: ChapterDrawsSchema.nullable().optional(),
               synopsis: z.string().trim().max(600).nullable().optional(),
-              pov: SlugSchema.nullable().optional(),
+              viewpointCharacter: z.string().trim().max(200).nullable().optional().describe("Character sheet id or unambiguous name; null clears the viewpoint character. Narrative style belongs in production-prose-style.pov."),
               when: z.string().trim().max(80).nullable().optional(),
               implies: ChapterImpliesWriteSchema.nullable().optional().describe(
                 "Facts about the world this prose implies but the world does not yet hold; listed on the chapter for the author to propose, never written into the world by this action.",

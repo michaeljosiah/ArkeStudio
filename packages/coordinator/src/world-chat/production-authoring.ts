@@ -250,12 +250,17 @@ function requireDraws(
   if (missingCanon) throw new Error(`Canon entry ${missingCanon} is not in this world`);
 }
 
-/** A point of view is a character the world holds (turn 127). */
-function requirePov(store: WorldStore, pov: string | null | undefined): void {
-  if (pov === null || pov === undefined) return;
-  if (!store.getBundle().sheets.some((sheet) => sheet.id === pov && sheet.type === "character")) {
-    throw new Error(`sheet ${pov} is not a character in this world`);
-  }
+/** Resolve against current characters; never choose between people sharing a short name. */
+function resolveViewpointCharacter(store: WorldStore, value: string | null | undefined): string | undefined {
+  if (!value?.trim()) return undefined;
+  const wanted = slugify(value);
+  if (!wanted) return undefined;
+  const characters = store.getBundle().sheets.filter((sheet) => sheet.type === "character");
+  const exact = characters.filter((sheet) => sheet.id === wanted || slugify(sheet.name) === wanted);
+  if (exact.length) return exact.length === 1 ? exact[0]!.id : undefined;
+  const aliases = characters.filter((sheet) => sheet.id.startsWith(`${wanted}-`)
+    || [...sheet.name.matchAll(/["“]([^"“”]+)["”]/g)].some((match) => slugify(match[1]!) === wanted));
+  return aliases.length === 1 ? aliases[0]!.id : undefined;
 }
 
 function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
@@ -481,24 +486,28 @@ export async function stageWorldChatProductionAuthoredAction(
           rank = Math.max(rank, chapter.order ?? chapter.number ?? 0);
         }
       }
+      const unmatched: string[] = [];
       const targets = change.chapters.map((chapter, index) => {
-        requirePov(store, chapter.pov);
+        const pov = resolveViewpointCharacter(store, chapter.viewpointCharacter);
+        if (chapter.viewpointCharacter !== undefined && !pov) unmatched.push(chapter.title);
         const stem = uniqueSlug(chapter.title, "chapter", taken);
         taken.push(stem);
         const doc = MarkdownFile.create({
           id: stem, title: chapter.title, order: rank + index + 1, status: "planned", version: 1, words: 0,
-          synopsis: chapter.synopsis, ...(chapter.pov ? { pov: chapter.pov } : {}),
+          synopsis: chapter.synopsis, ...(pov ? { pov } : {}),
           ...(chapter.when ? { when: chapter.when } : {}),
           created: store.now().slice(0, 10), updated: store.now().slice(0, 10),
         }, "");
         ChapterFrontmatterSchema.parse(doc.data);
         return { path: `productions/${production.meta.id}/chapters/${stem}.md`, content: doc.serialize(), expectedBaseHash: null };
       });
-      return gate.stage({ kind: "chapter-draft", summary: `Plan ${targets.length} chapters`, ...context, targets }, precondition);
+      const summary = `Plan ${targets.length} chapters` + (unmatched.length
+        ? ` — viewpoint character left unset for ${unmatched.join(", ")}: no unique character matched.` : "");
+      return gate.stage({ kind: "chapter-draft", summary, ...context, targets }, precondition);
     }
     if (change.operation === "create") {
       requireDraws(store, change.draws);
-      requirePov(store, change.pov);
+      const pov = resolveViewpointCharacter(store, change.viewpointCharacter);
       const stem = uniqueSlug(change.title, "chapter", [
         ...production.chapters.map((chapter) => chapter.file),
         ...proposedTargetStems(store, new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`)),
@@ -515,7 +524,7 @@ export async function stageWorldChatProductionAuthoredAction(
         // The plan and what the draft implied ride with it (turn 127); the overview version the
         // draft was written against is stamped here, by the coordinator, never by the client.
         ...(change.synopsis !== undefined && change.synopsis !== "" ? { synopsis: change.synopsis } : {}),
-        ...(change.pov !== undefined ? { pov: change.pov } : {}),
+        ...(pov ? { pov } : {}),
         ...(change.when !== undefined && change.when !== "" ? { when: change.when } : {}),
         ...(change.implies !== undefined && change.implies.length > 0 ? { implies: withImpliedIds(change.implies) } : {}),
         ...(body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
@@ -525,7 +534,8 @@ export async function stageWorldChatProductionAuthoredAction(
       ChapterFrontmatterSchema.parse(doc.data);
       return gate.stage({
         kind: "chapter-draft",
-        summary: `New chapter: ${change.title}`,
+        summary: `New chapter: ${change.title}` + (change.viewpointCharacter !== undefined && !pov
+          ? " — viewpoint character left unset: no unique character matched." : ""),
         ...context,
         targets: [{ path: `productions/${production.meta.id}/chapters/${stem}.md`, content: doc.serialize() }],
       }, precondition);
@@ -534,7 +544,11 @@ export async function stageWorldChatProductionAuthoredAction(
       candidate.id === change.chapterId || candidate.file === change.chapterId);
     if (!chapter) throw new Error(`chapter ${change.chapterId} is not in ${production.meta.id}`);
     requireDraws(store, change.changes.draws);
-    requirePov(store, change.changes.pov);
+    const pov = resolveViewpointCharacter(store, change.changes.viewpointCharacter);
+    // An edit must not erase an existing viewpoint because a supplied name was unmatched.
+    if (change.changes.viewpointCharacter != null && !pov) {
+      throw new Error("The chapter named a viewpoint I could not match to one character. Choose a character from the cast, or clear the viewpoint explicitly.");
+    }
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
     const doc = MarkdownFile.parse(await readLive(store, path));
     const changes = change.changes;
@@ -552,7 +566,7 @@ export async function stageWorldChatProductionAuthoredAction(
       ...(changes.status !== undefined ? { status: changes.status } : {}),
       ...(changes.draws !== undefined ? { draws: changes.draws ?? undefined } : {}),
       ...(changes.synopsis !== undefined ? { synopsis: changes.synopsis || undefined } : {}),
-      ...(changes.pov !== undefined ? { pov: changes.pov ?? undefined } : {}),
+      ...(changes.viewpointCharacter !== undefined ? { pov } : {}),
       ...(changes.when !== undefined ? { when: changes.when || undefined } : {}),
       ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? withImpliedIds(changes.implies) : undefined } : {}),
       ...(body !== undefined ? { words: countWords(body) } : {}),

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { newId, type ConversationId } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, newId, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { overviewSteer, proseStyleSteer } from "../../src/productions/ops.js";
 import { foldedOccurrences, replacePassage, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
@@ -277,7 +277,7 @@ it("stages a planned outline as one reviewable proposal and accepts every chapte
     kind: "world-chat-production-chapter", worldId: store.worldId,
     action: { kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: [],
       change: { operation: "outline", chapters: [
-        { title: "The answer", synopsis: "Maren finds the page.", pov: "maren-kest", when: "Next morning" },
+        { title: "The answer", synopsis: "Maren finds the page.", viewpointCharacter: "maren-kest", when: "Next morning" },
         { title: "The answer", synopsis: "She writes the missing night." },
       ] },
     },
@@ -325,4 +325,67 @@ it("reserves unreadable chapter files and pending outline ranks before acceptanc
   assert.deepEqual(chapters.slice(original.length).map((c) => c.title), ["Zulu first", "Zulu second", "Alpha first", "Alpha second"]);
   assert.equal(new Set(chapters.map((c) => c.order)).size, chapters.length);
   assert.equal(await readFile(path, "utf8"), unreadable);
+});
+
+
+it("keeps an outline through schema parsing and acceptance when optional viewpoints need resolution (issue 967)", async () => {
+  const { dir, store, gate, intent } = await open();
+  const characters = store.getBundle().sheets.filter((sheet) => sheet.type === "character");
+  const maren = characters.find((sheet) => sheet.id === "maren-kest")!;
+  const values = [maren.id, maren.name, "maren", "close third", "Nobody here", ""];
+  const action = ModelWorldChatActionSchema.parse({
+    kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: ["check_01J8F3K2QW9VZX4N7M0RTYB6HC"],
+    change: { operation: "outline", chapters: values.map((viewpointCharacter, index) => ({
+      title: `Viewpoint ${index + 1}`, synopsis: `Keep synopsis ${index + 1}.`, viewpointCharacter,
+    })) },
+  });
+  assert.equal(action.kind, "production-chapter");
+  if (action.kind !== "production-chapter") throw new Error("wrong action");
+  const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
+    kind: "world-chat-production-chapter", worldId: store.worldId, action,
+  });
+  assert.equal(proposal.targets.length, 6);
+  assert.match(proposal.summary, /viewpoint character left unset for Viewpoint 4, Viewpoint 5, Viewpoint 6/);
+  for (const [index, target] of proposal.targets.entries()) {
+    const staged = MarkdownFile.parse(await readFile(join(dir, ".proposals", proposal.id, target.path), "utf8"));
+    assert.equal(staged.data["pov"], index < 3 ? maren.id : undefined);
+    assert.equal(staged.data["viewpointCharacter"], undefined, "only canonical chapter metadata is persisted");
+    assert.equal(staged.data["synopsis"], `Keep synopsis ${index + 1}.`);
+  }
+  assert.equal((await gate.accept(proposal.id)).status, "accepted");
+  assert.equal(store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters.filter((c) => c.title.startsWith("Viewpoint ")).length, 6);
+});
+
+it("does not guess an ambiguous short name or erase an existing chapter viewpoint (issue 967)", async () => {
+  const dir = await makeTempWorld();
+  const source = await readFile(join(dir, "characters", "maren-kest.md"), "utf8");
+  const other = MarkdownFile.parse(source);
+  other.setData({ id: "maren-other", name: "Maren Other" });
+  await writeFile(join(dir, "characters", "maren-other.md"), other.serialize());
+  const chapter = MarkdownFile.parse(await readFile(join(dir, CHAPTER), "utf8"));
+  chapter.setData({ pov: "maren-kest" });
+  await writeFile(join(dir, CHAPTER), chapter.serialize());
+  const store = await WorldStore.open(dir, { clock: NOW });
+  closeOnCleanup(() => store.close());
+  const gate = new ProposalManager(store);
+  const intent = { actionId: newId("act"), conversationId: newId("cv") as ConversationId };
+  const create = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
+    kind: "world-chat-production-chapter", worldId: store.worldId,
+    action: { kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: [],
+      change: { operation: "create", title: "Ambiguous viewpoint", order: 99, body: "", status: "planned", viewpointCharacter: "maren" } },
+  });
+  assert.match(create.summary, /no unique character matched/);
+  const staged = MarkdownFile.parse(await readFile(join(dir, ".proposals", create.id, create.targets[0]!.path), "utf8"));
+  assert.equal(staged.data["pov"], undefined);
+  const edit = (viewpointCharacter: string | null) => stageWorldChatProductionAuthoredAction(store, gate, intent, {
+    kind: "world-chat-production-chapter", worldId: store.worldId,
+    action: { kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: [],
+      change: { operation: "edit", chapterId: "neap", changes: { viewpointCharacter } } },
+  });
+  const before = await readFile(join(dir, CHAPTER), "utf8");
+  await assert.rejects(edit("maren"), /could not match to one character/);
+  assert.equal(await readFile(join(dir, CHAPTER), "utf8"), before);
+  const cleared = await edit(null);
+  const clearedDoc = MarkdownFile.parse(await readFile(join(dir, ".proposals", cleared.id, CHAPTER), "utf8"));
+  assert.equal(clearedDoc.data["pov"], undefined);
 });
