@@ -4701,7 +4701,7 @@ export function ArtifactsScreen() {
           className="fy-gridcard fy-gridcard--quiet"
           style={{
             border: `1.5px dashed ${dropActive ? "var(--foreground)" : "var(--neutral-300)"}`,
-            background: dropActive ? "var(--neutral-100)" : "transparent",
+            background: dropActive ? "var(--muted)" : "transparent",
             color: "inherit",
             cursor: "pointer",
             textAlign: "left",
@@ -4710,7 +4710,6 @@ export function ArtifactsScreen() {
             justifyContent: "center",
             gap: 14,
             minHeight: 176,
-            boxShadow: "none",
           }}
         >
           <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>

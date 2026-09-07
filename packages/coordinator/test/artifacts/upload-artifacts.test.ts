@@ -57,6 +57,16 @@ const results = (events: DomainEvent[]) =>
   events.filter((e) => e.type === "queue.enqueue-result") as Array<Record<string, unknown>>;
 
 describe("filing artifacts from the panel (82a)", () => {
+  it("rejects more than sixteen picker results before filing anything", async () => {
+    const source = await sourceFile("over-limit.png", distinctPng(1));
+    const { provider, events, send } = await harness(() => Array.from({ length: 17 }, () => source));
+    try {
+      const before = provider.openStore()!.getBundle().artifacts;
+      await send(upload);
+      assert.deepEqual(provider.openStore()!.getBundle().artifacts, before);
+      assert.match(JSON.stringify(results(events)), /Import up to 16 files/);
+    } finally { await provider.close(); }
+  });
   it("copies what was picked onto the world's shelf, with a sidecar each", async () => {
     const a = await sourceFile("harbour-plate.png", distinctPng(1));
     const b = await sourceFile("bell-market.png", distinctPng(2));
