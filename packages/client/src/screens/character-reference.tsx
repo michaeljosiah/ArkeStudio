@@ -514,6 +514,7 @@ export function GenerateCharacterSheetScreen() {
         promptHint="Inherited from this world. Edit it and this one generation is made under your words instead — the look itself does not change."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("character-sheet", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? ""]?.worldName }}
         referenceHint="Optional. A layout, a pose sheet or a style plate to work from. It rides after the main photo, so it is dropped when the model has room for only one image."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
@@ -771,6 +772,7 @@ export function ReplaceMainPhotoScreen() {
         promptHint="Written from the character sheet. Whatever is here is what the model is asked for."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("main-photo", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? ""]?.worldName }}
         referenceHint="Optional. A lighting study, a costume plate, a photograph to match. Identity goes first, so this rides only where the model has room for a second image."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
@@ -990,6 +992,7 @@ export function CharacterLooksScreen() {
           promptHint="The main photo rides along, so what comes back is still this character wearing your words."
           worldSlug={world.meta.slug}
           reference={world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? null}
+          referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("look", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? ""]?.worldName }}
           referenceHint="Optional. A garment, a pose, a photograph to work from. The main photo goes first, so this rides only where the model has room for a second image."
           onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
           onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}

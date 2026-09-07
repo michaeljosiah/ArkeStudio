@@ -10,6 +10,8 @@ import type { WorldStore } from "./world/store.js";
  */
 export interface WorldProvider {
   listWorlds(): Promise<WorldSummary[]>;
+  /** Image paths only; reads no second store and acquires no world lock. */
+  listReferenceImages?(slug: string): Promise<string[]>;
   loadWorld(worldId: string): Promise<WorldBundle>;
   createWorld?(input: {
     name: string;

@@ -1,4 +1,4 @@
-import { TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
+import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
@@ -859,6 +859,14 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   const keyArtCandidates = await imagesIn(dir, join("incoming", "world-image"), "incoming/world-image");
   const masterLookCandidates = await imagesIn(dir, join("incoming", "master-look"), "incoming/master-look");
   const stagedReferences = await readStagedReferences(dir);
+  const stagedReferenceOrigins: Record<string, BorrowedImageOrigin> = {};
+  for (const file of Object.values(stagedReferences)) {
+    if (!file.startsWith("incoming/staged-refs/")) continue;
+    try {
+      const origin = BorrowedImageOriginSchema.parse(JSON.parse(await readFile(toExtendedLength(join(dir, file + ".origin.json")), "utf8")));
+      stagedReferenceOrigins[file] = origin;
+    } catch { /* Uploaded and local pictures have no borrowed origin. */ }
+  }
   const keyArt = await findKeyArt(dir);
   /*
    * When the key art last changed, so the renderer can tell a new picture from the old one.
@@ -1001,6 +1009,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     keyArtVersion,
     masterLookCandidates,
     stagedReferences,
+    stagedReferenceOrigins,
     sheets,
     canon,
     referenceKits,

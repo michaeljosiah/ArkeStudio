@@ -13,7 +13,7 @@ import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
-import { ReferencePickerBody, worldPickerSources } from "../components/reference-picker.js";
+import { StagedReferencePicker } from "../components/staged-reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -30,7 +30,6 @@ import {
   planKeyArt,
   useKeyArtPlans,
   pickStagedReference,
-  sendStageArtifactReference,
   setArtDirection,
   uploadMasterLook,
   uploadWorldImage,
@@ -431,6 +430,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         </div>}
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("world-image"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("world-image")] ?? ""]?.worldName }}
         referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
         onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
         onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("world-image"))}
@@ -574,6 +574,7 @@ export function ArtDirectionScreen() {
         promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("master-look"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("master-look")] ?? ""]?.worldName }}
         referenceHint={
           <>
             Optional. A palette, a frame or a lighting study for the model to look at while it works.{" "}
@@ -583,7 +584,7 @@ export function ArtDirectionScreen() {
               style={{ position: "static" }}
               onClick={() => setPickingReference(true)}
             >
-              Choose from artifacts
+              Browse images
             </button>
           </>
         }
@@ -592,21 +593,10 @@ export function ArtDirectionScreen() {
         {...(pickingReference
           ? {
               panel: (
-                <ReferencePickerBody
-                  mode="slot"
-                  worldSlug={world.meta.slug}
-                  model={model}
-                  carried={[]}
-                  world={worldPickerSources(world.artifacts, null)}
-                  session={[]}
-                  onChoose={(pick) => {
-                    if (pick.source === "artifact") {
-                      sendStageArtifactReference(world.meta.worldId, stagedReferenceKey("master-look"), pick.artifactId);
-                    }
-                    setPickingReference(false);
-                  }}
+                <StagedReferencePicker
+                  worldId={world.meta.worldId}
+                  referenceKey={stagedReferenceKey("master-look")}
                   onUpload={() => {
-                    // The host OS picker files into the world and stages in one step, as before.
                     pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"));
                     setPickingReference(false);
                   }}

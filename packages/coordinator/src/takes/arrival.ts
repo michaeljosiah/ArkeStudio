@@ -33,6 +33,7 @@ function provenanceOf(job: Job): Provenance {
     canonRevision: frozen?.canonRevision ?? 0,
     ...(frozen?.dialogueAssessments ? { dialogueAssessments: frozen.dialogueAssessments } : {}),
     sheets: frozen?.sheets ?? {},
+    ...(frozen?.borrowedImages ? { borrowedImages: frozen.borrowedImages } : {}),
     ...(frozen?.artDirectionVersion !== undefined ? { artDirectionVersion: frozen.artDirectionVersion } : {}),
     ...(frozen?.sceneId !== undefined ? { sceneId: frozen.sceneId } : {}),
     ...(frozen?.sceneVersion !== undefined ? { sceneVersion: frozen.sceneVersion } : {}),

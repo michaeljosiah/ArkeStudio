@@ -113,6 +113,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("reference.images"), requestId: UlidSchema,
+    slug: SlugSchema, images: z.array(z.string()), error: z.string().optional() }).strict(),
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),

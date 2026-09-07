@@ -399,6 +399,16 @@ export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAcc
   return () => benchSubjectAcceptedListeners.delete(listener);
 }
 
+export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
+const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
+export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
+  referenceImageListeners.add(listener);
+  return () => { referenceImageListeners.delete(listener); };
+}
+export function browseReferenceImages(slug: string, requestId: string): void {
+  send({ kind: "browse-reference-images", slug, requestId });
+}
+
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
 export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
@@ -1044,6 +1054,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.subject-accepted") {
       for (const listener of benchSubjectAcceptedListeners) listener(event);
+    }
+    if (event.type === "reference.images") {
+      for (const listener of referenceImageListeners) listener(event);
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
@@ -1764,9 +1777,10 @@ export function uploadMasterLook(worldId: string): void {
  * Stage an image for a generation to look at (design 67). Same picker, same one-way street: the
  * renderer asks, and learns from the snapshot that a reference is now attached.
  */
-export function pickStagedReference(worldId: string, key: string): void {
+export function pickStagedReference(worldId: string, key: string, image?: { slug: string; path: string }): void {
   send({
     kind: "pick-staged-reference",
+    ...(image ? { image } : {}),
     worldId,
     key,
     requestId: queueRequest("pick-staged-reference"),

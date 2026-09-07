@@ -3573,12 +3573,20 @@ export class Coordinator {
   }
 
   /**
-   * Freeze recipe and engine identity onto a local-recipe dispatch before it is journalled
-   * (SPEC-021 §2.11, R-15). Cloud inputs pass through untouched; a comfyui input for a model
+   * Freeze borrowed-image origin, then recipe and engine identity before a dispatch is journalled
+   * (issue 960; SPEC-021 §2.11, R-15). Cloud inputs need no recipe; a comfyui input for a model
    * the catalogue does not carry passes through too — admission refuses it with the reason,
    * which beats inventing identity for work that cannot run.
    */
   private freezeLocalIdentity(input: EnqueueInput): EnqueueInput {
+    const store = this.opts.provider.openStore?.();
+    const references = input.params.references;
+    if (store?.worldId === input.worldId && Array.isArray(references)) {
+      const origins = store.getBundle().stagedReferenceOrigins;
+      const borrowedImages = references.flatMap(file => typeof file === "string" && origins[file] ? [origins[file]] : []);
+      if (borrowedImages.length) input = { ...input, params: { ...input.params,
+        provenance: { ...(input.params.provenance as object), borrowedImages } } };
+    }
     if (input.provider !== "comfyui" || input.recipe !== undefined) return input;
     const identity = this.opts.comfyui?.service.identityFor(input.model);
     if (!identity) return input;
@@ -11316,14 +11324,40 @@ export class Coordinator {
         );
         return;
       }
+      case "browse-reference-images": {
+        try {
+          if (!(await this.opts.provider.listWorlds()).some(world => world.slug === msg.slug)) throw new Error("That world is unavailable.");
+          if (!this.opts.provider.listReferenceImages) throw new Error("Reference browsing is unavailable.");
+          const images = await this.opts.provider.listReferenceImages(msg.slug);
+          this.emit({ at: this.nowIso(), type: "reference.images", requestId: msg.requestId, slug: msg.slug, images });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "reference.images", requestId: msg.requestId, slug: msg.slug, images: [],
+            error: error instanceof Error ? error.message : "Images could not be read." });
+        }
+        return;
+      }
       case "pick-staged-reference": {
         const store = this.opts.provider.openStore?.();
         const pick = this.opts.pickFiles;
-        if (!store || store.worldId !== msg.worldId || !pick) {
+        if (!store || store.worldId !== msg.worldId || (!msg.image && !pick)) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Reference images are unavailable.");
           return;
         }
-        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        let origin: import("@arke-studio/contracts").BorrowedImageOrigin | undefined;
+        let chosen: readonly string[];
+        if (msg.image) {
+          const sourceWorld = (await this.opts.provider.listWorlds()).find(world => world.slug === msg.image!.slug);
+          const offered = sourceWorld && await this.opts.provider.listReferenceImages?.(sourceWorld.slug);
+          const media = offered?.includes(msg.image.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
+          if (!sourceWorld || !media || !media.contentType.startsWith("image/")) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "That image is no longer available.");
+            return;
+          }
+          chosen = [media.path];
+          if (sourceWorld.worldId !== msg.worldId) origin = {
+            worldName: sourceWorld.name, imageName: msg.image.path.split("/").pop()!, copiedAt: this.nowIso(),
+          };
+        } else chosen = await pick!({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         const [source] = chosen;
         // A closed dialog is not a failure, here as everywhere else the host picker is opened.
         if (!source) {
@@ -11350,8 +11384,11 @@ export class Coordinator {
               recursive: true,
               force: true,
             });
+            const file = join(store.dir, stagedReferenceDir(msg.key), `reference${picked.extension}`);
+            // Origin lands first: a failed metadata write must never leave an anonymous borrowed image.
+            if (origin) await atomicWriteFile(file + ".origin.json", Buffer.from(JSON.stringify(origin), "utf8"));
             await atomicWriteFile(
-              join(store.dir, stagedReferenceDir(msg.key), `reference${picked.extension}`),
+              file,
               picked.data,
             );
           })

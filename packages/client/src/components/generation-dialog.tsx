@@ -5,6 +5,7 @@ import { DispatchBar } from "./dispatch-bar.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
+import { StagedReferencePicker } from "./staged-reference-picker.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -92,6 +93,7 @@ export function GenerationDialog({
   commit,
   panel,
   onPanelClose,
+  referenceTarget,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -219,7 +221,20 @@ export function GenerationDialog({
    */
   panel?: ReactNode;
   onPanelClose?: () => void;
+  referenceTarget?: { worldId: string; key: string; origin?: string | undefined };
 }) {
+  const [browsingReference, setBrowsingReference] = useState(false);
+  const uploadReference = onAttachReference;
+  if (referenceTarget) {
+    onAttachReference = () => setBrowsingReference(true);
+    if (referenceTarget.origin) referenceHint = <>from {referenceTarget.origin}{referenceHint && <><br />{referenceHint}</>}</>;
+    if (browsingReference) {
+      panel = <StagedReferencePicker worldId={referenceTarget.worldId} referenceKey={referenceTarget.key}
+        onClose={() => setBrowsingReference(false)} onUpload={() => { uploadReference?.(); setBrowsingReference(false); }} />;
+      onPanelClose = () => setBrowsingReference(false);
+    }
+  }
+  useEffect(() => { if (!open) setBrowsingReference(false); }, [open]);
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();

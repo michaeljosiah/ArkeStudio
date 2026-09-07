@@ -332,11 +332,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("pick-staged-reference"),
+      image: z.object({ slug: SlugSchema, path: z.string().min(1) }).strict().optional(),
       worldId: UlidSchema,
       requestId: UlidSchema,
       key: StagedReferenceKeySchema,
     })
     .strict(),
+  z.object({ kind: z.literal("browse-reference-images"), requestId: UlidSchema, slug: SlugSchema }).strict(),
   /** Unstage it. That generation goes back to being made from words alone. */
   z
     .object({ kind: z.literal("clear-staged-reference"), worldId: UlidSchema, key: StagedReferenceKeySchema })
