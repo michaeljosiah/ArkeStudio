@@ -416,16 +416,16 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         lede="One picture of this world, for the app to show it by."
         prompt={prompt}
         onPrompt={setDraft}
+        promptMetadata={{constraints:plan?.fixedConstraints??"Preparing…",...((plan?.candidate||draft!==null)&&plan?{baseline:plan.prompt}:{})}}
         promptHint="The Art Director rewrites the assembled prompt for you to compare. Use assembled keeps the original; Use candidate selects the rewrite. Only Generate makes an image."
-        extra={<div style={{overflowWrap:"anywhere"}}>
-          <Button disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
-          {pendingReview!==null&&<Button onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}
-          <Button disabled={!plan||pendingReview!==null} onClick={()=>setDraft(null)}>Use assembled</Button>
-          {plan?.candidate&&<Button disabled={pendingReview!==null} onClick={()=>setDraft(plan.candidate!)}>Use candidate</Button>}
+        extra={<div className="fy-key-art-review" style={{overflowWrap:"anywhere"}}>
+          <Button size="sm" disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
+          {pendingReview!==null&&<Button size="sm" onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}
+          <Button size="sm" disabled={!plan||pendingReview!==null} onClick={()=>setDraft(null)}>Use assembled</Button>
+          {plan?.candidate&&<Button size="sm" disabled={pendingReview!==null} onClick={()=>setDraft(plan.candidate!)}>Use candidate</Button>}
           {plan?.candidate&&draft===null&&<p>The alternative below is not selected. Generate will use the assembled prompt shown in the box.</p>}
           {pendingReview!==null?<p role="status">Preparing prompt review… No image has been enqueued.</p>:<>
-            {(plan?.candidate&&draft===null?plan.review:promptReview)&&<PromptReviewDetails review={(plan?.candidate&&draft===null?plan.review:promptReview)!}/>}<p role="status">{plan?.reason??reviewError}</p></>}
-          <p>Fixed constraints: {plan?.fixedConstraints??"Preparing…"}</p>
+            {(plan?.candidate||draft!==null)&&(plan?.candidate&&draft===null?plan.review:promptReview)&&<PromptReviewDetails showMetrics={false} review={(plan?.candidate&&draft===null?plan.review:promptReview)!}/>}<p role="status">{plan?.reason??reviewError}</p></>}
         </div>}
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}

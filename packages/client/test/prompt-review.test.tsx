@@ -14,6 +14,6 @@ it("keeps a large rewrite collapsed without rendering token rows",async()=>{
   const review=await reviewPrompt("a ".repeat(200),"a extra ".repeat(200),[]);
   const html=renderToString(<PromptReviewDetails review={review}/>);
   assert.match(html,/<details><summary>Review changes/);
-  assert.match(html.replaceAll("<!-- -->",""),/200 additions are unverified/);
+  assert.match(html.replaceAll("<!-- -->","").replace(/<[^>]*>/g,""),/200 additions are unverified/);
   assert.doesNotMatch(html,/<ins>|<del>|Exact source:/);
 });

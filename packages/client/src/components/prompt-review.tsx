@@ -16,7 +16,7 @@ export function ShotPromptProposalDiff({ before, after }: { before: string | nul
   if (error) return <p role="status">{error}</p>;
   return result?.before === before && result.after === after ? <PromptReviewDetails review={result.review} /> : <p role="status">Calculating exact prompt changes…</p>;
 }
-export function PromptReviewDetails({ review }: {review:PromptReview}) {
+export function PromptReviewDetails({ review, showMetrics=true }: {review:PromptReview;showMetrics?:boolean}) {
   const [open,setOpen]=useState(false),[limit,setLimit]=useState(30);
   const additions=review.hunks.filter(h=>h.op==="add");
   const unverified=additions.filter(h=>h.support==="unverified"&&/[\p{L}\p{N}]/u.test(h.text));
@@ -24,16 +24,15 @@ export function PromptReviewDetails({ review }: {review:PromptReview}) {
   const added=additions.reduce((sum,h)=>sum+Array.from(h.text).length,0);
   const removed=review.hunks.filter(h=>h.op==="delete").reduce((sum,h)=>sum+Array.from(h.text).length,0);
   return <div className="fy-prompt-review" aria-label="Creative prompt diff" style={{overflowWrap:"anywhere"}}>
-    <p>{review.candidate.characters} Unicode characters · {review.candidate.utf8Bytes} UTF-8 bytes. Change: {review.characterDelta>=0?"+":""}{review.characterDelta} characters.</p>
+    {showMetrics&&<p>{review.candidate.characters} Unicode characters · {review.candidate.utf8Bytes} UTF-8 bytes. Change: {review.characterDelta>=0?"+":""}{review.characterDelta} characters.</p>}
     {review.hunks.length===0?<p>No textual changes.</p>:<>
-      <p>Added {added} characters; removed {removed}. {unverified.length} {unverified.length===1?"addition is":"additions are"} unverified.</p>
-      {unverified.length>0&&<p>Unverified means the application found no exact quotation in the supplied sources. It does not mean false.</p>}
+      <p>Added {added} characters; removed {removed}.{unverified.length>0&&<> {unverified.length} {unverified.length===1?"addition is":"additions are"} <abbr tabIndex={0} title="Unverified means the application found no exact quotation in the supplied sources. It does not mean false.">unverified</abbr>.</>}</p>
       <details onToggle={event=>setOpen(event.currentTarget.open)}>
-        <summary>Review changes · unverified additions first</summary>
+        <summary>Review changes</summary>
         {open&&<div className="fy-prompt-review__hunks">
           {ordered.slice(0,limit).map((h,i)=><div key={i}>
             {h.op==="delete"?<p>Removed: <del>{h.text}</del></p>:<>
-              <p>Added: <ins>{h.text}</ins> · {h.support}</p>
+              <p>Added: <ins>{h.text}</ins> · {h.support==="unverified"?<abbr tabIndex={0} title="No exact quotation found in the supplied sources. This does not mean false.">unverified</abbr>:"exact-source"}</p>
               {h.sources.length>0&&<details><summary>{h.sources.length} exact sources</summary>
                 {h.sources.map((source,j)=><p key={j}>Exact source: {source.ref} · “{source.quote}”</p>)}
               </details>}

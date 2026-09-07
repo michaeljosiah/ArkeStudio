@@ -14,7 +14,7 @@ import { proposedMasterLookNote, splitDescription } from "../src/screens/art-dir
 import { authoredPrompt } from "../src/components/generation-dialog.js";
 import { NewWorldScreen } from "../src/screens/shell.js";
 import { App } from "../src/App.js";
-import { worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
+import { reviewPrompt, worldImagePrompt, type BuildReview, type ClientMessage, type GenesisBlueprint } from "@arke-studio/contracts";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -723,4 +723,35 @@ describe("a character who is never depicted (issue 945)", () => {
     }
   });
 
+});
+
+it("keeps key-art metadata at the editor and shows review only after a draft", async () => {
+  Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {} });
+  const prompt="A quiet harbour.",candidate="A quiet neon harbour.";
+  const plan={requestId:"review-test",prompt,carried:[],dropped:[],sources:[],fixedConstraints:"No text, no logos."};
+  __setStateForTest(FIXTURE_STATE,{keyArtPlans:{[WORLD_ID]:plan}});
+  const container=document.createElement("div"); document.body.append(container);
+  const root=createRoot(container);
+  try {
+    await act(async()=>{root.render(<MemoryRouter initialEntries={[`/w/${WORLD_ID}/art-direction`]}><App/></MemoryRouter>);});
+    await act(async()=>{await new Promise(resolve=>setTimeout(resolve,25));});
+    const dialog=[...container.querySelectorAll("dialog")].find(d=>d.textContent?.includes("Generate the world's key art"))!;
+    assert.ok(dialog);
+    assert.equal(dialog.querySelector('.fy-gendialog__count')?.textContent,String(Array.from(prompt).length));
+    assert.match(dialog.querySelector('.fy-gendialog__info')?.getAttribute('title')??"",/No text, no logos/);
+    assert.doesNotMatch(dialog.textContent??"",/No textual changes|Unverified means|Change:|Fixed constraints:/);
+    assert.equal(dialog.querySelector('[aria-label="Creative prompt diff"]'),null);
+    const review=await reviewPrompt(prompt,candidate,[]);
+    await act(async()=>{__setStateForTest(FIXTURE_STATE,{keyArtPlans:{[WORLD_ID]:{...plan,candidate,review}}});});
+    assert.ok(dialog.querySelector('[aria-label="Creative prompt diff"]'));
+    assert.match(dialog.querySelector('abbr')?.getAttribute('title')??"",/does not mean false/);
+    assert.doesNotMatch(dialog.textContent??"",/Unverified means/);
+    assert.equal(dialog.querySelectorAll('ins').length,0,"detail rows start collapsed");
+    const disclosure=dialog.querySelector('.fy-prompt-review details')!;
+    await act(async()=>{(disclosure as HTMLDetailsElement).open=true;disclosure.dispatchEvent(new Event('toggle'));});
+    assert.ok(dialog.querySelector('ins'),"opening the disclosure shows changes");
+    await act(async()=>button(dialog as HTMLElement,"Use candidate").click());
+    assert.equal(dialog.querySelector('textarea')?.value,candidate);
+    assert.match(dialog.querySelector('.fy-gendialog__count')?.textContent??"",/\+5/);
+  } finally { await act(async()=>root.unmount());container.remove();__setStateForTest(FIXTURE_STATE); }
 });
