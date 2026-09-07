@@ -60,6 +60,7 @@ import {
 import { applyFieldEdit, safeFieldEditMessage } from "./field-edit.js";
 import { applyJsonResolution, applyResolution, mergeJson, mergeMarkdown } from "./merge.js";
 import { projectReview, type ReviewProjection } from "./review.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
  * The schema each JSON track's whole file must satisfy (SPEC-023 R-17): checked at staging so a
@@ -107,7 +108,7 @@ function chapterProblem(path: string, content: string): string | null {
     ChapterFrontmatterSchema.parse(MarkdownFile.parse(content).data);
     return null;
   } catch (err) {
-    return `not a chapter: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`;
+    return `not a chapter: ${describeCoordinatorError(err)}`;
   }
 }
 
@@ -448,7 +449,7 @@ export class ProposalManager {
           schema.parse(JSON.parse(target.content));
         } catch (err) {
           throw new Error(
-            `${target.path} is not a ${JSON_TRACK_LABELS[track] ?? track}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+            `${target.path} is not a ${JSON_TRACK_LABELS[track] ?? track}: ${describeCoordinatorError(err)}`,
           );
         }
       }
@@ -1121,7 +1122,7 @@ export class ProposalManager {
         } catch (err) {
           refusals.push({
             path: file.path,
-            message: `the scene on disk cannot be written over: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+            message: `the scene on disk cannot be written over: ${describeCoordinatorError(err)}`,
           });
         }
       }
@@ -1203,7 +1204,7 @@ export class ProposalManager {
         } catch (err) {
           problems.push({
             path: file.path,
-            message: `not a ${JSON_TRACK_LABELS[classify(file.path).track] ?? "valid record"}: ${err instanceof Error ? err.message.slice(0, 200) : "unreadable"}`,
+            message: `not a ${JSON_TRACK_LABELS[classify(file.path).track] ?? "valid record"}: ${describeCoordinatorError(err)}`,
           });
           continue;
         }

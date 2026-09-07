@@ -32,6 +32,7 @@ import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 
 /**
  * One turn: a message goes out, a reply and its propositions come back (#70 §8).
@@ -888,7 +889,7 @@ export class WorldChatRunner {
           problems: [
             {
               code: "editor-request",
-              safeMessage: `The editor request was refused: ${err instanceof Error ? err.message : String(err)}`.slice(0, 300),
+              safeMessage: `The editor request was refused: ${describeCoordinatorError(err)}`,
             },
           ],
         };

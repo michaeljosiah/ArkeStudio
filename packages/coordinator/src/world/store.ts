@@ -11,6 +11,7 @@ import {
   type WorldAuthoredFieldChanges,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
@@ -572,7 +573,7 @@ export class WorldStore {
         await this.rescan();
         await this.afterExternalEditsCleared();
       } catch (err) {
-        const refusal = (err instanceof Error ? err.message : String(err)).slice(0, 300);
+        const refusal = describeCoordinatorError(err);
         this.externalEdits = this.externalEdits.map((candidate) =>
           candidate.path === portablePath
             ? { path: candidate.path, kind: candidate.kind, refusal }
@@ -621,7 +622,7 @@ export class WorldStore {
         {
           path: `productions/${styled.meta.id}/prose-style.json`,
           kind: "modified",
-          refusal: (err instanceof Error ? err.message : String(err)).slice(0, 300),
+          refusal: describeCoordinatorError(err),
         },
       ];
     }

@@ -28,6 +28,7 @@ import { ZodError } from "zod";
 import { entryContent } from "../canon/authoring.js";
 import { buildSheetContent, editSheetContent } from "../sheets/authoring.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { MarkdownFile } from "../world/text-files.js";
 
 /**
@@ -236,7 +237,7 @@ function detailOf(err: unknown): string {
       .join("; ")
       .slice(0, 300);
   }
-  return err instanceof Error ? err.message.slice(0, 300) : "unreadable";
+  return describeCoordinatorError(err);
 }
 
 /**
@@ -953,7 +954,7 @@ function jsonRecord<T>(
     const record = schema.parse(value);
     return { record, content: `${JSON.stringify(record, null, 2)}\n` };
   } catch (err) {
-    throw new MaterialiseError(candidateId, err instanceof Error ? err.message.slice(0, 300) : "does not satisfy its schema");
+    throw new MaterialiseError(candidateId, describeCoordinatorError(err));
   }
 }
 

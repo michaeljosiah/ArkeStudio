@@ -31,6 +31,7 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
@@ -822,7 +823,7 @@ export class FoundingBuildService {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
     }
@@ -970,7 +971,7 @@ export class FoundingBuildService {
         .then(
           () => undefined,
           (err: unknown) =>
-            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+            `authored from its one-line seed — the drafting agent failed (${describeCoordinatorError(err)})`,
         );
     }
     // The conversation's rule survives even a drafting agent that omits or contradicts it.
@@ -1091,7 +1092,7 @@ export class FoundingBuildService {
         kind: "terminal",
         key: item.key,
         outcome: item.kind === "sheet-image" && err instanceof AnchorMissing ? "skipped" : "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1130,7 +1131,7 @@ export class FoundingBuildService {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1254,7 +1255,7 @@ export class FoundingBuildService {
           kind: "terminal",
           key: item.key,
           outcome: "failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: describeCoordinatorError(err),
           at: this.ports.nowIso(),
         });
       }
