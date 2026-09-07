@@ -160,7 +160,6 @@ import {
   draftSceneSkeleton,
   exportBoard,
   landBoard,
-  overviewSteer,
   productionCreatedBy,
   proposeEpisode,
   proposeSeason,
@@ -7560,51 +7559,6 @@ export class Coordinator {
                   proposalId,
                   purpose: "drafting",
                   instruction: `Write the story overview in ${path}. ${msg.instruction}. The file is one JSON document: keep the version field untouched and fill logline (one sentence), spine (the shape of the whole story), acts (an array of { title, summary }), and targetLength. Anything the overview implies about the world — a new name, a rule, a place — must NOT be written into world files; note such facts in the spine text as open questions for separate proposal. Do not touch any other file.`,
-                },
-                worldQueryUrl,
-              )
-              .then(() => this.refreshWorldSnapshot(msg.worldId)),
-          );
-        } catch {
-          this.transport.broadcastSnapshot();
-        }
-        return;
-      }
-      case "draft-chapter": {
-        const gate = this.opts.provider.gate?.();
-        const store = this.opts.provider.openStore?.();
-        if (!gate || !store || !this.authoring || !this.opts.adapter?.readiness().ready) return;
-        try {
-          const path = `productions/${msg.productionId}/chapters/${msg.chapterFile}.md`;
-          const staged = await gate.stage({
-            kind: "chapter-draft",
-            summary: `Draft: ${msg.chapterFile}`,
-            source: "chat:studio",
-            // There is no client caller or durable chapter conversation. This remains unattended
-            // until a real surface exists; recording an attended owner here would hide dead code.
-            origin: { surface: "coordinator", gesture: "legacy-draft-chapter-command" },
-            targets: [{ path }],
-          });
-          this.emit({
-            at: new Date().toISOString(),
-            type: "proposal.staged",
-            worldId: msg.worldId,
-            proposalId: staged.id,
-          });
-          const worldQueryUrl = await this.worldQuery.start();
-          this.trackBackground(
-            this.authoring
-              .run(
-                store,
-                gate,
-                {
-                  worldId: msg.worldId,
-                  proposalId: staged.id,
-                  purpose: "drafting",
-                  instruction: `Draft the chapter prose in ${path}. ${msg.instruction}.${overviewSteer(
-                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.story,
-                    store.getBundle().productions.find((p) => p.meta.id === msg.productionId)?.proseStyle,
-                  )} Anything the prose implies about the world — a new name, a rule, a place — must NOT be written into world files; list such facts in the chapter's frontmatter under \`implies\`, each as a kind (canon, character, location or faction) and one sentence, for separate proposal (turn 127). Never put them in the prose.`,
                 },
                 worldQueryUrl,
               )

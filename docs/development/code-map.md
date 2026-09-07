@@ -100,3 +100,19 @@ their measured parent media, and carries scoped missing-measurement notices into
 Inspect `TimelineCommandRefused` and existing migration/history handling when changing edits. A client drag preview is not a successful persisted edit. Start with coordinator `test/productions/timeline.test.ts`, `timeline-migration.test.ts` and client `test/timeline-editing-guards.test.tsx`, `plan-playback.test.ts`.
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).
+
+
+### Edit or draft a chapter
+
+Client `screens/chapter-workspace.tsx` opens prose through `open-chapter`, saves against the file
+hash through `save-chapter`, edits the frontmatter through `edit-chapter-plan`, and restores an
+available snapshot through `restore-chapter`. Coordinator `productions/ops.ts` owns those writes;
+`world/commit.ts` owns the chapter history and commits `progress.json` with a successful save.
+
+The dock uses the production conversation, naming the chapter as its subject. `world-chat/run.ts`
+asks `chapter-brief.ts` for leased reads of its plan, previous ending, draws and style, retaining
+the normal receipts. `production-authoring.ts` stages a `production-chapter` action as a chapter
+proposal; acceptance cuts a version. Its `outline` operation stages several planned chapters on
+one card. Implies stays on the chapter until Propose sends its separate canon/sheet ask or Dismiss
+removes an open item. See SPEC-012 R-53–R-61 and the chapter workspace, chapter brief, chapter
+operations and story dashboard tests named above.

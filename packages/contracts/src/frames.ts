@@ -2033,16 +2033,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       version: z.number().int().min(0),
     })
     .strict(),
-  /** SPEC-012 R-5: agent drafts arrive as proposals and cut a version on acceptance. */
-  z
-    .object({
-      kind: z.literal("draft-chapter"),
-      worldId: UlidSchema,
-      productionId: SlugSchema,
-      chapterFile: z.string().min(1),
-      instruction: z.string().min(1).max(2000),
-    })
-    .strict(),
   /** SPEC-012 R-4: reorder via frontmatter — no file renamed, no history path moved. */
   z
     .object({

@@ -3450,15 +3450,6 @@ export function editChapterPlan(
   send({ kind: "edit-chapter-plan", worldId, productionId, chapterFile, changes });
 }
 
-export function draftChapter(
-  worldId: string,
-  productionId: string,
-  chapterFile: string,
-  instruction: string,
-): void {
-  send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
-}
-
 export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
   send({ kind: "reorder-chapters", worldId, productionId, orderedFiles });
 }
