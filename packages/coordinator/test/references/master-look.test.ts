@@ -1,3 +1,6 @@
+import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
+import { assembleKeyArt } from "../../src/references/key-art-references.js";
+import { mainPhotoRequests } from "../../src/references/generate.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -472,5 +475,50 @@ describe("staging a reference for the next master look", () => {
     } finally {
       await provider.close();
     }
+  });
+});
+
+
+describe("world images in generation slots (#948)", () => {
+  it("stages the accepted face by pointer, preserves its role and leaves the original on clear", async () => {
+    const file = "references/maren-kest/head-front.png";
+    const { provider, worldDir, send, events } = await harness(() => { throw new Error("must not open the OS picker"); }, async (dir) => {
+      await writeFile(join(dir, file), pngBytes());
+    });
+    try {
+      await send({ kind: "pick-staged-reference", key: "world-image", worldId: WORLD_ID, worldFile: file, requestId: "01J8F3K2QW9VZX4N7M0RTYB62A" });
+      const store = provider.openStore()!;
+      const bundle = store.getBundle();
+      assert.equal(bundle.stagedReferences["world-image"], file);
+      assert.deepEqual(await readdir(join(worldDir, stagedReferenceDir("world-image"))), ["world.json"]);
+      const source = worldImageReferences(bundle).find((image) => image.file === file)!;
+      assert.equal(source.role, "identity");
+      const assembly = await assembleKeyArt(store, bundle, null, model, file);
+      assert.deepEqual(assembly.referenceRoles, [{ file, role: "identity" }]);
+      assert.equal(assembly.sheets["maren-kest"], bundle.sheets.find((sheet) => sheet.id === "maren-kest")!.version);
+      const [request] = mainPhotoRequests(bundle.meta, bundle.artDirection, bundle.sheets.find((sheet) => sheet.id === "maren-kest")!, null, model, {
+        prompt: "A portrait", count: 1, identityReferences: [], generationKey: "test", staged: stagedWorldImage(bundle, "world-image")!,
+      });
+      assert.deepEqual(request!.input.params["referenceRoles"], [{ file, role: "identity" }]);
+      await send({ kind: "clear-staged-reference", key: "world-image", worldId: WORLD_ID });
+      assert.equal(store.getBundle().stagedReferences["world-image"], undefined);
+      assert.deepEqual(await readFile(join(worldDir, file)), Buffer.from(pngBytes()));
+      assert.ok(events.some((event) => event.type === "queue.enqueue-result" && event.disposition === "not-queued"));
+    } finally { await provider.close(); }
+  });
+
+  it("refuses traversal, unknown files, missing images and stale-world requests without replacing the slot", async () => {
+    const file = "references/maren-kest/head-front.png";
+    const { provider, worldDir, send, events } = await harness(() => [], async (dir) => { await writeFile(join(dir, file), pngBytes()); });
+    try {
+      const pick = (worldFile: string, worldId = WORLD_ID) => send({ kind: "pick-staged-reference", key: "master-look", worldId, worldFile, requestId: "01J8F3K2QW9VZX4N7M0RTYB62A" });
+      await pick(file);
+      for (const bad of ["../outside.png", "C:/outside.png", "unknown.png"]) await pick(bad);
+      await pick(file, "01J8F3K2QW9VZX4N7M0RTYB61A");
+      assert.equal(provider.openStore()!.getBundle().stagedReferences["master-look"], file);
+      await rm(join(worldDir, file));
+      await pick(file);
+      assert.equal(events.filter((event) => event.type === "queue.enqueue-result" && event.disposition === "rejected").length, 5);
+    } finally { await provider.close(); }
   });
 });

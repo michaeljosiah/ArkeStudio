@@ -340,6 +340,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("pick-staged-reference"),
+      worldFile: z.string().min(1).max(1024).optional(),
       worldId: UlidSchema,
       requestId: UlidSchema,
       key: StagedReferenceKeySchema,

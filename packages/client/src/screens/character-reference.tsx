@@ -521,6 +521,7 @@ export function GenerateCharacterSheetScreen() {
         reference={world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? null}
         referenceHint="Optional. A layout, a pose sheet or a style plate to work from. It rides after the main photo, so it is dropped when the model has room for only one image."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
+        worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
         extra={travelling}
         workflow="character-sheet"
@@ -778,6 +779,7 @@ export function ReplaceMainPhotoScreen() {
         reference={world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? null}
         referenceHint="Optional. A lighting study, a costume plate, a photograph to match. Identity goes first, so this rides only where the model has room for a second image."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
         extra={travelling}
         workflow="main-photo"
@@ -997,6 +999,7 @@ export function CharacterLooksScreen() {
           reference={world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? null}
           referenceHint="Optional. A garment, a pose, a photograph to work from. The main photo goes first, so this rides only where the model has room for a second image."
           onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
+          worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId), file) }}
           onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
           extra={
             <>

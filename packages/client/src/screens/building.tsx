@@ -83,6 +83,9 @@ export function BuildingScreen() {
         </div>
 
         <Loading size={72} />
+        {build.items.filter((item) => item.kind === "key-art" && item.detail).map((item) => (
+          <p key={item.key} role="status" style={{ maxWidth: 560, margin: 0 }}>{item.detail}</p>
+        ))}
 
         <div style={{ width: "min(560px, 100%)", display: "flex", flexDirection: "column", gap: 7 }}>
           {/* The item in flight, named (R-41) — "Nadia · main photo", never "Creating characters". */}

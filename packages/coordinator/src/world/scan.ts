@@ -1,12 +1,13 @@
+import { isWorldImagePath } from "@arke-studio/contracts";
 import { TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import { discoverBenchSessions } from "../bench/service.js";
 import {
@@ -182,6 +183,17 @@ async function readStagedReferences(dir: string): Promise<Record<string, string>
       staged[key] = image;
       continue;
     }
+    try {
+      const parsed = JSON.parse(await readFile(join(dir, root, key, "world.json"), "utf8")) as { file?: unknown };
+      if (typeof parsed.file === "string" && isWorldImagePath(parsed.file)) {
+        const worldRoot = await realpath(dir);
+        const target = await realpath(join(dir, parsed.file));
+        if (target.startsWith(worldRoot + sep) && (await stat(target)).isFile()) {
+          staged[key] = parsed.file;
+          continue;
+        }
+      }
+    } catch { /* A removed image leaves an empty slot. */ }
     // An artifact-backed slot (issue 305 §4) holds a pointer, never a copy: the staged path is
     // the artifact's own file, so clearing the slot removes this directory and nothing else.
     try {

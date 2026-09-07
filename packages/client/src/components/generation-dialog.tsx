@@ -1,3 +1,5 @@
+import { worldImageReferences, type WorldBundle, type ManifestModel } from "@arke-studio/contracts";
+import { ReferencePickerBody } from "./reference-picker.js";
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
 import { Button, Textarea } from "./ui.js";
@@ -69,6 +71,7 @@ export function GenerationDialog({
   referenceLabel = "Reference image",
   referenceHint,
   onAttachReference,
+  worldReferences,
   onClearReference,
   workflow,
   capability = "image",
@@ -149,6 +152,7 @@ export function GenerationDialog({
   referenceLabel?: string;
   referenceHint?: ReactNode;
   onAttachReference?: () => void;
+  worldReferences?: { world: WorldBundle; model: ManifestModel | null; onChoose: (file: string) => void };
   onClearReference?: () => void;
   /** Which kind of work this is, for the estimate the bar shows. */
   workflow: CharacterImageWorkflow;
@@ -220,6 +224,22 @@ export function GenerationDialog({
   panel?: ReactNode;
   onPanelClose?: () => void;
 }) {
+  const [pickingReference, setPickingReference] = useState(false);
+  if (pickingReference && worldReferences) {
+    panel = <ReferencePickerBody
+      mode="slot" only="image" title="Choose one reference image"
+      worldSlug={worldSlug} model={worldReferences.model} carried={[]} session={[]}
+      world={worldImageReferences(worldReferences.world).map((source) => ({
+        key: source.file, kind: "image", name: source.name, imagePath: source.file,
+        meta: source.role, group: source.group, durationSec: 0,
+        pick: { source: "world-file", path: source.file },
+      }))}
+      onChoose={(pick) => { if (pick.source === "world-file") worldReferences.onChoose(pick.path); setPickingReference(false); }}
+      onUpload={() => { onAttachReference?.(); setPickingReference(false); }}
+      onClose={() => setPickingReference(false)}
+    />;
+    onPanelClose = () => setPickingReference(false);
+  }
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();
@@ -243,7 +263,7 @@ export function GenerationDialog({
   }, [pressed]);
   // A dialog reopened after an answer must not still be mid-press from the last one.
   useEffect(() => {
-    if (!open) setPressed(false);
+    if (!open) { setPressed(false); setPickingReference(false); }
   }, [open]);
 
   /*
@@ -337,10 +357,10 @@ export function GenerationDialog({
         */}
         {reference !== undefined && (
           <>
-            <div className="fy-gendialog__label">{referenceLabel}</div>
+            <div className="fy-gendialog__label">{referenceLabel}{worldReferences && " · one optional image"}</div>
             <div className="fy-gendialog__reference">
               {reference === null ? (
-                <button type="button" className="fy-gendialog__slot" onClick={onAttachReference}>
+                <button type="button" className="fy-gendialog__slot" onClick={worldReferences ? () => setPickingReference(true) : onAttachReference}>
                   <Plus size={16} />
                   <span>Add a reference image</span>
                 </button>
@@ -349,6 +369,10 @@ export function GenerationDialog({
                   <span className="fy-gendialog__thumb">
                     <Portrait worldSlug={worldSlug} path={reference} label="Reference image" radius={7} />
                   </span>
+                  {worldReferences && <span>{(() => {
+                    const source = worldImageReferences(worldReferences.world).find((image) => image.file === reference);
+                    return source ? `${source.name} · ${source.role}` : "Uploaded reference · style";
+                  })()}</span>}
                   <button type="button" className="fy-gendialog__remove" onClick={onClearReference}>
                     Remove
                   </button>

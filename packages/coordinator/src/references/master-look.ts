@@ -93,6 +93,7 @@ export function masterLookRequest(
     prompt?: string | undefined;
     /** World-relative images to send along, already filtered to what this model can take. */
     references?: readonly string[] | undefined;
+    referenceRoles?: Array<{ file: string; role: string }>;
     /** The chosen size, or absent for the provider's default. */
     tier?: SizeTier | undefined;
     /** The chosen shape. One the model does not offer is dropped, not sent. */
@@ -128,7 +129,7 @@ export function masterLookRequest(
       // Recorded as riding the world look at the version that asked for it, like any other
       // generation — this one happens to be a picture *of* that version.
       artDirection: { version: direction.version, source: "world", transport: "text" },
-      ...(references.length > 0 ? { references: [...references] } : {}),
+      ...(references.length > 0 ? { references: [...references], referenceRoles: options.referenceRoles ?? references.map((file) => ({ file, role: "style" })) } : {}),
     },
     estimatedMicroUsd: estimateMicroUsd(model, {
       images: 1,

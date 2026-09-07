@@ -188,7 +188,13 @@ async function makeHarness(t: TestContext, overrides: Partial<FoundingBuildPorts
     scopedJobs: (genesisId) => [...queue.jobs.values()].filter((job) => job.worldId === genesisId),
     cancelScopedJobs: async () => {},
     authorSheet: async () => {},
-    enqueue: (input) => queue.enqueue(input),
+    enqueue: (input) => {
+      if (input.target.kind === "world-image" && (input.params["droppedReferences"] as unknown[] | undefined)?.length) {
+        const published = events.findLast((event) => event.type === "build.state");
+        assert.ok(published?.type === "build.state" && published.state.items.some((item) => item.kind === "key-art" && item.detail), "reference loss is published before paid enqueue");
+      }
+      return queue.enqueue(input);
+    },
     jobById: (jobId) => queue.jobs.get(jobId),
     ledgerEntryFor: async () => undefined,
     cancelJob: (jobId) => queue.cancel(jobId),
@@ -541,6 +547,17 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(prompt.startsWith(brief.prompt!), "regeneration reads the same durable authored prompt");
     const again = await assembleKeyArt(store, store.getBundle(), brief, twoSlot);
     assert.deepEqual(again.references, references, "same assembly, either path (R-62)");
+    const bundle = store.getBundle();
+    const aliased = { ...bundle, sheets: bundle.sheets.map((sheet) => sheet.id === "maren-kest" ? { ...sheet, name: 'Maren "Ade" Kest' } : sheet) };
+    const byAlias = await assembleKeyArt(store, aliased, { ...brief, characters: ["Ade", "maren-kest"], location: "The Vigil, after midnight" }, MODEL);
+    assert.equal(byAlias.carried.filter((r) => r.role === "identity").length, 1, "aliases of one person use one slot");
+    assert.equal(byAlias.carried.find((r) => r.role === "environment")?.name, "The Vigil");
+    const ambiguous = { ...aliased, sheets: [...aliased.sheets, { ...aliased.sheets.find((sheet) => sheet.id === "maren-kest")!, id: "other-ade" }] };
+    const refused = await assembleKeyArt(store, ambiguous, { ...brief, characters: ["Ade"] }, MODEL);
+    assert.ok(refused.dropped.some((r) => r.name === "Ade"), "ambiguous nicknames never guess an identity");
+    assert.ok(!prompt.includes("In frame:"), "the authored prompt is never relabelled as the supplied cast");
+    await assert.rejects(assembleKeyArt(store, { ...aliased, sheets: aliased.sheets.map((sheet) => sheet.id === "maren-kest" ? { ...sheet, neverDepicted: true } : sheet) }, { ...brief, characters: ["Ade"] }, MODEL), /never depicted/, "a nickname cannot bypass the depiction rule");
+    assert.ok(h.lastState()?.items.find((item) => item.kind === "key-art")?.detail?.includes("The Warden"), "reference loss survives completion in the build state");
   });
 
   it("every anchor failed: key art is still made, from the lore and the look alone (row 20)", async (t) => {
