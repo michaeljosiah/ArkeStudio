@@ -1,5 +1,6 @@
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { StageConstructor } from "./productions/stage-construction.js";
+import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
 import { recordDialogueFeedback } from "./takes/feedback.js";
 import { proposeShotVisualFacts } from "./productions/visual-facts.js";
 import { KeyArtPromptReviews, keyArtReviewContext } from "./references/prompt-review.js";
@@ -20,7 +21,7 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { createPreparedSession, type SessionInput } from "./harness/session-files.js";
 import { existsSync, mkdirSync } from "node:fs";
-import { copyFile, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { copyFile, mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, extname, join, resolve, sep } from "node:path";
 import {
@@ -11783,7 +11784,7 @@ export class Coordinator {
         const brief = await readKeyArtBrief(store.dir);
         const staged = model ? stagedFor(bundle, stagedReferenceKey("world-image"), model)[0] : undefined;
         const assembly =
-          model && brief !== null
+          model
             ? await assembleKeyArt(store, bundle, brief, model, staged)
             : { carried: [], dropped: [], references: staged ? [staged] : [], referenceRoles: staged ? [{file:staged,role:"style"}] : [], sheets: {} };
         const prompt =
@@ -11857,18 +11858,7 @@ export class Coordinator {
         // R-60).
         const brief = await readKeyArtBrief(store.dir);
         const staged = stagedFor(bundle, stagedReferenceKey("world-image"), model)[0];
-        const assembly =
-          brief !== null
-            ? await assembleKeyArt(store, bundle, brief, model, staged)
-            : {
-                // A world has no reference kit, so without a brief the staged image is the
-                // only reference key art can ever carry — role style, as before.
-                references: staged !== undefined ? [staged] : [],
-                referenceRoles: staged !== undefined ? [{ file: staged, role: "style" }] : [],
-                carried: [],
-                dropped: [],
-                sheets: {},
-              };
+        const assembly = await assembleKeyArt(store, bundle, brief, model, staged);
         if (assembly.dropped.length > 0) {
           void this.appLog?.append({
             kind: "world-image.references-dropped",
@@ -12109,6 +12099,7 @@ export class Coordinator {
               ...(msg.tier !== undefined ? { tier: msg.tier } : {}),
               ...(msg.aspect !== undefined ? { aspect: msg.aspect } : {}),
               references,
+              referenceRoles: references.map((file) => ({ file, role: stagedWorldImage(bundle, "master-look")?.role ?? "style" })),
               slot: { index, count: wanted },
             }),
           ),
@@ -12117,6 +12108,30 @@ export class Coordinator {
       }
       case "pick-staged-reference": {
         const store = this.opts.provider.openStore?.();
+        if (msg.worldFile !== undefined) {
+          if (!store || store.worldId !== msg.worldId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+            return;
+          }
+          try {
+            await store.gateOp(async () => {
+              const source = worldImageReferences(store.getBundle()).find((image) => image.file === msg.worldFile);
+              if (!source) throw new Error("That image is no longer in this world.");
+              const root = await realpath(store.dir);
+              const target = await realpath(join(store.dir, source.file));
+              if (!target.startsWith(root + sep)) throw new Error("That image is outside this world.");
+              const picked = await readPickedImage(target);
+              if ("error" in picked) throw new Error(picked.error);
+              await rm(toExtendedLength(join(store.dir, stagedReferenceDir(msg.key))), { recursive: true, force: true });
+              await atomicWriteFile(join(store.dir, stagedReferenceDir(msg.key), "world.json"), Buffer.from(JSON.stringify({ file: source.file })));
+            });
+            this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
+            await this.refreshWorldSnapshot(msg.worldId);
+          } catch (error) {
+            this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error ? error.message : "That image could not be attached.");
+          }
+          return;
+        }
         const pick = this.opts.pickFiles;
         if (!store || store.worldId !== msg.worldId || !pick) {
           this.rejectEnqueue(msg.requestId, msg.kind, "Reference images are unavailable.");
@@ -12693,7 +12708,7 @@ export class Coordinator {
         }
         let requests;
         try {
-          const stagedMainPhoto = bundle.stagedReferences[stagedReferenceKey("main-photo", msg.sheetId)];
+          const stagedMainPhoto = stagedWorldImage(bundle, stagedReferenceKey("main-photo", msg.sheetId));
           requests = mainPhotoRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
             ...(stagedMainPhoto !== undefined ? { staged: stagedMainPhoto } : {}),
             prompt: msg.prompt,
@@ -12750,7 +12765,7 @@ export class Coordinator {
         }
         let requests;
         try {
-          const stagedView = bundle.stagedReferences[stagedReferenceKey("location-view", msg.sheetId)];
+          const stagedView = stagedWorldImage(bundle, stagedReferenceKey("location-view", msg.sheetId));
           requests = locationViewRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
             ...(stagedView !== undefined ? { staged: stagedView } : {}),
             name: msg.name,
@@ -13243,7 +13258,7 @@ export class Coordinator {
             Date.now().toString(36),
             msg.styleOverride,
             msg.tier,
-            bundle.stagedReferences[stagedReferenceKey("character-sheet", msg.sheetId)],
+            stagedWorldImage(bundle, stagedReferenceKey("character-sheet", msg.sheetId)),
           );
         } catch (error) {
           this.rejectEnqueue(
@@ -13324,7 +13339,7 @@ export class Coordinator {
         }
         let requests;
         try {
-          const stagedLook = bundle.stagedReferences[stagedReferenceKey("look", msg.sheetId)];
+          const stagedLook = stagedWorldImage(bundle, stagedReferenceKey("look", msg.sheetId));
           requests = characterLookRequests(bundle.meta, bundle.artDirection, sheet, kit, model, {
             ...(stagedLook !== undefined ? { staged: stagedLook } : {}),
             kind: msg.lookKind,

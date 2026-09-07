@@ -1917,9 +1917,10 @@ export function uploadMasterLook(worldId: string): void {
  * Stage an image for a generation to look at (design 67). Same picker, same one-way street: the
  * renderer asks, and learns from the snapshot that a reference is now attached.
  */
-export function pickStagedReference(worldId: string, key: string): void {
+export function pickStagedReference(worldId: string, key: string, worldFile?: string): void {
   send({
     kind: "pick-staged-reference",
+    ...(worldFile !== undefined ? { worldFile } : {}),
     worldId,
     key,
     requestId: queueRequest("pick-staged-reference"),

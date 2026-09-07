@@ -1,3 +1,4 @@
+import { worldImageReferences } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -94,7 +95,9 @@ export async function assembleKeyArt(
   // The style role is reserved first and never lost to identity overflow (R-60). Callers
   // already withhold a staged image from a zero-slot route (`stagedFor`), so no drop entry.
   if (staged !== undefined && budget > 0) {
-    carried.push({ file: staged, role: "style", sheetId: null, sheetVersion: null, name: "staged reference" });
+    const source = worldImageReferences(bundle).find((image) => image.file === staged);
+    carried.push({ file: staged, role: source?.role ?? "style", sheetId: source?.sheetId ?? null, sheetVersion: source?.sheetVersion ?? null, name: source?.name ?? "staged reference" });
+    if (source?.sheetId && source.sheetVersion) sheets[source.sheetId] = source.sheetVersion;
   }
 
   const room = () => carried.length < budget;
@@ -134,6 +137,7 @@ export async function assembleKeyArt(
       dropped.push({ name, reason: "no accepted main photo" });
       continue;
     }
+    if (carried.some((reference) => reference.file === `references/${sheet.id}/${photo}`)) continue;
     if (!room()) {
       // Surplus drops in the brief's own order, and says so (R-60).
       dropped.push({ name, reason: `${model.displayName} takes ${budget} reference image${budget === 1 ? "" : "s"}` });
@@ -155,7 +159,9 @@ export async function assembleKeyArt(
     const view = kit ? orderedLocationViews(kit)[0] : undefined;
     if (!sheet) dropped.push({ name: brief.location, reason: "is not in the world" });
     else if (view === undefined) dropped.push({ name: brief.location, reason: "no accepted establishing view" });
-    else if (!room()) {
+    else if (carried.some((reference) => reference.file === `references/${sheet.id}/${view.file}`)) {
+      // The author already selected this same view.
+    } else if (!room()) {
       dropped.push({ name: brief.location, reason: `${model.displayName} takes ${budget} reference image${budget === 1 ? "" : "s"}` });
     } else {
       carried.push({
