@@ -5,7 +5,7 @@ import { describe, it } from "node:test";
 import { ModelWorldChatActionSchema, newId, type ConversationId } from "@arke-studio/contracts";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { overviewSteer, proseStyleSteer } from "../../src/productions/ops.js";
-import { foldedOccurrences, replacePassage, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
+import { foldedOccurrences, replacePassage, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { storyFence } from "../../src/world-chat/target-reads.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -345,7 +345,7 @@ it("keeps an outline through schema parsing and acceptance when optional viewpoi
     kind: "world-chat-production-chapter", worldId: store.worldId, action,
   });
   assert.equal(proposal.targets.length, 6);
-  assert.match(proposal.summary, /viewpoint character left unset for Viewpoint 4, Viewpoint 5, Viewpoint 6/);
+  assert.match(proposal.summary, /viewpoint character left unset for chapter 4, chapter 5, chapter 6/);
   for (const [index, target] of proposal.targets.entries()) {
     const staged = MarkdownFile.parse(await readFile(join(dir, ".proposals", proposal.id, target.path), "utf8"));
     assert.equal(staged.data["pov"], index < 3 ? maren.id : undefined);
@@ -388,4 +388,24 @@ it("does not guess an ambiguous short name or erase an existing chapter viewpoin
   const cleared = await edit(null);
   const clearedDoc = MarkdownFile.parse(await readFile(join(dir, ".proposals", cleared.id, CHAPTER), "utf8"));
   assert.equal(clearedDoc.data["pov"], undefined);
+});
+
+
+it("resolves active production cast, canonical ids before names, and Unicode names", async () => {
+  const { store } = await open();
+  const sheets = store.getBundle().sheets;
+  const maren = sheets.find((sheet) => sheet.id === "maren-kest")!;
+  sheets.push(
+    { ...maren, id: "maren-foreign", name: "Maren Foreign", production: "elsewhere" },
+    { ...maren, id: "maren-retired", name: "Maren Retired", retired: true },
+    { ...maren, id: "mei-ling", name: "美玲", production: PRODUCTION },
+  );
+  assert.equal(resolveChapterViewpointEdit(store, PRODUCTION, "maren"), maren.id);
+  assert.equal(resolveChapterViewpointEdit(store, PRODUCTION, "美玲"), "mei-ling");
+  assert.throws(() => resolveChapterViewpointEdit(store, PRODUCTION, "maren-foreign"), /could not match/);
+  assert.throws(() => resolveChapterViewpointEdit(store, PRODUCTION, "maren-retired"), /could not match/);
+  sheets.push({ ...maren, id: "new-maren", name: "Maren Kest" });
+  maren.name = "Maren Renamed";
+  assert.equal(resolveChapterViewpointEdit(store, PRODUCTION, "maren-kest"), maren.id);
+  assert.equal(resolveChapterViewpointEdit(store, PRODUCTION, "Maren Kest"), "new-maren");
 });

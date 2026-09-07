@@ -14,6 +14,7 @@ import {
   isGraphScene,
   migrateLegacyScene,
   productionShape,
+  pickableSheets,
   type ConversationActionPrepareIntent,
   type Proposal,
   type WorldChatProductionChapterAction,
@@ -251,16 +252,31 @@ function requireDraws(
 }
 
 /** Resolve against current characters; never choose between people sharing a short name. */
-function resolveViewpointCharacter(store: WorldStore, value: string | null | undefined): string | undefined {
+function resolveViewpointCharacter(store: WorldStore, productionId: string, value: string | null | undefined): string | undefined {
   if (!value?.trim()) return undefined;
+  const characters = pickableSheets(store.getBundle().sheets, productionId)
+    .filter((sheet) => sheet.type === "character" && !sheet.retired);
+  const byId = characters.find((sheet) => sheet.id === value.trim());
+  if (byId) return byId.id;
+  const normalize = (name: string) => name.normalize("NFKC").trim().toLowerCase();
+  const named = characters.filter((sheet) => normalize(sheet.name) === normalize(value));
+  if (named.length) return named.length === 1 ? named[0]!.id : undefined;
   const wanted = slugify(value);
   if (!wanted) return undefined;
-  const characters = store.getBundle().sheets.filter((sheet) => sheet.type === "character");
-  const exact = characters.filter((sheet) => sheet.id === wanted || slugify(sheet.name) === wanted);
+  const exact = characters.filter((sheet) => slugify(sheet.name) === wanted);
   if (exact.length) return exact.length === 1 ? exact[0]!.id : undefined;
   const aliases = characters.filter((sheet) => sheet.id.startsWith(`${wanted}-`)
     || [...sheet.name.matchAll(/["“]([^"“”]+)["”]/g)].some((match) => slugify(match[1]!) === wanted));
   return aliases.length === 1 ? aliases[0]!.id : undefined;
+}
+
+/** Run before turn completion as well as at staging, so a refused edit can be corrected. */
+export function resolveChapterViewpointEdit(store: WorldStore, productionId: string, value: string | null | undefined): string | undefined {
+  const pov = resolveViewpointCharacter(store, productionId, value);
+  if (value != null && !pov) {
+    throw new Error("The chapter named a viewpoint I could not match to one character. Choose a character from the cast, or clear the viewpoint explicitly.");
+  }
+  return pov;
 }
 
 function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
@@ -488,8 +504,8 @@ export async function stageWorldChatProductionAuthoredAction(
       }
       const unmatched: string[] = [];
       const targets = change.chapters.map((chapter, index) => {
-        const pov = resolveViewpointCharacter(store, chapter.viewpointCharacter);
-        if (chapter.viewpointCharacter !== undefined && !pov) unmatched.push(chapter.title);
+        const pov = resolveViewpointCharacter(store, production.meta.id, chapter.viewpointCharacter);
+        if (chapter.viewpointCharacter !== undefined && !pov) unmatched.push(`chapter ${index + 1}`);
         const stem = uniqueSlug(chapter.title, "chapter", taken);
         taken.push(stem);
         const doc = MarkdownFile.create({
@@ -507,7 +523,7 @@ export async function stageWorldChatProductionAuthoredAction(
     }
     if (change.operation === "create") {
       requireDraws(store, change.draws);
-      const pov = resolveViewpointCharacter(store, change.viewpointCharacter);
+      const pov = resolveViewpointCharacter(store, production.meta.id, change.viewpointCharacter);
       const stem = uniqueSlug(change.title, "chapter", [
         ...production.chapters.map((chapter) => chapter.file),
         ...proposedTargetStems(store, new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`)),
@@ -544,11 +560,7 @@ export async function stageWorldChatProductionAuthoredAction(
       candidate.id === change.chapterId || candidate.file === change.chapterId);
     if (!chapter) throw new Error(`chapter ${change.chapterId} is not in ${production.meta.id}`);
     requireDraws(store, change.changes.draws);
-    const pov = resolveViewpointCharacter(store, change.changes.viewpointCharacter);
-    // An edit must not erase an existing viewpoint because a supplied name was unmatched.
-    if (change.changes.viewpointCharacter != null && !pov) {
-      throw new Error("The chapter named a viewpoint I could not match to one character. Choose a character from the cast, or clear the viewpoint explicitly.");
-    }
+    const pov = resolveChapterViewpointEdit(store, production.meta.id, change.changes.viewpointCharacter);
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
     const doc = MarkdownFile.parse(await readLive(store, path));
     const changes = change.changes;
