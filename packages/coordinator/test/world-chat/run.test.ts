@@ -78,6 +78,8 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    entryContext?: import("@arke-studio/contracts").WorldChatContext;
+    chapterBrief?: RunDeps["chapterBrief"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
@@ -88,7 +90,7 @@ async function setup(
   const store = new WorldChatStore(conversationDir(worldPath, conversationId));
   await store.create(conversationId, AT);
   await store.append(
-    { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+    { type: "conversation.created", title: "a talk", entryContext: options.entryContext ?? { kind: "world" } },
     { at: AT },
   );
   const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
@@ -96,6 +98,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
       ? {
@@ -805,4 +808,26 @@ describe("a rename becomes a fenced action without writing during the turn (SPEC
     await runner.send(store, conversationId, "Name it");
     assert.ok(prompts.some((prompt) => /cannot be renamed in this conversation/.test(prompt)), "told the model, not swallowed");
   });
+});
+
+
+it("puts the leased chapter brief into the model prompt and preserves the chapter on retry", async () => {
+  const prompts: string[] = [];
+  const subjects: string[] = [];
+  const answer = JSON.stringify({ reply: "Ready.", candidateOperations: [], groupOperations: [] });
+  const h = await setup(fakeAdapter(["invalid", "invalid", answer], { prompts }), {
+    entryContext: { kind: "production", productionId: "the-ledger-of-nights" },
+    chapterBrief: async ({ chapterId, productionId, budgetChars }) => {
+      assert.equal(productionId, "the-ledger-of-nights");
+      assert.ok(budgetChars > 0);
+      subjects.push(chapterId);
+      return "The previous chapter ends with the bell stopping.";
+    },
+  });
+  await h.runner.send(h.store, h.conversationId, "Draft from the synopsis", [], { kind: "chapter", chapterId: "neap" });
+  const view = await h.view();
+  await h.runner.retry(h.store, h.conversationId, view.messages[0]!.turnId!);
+  assert.deepEqual(subjects, ["neap", "neap"]);
+  assert.match(prompts[0]!, /previous chapter ends with the bell stopping/);
+  assert.match(prompts.at(-1)!, /previous chapter ends with the bell stopping/);
 });

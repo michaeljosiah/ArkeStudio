@@ -84,6 +84,8 @@ export interface RunDeps {
   /** Release the lease and clean the scratch, whatever the outcome. */
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
+  /** Assemble the selected chapter through the run's leased reads before asking the model. */
+  chapterBrief?: (input: { leaseToken: string; productionId: string; chapterId: string; budgetChars: number }) => Promise<string>;
   receiptsFor: (runId: RunId) => readonly WorldChatCheckReceipt[];
   /** Run the coordinator's own check plan for one draft and return what it found. */
   runCheckPlan: (input: {
@@ -491,8 +493,11 @@ export class WorldChatRunner {
       develop:
         " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
     };
+    const budgetChars = budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined);
+    const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
+    const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
     const assembled = assembleContext({
-      budgetChars: budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined),
+      budgetChars: budgetChars - briefBudget,
       ...(view.entryContext && this.deps.describeEntry
         ? {
             entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
@@ -530,13 +535,12 @@ export class WorldChatRunner {
     // two and three): written after the words, a crash between the two would leave a retryable
     // turn without what it was held to, and a retry could stage what the ask forbade; written
     // before them, the worst a crash leaves is a constraint with no turn, which nothing reads.
-    // Only the constraints that hold a turn to something — a passage, or a reply and nothing
-    // else — are worth the fence; the other subjects only colour the narration, as they always
-    // did, and are not written.
-    const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage");
+    // A chapter subject also survives retry: its drafting brief must name the same chapter.
+    // Other selections only colour the narration and are not written.
+    const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
     try {
       if (constrained) {
-        await this.deps.raiseSchemaBoundary?.(TURN_CONSTRAINTS_SCHEMA_VERSION);
+        await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
         await store.append(
           { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
           { at },
@@ -577,6 +581,10 @@ export class WorldChatRunner {
         attachmentIds: linked,
       });
       prepared = true;
+      const brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
+        ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget })
+        : "";
+      if (controller.signal.aborted) return { status: "cancelled" };
       const session = this.deps.createSession
         ? await this.deps.createSession({
             cwd,
@@ -604,7 +612,7 @@ export class WorldChatRunner {
       const refusedTools = new Set<string>();
       const refused = (tool: string) => refusedTools.add(tool);
 
-      const prompt = renderPrompt(assembled);
+      const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "");
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused);
 
       let outcome = await this.applyResult(
@@ -1192,7 +1200,9 @@ const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each qu
 
 function subjectNarration(subject: WorldChatSubject | undefined): string {
   if (subject === undefined) return "";
-  const named = subject.kind === "timeline-clip"
+  const named = subject.kind === "chapter"
+    ? `chapter ${subject.chapterId}`
+    : subject.kind === "timeline-clip"
     ? `clip ${subject.clipId} on the timeline`
     : subject.kind === "timeline-track"
       ? `track ${subject.trackId} on the timeline`

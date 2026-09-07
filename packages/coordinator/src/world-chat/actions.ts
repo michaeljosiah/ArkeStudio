@@ -501,11 +501,11 @@ function currentWorldObservation(
       // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
       // alone; the bare production id is the list (codex on PR 899).
       const targetId = target ?? store.worldId;
-      const [productionId, chapterId] = targetId.split(":");
+      const [productionId, chapterId, section] = targetId.split(":");
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (chapterId) {
         const canonical = canonicalChapterId(store, productionId!, chapterId);
-        return { target: `${productionId}:${canonical}`, fence: chapterFence(production, canonical) };
+        return { target: `${productionId}:${canonical}${section === "plan" || section === "ending" ? `:${section}` : ""}`, fence: chapterFence(production, canonical) };
       }
       return { target: targetId, fence: chaptersFence(production) };
     }

@@ -675,11 +675,27 @@ export class WorldChatTargetReads {
         break;
       }
       case "get_chapter": {
-        assertArgs(args, ["productionId", "chapterId"]);
+        assertArgs(args, ["productionId", "chapterId", "section"]);
         const productionId = requireString(args, "productionId");
         const chapterId = requireString(args, "chapterId");
         const chapter = productionOf(bundle, productionId)?.chapters.find((entry) => entry.id === chapterId || entry.file === chapterId);
+        const section = args["section"];
+        if (section !== undefined && section !== "plan" && section !== "ending") throw new TargetReadError("section must be plan or ending");
+        if (section === "plan") {
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:plan`);
+          rows = chapter ? [{ key: "plan", value: chapter }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         const body = chapter && this.deps.getChapterBody ? await this.deps.getChapterBody(productionId, chapter.file) : null;
+        if (section === "ending") {
+          if (chapter && body === null) throw new TargetReadError("The previous chapter could not be read.");
+          const paragraphs = (body ?? "").trim().split(/\n\s*\n/).slice(-3).join("\n\n");
+          readTarget = target("chapters", `${productionId}:${chapter?.id ?? chapterId}:ending`);
+          rows = chapter ? [{ key: "ending", value: { chapterId: chapter.id, title: chapter.title, ending: paragraphs.slice(-6_000), truncated: paragraphs.length > 6_000 } }] : [];
+          revisionOrDigest = chapterFence(productionOf(bundle, productionId), chapterId);
+          break;
+        }
         // The full record beside the chapter (turn 129): the summary carries only its stamp and
         // placings, and a question about what a character learned is answered from the lines.
         const continuity = chapter && this.deps.getChapterContinuity ? await this.deps.getChapterContinuity(productionId, chapter.file) : null;

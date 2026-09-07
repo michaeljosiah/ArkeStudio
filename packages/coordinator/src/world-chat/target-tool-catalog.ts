@@ -60,7 +60,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool(
     "get_chapter",
     "Read one chapter's complete prose in bounded chunks.",
-    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem" } },
+    { ...PRODUCTION, chapterId: { type: "string", description: "Chapter id or file stem" }, section: { type: "string", enum: ["plan", "ending"], description: "Optional plan only, or the last three paragraphs (at most 6000 characters). Omit for the full chapter." } },
     ["productionId", "chapterId"],
   ),
   tool("list_scenes", "Read the complete scene identity and summary index; use get_scene for each full record.", PRODUCTION, ["productionId"]),

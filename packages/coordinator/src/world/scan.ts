@@ -103,7 +103,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // fails on a build without the field, which drops the artifact and every clip that cites it.
 // Fifteen adds chapter retirement to strict frontmatter (issue 888).
 // Sixteen adds the dramatic question and ending to the strict story overview (issue 889).
-export const SUPPORTED_SCHEMA_VERSION = 16;
+// Seventeen persists chapter subjects on retriable conversation turns (issue 890).
+export const SUPPORTED_SCHEMA_VERSION = 17;
 
 export class WorldOpenError extends Error {
   constructor(

@@ -337,6 +337,7 @@ import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
+import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
 import { worldChatContextExists, worldChatSubjectExists } from "./world-chat/context-validation.js";
 
@@ -15098,6 +15099,14 @@ export class Coordinator {
         receipts.delete(runId);
         await removeRunScratch(this.opts.appRoot ?? tmpdir(), conversationId, runId);
       },
+      chapterBrief: ({ leaseToken, productionId, chapterId, budgetChars }) => chapterDraftingBrief(
+        store.getBundle(), productionId, chapterId, async (tool, args) => {
+          const outcome = await retrieval.call(leaseToken, tool, args);
+          const seen = receipts.get(outcome.receipt.runId) ?? [];
+          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
+          return outcome;
+        }, budgetChars,
+      ),
       receiptsFor: (runId) => receipts.get(runId) ?? [],
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
       createSession: ({ cwd, runId, model }) => {
