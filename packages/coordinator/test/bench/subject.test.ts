@@ -908,7 +908,7 @@ describe("the Stage's handoff to the bench", () => {
     assert.match(video.prefill.composer.brief, /Camera move, dolly, blocked out on the stage \(2 keys\)\./);
     // A figure that holds still faces the lens, so a camera out along +Z stands in front of her.
     assert.match(video.prefill.composer.brief, /0\.0s — 3\.0m in front of Maren Kest, 1\.55m high, aimed at Maren Kest/);
-    // No route maps a video reference yet, so the tile shows and says it is not riding.
+    // This test route takes images but no video; the tile remains inactive.
     assert.equal(video.prefill.composer.activeTokens.includes(playblast!.token), false);
 
     const stagedFigure = shot.staging.cast?.[0];
@@ -941,7 +941,7 @@ describe("the Stage's handoff to the bench", () => {
     assert.ok(stale.ok);
     if (!stale.ok) return;
     assert.equal(stale.prefill.references.some((reference) => reference.label?.includes("opening frame")), false);
-    assert.match(stale.prefill.references.find((reference) => reference.kind === "video")?.detail ?? "", /stale/);
+    assert.equal(stale.prefill.references.some((reference) => reference.kind === "video"), false);
 
     // The ordinary handoff is a still, and a still has no move to describe.
     const image = await prepareBenchSubject(world, {

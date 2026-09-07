@@ -1,12 +1,16 @@
 import { readFile } from "node:fs/promises";
+import { withImpliedIds } from "../productions/ops.js";
 import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
   EpisodeSchema,
+  ProseStyleSchema,
   SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
   StoryOverviewSchema,
+  countWords,
+  paragraphSpans,
   isGraphScene,
   migrateLegacyScene,
   productionShape,
@@ -15,6 +19,7 @@ import {
   type WorldChatProductionChapterAction,
   type WorldChatProductionEpisodeAction,
   type WorldChatProductionOverviewAction,
+  type WorldChatProductionProseStyleAction,
   type WorldChatProductionSceneAction,
   type WorldChatProductionSeasonAction,
   type WorldChatProductionSeriesAction,
@@ -28,6 +33,7 @@ import type { WorldStatePrecondition, WorldStore } from "../world/store.js";
 export type WorldChatProductionAuthoredAction =
   | WorldChatProductionSeriesAction
   | WorldChatProductionOverviewAction
+  | WorldChatProductionProseStyleAction
   | WorldChatProductionSeasonAction
   | WorldChatProductionEpisodeAction
   | WorldChatProductionChapterAction
@@ -52,6 +58,136 @@ async function readLive(store: WorldStore, path: string): Promise<string> {
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
   if (raw === null) throw new Error(`${path} does not exist`);
   return raw;
+}
+
+/**
+ * Every occurrence of `find` in `text` with whitespace folded on both sides — a run of spaces
+ * and line breaks reads as one space — returned as offsets into the unfolded `text`, so the
+ * span replaced is the file's own bytes, wrapping included.
+ */
+/**
+ * A character of emphasis, or a character of the words. Only the two spellings of emphasis fold
+ * (codex on PR 903): `*` and `_` say the same thing, while a backtick or a tilde changes what
+ * the words are, and a quote must not match across it. And either mark between two letters or
+ * digits is not emphasis at all in prose — `foo_bar` and `foo*bar` are one word each — so it
+ * stays a character of the words, and a quote of the word never matches prose the author has
+ * since joined up (codex, rounds three and four). A letter or a digit on both sides, and only
+ * those: `\w` would count the underscore itself, and read the inner pair of `__not__` as the
+ * middle of a word.
+ */
+function isMarker(source: string, i: number): boolean {
+  const c = source[i]!;
+  if (c !== "*" && c !== "_") return false;
+  const before = i > 0 ? source[i - 1]! : " ";
+  const after = i + 1 < source.length ? source[i + 1]! : " ";
+  return !(/[^\W_]/.test(before) && /[^\W_]/.test(after));
+}
+
+/** A text with its whitespace folded to single spaces and, when asked, its emphasis markers dropped. */
+function foldSource(source: string, markers: boolean): { folded: string; starts: number[]; ends: number[] } {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let folded = "";
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i]!;
+    if (markers && isMarker(source, i)) continue;
+    if (/\s/.test(c)) {
+      if (folded.endsWith(" ")) {
+        ends[ends.length - 1] = i + 1;
+        continue;
+      }
+      folded += " ";
+    } else {
+      folded += c;
+    }
+    starts.push(i);
+    ends.push(i + 1);
+  }
+  return { folded, starts, ends };
+}
+
+/**
+ * The words alone, folded as the matcher folds them, for a guard that asks whether one text is
+ * within another (codex on PR 903, round four): the selection the editor served as `**not**`
+ * holds a quote of the file's `__not__` only when both are folded the same way.
+ */
+export function foldedText(text: string, markers: boolean): string {
+  return foldSource(text, markers).folded.trim();
+}
+
+export function foldedOccurrences(text: string, find: string): Array<{ start: number; end: number }> {
+  // The selection is what the editor showed and the quote is what the file holds (codex, round
+  // four): `**bold**` selected in part, or `__bold__` stored where the editor would write
+  // `**bold**`, differ only in emphasis markers. The words are matched plainly and with the
+  // markers folded, and the two sets are joined (codex on PR 903): a paragraph holding the words
+  // plain and again in emphasis has two occurrences whichever way the quote was spelled, and
+  // uniqueness must see both, or a revision lands on the wrong copy. A plain hit keeps its plain
+  // span; a marked hit that is the same words already found plainly is the same occurrence.
+  const hits = foldedOccurrencesWith(text, find, false);
+  for (const hit of foldedOccurrencesWith(text, find, true)) {
+    if (!hits.some((held) => hit.start < held.end && held.start < hit.end)) hits.push(hit);
+  }
+  return hits.sort((a, b) => a.start - b.start);
+}
+
+function foldedOccurrencesWith(text: string, find: string, markers: boolean): Array<{ start: number; end: number }> {
+  const haystack = foldSource(text, markers);
+  const needle = foldSource(find, markers).folded.trim();
+  if (needle === "") return [];
+  const hits: Array<{ start: number; end: number }> = [];
+  for (let at = haystack.folded.indexOf(needle); at >= 0; at = haystack.folded.indexOf(needle, at + needle.length)) {
+    let start = haystack.starts[at]!;
+    let end = haystack.ends[at + needle.length - 1]!;
+    // The markers that wrap the matched words go with them: a span that began after `__` and
+    // ended before it would leave half a mark standing on either side of the replacement.
+    if (markers) {
+      while (start > 0 && isMarker(text, start - 1)) start--;
+      while (end < text.length && isMarker(text, end)) end++;
+    }
+    hits.push({ start, end });
+  }
+  return hits;
+}
+
+/**
+ * One passage replaced in a chapter's body (turn 128). An ask that named its paragraph is looked
+ * for there and only there — current uniqueness is never passage identity, because the author
+ * may have typed over the selected occurrence while Arke answered, and a quote that then matches
+ * elsewhere would change prose nobody pointed at. Without a paragraph the quote must occur exactly
+ * once: a quote that matches nothing is a stale read, and one that matches twice would change the
+ * wrong one, so the ask is for more of it rather than a guess.
+ */
+export function replacePassage(
+  body: string,
+  passage: { find: string; with: string; paragraph?: number | undefined },
+  label: string,
+): string {
+  if (passage.paragraph !== undefined) {
+    const span = paragraphSpans(body)[passage.paragraph - 1];
+    if (span === undefined) {
+      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+    }
+    const paragraph = body.slice(span.start, span.end);
+    // Found with whitespace folded (codex, round three): the file wraps its lines where the
+    // editor showed one, so a quote across a soft break is still the same words.
+    const hits = foldedOccurrences(paragraph, passage.find);
+    if (hits.length === 0) {
+      throw new Error(`that passage is not in paragraph ${passage.paragraph} of ${label} as it stands · read the chapter again`);
+    }
+    // Still exactly once inside the paragraph (codex, round two): a twin left standing after
+    // the selected copy was typed over is exactly the wrong one to change.
+    if (hits.length > 1) {
+      throw new Error(`that passage occurs more than once in paragraph ${passage.paragraph} of ${label} · quote more of it`);
+    }
+    const [hit] = hits;
+    return body.slice(0, span.start + hit!.start) + passage.with + body.slice(span.start + hit!.end);
+  }
+  const first = body.indexOf(passage.find);
+  if (first < 0) throw new Error(`that passage is not in ${label} as it stands · quote it as get_chapter returns it`);
+  let count = 1;
+  for (let at = body.indexOf(passage.find, first + passage.find.length); at >= 0; at = body.indexOf(passage.find, at + passage.find.length)) count++;
+  if (count > 1) throw new Error(`that passage occurs ${count} times in ${label} · quote more of it, or say which paragraph`);
+  return body.slice(0, first) + passage.with + body.slice(first + passage.find.length);
 }
 
 function withoutCleared<T extends Record<string, unknown>>(
@@ -112,6 +248,14 @@ function requireDraws(
   if (missingSheet) throw new Error(`sheet ${missingSheet} is not in this world`);
   const missingCanon = draws.canon.find((id) => !canon.has(id));
   if (missingCanon) throw new Error(`Canon entry ${missingCanon} is not in this world`);
+}
+
+/** A point of view is a character the world holds (turn 127). */
+function requirePov(store: WorldStore, pov: string | null | undefined): void {
+  if (pov === null || pov === undefined) return;
+  if (!store.getBundle().sheets.some((sheet) => sheet.id === pov && sheet.type === "character")) {
+    throw new Error(`sheet ${pov} is not a character in this world`);
+  }
 }
 
 function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
@@ -211,6 +355,22 @@ export async function stageWorldChatProductionAuthoredAction(
     }, precondition);
   }
 
+  if (payload.kind === "world-chat-production-prose-style") {
+    // The style the book is written in (turn 128): its own file beside the overview, with its own
+    // version, so settling a sample never marks every chapter stale against the plan.
+    const current = production.proseStyle ?? { version: 1 };
+    const record = ProseStyleSchema.parse(withoutCleared(current, payload.action.changes));
+    return gate.stage({
+      kind: "prose-style",
+      summary: `Prose style: ${production.meta.title}`,
+      ...context,
+      targets: [{
+        path: `productions/${production.meta.id}/prose-style.json`,
+        content: `${JSON.stringify(record, null, 2)}\n`,
+      }],
+    }, precondition);
+  }
+
   if (payload.kind === "world-chat-production-season") {
     if (!productionShape(production.meta).isEpisodic) {
       throw new Error(`${production.meta.title} is not an episodic production`);
@@ -304,6 +464,7 @@ export async function stageWorldChatProductionAuthoredAction(
     const change = payload.action.change;
     if (change.operation === "create") {
       requireDraws(store, change.draws);
+      requirePov(store, change.pov);
       const stem = uniqueSlug(change.title, "chapter", [
         ...production.chapters.map((chapter) => chapter.file),
         ...proposedTargetStems(store, new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`)),
@@ -317,6 +478,13 @@ export async function stageWorldChatProductionAuthoredAction(
         version: 1,
         words: body.trim() === "" ? 0 : body.trim().split(/\s+/).length,
         ...(change.draws ? { draws: change.draws } : {}),
+        // The plan and what the draft implied ride with it (turn 127); the overview version the
+        // draft was written against is stamped here, by the coordinator, never by the client.
+        ...(change.synopsis !== undefined && change.synopsis !== "" ? { synopsis: change.synopsis } : {}),
+        ...(change.pov !== undefined ? { pov: change.pov } : {}),
+        ...(change.when !== undefined && change.when !== "" ? { when: change.when } : {}),
+        ...(change.implies !== undefined && change.implies.length > 0 ? { implies: withImpliedIds(change.implies) } : {}),
+        ...(body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
         created: store.now().slice(0, 10),
         updated: store.now().slice(0, 10),
       }, body);
@@ -332,23 +500,42 @@ export async function stageWorldChatProductionAuthoredAction(
       candidate.id === change.chapterId || candidate.file === change.chapterId);
     if (!chapter) throw new Error(`chapter ${change.chapterId} is not in ${production.meta.id}`);
     requireDraws(store, change.changes.draws);
+    requirePov(store, change.changes.pov);
     const path = `productions/${production.meta.id}/chapters/${chapter.file}.md`;
     const doc = MarkdownFile.parse(await readLive(store, path));
     const changes = change.changes;
+    /*
+     * A revision is a passage, never a chapter (turn 128). The one span it names is replaced in
+     * the live body here, so the staged file is the whole chapter with one change and the card
+     * can say exactly that. It is not a draft: the words are restamped, the overview version the
+     * chapter was drafted against is not.
+     */
+    const body = changes.passage === undefined
+      ? changes.body
+      : replacePassage(doc.body, changes.passage, `chapter ${String(chapter.order).padStart(2, "0")}`);
     doc.setData({
       ...(changes.title !== undefined ? { title: changes.title } : {}),
       ...(changes.status !== undefined ? { status: changes.status } : {}),
       ...(changes.draws !== undefined ? { draws: changes.draws ?? undefined } : {}),
-      ...(changes.body !== undefined
-        ? { words: changes.body.trim() === "" ? 0 : changes.body.trim().split(/\s+/).length }
-        : {}),
+      ...(changes.synopsis !== undefined ? { synopsis: changes.synopsis || undefined } : {}),
+      ...(changes.pov !== undefined ? { pov: changes.pov ?? undefined } : {}),
+      ...(changes.when !== undefined ? { when: changes.when || undefined } : {}),
+      ...(changes.implies !== undefined ? { implies: changes.implies && changes.implies.length > 0 ? withImpliedIds(changes.implies) : undefined } : {}),
+      ...(body !== undefined ? { words: countWords(body) } : {}),
+      // A new draft is against the overview as it is now; a plan edit alone restamps nothing.
+      ...(changes.body !== undefined && changes.body.trim() !== "" && production.story ? { draftedAgainst: production.story.version } : {}),
     });
-    if (changes.body !== undefined) doc.setBody(changes.body);
+    // Cleared fields are dropped, not left as nulls the read schema would refuse.
+    for (const key of ["draws", "synopsis", "pov", "when", "implies"] as const) if (doc.data[key] === undefined) delete doc.data[key];
+    if (body !== undefined) doc.setBody(body);
     ChapterFrontmatterSchema.parse(doc.data);
+    // The gesture says a passage was revised (codex, round two): the card and the manuscript draw
+    // a passage only when the action was one, never from a common head and tail alone — a whole
+    // chapter recast between an untouched opening and closing is a draft, and is said to be.
     return gate.stage({
       kind: "chapter-draft",
-      summary: `Edit chapter: ${chapter.title}`,
-      ...context,
+      summary: changes.passage === undefined ? `Edit chapter: ${chapter.title}` : `Revise a passage: ${chapter.title}`,
+      ...(changes.passage === undefined ? context : { ...context, origin: { ...context.origin, gesture: "passage-revision" } }),
       targets: [{ path, content: doc.serialize() }],
     }, precondition);
   }

@@ -1,3 +1,4 @@
+import { orderedShots } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -335,4 +336,19 @@ export function carriesStageRig(raw: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** Expanded Stage geometry, shot-local performance and camera lens/roll need schema 10. */
+export function carriesStageConstruction(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    const blocks = [scene.blocking, ...orderedShots(scene).map(shot => shot.staging)];
+    return blocks.some(block => block && (
+      block.cast?.some(f => f.parent !== undefined || f.y !== undefined || f.height !== undefined || f.facing !== undefined) ||
+      block.sets?.some(s => s.vertices !== undefined || s.triangles !== undefined || s.shape !== undefined || s.rotation !== undefined || s.y !== undefined || s.group !== undefined || s.solid !== undefined)
+    )) || orderedShots(scene).some(shot => shot.staging && (
+      shot.staging.objectMotions !== undefined || shot.staging.performances !== undefined || shot.staging.authorship !== undefined || shot.staging.playblast?.sourceFingerprint !== undefined ||
+      shot.staging.keys.some(k => k.anchorSpace !== undefined || k.roll !== undefined || k.focalMm !== undefined)
+    ));
+  } catch { return false; }
 }

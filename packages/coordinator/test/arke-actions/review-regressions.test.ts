@@ -6,6 +6,8 @@ import { ART_DIRECTION_PATH, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackCl
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { openBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
+import { setOwner } from "../../src/artifacts/filing.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
@@ -20,13 +22,13 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
-async function setup() {
+async function setup(ffmpeg?: FfmpegRunner) {
   const made = await makeTempRoot();
   const provider = new FsWorldProvider(made.root, { clock: () => AT });
   closeOnCleanup(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
-  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
+  const coordinator = new Coordinator({ provider, adapter: null, ffmpeg, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
   const internal = coordinator as unknown as {
     handleClientMessage(message: ClientMessage): Promise<void>;
     conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle;
@@ -261,6 +263,23 @@ describe("PR 815 coordinator regressions", () => {
     const failure = w.events.find((event) => event.type === "export.progress" && event.status === "failed");
     assert.ok(failure?.type === "export.progress");
     assert.match(failure.error!, /export needs ffmpeg/);
+  });
+
+  it("refuses a foreign master before starting a legacy spine export (#895)", async () => {
+    let encoded = false;
+    const w = await setup({ slateFont: "unused.ttf", async run() { encoded = true; } });
+    const artifact = w.store.getBundle().artifacts.find(a => a.kind === "audio")!;
+    await setOwner(w.store, artifact, "another-production");
+    const path = "productions/saltlight/spine.json";
+    const before = await readFile(join(w.worldDir, path), "utf8").catch(() => null);
+    await w.store.commit({ kind: "test-spine", source: "test", files: [{ path, action: before === null ? "create" : "replace", baseHash: before === null ? null : sha256(before),
+      content: JSON.stringify({ schemaVersion: 1, revision: 1, trackArtifactId: artifact.id, markers: [], anchors: {}, updatedAt: AT }) + "\n",
+    }] });
+    await w.internal.handleClientMessage({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
+    const failure = w.events.find(event => event.type === "export.progress" && event.status === "failed");
+    assert.ok(failure?.type === "export.progress");
+    assert.match(failure.error!, /Master track cites artifact .*belongs to another production.*Import the file/);
+    assert.equal(encoded, false);
   });
 
   it("still reports an invalid editor-request file through the Timeline refusal", async () => {

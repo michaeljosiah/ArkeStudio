@@ -8,7 +8,6 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import {
   ClientStateSchema,
   applyTimelineCommands,
-  deriveCut,
   seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
   type ClientState,
@@ -612,17 +611,10 @@ describe("the rail and the switcher on a production with no story (508)", () => 
     assert.doesNotMatch(html, /0s cut/, "an empty cut is not what this production is");
   });
 
-  it("leaves a production with a story on the derived clock", () => {
+  it("keeps an unsaved story Cut empty in both the rail and the switcher (#930)", () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const derived = deriveCut(state.world!.productions[0]!);
     const html = renderCut(state);
-    // The rail states the cut and the switcher states how much of it is covered: two figures,
-    // both derived, and neither of them measured off the timeline.
-    assert.match(html, new RegExp(`fy-prodrail__count">${derived.totalSec}s`), "the rail states the cut");
-    assert.match(
-      html,
-      new RegExp(`fy-prodrail__switchsub">video · ${derived.totalSec - derived.uncoveredSec}s cut`),
-      "the switcher states what is covered",
-    );
+    assert.match(html, /fy-prodrail__count">0s/);
+    assert.match(html, /fy-prodrail__switchsub">video · 0s cut/);
   });
 });

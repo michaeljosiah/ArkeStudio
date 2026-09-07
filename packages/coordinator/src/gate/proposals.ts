@@ -19,6 +19,7 @@ import {
   SeriesSchema,
   validateSceneFlow,
   RoutingSchema,
+  ProseStyleSchema,
   StoryOverviewSchema,
   type SceneRecord,
   type Proposal,
@@ -78,6 +79,7 @@ import { projectReview, type ReviewProjection } from "./review.js";
  */
 const JSON_TRACK_SCHEMAS: Partial<Record<ReturnType<typeof classify>["track"], { parse: (v: unknown) => unknown }>> = {
   story: StoryOverviewSchema,
+  "prose-style": ProseStyleSchema,
   routing: RoutingSchema,
   season: SeasonSchema,
   episode: EpisodeSchema,
@@ -1077,8 +1079,12 @@ export class ProposalManager {
       // older build opens the world and silently drops what was just accepted.
       const crossesBoundary = files.some((file) => {
         const track = classify(file.path).track;
-        return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story";
+        return track === "season" || track === "episode" || track === "series" || track === "routing" || track === "story" || track === "prose-style";
       });
+      // The style is its own boundary (turn 128, codex on PR 899): a world already past 2 must
+      // still be raised, or a build older than the style opens it and drafts without the style
+      // every draft is promised to hold to.
+      const styleLands = files.some((file) => classify(file.path).track === "prose-style");
       /*
        * New draft and World Chat proposals are graph scenes. A persisted proposal can predate
        * that retirement and still carry a legacy `shots[]` scene, so acceptance upgrades that
@@ -1126,7 +1132,7 @@ export class ProposalManager {
         source: proposal.source,
         proposalId: proposal.id,
         files,
-        ...(crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
+        ...(styleLands ? { raiseSchemaVersion: 10 } : crossesBoundary ? { raiseSchemaVersion: 2 } : {}),
       });
       await this.retire(proposalId, result.commitId);
       return { status: "accepted", result, ripples: authoritative.items };
@@ -1433,6 +1439,7 @@ export class ProposalManager {
         const jsonTrack =
           track === "scene" ||
           track === "story" ||
+          track === "prose-style" ||
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
@@ -1528,6 +1535,7 @@ export class ProposalManager {
         resolved =
           track === "scene" ||
           track === "story" ||
+          track === "prose-style" ||
           track === "routing" ||
           track === "season" ||
           track === "episode" ||
@@ -1803,6 +1811,7 @@ function readVersion(path: string, raw: string): number | null {
     if (
       kind.track === "scene" ||
       kind.track === "story" ||
+      kind.track === "prose-style" ||
       kind.track === "routing" ||
       kind.track === "season" ||
       kind.track === "episode" ||

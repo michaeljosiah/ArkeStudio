@@ -4,7 +4,6 @@ import {
   GenesisKeyArtBriefSchema,
   ART_DIRECTION_PATH,
   ArtDirectionRecordSchema,
-  keyArtBriefProse,
   keyArtBriefSettled,
   orderedLocationViews,
   type GenesisKeyArtBrief,
@@ -22,7 +21,7 @@ import { referenceBudgetFor } from "./generate.js";
 /**
  * Key art is a picture of this world, not of its genre (SPEC-031 §1.11).
  *
- * The prompt draws on the bible and the cast alongside the key-art brief, and the frame
+ * Arke authors the prompt from the world; the frame
  * carries the main photos of the characters the brief names as identity references — which
  * characters appear is the brief's to say, never the model's to guess (R-58, R-59). One
  * assembly, used by the founding build and by the world screen's own Regenerate alike: a
@@ -99,14 +98,14 @@ export async function assembleKeyArt(
   }
 
   const room = () => carried.length < budget;
-  const normalize = (name: string) => name.trim().toLowerCase().replace(/[��]/g, "'");
+  const normalize = (name: string) => name.trim().toLowerCase().replace(/[’‘]/g, "'");
   const sheetByName = (type: Sheet["type"], name: string): Sheet | undefined => {
     const wanted = normalize(name);
     const candidates = bundle.sheets.filter((sheet) => sheet.type === type);
     const exact = candidates.filter((sheet) => normalize(sheet.name) === wanted || normalize(sheet.id) === wanted);
     if (exact.length) return exact.length === 1 ? exact[0] : undefined;
     const aliases = candidates.filter((sheet) => type === "character"
-      ? [...sheet.name.matchAll(/["�]([^"��]+)["�]/g)].some((match) => normalize(match[1]!) === wanted)
+      ? [...sheet.name.matchAll(/["“]([^"“”]+)["”]/g)].some((match) => normalize(match[1]!) === wanted)
       : wanted.startsWith(`${normalize(sheet.name)},`));
     // Never guess between people with the same nickname. For places, prefer the longest
     // complete name: "House, Ikoyi" is more specific than "House".
@@ -125,6 +124,7 @@ export async function assembleKeyArt(
       dropped.push({ name, reason: "is not in the world" });
       continue;
     }
+    if (sheet.neverDepicted === true) throw new Error(`${sheet.name} is never depicted. Key art will not be made.`);
     if (seen.has(sheet.id)) continue;
     seen.add(sheet.id);
     const kit = (await readKit(store, sheet.id))?.kit ?? null;
@@ -178,40 +178,53 @@ export async function assembleKeyArt(
   };
 }
 
-/** The first stretch of the bible, sized for a prompt rather than a reader. */
-export function bibleExcerpt(text: string, max = 500): string {
-  const clean = text.replace(/^#.*$/gm, "").replace(/\s+/g, " ").trim();
-  if (clean.length <= max) return clean;
-  const cut = clean.slice(0, max);
-  return `${cut.slice(0, Math.max(cut.lastIndexOf(". ") + 1, max - 80))}`.trim();
+/**
+ * The bible flattened to prose. It is written to be read — headings, emphasis, lists — and an
+ * image model reads `**` as two asterisks: a real prompt carried them (issue 906).
+ */
+function plainProse(text: string): string {
+  return text
+    .replace(/^#.*$/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/^\s*>+\s?/gm, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*`]+/g, "")
+    .replace(/(^|\s)_+(?=\S)/g, "$1")
+    .replace(/(?<=\S)_+(?=[\s.,;:!?)]|$)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * The composed prompt, drawing on more than the world's surface (R-58): the look, the
- * logline, the bible's argument, who is in the frame, and the brief's subject, moment and
- * stakes. Only the floor of `keyArtPrompt`'s precedence — an authored prompt or an art
- * director's rewrite still outranks it.
+ * The first stretch of the bible, sized for a prompt rather than a reader, and cut where a
+ * sentence ends. The budget used to be 500 characters against models that take sixty times
+ * that, and the cut fell back to a fixed position whenever the last sentence ended more than
+ * eighty characters back — which is exactly when a fixed cut lands mid-word (issue 906). Now
+ * the last sentence inside the budget wins wherever it is; only a stretch with no sentence
+ * end at all cuts at a word, and says so.
+ */
+export function bibleExcerpt(text: string, max = 1500): string {
+  const clean = plainProse(text);
+  if (clean.length <= max) return clean;
+  // One past the budget, so a sentence ending on the last character still shows its space.
+  const cut = clean.slice(0, max + 1);
+  const sentenceEnd = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  if (sentenceEnd > 0) return cut.slice(0, sentenceEnd + 1);
+  const wordEnd = cut.lastIndexOf(" ");
+  return `${(wordEnd > 0 ? cut.slice(0, wordEnd) : cut.slice(0, max)).trim()}…`;
+}
+
+/**
+ * Authored words travel intact (SPEC-031 R-58, issue 940). Old briefs remain editable seeds;
+ * narrative context and production-wide direction belong to the writer, not the image model.
  */
 export function keyArtComposition(input: {
   meta: WorldMeta;
   direction: ResolvedArtDirection;
   bible: string;
   brief: GenesisKeyArtBrief;
-  /** The characters actually carried, in order — the prompt and the frame must agree. */
   cast: readonly string[];
 }): string {
-  const excerpt = bibleExcerpt(input.bible);
-  const lines = [
-    `Key art for "${input.meta.name}". ${input.direction.description}.`,
-    input.meta.logline?.trim() ?? "",
-    input.meta.tone?.trim() ? `Tone: ${input.meta.tone.trim()}.` : "",
-    input.meta.genre?.trim() ? `Genre: ${input.meta.genre.trim()}.` : "",
-    excerpt !== "" ? `The story: ${excerpt}` : "",
-    `The image: ${keyArtBriefProse(input.brief)}.`,
-    input.cast.length > 0
-      ? `Identity references supplied for: ${input.cast.join(", ")} — preserve each supplied identity exactly.`
-      : "",
-    "A single evocative cinematic image of this world and what is at stake in it. No text, no logos.",
-  ];
-  return lines.filter((line) => line !== "").join(" ");
+  const body = input.brief.prompt ?? [input.brief.subject, input.brief.moment].filter((text): text is string => Boolean(text)).map(text => text.trim().replace(/\.+$/, "")).join(". ");
+  return `${body} No text, no logos.`;
 }

@@ -1,3 +1,4 @@
+import { WorldChatProductionStageConstructActionSchema } from "@arke-studio/contracts";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
@@ -6,6 +7,7 @@ import {
   CanonEntrySchema,
   deriveArtDirectionDescription,
   buildRenderPlan,
+  legacyArtifactScopeRefusal,
   productionFrameRate,
   productionShape,
   SceneRecordSchema,
@@ -43,6 +45,8 @@ import {
   WorldChatProductionMetadataActionSchema,
   WorldChatProductionModelActionSchema,
   WorldChatProductionOverviewActionSchema,
+  WorldChatProductionProseStyleActionSchema,
+  type WorldChatSubject,
   WorldChatProductionSceneActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
   WorldChatProductionSceneOrderActionSchema,
@@ -248,6 +252,7 @@ import {
   seriesFence,
   sheetsFence,
   storyFence,
+  chapterFence,
   spineFence,
   timelineFence,
   takesFence,
@@ -257,7 +262,7 @@ import {
   jobsFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
-import { stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { foldedText, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -285,6 +290,13 @@ export interface WorldChatActionTurn {
   readonly actions: readonly ModelWorldChatAction[];
   /** Present on live runs; absent only on callers created before complete target receipts. */
   readonly receipts?: readonly WorldChatCheckReceipt[];
+  /**
+   * What was selected while the line was said (turn 128): a passage revision the model returns
+   * is held against it, so the action can only aim at the words the author pointed at.
+   */
+  readonly subject?: WorldChatSubject;
+  /** The line asked for a reply and nothing else (turn 128): an action it returns is refused. */
+  readonly replyOnly?: boolean;
   readonly at: string;
 }
 
@@ -419,9 +431,12 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-model": ["production-metadata"],
   "production-series": ["production-metadata", "series"],
   "production-overview": ["story"],
+  "production-prose-style": ["story"],
   "production-season": ["seasons"],
   "production-episode": ["episodes"],
-  "production-chapter": ["chapters"],
+  // The story read carries the prose style (turn 128): a draft or a revision that never saw it
+  // cannot be said to hold to it, so the read is required, not hoped for.
+  "production-chapter": ["chapters", "story"],
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "production-chapter-order": ["chapters"],
@@ -437,6 +452,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-take-review": ["takes"],
   "production-take-trim": ["takes"],
   "production-stage-playblast": ["scenes"],
+  "production-stage-construct": ["scenes"],
   "audio-spine-command": ["spine"],
   "production-routing": ["routing", "scenes"],
   "production-routing-traversal": ["routing", "scenes"],
@@ -482,8 +498,16 @@ function currentWorldObservation(
       return { target: productionId, fence: episodesFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
     }
     case "chapters": {
-      const productionId = target ?? store.worldId;
-      return { target: productionId, fence: chaptersFence(bundle.productions.find((candidate) => candidate.meta.id === productionId)) };
+      // `productionId:chapterId` is one chapter's read (get_chapter), fenced on that chapter
+      // alone; the bare production id is the list (codex on PR 899).
+      const targetId = target ?? store.worldId;
+      const [productionId, chapterId] = targetId.split(":");
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      if (chapterId) {
+        const canonical = canonicalChapterId(store, productionId!, chapterId);
+        return { target: `${productionId}:${canonical}`, fence: chapterFence(production, canonical) };
+      }
+      return { target: targetId, fence: chaptersFence(production) };
     }
     case "scenes": {
       const targetId = target ?? store.worldId;
@@ -550,7 +574,8 @@ function productionActionTargets(
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
     ];
-    case "production-overview": return [{ requirement: "story", target: action.productionId }];
+    case "production-overview":
+    case "production-prose-style": return [{ requirement: "story", target: action.productionId }];
     case "production-season": return [
       { requirement: "seasons", target: action.productionId },
       ...(action.changes.arcs !== undefined && action.changes.arcs !== null
@@ -566,8 +591,16 @@ function productionActionTargets(
     ];
     case "production-chapter": {
       const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      // A passage is quoted from a read of that chapter (turn 128), so the read is required by
+      // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
+      // sends the model back to read it again rather than to guess.
+      const quotedFrom = action.change.operation === "edit" && action.change.changes.passage !== undefined
+        ? [{ requirement: "chapters" as const, target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.change.chapterId)}` }]
+        : [];
       return [
         { requirement: "chapters", target: action.productionId },
+        ...quotedFrom,
+        { requirement: "story", target: action.productionId },
         ...(draws
           ? [
               { requirement: "sheets" as const, target: worldId },
@@ -614,6 +647,7 @@ function productionActionTargets(
     ];
     case "production-take-review":
     case "production-take-trim": return [{ requirement: "takes", target: action.productionId }];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { requirement: "scenes", target: `${action.productionId}:${action.sceneId}` },
     ];
@@ -740,6 +774,7 @@ function preparedWorldPayload(
     case "production-model": return WorldChatProductionModelActionSchema.parse({ kind: "world-chat-production-model", ...common });
     case "production-series": return WorldChatProductionSeriesActionSchema.parse({ kind: "world-chat-production-series", ...common });
     case "production-overview": return WorldChatProductionOverviewActionSchema.parse({ kind: "world-chat-production-overview", ...common });
+    case "production-prose-style": return WorldChatProductionProseStyleActionSchema.parse({ kind: "world-chat-production-prose-style", ...common });
     case "production-season": return WorldChatProductionSeasonActionSchema.parse({ kind: "world-chat-production-season", ...common });
     case "production-episode": return WorldChatProductionEpisodeActionSchema.parse({ kind: "world-chat-production-episode", ...common });
     case "production-chapter": return WorldChatProductionChapterActionSchema.parse({ kind: "world-chat-production-chapter", ...common });
@@ -757,6 +792,7 @@ function preparedWorldPayload(
     case "production-take-generation": return WorldChatProductionTakeGenerationActionSchema.parse({ kind: "world-chat-production-take-generation", ...common });
     case "production-take-review": return WorldChatProductionTakeReviewActionSchema.parse({ kind: "world-chat-production-take-review", ...common });
     case "production-take-trim": return WorldChatProductionTakeTrimActionSchema.parse({ kind: "world-chat-production-take-trim", ...common });
+    case "production-stage-construct": return WorldChatProductionStageConstructActionSchema.parse({ kind: "world-chat-production-stage-construct", ...common });
     case "production-stage-playblast": return WorldChatProductionStagePlayblastActionSchema.parse({ kind: "world-chat-production-stage-playblast", ...common });
     case "audio-spine-command": return WorldChatAudioSpineActionSchema.parse({ kind: "world-chat-audio-spine-command", ...common });
     case "production-routing": return WorldChatProductionRoutingActionSchema.parse({ kind: "world-chat-production-routing", ...common });
@@ -894,6 +930,54 @@ function actionProduction(action: ModelWorldChatAction, contextProductionId: str
   return undefined;
 }
 
+/**
+ * A chapter's canonical id from either spelling (codex on PR 899): `get_chapter` and the chapter
+ * edit both accept the frontmatter id or the file stem, and a receipt is matched by exact target,
+ * so both sides name the chapter the same way or a current read is refused as missing.
+ */
+function canonicalChapterId(store: WorldStore, productionId: string, chapterId: string): string {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  return production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)?.id ?? chapterId;
+}
+
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection, the chapter and the paragraph exist as a structured subject on the turn, not only
+ * in the words said, so an action that comes back naming another chapter, another paragraph, or
+ * words outside the selection is refused by name rather than staged. Whitespace is folded on both
+ * sides, because the selection is rendered text and the quote is the file's.
+ */
+function heldToPassage(store: WorldStore, action: ModelWorldChatAction, subject: WorldChatSubject | undefined): void {
+  if (subject?.kind !== "passage") return;
+  if (action.kind !== "production-chapter" || action.change.operation !== "edit" || action.change.changes.passage === undefined) return;
+  const passage = action.change.changes.passage;
+  // Both spellings of a chapter resolve to its id before they are compared (codex, round four):
+  // the subject names the id, the edit may name the file stem, and both mean one chapter.
+  const asked = canonicalChapterId(store, action.productionId, subject.chapterId);
+  const named = canonicalChapterId(store, action.productionId, action.change.chapterId);
+  if (named !== asked) {
+    throw new Error(`This ask was about a passage in chapter ${asked}; the revision names ${named}.`);
+  }
+  // A paragraph the ask named must come back on the action, not only match when present: an
+  // action without one falls back to the whole chapter, where a twin of the selected words could
+  // be the one changed after the author typed over the selected copy.
+  if (subject.paragraph !== undefined && passage.paragraph === undefined) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision must name that paragraph.`);
+  }
+  if (subject.paragraph !== undefined && passage.paragraph !== undefined && passage.paragraph !== subject.paragraph) {
+    throw new Error(`This ask was about paragraph ${subject.paragraph} of chapter ${asked}; the revision names paragraph ${passage.paragraph}.`);
+  }
+  // Folded as the replacement matcher folds (codex on PR 903, round four): whitespace, and then
+  // the emphasis markers too, so a quote of the file's `__not__` is within a selection the
+  // editor served as `**not**` — the same fallback the matcher advertises, or the guard would
+  // refuse what the matcher would have found.
+  const within = foldedText(subject.text, false).includes(foldedText(passage.find, false))
+    || foldedText(subject.text, true).includes(foldedText(passage.find, true));
+  if (!within) {
+    throw new Error("The revision's passage is not within the words this ask was about; quote from the selection, or ask about the chapter instead.");
+  }
+}
+
 function worldActionTargets(
   store: WorldStore,
   action: ModelWorldChatAction,
@@ -996,6 +1080,7 @@ function worldActionTargets(
       label: action.change.operation === "edit" ? action.change.seriesId : action.change.title,
     }];
     case "production-overview": return [{ kind: "story", id: action.productionId, label: "Story overview" }];
+    case "production-prose-style": return [{ kind: "story", id: action.productionId, label: "Prose style" }];
     case "production-season": return [{ kind: "season", id: action.productionId, label: "Season" }];
     case "production-episode": return [{
       kind: "episode",
@@ -1038,6 +1123,7 @@ function worldActionTargets(
       { kind: "take", id: action.takeId, label: action.takeId },
       { kind: "shot", id: action.shotId, label: action.shotId },
     ];
+    case "production-stage-construct":
     case "production-stage-playblast": return [
       { kind: "scene", id: action.sceneId, label: action.sceneId },
       { kind: "shot", id: action.shotId, label: action.shotId },
@@ -1066,6 +1152,15 @@ export function prepareWorldChatActions(
   turn: WorldChatActionTurn,
   deps: WorldChatActionAdapterDeps = {},
 ): PreparedWorldChatAction[] {
+  // A quick ask that promised a reply and nothing else (turn 128) is held to the promise here,
+  // whatever the model returned and through whichever channel — candidates, bible edits, scene
+  // edits, editor requests or actions: `Hold this against the style` stages nothing.
+  if (
+    turn.replyOnly === true &&
+    (turn.actions.length > 0 || turn.candidates.length > 0 || turn.groups.length > 0 || turn.bibleEdits.length > 0 || turn.sceneEdits.length > 0 || turn.editorRequests.length > 0)
+  ) {
+    throw new Error("This ask was for a reply only; nothing is staged from it. Say what you would change, and the author will ask for it.");
+  }
   const prepared: PreparedWorldChatAction[] = [];
   const candidateById = new Map(turn.existingCandidates.map((candidate) => [candidate.id, candidate]));
   for (const candidate of turn.candidates) candidateById.set(candidate.id, candidate);
@@ -1124,6 +1219,7 @@ export function prepareWorldChatActions(
   const plannedSeriesIds = new Set<string>();
   for (const [index, rawAction] of turn.actions.entries()) {
     const action = scopedWorldAction(store, rawAction, contextProductionId);
+    heldToPassage(store, action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
@@ -2686,6 +2782,16 @@ async function sharedResourceProjection(
       };
       break;
     }
+    case "world-chat-production-stage-construct": {
+      authority = { kind: "scene-store", id: intent.actionId };
+      const production = bundle.productions.find(p => p.meta.id === payload.action.productionId);
+      const scene = production?.scenes.find(s => s.id === payload.action.sceneId);
+      const shot = scene && orderedShots(scene).find(s => s.id === payload.action.shotId);
+      if (!shot || !scene) throw new Error("That Stage shot is no longer available.");
+      shown = { title: `Construct the blockout for ${shot.title}`, consequence: "Uses the configured language model for up to three turns and five minutes, then opens an editable Stage draft. Keep applies it to this shot.", affectedTargets: [...intent.targets], ripples: [], permissionReason: "authored-change", body: { family: "host-action", action: payload.action.instruction, effect: `Preserve ${payload.action.preserve}. Inspect rendered views before human review.` } };
+      authorityRevision = scene.version;
+      break;
+    }
     case "world-chat-production-stage-playblast": {
       authority = { kind: "scene-store", id: intent.actionId };
       const production = bundle.productions.find((candidate) => candidate.meta.id === payload.action.productionId);
@@ -2811,6 +2917,7 @@ async function sharedResourceProjection(
             ...(payload.action.subtitles ? { subtitles: payload.action.subtitles } : {}),
           });
       if (projected?.ok === false) approvalBlockedReason = projected.reason;
+      if (projected === null) approvalBlockedReason ??= legacyArtifactScopeRefusal(production, bundle.artifacts, timeline, payload.action.scope) ?? undefined;
       if (!deps.startProductionExport) approvalBlockedReason ??= "Local video export is unavailable in this host.";
       const sidecar = payload.action.subtitles && (payload.action.subtitles.mode === "sidecar" || payload.action.subtitles.mode === "burn-in+sidecar")
         ? payload.action.subtitles.sidecar ?? "srt"
@@ -3549,6 +3656,7 @@ async function executeSharedResource(
       }, options);
       return { status: "completed", receipt: { kind: "take-trim", id: payload.action.shotId, summary: "The selected take's trim-in was updated." } };
     }
+    case "world-chat-production-stage-construct": return { status: "awaiting-host", detail: "Waiting for the Stage construction surface." };
     case "world-chat-production-stage-playblast": {
       return { status: "awaiting-host", detail: "Waiting for the desktop renderer to record the Stage." };
     }
@@ -4251,6 +4359,15 @@ export function worldChatActionAdapters(
             }
           : null;
       },
+      ...(actionKind === "world-chat-production-stage-construct" ? {
+        completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
+          const input = value as { kind?: string; shotId?: string; sceneId?: string; status?: string; detail?: string };
+          const prepared = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+          if (!prepared.success || input.kind !== "stage-constructor-result" || input.shotId !== prepared.data.action.shotId || input.sceneId !== prepared.data.action.sceneId) return { status: "failed", detail: "The Stage construction did not match the approved shot." };
+          await removePreparation(store, "world", action.actionId);
+          return input.status === "ready" ? { status: "completed", receipt: { kind: "stage-draft", id: action.actionId, summary: "Constructed and inspected an editable Stage draft. Keep applies it." } } : { status: "failed", detail: input.detail ?? "Stage construction stopped." };
+        },
+      } : {}),
       ...(actionKind === "world-chat-production-stage-playblast"
         ? {
             completeHost: async (action: ConversationActionCard, value: unknown): Promise<ConversationActionExecutionOutcome> => {
@@ -4318,6 +4435,7 @@ export function worldChatActionAdapters(
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),
                 }, {
+                  ...(deps.mediaProbe ? { mediaProbe: deps.mediaProbe } : {}),
                   source: `world-chat:${action.conversationId}:${action.actionId}`,
                   requestId: action.actionId,
                   precondition: observationPrecondition(store, action),
@@ -4399,6 +4517,7 @@ export function worldChatActionAdapters(
     "world-chat-production-take-review",
     "world-chat-production-take-trim",
     "world-chat-production-stage-playblast",
+    "world-chat-production-stage-construct",
     "world-chat-audio-spine-command",
     "world-chat-production-routing",
     "world-chat-production-routing-traversal",
@@ -4443,6 +4562,14 @@ export function worldChatActionAdapters(
   const productionOverview = proposalBacked(
     "world-chat-production-overview",
     (value) => WorldChatProductionOverviewActionSchema.parse(value),
+    (intent, payload, precondition) => {
+      if (!gate) throw new Error("The proposal authority is unavailable.");
+      return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
+    },
+  );
+  const productionProseStyle = proposalBacked(
+    "world-chat-production-prose-style",
+    (value) => WorldChatProductionProseStyleActionSchema.parse(value),
     (intent, payload, precondition) => {
       if (!gate) throw new Error("The proposal authority is unavailable.");
       return stageWorldChatProductionAuthoredAction(store, gate, intent, payload, precondition);
@@ -4571,6 +4698,7 @@ export function worldChatActionAdapters(
     artDirectionRestore,
     productionSeries,
     productionOverview,
+    productionProseStyle,
     productionSeason,
     productionEpisode,
     productionChapter,
@@ -4601,4 +4729,9 @@ async function saveProposalPoint(
   });
   if (staged.proposalIds.length !== 1) throw new Error("A conversation action must bind one proposal authority.");
   return staged.proposalIds[0]!;
+}
+
+export async function stageConstructionHandoff(store: WorldStore, action: ConversationActionCard) {
+  const parsed = WorldChatProductionStageConstructActionSchema.safeParse(await readPreparation(store, "world", action));
+  return parsed.success ? parsed.data.action : null;
 }

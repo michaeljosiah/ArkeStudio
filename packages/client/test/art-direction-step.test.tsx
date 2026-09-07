@@ -20,6 +20,8 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
+const scrolled: HTMLElement[] = [];
+dom.HTMLElement.prototype.scrollIntoView = function () { scrolled.push(this); };
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
 Object.assign(globalThis, {
   window: dom.window,
@@ -244,15 +246,54 @@ describe("the chat-to-build handoff (issue 666)", () => {
   it("treats Begin as approval of the look already proposed in conversation", async () => {
     const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures under cold harbor light."), BUILD_REVIEW);
     try {
+      scrolled.length = 0;
       await act(async () => button(mounted.container, "Begin in this world").click());
+      assert.equal(scrolled.length, 1, "the pending card is brought into view");
+      assert.ok(scrolled[0]?.querySelector(".fy-actioncard"));
+      assert.ok(mounted.container.querySelector(".fy-working__elapsed"), "sizing shows elapsed time");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy")?.textContent, "sizing the build…");
       assert.ok(mounted.container.textContent?.includes("sizing the build"), "a cached review is not actionable");
       assert.ok(!mounted.container.textContent?.includes("Build Glass Harbor"));
       await answerPlan(mounted);
+      assert.equal(scrolled.length, 2, "the completed card is brought into view too");
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
       assert.ok(mounted.container.textContent?.includes("One press makes Glass Harbor."), "the final build review opens");
+      // A card in the thread, not a route of its own (issue 920): the conversation that reached
+      // the decision stays on screen under it.
+      assert.ok(mounted.container.textContent?.includes("A drowned city."), "the review is a card in the conversation");
+      assert.ok(button(mounted.container, "Begin in this world").disabled, "the card is the control while it is open");
       assert.ok(
         !mounted.container.textContent?.includes("The conversation proposed this look."),
         "the duplicate words confirmation is skipped",
       );
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.ok(!mounted.container.textContent?.includes("One press makes Glass Harbor."), "set aside, the card goes");
+      assert.equal(button(mounted.container, "Begin in this world").disabled, false);
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
+  it("clears sizing on refusal or dismissal and ignores a dismissed result", async () => {
+    const mounted = await mountGenesis(genesisBlueprint("Ink-washed miniatures."));
+    try {
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      scrolled.length = 0;
+      await emitBuildPlan(latestPlanRequest(mounted).requestId, null, "The plan could not be sized.");
+      assert.equal(scrolled.length, 1, "the refusal is brought into view");
+      assert.ok(scrolled[0]?.textContent?.includes("The plan could not be sized."));
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      await act(async () => button(mounted.container, "Not yet").click());
+      await act(async () => button(mounted.container, "Begin in this world").click());
+      const request = latestPlanRequest(mounted);
+      await act(async () => button(mounted.container, "Not yet").click());
+      assert.equal(mounted.container.querySelector(".fy-working"), null);
+      assert.equal(mounted.container.querySelector(".fy-cx__busy"), null);
+      scrolled.length = 0;
+      await emitBuildPlan(request.requestId, BUILD_REVIEW);
+      assert.equal(scrolled.length, 0, "a dismissed reply cannot move the author's view");
+      assert.equal(mounted.container.querySelector(".fy-actioncard[aria-label='Build Glass Harbor']"), null);
     } finally {
       await unmountGenesis(mounted);
     }
@@ -271,7 +312,7 @@ describe("the chat-to-build handoff (issue 666)", () => {
     }
   });
 
-  it("uses a conversational look that changed after returning to chat", async () => {
+  it("follows a conversational look that changed under the open card", async () => {
     const firstLook = "Ink-washed miniatures under cold harbor light.";
     const latestLook = "Charcoal silhouettes against a warm harbor dawn.";
     const mounted = await mountGenesis(genesisBlueprint(firstLook));
@@ -279,7 +320,9 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       const firstRequest = latestPlanRequest(mounted);
       assert.equal(firstRequest.look, firstLook);
-      await act(async () => button(mounted.container, "Back to chat").click());
+      // The card sits in the thread, so the conversation can move under it. A blueprint that
+      // changed is what the press would be refused for, so the plan is asked again — with the
+      // look the conversation now proposes, not the one it proposed before.
       await act(async () => {
         __applyEventForTest({
           type: "genesis.blueprint",
@@ -288,8 +331,8 @@ describe("the chat-to-build handoff (issue 666)", () => {
           blueprint: genesisBlueprint(latestLook),
         });
       });
-      await act(async () => button(mounted.container, "Begin in this world").click());
       const latestRequest = latestPlanRequest(mounted);
+      assert.notEqual(latestRequest.requestId, firstRequest.requestId, "the moved blueprint is sized again");
       assert.equal(latestRequest.look, latestLook);
       await emitBuildPlan(latestRequest.requestId, BUILD_REVIEW);
       await emitBuildPlan(firstRequest.requestId, { ...BUILD_REVIEW, worldName: "Old Harbor" });
@@ -306,12 +349,16 @@ describe("the chat-to-build handoff (issue 666)", () => {
       await act(async () => button(mounted.container, "Begin in this world").click());
       await answerPlan(mounted);
       await act(async () => button(mounted.container, "Build Glass Harbor").click());
-      assert.equal(button(mounted.container, "Back to chat").disabled, true, "the authorized blueprint cannot change");
+      // The composer is the way the blueprint could change now that the card is in the thread,
+      // so it is the thing the press locks.
+      assert.ok(mounted.container.textContent?.includes("founding the world…"), "the authorized blueprint cannot change");
       assert.ok(mounted.container.textContent?.includes("Building…"), "the accepted review remains visible while it starts");
+      assert.equal(button(mounted.container, "Not yet").disabled, true);
       const beginRequest = latestBeginRequest(mounted);
       await emitBuildPlan(beginRequest.requestId, null, "the blueprint changed; review it again");
       assert.ok(mounted.container.textContent?.includes("the blueprint changed; review it again"));
-      assert.equal(button(mounted.container, "Back to chat").disabled, false, "a refused build releases navigation");
+      assert.ok(!mounted.container.textContent?.includes("founding the world…"), "a refused build releases the conversation");
+      assert.equal(button(mounted.container, "Not yet").disabled, false);
     } finally {
       await unmountGenesis(mounted);
     }
@@ -645,4 +692,35 @@ describe("location views ask in the dialog (design 66)", () => {
     );
     assert.match(locations, /promptOptional/, "and location views are the surface that opts out");
   });
+
+});
+
+describe("a character who is never depicted (issue 945)", () => {
+  /*
+   * A character the author ruled out is not waiting for anything (issue 945). The build card
+   * already says "never depicted"; the rail said "no face yet", which promises the picture the
+   * rule forbids — and the two sat on screen together.
+   */
+  it("says a never-depicted character is never depicted, not that a face is coming", async () => {
+    const mounted = await mountGenesis({
+      ...genesisBlueprint(),
+      characters: [
+        { name: "Boma Abbey", slug: "boma-abbey", description: "Sixteen, and she has started answering." },
+        { name: "Ibinabo", slug: "ibinabo", description: "A voice on a band that carries no station.", neverDepicted: true },
+      ],
+    });
+    try {
+      const text = mounted.container.textContent ?? "";
+      assert.ok(text.includes("sketch · never depicted"), "the ruled-out character says the rule");
+      assert.ok(text.includes("sketch · no face yet"), "an ordinary character still awaits its face");
+      assert.equal(
+        (text.match(/no face yet/g) ?? []).length,
+        1,
+        "only the character without the rule is told a face is coming",
+      );
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
 });

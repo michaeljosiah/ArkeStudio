@@ -1,9 +1,11 @@
+import { StageConstructionDraftSchema } from "./stage-construction.js";
 import { MasterAudioReviewSchema, PreparedPerformanceAudioReviewSchema } from "./audio-reference.js";
 import { PromptReviewSchema } from "./prompt-review.js";
 import { TableReadPlanSchema } from "./rehearsal.js";
 import { PerformanceGenerationQuoteSchema } from "./performance.js";
 import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
+import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { z } from "zod";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -113,6 +115,11 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
+  /** Unexpected command failures are transient notices, never evidence of rollback (#926). */
+  z.object({ ...base, type: z.literal("command.failed"), command: z.string(),
+    requestId: z.string().nullable(), reason: z.string() }).strict(),
+  z.object({ type: z.literal("stage.construction"), at: z.string(), worldId: z.string(), requestId: z.string(), sceneId: z.string(), shotId: z.string(), baseVersion: z.number(), status: z.enum(["working", "inspect", "ready", "failed"]), detail: z.string(), round: z.number().int(), draft: StageConstructionDraftSchema.optional() }).strict(),
+
   /** A world was opened into the coordinator; the follow-up snapshot carries its bundle. */
   z.object({ ...base, type: z.literal("world.opened"), worldId: UlidSchema }).strict(),
   z.object({ ...base, type: z.literal("world.closed"), worldId: UlidSchema }).strict(),
@@ -278,6 +285,16 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
        * with no v1–v3 to put back, and a Restore that always fails is worse than none.
        */
       versions: z.array(z.number().int().min(1)).optional(),
+      /**
+       * The continuity record beside the chapter (turn 129, SPEC-012 R-42): the lines come with
+       * the chapter, because the summary in the bundle carries only the stamp and the placings.
+       */
+      continuity: ChapterContinuitySchema.optional(),
+      /** A record is there but cannot be read; the panel says so rather than offering a first run. */
+      continuityUnreadable: z.literal(true).optional(),
+      /** The cast of lines beside the chapter (turn 130), for the same reason. */
+      voices: ChapterVoicesSchema.optional(),
+      voicesUnreadable: z.literal(true).optional(),
       reason: z.string().min(1).optional(),
     })
     .strict(),
@@ -673,6 +690,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       characterCount: z.number().int().min(0),
       estimatedMicroUsd: z.number().int().min(0),
       confirmationToken: z.string().min(1).optional(),
+      /** The cloud voices a priced page would send its words to, by label and provider (R-47). */
+      voices: z.array(z.object({ label: z.string().min(1), provider: z.string().min(1) }).strict()).optional(),
       error: z.string().optional(),
     })
     .strict(),
@@ -871,6 +890,111 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       found: z.number().int().min(0),
       /** Quotes that did not appear in the document, dropped before anyone saw them (D3). */
       dropped: z.number().int().min(0),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
+   * Continuity derived for a chapter (turn 129, SPEC-012 §2.4.1): started, then finished with a
+   * named ending. "derived" carries the record itself, so the open panel has the lines without a
+   * second read, and how many characters were placed, lines dropped and characters cut;
+   * "stopped" is the author's own doing; "unavailable" is the harness; "failed" names its
+   * reason. Every ending short of "derived" leaves the last record standing.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("continuity.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("continuity.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["derived", "stopped", "unavailable", "failed"]),
+      placed: z.number().int().min(0),
+      dropped: z.number().int().min(0),
+      omitted: z.number().int().min(0),
+      cut: z.number().int().min(0),
+      record: ChapterContinuitySchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /** The cast of lines (turn 130): started, then finished with a named ending, as continuity's. */
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.started"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("voices.finished"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterId: SlugSchema,
+      outcome: z.enum(["cast", "stopped", "unavailable", "failed"]),
+      lines: z.number().int().min(0),
+      dropped: z.number().int().min(0),
+      omitted: z.number().int().min(0),
+      record: ChapterVoicesSchema.optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+
+  /**
+   * A manuscript read for import (turn 131): what the file holds, before anything is written —
+   * or why it could not be read. Held by request until imported or cancelled.
+   */
+  z
+    .object({
+      ...base,
+      type: z.literal("manuscript.read-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      fileName: z.string().min(1).optional(),
+      words: z.number().int().min(0).optional(),
+      chapters: z.array(z.object({ title: z.string().min(1), words: z.number().int().min(0) }).strict()).optional(),
+      /** The style that started chapters, as the sheet names it; absent for a document with none. */
+      headingLevel: z.string().min(1).optional(),
+      /** Headings above the chapter level, the book's name or a part's, left out and counted. */
+      leftOut: z.number().int().min(0).optional(),
+      /** Every level the document uses, with its count and whether chapters were found at it: the sheet's segment. */
+      levels: z
+        .array(z.object({ level: z.enum(["title", "subtitle", "heading1", "heading2", "document"]), label: z.string().min(1), count: z.number().int().min(0), chosen: z.boolean() }).strict())
+        .optional(),
+      /** Footnote and endnote references, not carried and said so. */
+      notes: z.number().int().min(0).optional(),
+      /** Hyperlinks, their labels kept and their targets not, said so. */
+      links: z.number().int().min(0).optional(),
+      /** The picker was closed without a file: no action, and the sheet closes. */
+      cancelled: z.literal(true).optional(),
+      /** The highest order there is: the chapters would follow it. */
+      after: z.number().int().min(0).optional(),
+      reason: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("manuscript.import-result"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      created: z.number().int().min(0).optional(),
+      after: z.number().int().min(0).optional(),
       reason: z.string().optional(),
     })
     .strict(),

@@ -1,3 +1,5 @@
+import { isManuscriptLanguage } from "./manuscript.js";
+import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
@@ -34,7 +36,7 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
@@ -57,6 +59,10 @@ export type Frame = z.infer<typeof FrameSchema>;
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("stage-construct"), conversationId: z.string().optional(), actionId: z.string().optional(), worldId: z.string(), productionId: z.string(), sceneId: z.string(), shotId: z.string(), requestId: z.string().uuid(), instruction: z.string().max(4000), preserve: z.enum(["blocking", "camera", "none"]), baseVersion: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
+  z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
+
   z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
@@ -210,6 +216,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
        */
       sources: z.array(ProseReadSourceSchema).min(1).max(1000),
       confirmationToken: z.string().min(1).optional(),
+      /** A cloned voice on a voiced page (turn 130): the remote engine its recording may go to. */
+      voiceUploadConfirmedFor: z.string().min(1).optional(),
     })
     .strict(),
   /**
@@ -521,6 +529,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       modelId: z.string().min(1).optional(),
       /** What is selected on the timeline while they talk (SPEC-039 R-26); the subject of "this". */
       subject: WorldChatSubjectSchema.optional(),
+      /**
+       * A line that asks for a reply and nothing else (turn 128): findings, not a proposal. The
+       * coordinator refuses any authored action the turn comes back with, so a quick ask that
+       * promises to stage nothing cannot be talked into staging something.
+       */
+      replyOnly: z.boolean().optional(),
     })
     .strict(),
   /**
@@ -1952,6 +1966,29 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseHash: z.string().min(1).optional(),
     })
     .strict(),
+  /**
+   * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+   * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
+   * field. The sizes here are the writer's; the read path has none.
+   */
+  z
+    .object({
+      kind: z.literal("edit-chapter-plan"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      changes: z
+        .object({
+          title: z.string().trim().min(1).max(200).optional(),
+          synopsis: z.string().trim().max(600).nullable().optional(),
+          pov: SlugSchema.nullable().optional(),
+          when: z.string().trim().max(80).nullable().optional(),
+          implies: ChapterImpliesWriteSchema.nullable().optional(),
+        })
+        .strict()
+        .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),
+    })
+    .strict(),
   /** Undo for a chapter (turn 126): v<n> comes back as a new version, nothing between is lost. */
   z
     .object({
@@ -2722,6 +2759,52 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-extraction"), worldId: UlidSchema, artifactId: z.string().min(1) })
     .strict(),
+  /**
+   * Continuity after a chapter (turn 129): derived by a press, never by a save, one run per
+   * chapter at a time, stoppable the way extraction is.
+   */
+  z
+    .object({ kind: z.literal("derive-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /** The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time, stoppable. */
+  z
+    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  z
+    .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .strict(),
+  /**
+   * A manuscript out and a manuscript in (turn 131, SPEC-012 §2.4.3). The export lands under
+   * the world's `exports/` and reports through `export.progress`; the import is read by the host
+   * and shown before anything is written, then appended in one commit.
+   */
+  z
+    .object({
+      kind: z.literal("export-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      format: z.enum(["docx", "epub"]),
+      /** The EPUB's language, as the sheet named it — a BCP 47 tag in full shape (codex on PR 916); the world records none. */
+      language: z.string().refine(isManuscriptLanguage, "expected a BCP-47 language tag").optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */
+  z
+    .object({
+      kind: z.literal("reread-manuscript"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      headingLevel: z.enum(["title", "subtitle", "heading1", "heading2", "document"]),
+    })
+    .strict(),
+  z.object({ kind: z.literal("cancel-manuscript"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /** SPEC-015 R-15: per-candidate resolution; accepts commit individually, rejects leave no trace. */
   z
     .object({

@@ -24,11 +24,11 @@ export const FoundingBuildIdSchema = prefixedIdSchema("fb");
 // ---------------------------------------------------------------------------
 
 export const BUILD_STAGES = [
-  { id: "understanding", label: "Understanding your vision" },
-  { id: "shaping", label: "Shaping the world" },
-  { id: "creating", label: "Creating characters" },
-  { id: "forging", label: "Forging history and lore" },
-  { id: "finalizing", label: "Finalizing the details" },
+  { id: "understanding", label: "Blueprint ready" },
+  { id: "shaping", label: "World records" },
+  { id: "creating", label: "Main photos · establishing views" },
+  { id: "forging", label: "Character sheets · key art" },
+  { id: "finalizing", label: "Finishing" },
 ] as const;
 export type BuildStageId = (typeof BUILD_STAGES)[number]["id"];
 
@@ -517,6 +517,7 @@ export function compileBuildItems(
       estimatedMicroUsd: 0,
       authorized: true,
     });
+    if (character.neverDepicted === true) continue;
     items.push({
       key: `main-photo:${character.slug}`,
       kind: "main-photo",
@@ -544,6 +545,7 @@ export function compileBuildItems(
   }
 
   for (const character of blueprint.characters) {
+    if (character.neverDepicted === true) continue;
     const sheetImageRefusal = refusal ?? sheetsRefused;
     items.push({
       key: `sheet-image:${character.slug}`,
@@ -559,7 +561,9 @@ export function compileBuildItems(
     });
   }
   // Key art needs a brief: one is never invented from a logline (R-5).
-  if (keyArtBriefSettled(blueprint.keyArt)) {
+  if (keyArtBriefSettled(blueprint.keyArt) && !blueprint.characters.some((character) =>
+    character.neverDepicted === true && blueprint.keyArt?.characters.some((name) =>
+      name.toLowerCase() === character.name.toLowerCase() || name === character.slug))) {
     items.push({
       key: "key-art:world",
       kind: "key-art",

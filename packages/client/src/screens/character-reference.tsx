@@ -247,10 +247,15 @@ export function CharacterReferenceScreen() {
       <main className="fy-reference-grid">
         <section className="fy-reference-card">
           <div className="fy-reference-card__image fy-reference-card__image--photo fy-imghost">
+            {/*
+             * "Outstanding" is owed work. A never-depicted character is not waiting for a photo —
+             * the author ruled one out and the build skipped it deliberately (issue 905, issue 945).
+             * Say the rule, not a shortfall.
+             */}
             <ImageDialog
               worldSlug={world.meta.slug}
               path={photo ? `references/${sheetId}/${photo.file}` : ""}
-              label={photo ? `${sheet.name} main photo` : "Main photo outstanding"}
+              label={photo ? `${sheet.name} main photo` : sheet.neverDepicted === true ? "Never depicted" : "Main photo outstanding"}
               title={sheet.name}
               subtitle="main photo"
               triggerLabel={`View larger main photo of ${sheet.name}`}

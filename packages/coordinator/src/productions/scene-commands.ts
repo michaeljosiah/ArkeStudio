@@ -1,3 +1,4 @@
+import { stageProblems, resolvedShotStaging } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -50,7 +51,7 @@ export type SceneCommand =
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
   | { kind: "edit-shot"; shotId: string; change: Partial<Omit<Shot, "id" | "number" | "staging">> }
-  | { kind: "set-prompt-override"; shotId: string; text: string | null }
+  | { kind: "set-prompt-override"; shotId: string; text: string | null; capability?: "image" | "video" }
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
   | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" }
@@ -297,6 +298,10 @@ async function candidateFor(
             : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
         });
       }
+      if (command.staging) {
+        const problems = stageProblems(resolvedShotStaging(next, { ...command.staging, version: 1 }), current.durationSec ?? 4);
+        if (problems.length) throw new SceneCommandRefused(problems);
+      }
       return command.staging === undefined
         ? next
         : editShot(next, {
@@ -353,13 +358,13 @@ async function candidateFor(
         return editShot(record, { shotId: command.shotId, change: { promptOverride: undefined } });
       }
       const sheetVersions: Record<string, number> = {};
-      for (const slug of parseMentions(shot.description)) {
+      for (const slug of new Set([...parseMentions(shot.description), ...(record.inherits?.location ? [record.inherits.location] : [])])) {
         const sheet = store.getBundle().sheets.find((candidate) => candidate.id === slug);
         if (sheet !== undefined) sheetVersions[slug] = sheet.version;
       }
       return editShot(record, {
         shotId: command.shotId,
-        change: { promptOverride: { text: command.text, sheetVersions } },
+        change: { promptOverride: { text: command.text, sheetVersions, ...(command.capability ? { capability: command.capability } : {}) } },
       });
     }
     case "delete-shot": {

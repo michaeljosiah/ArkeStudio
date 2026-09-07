@@ -137,6 +137,20 @@ export const WorldChatSubjectSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("take"), takeId: TakeIdSchema }).strict(),
+  /**
+   * A passage selected in a chapter (turn 128): the chapter, the paragraph counted from one by
+   * blank lines, and the words. The structured twin of the dock's subject prefix, carried so a
+   * revision the model returns can be held against what was actually selected rather than
+   * against its own retelling of it.
+   */
+  z
+    .object({
+      kind: z.literal("passage"),
+      chapterId: SlugSchema,
+      paragraph: z.number().int().min(1).optional(),
+      text: z.string().min(1).max(1_200),
+    })
+    .strict(),
 ]);
 export type WorldChatSubject = z.infer<typeof WorldChatSubjectSchema>;
 
