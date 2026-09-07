@@ -263,7 +263,7 @@ import {
   jobsFence,
   type ArkeExportReadRecord,
 } from "./target-reads.js";
-import { foldedText, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
+import { foldedText, resolveChapterViewpointEdit, stageWorldChatProductionAuthoredAction } from "./production-authoring.js";
 import {
   stageWorldChatArtDirectionAction,
   stageWorldChatCanonAction,
@@ -593,6 +593,10 @@ function productionActionTargets(
     ];
     case "production-chapter": {
       const draws = action.change.operation === "create" ? action.change.draws : action.change.operation === "edit" ? action.change.changes.draws : undefined;
+      const resolvesViewpoint = action.change.operation === "outline"
+        ? action.change.chapters.some((chapter) => chapter.viewpointCharacter !== undefined)
+        : action.change.operation === "create" ? action.change.viewpointCharacter !== undefined
+        : action.change.changes.viewpointCharacter != null;
       // A passage is quoted from a read of that chapter (turn 128), so the read is required by
       // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
       // sends the model back to read it again rather than to guess.
@@ -603,12 +607,8 @@ function productionActionTargets(
         { requirement: "chapters", target: action.productionId },
         ...quotedFrom,
         { requirement: "story", target: action.productionId },
-        ...(draws
-          ? [
-              { requirement: "sheets" as const, target: worldId },
-              { requirement: "canon" as const, target: worldId },
-            ]
-          : []),
+        ...(draws || resolvesViewpoint ? [{ requirement: "sheets" as const, target: worldId }] : []),
+        ...(draws ? [{ requirement: "canon" as const, target: worldId }] : []),
       ];
     }
     case "production-scene": return [
@@ -1227,6 +1227,9 @@ export function prepareWorldChatActions(
     const action = scopedWorldAction(store, rawAction, contextProductionId);
     heldToPassage(store, action, turn.subject);
     const productionId = actionProduction(action, contextProductionId);
+    if (action.kind === "production-chapter" && action.change.operation === "edit") {
+      resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
+    }
     const payload = preparedWorldPayload(store, action, productionId, turn.at);
     if (payload.kind === "world-chat-production-create") {
       if (plannedProductionIds.has(payload.plan.production.id)) {
@@ -1373,6 +1376,10 @@ async function proposalProjection(
       after: clipped(field.proposed),
     })),
   );
+  // Outline omissions use chapter positions, so even 100 entries fit in one review field.
+  if (proposal.kind === "chapter-draft" && proposal.summary.includes("viewpoint character left unset")) {
+    fields.push({ label: "Viewpoint characters", before: null, after: clipped(proposal.summary) });
+  }
   return {
     authority: { kind: "proposal-manager", id: proposal.id },
     authorityRevision: proposal.draftRevision,

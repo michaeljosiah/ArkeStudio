@@ -2229,3 +2229,54 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   current.proseStyle = { version: 1, voice: "A changed style." };
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
 });
+
+
+it("fences chapter viewpoints and refuses invalid edits before completing the turn (#967)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const action = {
+    kind: "production-chapter" as const, productionId: context.productionId,
+    change: { operation: "edit" as const, chapterId: "neap", changes: { viewpointCharacter: "maren" } },
+    checkReceiptIds: receipts.map((receipt) => receipt.id),
+  };
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /requires the complete current sheets read/);
+  receipts.push(currentReceipt(w.store, "sheets"));
+  action.checkReceiptIds = receipts.map((receipt) => receipt.id);
+  const before = (await loaded(w.log)).seq;
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, change: { ...action.change, changes: { viewpointCharacter: "Unknown person" } } }],
+  }), /Choose a character from the cast/);
+  assert.equal((await loaded(w.log)).seq, before);
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  assert.ok(prepared[0]!.intent.baseObservations.some((observation) => observation.requirement === "sheets"));
+  w.store.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!.retired = true;
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, change: { operation: "outline", chapters: [{ title: "Opening", synopsis: "A plan.", viewpointCharacter: "maren" }] } }],
+  }), /sheets read is no longer current/);
+  await appendTurn(w.log, oneTurn, prepared);
+  await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare this action/);
+});
+
+it("shows every omitted viewpoint beyond the card title limit (#967)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId), currentReceipt(w.store, "sheets")];
+  const action = ModelWorldChatActionSchema.parse({
+    kind: "production-chapter", productionId: context.productionId, checkReceiptIds: receipts.map((receipt) => receipt.id),
+    change: { operation: "outline", chapters: Array.from({ length: 20 }, (_, index) => ({
+      title: `${index + 1} ${"Long chapter title ".repeat(10)}`, synopsis: "The chapter is retained.", viewpointCharacter: "close third",
+    })) },
+  });
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  await appendTurn(w.log, oneTurn, prepared);
+  await bindAll(w.lifecycle, prepared);
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.body.family, "authored-diff");
+  if (card.shown.body.family !== "authored-diff") throw new Error("wrong review body");
+  const notice = card.shown.body.fields.find((field) => field.label === "Viewpoint characters")!.after!;
+  assert.ok(notice.length > 200);
+  for (let index = 1; index <= 20; index++) assert.ok(notice.includes(`chapter ${index}`));
+});
