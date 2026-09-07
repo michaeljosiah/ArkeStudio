@@ -43,6 +43,8 @@ Client, coordinator and integrations ──> shared contracts
 | Generation reference slot | contracts `src/world-image-references.ts` supplies the image catalogue and roles; client `components/generation-dialog.tsx` embeds `reference-picker.tsx`; coordinator `pick-staged-reference` validates and writes a pointer, read by `world/scan.ts` | coordinator `test/references/master-look.test.ts`; client `test/world-reference-slot.test.tsx` |
 | Derived search | coordinator `src/index-db/world-index.ts`, `app-index.ts`, `queries.ts`, `sqlite.ts` | coordinator `test/index-db/cache-contract.test.ts` |
 
+Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
+
 For an unfamiliar feature, search its visible label in client source, follow the store helper's message kind into contracts and the coordinator switch, then follow the domain operation. Search the emitted event back into the client store. Use nearby tests to discover fixtures and failure cases.
 
 ## Startup and lifecycle
