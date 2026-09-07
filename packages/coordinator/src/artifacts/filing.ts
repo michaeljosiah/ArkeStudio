@@ -396,12 +396,13 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
    */
   if ((outcome.outcome === "filed" || outcome.outcome === "deduplicated") &&
       outcome.artifact.mediaInfo === undefined && (outcome.artifact.kind === "audio" || outcome.artifact.kind === "video")) {
-    if (await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned)) {
-      // The measurement may have re-kinded the sidecar; every filing surface reports what is on
-      // disk now, not the record from before the probe (codex on PR 944).
-      const measured = store.getBundle().artifacts.find((artifact) => artifact.id === outcome.artifact.id);
-      if (measured !== undefined) return { ...outcome, artifact: measured };
-    }
+    await measureInto(store, outcome.artifact.file, input.mediaProbe ?? null, input.abandoned);
+    // Re-read after any attempt, not only a recorded one: the measurement may have re-kinded the
+    // sidecar, and a competing filing of the same bytes may have landed it first. Either way every
+    // filing surface reports what is on disk now, not the record from before the probe (codex on
+    // PR 944).
+    const measured = store.getBundle().artifacts.find((artifact) => artifact.id === outcome.artifact.id);
+    if (measured !== undefined) return { ...outcome, artifact: measured };
   }
   return outcome;
 }
@@ -520,7 +521,8 @@ export async function fileGeneratedArtifact(
     await writeSidecar(store, created, null);
     return { artifact: created, created: true };
   });
-  if (filed.created && (kind === "audio" || kind === "video") && (await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned))) {
+  if (filed.created && (kind === "audio" || kind === "video")) {
+    await measureInto(store, filed.artifact.file, input.mediaProbe ?? null, input.abandoned);
     return store.getBundle().artifacts.find((artifact) => artifact.id === filed.artifact.id) ?? filed.artifact;
   }
   return filed.artifact;
