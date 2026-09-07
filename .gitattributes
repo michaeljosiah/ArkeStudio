@@ -13,3 +13,6 @@
 *.webp binary
 *.pdf binary
 *.mp4 binary
+
+# Vendored ComfyUI sources are verified by byte digest before installation.
+vendor/comfyui/** -text diff

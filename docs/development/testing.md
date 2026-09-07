@@ -55,6 +55,12 @@ Close stores, sockets, watchers, timers and supervisors in test cleanup before d
 
 Host Node loads `better-sqlite3`; desktop uses the Electron native build through its alias/rebuild setup. A successful Node test does not establish packaged native loading. See [maintenance](maintenance.md) before changing either arrangement.
 
+## Local image generation
+
+Local Krea 2 image generation has an opt-in GPU check and offline custom-node installer tests;
+see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
+success alone does not establish usable image quality.
+
 ## Independent editor media
 
 After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` from the repository root. It opens a hidden sandboxed Electron file page with the built preload, supplies real file-backed selections, and verifies ordered path resolution and private authentication. It uses a temporary profile and requires a desktop display (it is separate from headless CI).

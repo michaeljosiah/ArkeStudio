@@ -21,7 +21,15 @@ bundling; `scripts/verify-licenses.mjs` gates packaging on this file staying com
 | Kokoro TTS models | Apache-2.0 | **Not installer contents** (R-8) — downloaded on first use; notice recorded here for the downloaded artefact. |
 | whisper.cpp models | MIT | **Not installer contents** — downloaded on first use. |
 
-One component is **source we carry rather than a package we depend on**. Two renderer files are
+The offline Krea 2 node installer carries unmodified source from
+[ComfyUI-ConditioningKrea2Rebalance](https://github.com/nova452/ComfyUI-ConditioningKrea2Rebalance)
+by nova452, commit `a0cd00681448ab63232463c83f12e0364456da59`, under Apache-2.0.
+The three Python modules, full licence and file hashes are retained in
+`vendor/comfyui/ComfyUI-ConditioningKrea2Rebalance/`. No upstream NOTICE file is present at
+that revision. These files are installed explicitly into the user's ComfyUI; model weights
+are downloaded separately from Comfy-Org under the Krea 2 Community License.
+
+Another component is **source we carry rather than a package we depend on**. Two renderer files are
 derived from **LTX-Desktop** (https://github.com/Lightricks/LTX-Desktop, commit `7ec86f3`),
 Copyright (c) Lightricks Ltd., **Apache-2.0**:
 

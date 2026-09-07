@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
+import { KREA2_IMAGE, KREA2_BUCKETS } from "./krea2-recipe.js";
 
 /**
  * The recipe catalogue (SPEC-021 §2.3): hand-authored, shipped, versioned — never fetched,
@@ -7,7 +8,7 @@ import type { ManifestModel, RecipeIdentity } from "@arke-studio/contracts";
  * is private to this package and the coordinator's dispatch path, and what everything else sees
  * is the manifest projection at the bottom of this file, which carries no graph at all.
  *
- * Both shipped recipes run on ComfyUI core nodes alone (D11) — that is part of why these two
+ * The original image/video pair runs on ComfyUI core nodes alone (D11) — that is why those two
  * models were chosen — so `customNodes` is empty twice over, while the verification machinery
  * that would pin one stays real and tested.
  *
@@ -100,6 +101,14 @@ export interface ComfyUiRecipe {
     nodes: readonly string[];
     /** The optional input slot they feed, cleared with them. */
     slot: readonly [nodeId: string, inputKey: string];
+  };
+  /** Ordered optional reference inputs; absent pictures remove only their declared carriers. */
+  referenceImages?: ReadonlyArray<NonNullable<ComfyUiRecipe["referenceFrame"]>>;
+  /** Use ordinary text conditioning when no references were supplied. Both paths are authored. */
+  referenceConditioning?: {
+    nodes: readonly string[];
+    slot: readonly [nodeId: string, inputKey: string];
+    textOnly: readonly [nodeId: string, output: number];
   };
   /** The one node whose outputs are fetched (§2.6) — never every image the history names. */
   outputNode: string;
@@ -736,7 +745,7 @@ const CLONED_VOICE: ComfyUiRecipe = {
   },
 };
 
-export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, CLONED_VOICE]);
+export const COMFYUI_RECIPES: readonly ComfyUiRecipe[] = deepFreeze([KREA2_IMAGE, DRAFT_IMAGE, DRAFT_VIDEO, H3_VIDEO, H3_VIDEO_768, CLONED_VOICE]);
 
 export function comfyUiRecipeById(modelId: string): ComfyUiRecipe | null {
   return COMFYUI_RECIPES.find((recipe) => recipe.id === modelId) ?? null;
@@ -773,6 +782,13 @@ function sha256Hex(text: string): string {
 }
 
 export function recipeTemplateDigest(recipe: ComfyUiRecipe): string {
+  if (recipe.referenceImages !== undefined) {
+    return sha256Hex(canonicalJson({
+      graph: recipe.graph,
+      referenceImages: recipe.referenceImages,
+      referenceConditioning: recipe.referenceConditioning ?? null,
+    }));
+  }
   return sha256Hex(canonicalJson(recipe.graph));
 }
 
@@ -907,6 +923,11 @@ export const WAN_DIMENSIONS: Record<string, { width: number; height: number }> =
   "9:16": { width: 704, height: 1280 },
 };
 
+export const IMAGE_DIMENSIONS: Record<string, Record<string, { width: number; height: number }>> = {
+  [DRAFT_IMAGE.id]: SDXL_BUCKETS,
+  [KREA2_IMAGE.id]: KREA2_BUCKETS,
+};
+
 /**
  * The verified 480p-class sizes, not the node's 1344×768 native default: the floor above was
  * measured at exactly these, and a size nobody has run is a promise nobody has kept. Raise them
@@ -958,6 +979,21 @@ export const VIDEO_DERIVATIONS: Record<
 };
 
 export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
+  {
+    id: KREA2_IMAGE.id,
+    provider: "comfyui",
+    capability: "image",
+    displayName: KREA2_IMAGE.displayName,
+    accepts: { referenceImages: KREA2_IMAGE.referenceImages!.length, referenceRoles: false, startFrame: false, endFrame: false },
+    limits: {
+      maxPromptChars: 2000,
+      resolutions: ["2048"],
+      tiers: { "2K": "2048" },
+      aspects: Object.keys(KREA2_BUCKETS),
+    },
+    pricing: { kind: "unmetered" },
+    requires: { vramMb: KREA2_IMAGE.hardware.minVramMb, memMb: KREA2_IMAGE.hardware.minMemMb },
+  },
   {
     id: CLONED_VOICE.id,
     provider: "comfyui",

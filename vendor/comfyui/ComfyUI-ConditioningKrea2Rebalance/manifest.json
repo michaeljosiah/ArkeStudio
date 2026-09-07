@@ -1,0 +1,10 @@
+{
+  "upstream": "https://github.com/nova452/ComfyUI-ConditioningKrea2Rebalance",
+  "commit": "a0cd00681448ab63232463c83f12e0364456da59",
+  "files": {
+    "__init__.py": "11fa2639058f52a9390353d35a0a97d9d33952ba05758446729bdfa874b43d67",
+    "conditioning_rebalance.py": "6828d780a9dd329c13ae82bc0a09623a9705a5fdcb3d160fbf9eecd4be228378",
+    "image_edit_encode_rebalance.py": "f03905a0055f06cb27a379f06644f7265769eaf831278ba292143a1e7aae6754",
+    "LICENSE": "1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6"
+  }
+}

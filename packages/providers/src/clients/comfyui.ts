@@ -5,7 +5,7 @@ import {
   callerParamNames,
   comfyUiRecipeById,
   comfyUiRecipeIdentity,
-  SDXL_BUCKETS,
+  IMAGE_DIMENSIONS,
   substituteRecipeParams,
   VIDEO_DERIVATIONS,
   type ComfyUiRecipe,
@@ -80,19 +80,28 @@ function contentAddressedName(data: Uint8Array, contentType: string): string {
 }
 
 /**
- * Take the optional first frame back out (issue 863): the carrier nodes go, and with them the
+ * Take unused references back out: the carrier nodes go, and with them the
  * slot they fed. Authored into the graph and removed here rather than the other way round,
  * because what is in the template is what the digest covers and what the compatibility probe
  * asks the engine about — and because `LoadImage.image` is a combo over the engine's own files,
  * so leaving an empty placeholder connected would refuse every text-to-video dispatch.
  */
-function dropReferenceFrame(recipe: ComfyUiRecipe, graph: RecipeGraph): RecipeGraph {
-  const attachment = recipe.referenceFrame;
-  if (attachment === undefined) return graph;
-  const [nodeId, inputKey] = attachment.slot;
-  const consumer = graph[nodeId];
-  if (consumer) delete consumer.inputs[inputKey];
-  for (const carrier of attachment.nodes) delete graph[carrier];
+function referenceInputs(recipe: ComfyUiRecipe): NonNullable<ComfyUiRecipe["referenceImages"]> {
+  return recipe.referenceImages ?? (recipe.referenceFrame === undefined ? [] : [recipe.referenceFrame]);
+}
+
+function dropUnusedReferences(recipe: ComfyUiRecipe, graph: RecipeGraph, count: number): RecipeGraph {
+  for (const attachment of referenceInputs(recipe).slice(count)) {
+    const [nodeId, inputKey] = attachment.slot;
+    const consumer = graph[nodeId];
+    if (consumer) delete consumer.inputs[inputKey];
+    for (const carrier of attachment.nodes) delete graph[carrier];
+  }
+  if (count === 0 && recipe.referenceConditioning !== undefined) {
+    const fallback = recipe.referenceConditioning;
+    graph[fallback.slot[0]]!.inputs[fallback.slot[1]] = [...fallback.textOnly];
+    for (const node of fallback.nodes) delete graph[node];
+  }
   return graph;
 }
 
@@ -484,17 +493,21 @@ export class ComfyUiClient implements ProviderClient {
     }
     const values: RecipeParamValues = { prompt, ...seedValue };
     if (recipe.capability === "image") {
-      // The output spec's shape decides the bucket; the bucket decides the pixels. Snapping,
-      // not scaling: an off-bucket SDXL size generates worse, and the tier already priced at 1K.
+      // The output spec's shape selects one of this recipe's authored canvases. SDXL keeps
+      // its training buckets; Krea's dimensions follow the quality tier its manifest offers.
       const output = params["output"] as { width?: unknown; height?: unknown; aspect?: unknown } | undefined;
+      const buckets = IMAGE_DIMENSIONS[recipe.id];
+      if (buckets === undefined) throw new Error(`comfyui: ${recipe.displayName} has no image dimensions`);
+      const requestedAspect = output?.aspect ?? params["aspect"] ?? params["aspect_ratio"];
       const aspect =
-        typeof output?.aspect === "string" && output.aspect in SDXL_BUCKETS
-          ? output.aspect
+        typeof requestedAspect === "string" && requestedAspect in buckets
+          ? requestedAspect
           : nearestBucket(
               typeof output?.width === "number" ? output.width : 1024,
               typeof output?.height === "number" ? output.height : 1024,
+              buckets,
             );
-      const bucket = SDXL_BUCKETS[aspect]!;
+      const bucket = buckets[aspect]!;
       values["width"] = bucket.width;
       values["height"] = bucket.height;
       return values;
@@ -745,21 +758,22 @@ export class ComfyUiClient implements ProviderClient {
      * character's face and the only free speaking sample there is.
      *
      * Bytes AND paths, because they fail in opposite directions. More pictures than the row
-     * declares would be silently dropped past the first; a path list that arrived with nothing
-     * prepared would generate a stranger under the sample's name, which is the failure the
+     * declares would be silently dropped; a path list whose bytes never arrived
+     * would generate a stranger under the sample's name, which is the failure the
      * original allow-list existed to prevent.
      */
     const durable = request.params["references"];
     const asked = Array.isArray(durable) ? durable.length : 0;
     const prepared = request.imageReferences ?? [];
-    const frame = recipe.referenceFrame === undefined ? null : (prepared[0] ?? null);
-    if (recipe.referenceFrame === undefined) {
+    const attachments = referenceInputs(recipe);
+    if (attachments.length === 0) {
       if (asked > 0 || prepared.length > 0) {
         throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes no reference images`);
       }
-    } else if (asked > 1 || prepared.length > 1) {
-      throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes one reference image`);
-    } else if (asked > 0 && frame === null) {
+    } else if (asked > attachments.length || prepared.length > attachments.length) {
+      const limit = attachments.length === 1 ? "one reference image" : `up to ${attachments.length} reference images`;
+      throw new ProviderRequestRejectedError(`comfyui: ${recipe.displayName} takes ${limit}`);
+    } else if (asked > 0 && asked !== prepared.length) {
       throw new ProviderRequestRejectedError(
         `comfyui: ${recipe.displayName} was asked to carry a reference image that never arrived`,
       );
@@ -778,8 +792,8 @@ export class ComfyUiClient implements ProviderClient {
       const clip = request.voiceReference!;
       values["speakerFile"] = await this.uploadInput(base, clip, "voice recording", request.signal);
     }
-    if (frame !== null) {
-      values[recipe.referenceFrame!.param] = await this.uploadInput(
+    for (const [index, frame] of prepared.entries()) {
+      values[attachments[index]!.param] = await this.uploadInput(
         base,
         { ...frame, name: contentAddressedName(frame.data, frame.contentType) },
         "reference image",
@@ -788,9 +802,7 @@ export class ComfyUiClient implements ProviderClient {
     }
     // Substitute first, then drop: the size params bind into the scaler as well as the canvas,
     // and a graph pruned before substitution would refuse its own bindings.
-    const graph = frame === null
-      ? dropReferenceFrame(recipe, substituteRecipeParams(recipe, values))
-      : substituteRecipeParams(recipe, values);
+    const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",
@@ -997,12 +1009,12 @@ function historyError(messages: unknown[] | undefined): string | null {
   return null;
 }
 
-/** The SDXL bucket whose shape is closest — shape first, the same tie the size snapper breaks. */
-function nearestBucket(width: number, height: number): string {
+/** The recipe's bucket whose shape is closest, matching the size snapper's priority. */
+function nearestBucket(width: number, height: number, buckets: Record<string, { width: number; height: number }>): string {
   const ratio = width / height;
   let best = "1:1";
   let bestDelta = Number.POSITIVE_INFINITY;
-  for (const [aspect, size] of Object.entries(SDXL_BUCKETS)) {
+  for (const [aspect, size] of Object.entries(buckets)) {
     const delta = Math.abs(size.width / size.height - ratio);
     if (delta < bestDelta) {
       bestDelta = delta;
