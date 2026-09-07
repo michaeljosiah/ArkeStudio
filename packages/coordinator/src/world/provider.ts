@@ -1,5 +1,5 @@
-import { mkdir, readdir, rm, stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { mkdir, readdir, rm, stat, realpath } from "node:fs/promises";
+import { basename, join, relative, isAbsolute } from "node:path";
 import {
   BIBLE_PATH,
   DEFAULT_AUDIO_POLICY,
@@ -606,6 +606,25 @@ export class FsWorldProvider implements WorldProvider {
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
   }
 
+  async listReferenceImages(slug: string): Promise<string[]> {
+    if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return [];
+    const images: string[] = [];
+    const walk = async (folder: string, depth: number): Promise<void> => {
+      if (depth > 8) return;
+      const entries = await readdir(toExtendedLength(join(this.worldsDir(), slug, folder)), { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        const path = folder ? folder + "/" + entry.name : entry.name;
+        if (entry.isDirectory() && (folder !== "" || ["references", "art-direction", "artifacts"].includes(entry.name))) {
+          await walk(path, depth + 1);
+        } else if (entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name) && await this.serveMedia(slug, path)) {
+          images.push(path);
+        }
+      }
+    };
+    await walk("", 0);
+    return images.sort();
+  }
+
   async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return null;
     const portable = relPath.replace(/\\/g, "/");
@@ -614,6 +633,10 @@ export class FsWorldProvider implements WorldProvider {
     if (contentType === undefined) return null;
     const abs = join(this.worldsDir(), slug, fromPortable(portable));
     try {
+      const root = await realpath(toExtendedLength(join(this.worldsDir(), slug)));
+      const target = await realpath(toExtendedLength(abs));
+      const rel = relative(root, target);
+      if (rel.startsWith("..") || isAbsolute(rel)) return null;
       const info = await stat(toExtendedLength(abs));
       if (!info.isFile()) return null;
     } catch {

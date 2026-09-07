@@ -13,7 +13,6 @@ import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
 import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
-import { ReferencePickerBody, worldPickerSources } from "../components/reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import { Button } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -30,7 +29,6 @@ import {
   planKeyArt,
   useKeyArtPlans,
   pickStagedReference,
-  sendStageArtifactReference,
   setArtDirection,
   uploadMasterLook,
   uploadWorldImage,
@@ -418,21 +416,23 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         lede="One picture of this world, for the app to show it by."
         prompt={prompt}
         onPrompt={setDraft}
-        promptHint="The creative body sent on Generate. Fixed constraints appear separately below. Drafting an alternative never generates an image."
-        extra={<div style={{overflowWrap:"anywhere"}}>
-          <Button disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
-          {pendingReview!==null&&<Button onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}
-          <Button disabled={!plan||pendingReview!==null} onClick={()=>setDraft(null)}>Use assembled</Button>
-          {plan?.candidate&&<Button disabled={pendingReview!==null} onClick={()=>setDraft(plan.candidate!)}>Use candidate</Button>}
+        promptMetadata={{constraints:plan?.fixedConstraints??"Preparing…",...((plan?.candidate||draft!==null)&&plan?{baseline:plan.prompt}:{})}}
+        promptHint="The Art Director rewrites the assembled prompt for you to compare. Use assembled keeps the original; Use candidate selects the rewrite. Only Generate makes an image."
+        extra={<div className="fy-key-art-review" style={{overflowWrap:"anywhere"}}>
+          <Button size="sm" disabled={pendingReview!==null||!model} onClick={()=>{if(model){setDraft(null);setPendingReview(planKeyArt(worldId,{modelId:model.id,draftAlternative:true}));}}}>Draft alternative with Art Director</Button>
+          {pendingReview!==null&&<Button size="sm" onClick={()=>{send({kind:"cancel-key-art-prompt",worldId});setPendingReview(planKeyArt(worldId,{modelId:model?.id}));}}>Stop drafting and use assembled</Button>}
+          <Button size="sm" disabled={!plan||pendingReview!==null} onClick={()=>setDraft(null)}>Use assembled</Button>
+          {plan?.candidate&&<Button size="sm" disabled={pendingReview!==null} onClick={()=>setDraft(plan.candidate!)}>Use candidate</Button>}
           {plan?.candidate&&draft===null&&<p>The alternative below is not selected. Generate will use the assembled prompt shown in the box.</p>}
           {pendingReview!==null?<p role="status">Preparing prompt review… No image has been enqueued.</p>:<>
-            {(plan?.candidate&&draft===null?plan.review:promptReview)&&<PromptReviewDetails review={(plan?.candidate&&draft===null?plan.review:promptReview)!}/>}<p role="status">{plan?.reason??reviewError}</p></>}
-          <p>Fixed constraints: {plan?.fixedConstraints??"Preparing…"}</p>
+            {(plan?.candidate||draft!==null)&&(plan?.candidate&&draft===null?plan.review:promptReview)&&<PromptReviewDetails showMetrics={false} review={(plan?.candidate&&draft===null?plan.review:promptReview)!}/>}<p role="status">{plan?.reason??reviewError}</p></>}
         </div>}
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("world-image"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("world-image")] ?? ""]?.worldName }}
         referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
         onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("world-image"), file) }}
         onClearReference={() => clearStagedReference(worldId, stagedReferenceKey("world-image"))}
         workflow="main-photo"
         // The request carries no output spec at all, so the provider's own size is what runs.
@@ -503,7 +503,6 @@ export function ArtDirectionScreen() {
   const [count, setCount] = useState(1);
   const [picked, setPicked] = useState<string | null>(null);
   // The reference picker takes over the dialog's own panel — never a dialog over it (issue 305).
-  const [pickingReference, setPickingReference] = useState(false);
   const generateRef = useRef<HTMLButtonElement>(null);
   if (!world || world.meta.worldId !== worldId) return null;
   const direction = world.artDirection;
@@ -574,48 +573,11 @@ export function ArtDirectionScreen() {
         promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
-        referenceHint={
-          <>
-            Optional. A palette, a frame or a lighting study for the model to look at while it works.{" "}
-            <button
-              type="button"
-              className="fy-gendialog__reset"
-              style={{ position: "static" }}
-              onClick={() => setPickingReference(true)}
-            >
-              Choose from artifacts
-            </button>
-          </>
-        }
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("master-look"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("master-look")] ?? ""]?.worldName }}
+        referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
+        worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
-        {...(pickingReference
-          ? {
-              panel: (
-                <ReferencePickerBody
-                  mode="slot"
-                  worldSlug={world.meta.slug}
-                  model={model}
-                  carried={[]}
-                  world={worldPickerSources(world.artifacts, null)}
-                  session={[]}
-                  onChoose={(pick) => {
-                    if (pick.source === "artifact") {
-                      sendStageArtifactReference(world.meta.worldId, stagedReferenceKey("master-look"), pick.artifactId);
-                    }
-                    setPickingReference(false);
-                  }}
-                  onUpload={() => {
-                    // The host OS picker files into the world and stages in one step, as before.
-                    pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"));
-                    setPickingReference(false);
-                  }}
-                  onClose={() => setPickingReference(false)}
-                />
-              ),
-              onPanelClose: () => setPickingReference(false),
-            }
-          : {})}
         // "main-photo" is borrowed for its price band only — a master look is not a portrait, and
         // the coordinator builds this request landscape, so the orientation is stated rather than
         // inferred from the workflow. Without it the dialog would default to a portrait shape and

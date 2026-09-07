@@ -78,8 +78,11 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    entryContext?: import("@arke-studio/contracts").WorldChatContext;
+    chapterBrief?: RunDeps["chapterBrief"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
     createdModels?: Array<string | undefined>;
+    raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
   } = {},
 ) {
   const worldPath = await tempDir("arke-run-");
@@ -87,7 +90,7 @@ async function setup(
   const store = new WorldChatStore(conversationDir(worldPath, conversationId));
   await store.create(conversationId, AT);
   await store.append(
-    { type: "conversation.created", title: "a talk", entryContext: { kind: "world" } },
+    { type: "conversation.created", title: "a talk", entryContext: options.entryContext ?? { kind: "world" } },
     { at: AT },
   );
   const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
@@ -95,6 +98,7 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
     ...(options.createdModels
       ? {
@@ -104,6 +108,7 @@ async function setup(
           },
         }
       : {}),
+    ...(options.raiseSchemaBoundary ? { raiseSchemaBoundary: options.raiseSchemaBoundary } : {}),
     prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
     release: async ({ runId }) => void released.push(runId),
     receiptsFor: () => [],
@@ -153,6 +158,46 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("a turn held to a passage, or to a reply, fences the world and writes its constraints before the words (codex on PR 903, round three)", async () => {
+    const raised: number[] = [];
+    const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply, reply]), {
+      raiseSchemaBoundary: async (version) => void raised.push(version),
+    });
+    await runner.send(store, conversationId, "Tighten this.", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" });
+    let types = (await store.read()).events.map((e) => e.event.type);
+    assert.deepEqual(raised, [12], "the world is fenced at a boundary of the event's own, past the ones the style's and the stage's builds support (codex, round four)");
+    assert.ok(types.includes("turn.constraints"));
+    assert.ok(types.indexOf("turn.constraints") < types.indexOf("turn.started"), "the constraints land first, so a turn is never found without them");
+
+    await runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true);
+    types = (await store.read()).events.map((e) => e.event.type);
+    assert.equal(types.filter((type) => type === "turn.constraints").length, 2, "a reply-only ask is a constraint too");
+    assert.deepEqual(raised, [12, 12], "asked each time; the store is the one that knows it is already there");
+
+    // A subject that only colours the narration, as it always did, is no constraint: nothing is
+    // written for it, and nothing is fenced.
+    await runner.send(store, conversationId, "About this scene.", [], { kind: "scene", sceneId: "sc_1" } as never);
+    types = (await store.read()).events.map((e) => e.event.type);
+    assert.equal(types.filter((type) => type === "turn.constraints").length, 2);
+    assert.deepEqual(raised, [12, 12]);
+  });
+
+  it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {
+    const reply = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId } = await setup(fakeAdapter([reply, reply]), {
+      raiseSchemaBoundary: async () => {
+        throw new Error("external edits awaiting reconciliation");
+      },
+    });
+    await assert.rejects(() => runner.send(store, conversationId, "Just tell me.", [], undefined, undefined, true), /awaiting reconciliation/);
+    assert.equal((await store.read()).events.some((e) => e.event.type === "turn.started"), false, "nothing was written for the turn");
+    // The next line goes through: the controller of the turn that never began is not in the way.
+    const outcome = await runner.send(store, conversationId, "And now?");
+    assert.notEqual(outcome.status, "unavailable");
+    assert.ok((await store.read()).events.some((e) => e.event.type === "turn.started"), "the conversation is still live");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");
@@ -763,4 +808,54 @@ describe("a rename becomes a fenced action without writing during the turn (SPEC
     await runner.send(store, conversationId, "Name it");
     assert.ok(prompts.some((prompt) => /cannot be renamed in this conversation/.test(prompt)), "told the model, not swallowed");
   });
+});
+
+
+it("puts the leased chapter brief into the model prompt and preserves the chapter on retry", async () => {
+  const prompts: string[] = [];
+  const subjects: string[] = [];
+  const answer = JSON.stringify({ reply: "Ready.", candidateOperations: [], groupOperations: [] });
+  const h = await setup(fakeAdapter(["invalid", "invalid", answer], { prompts }), {
+    entryContext: { kind: "production", productionId: "the-ledger-of-nights" },
+    chapterBrief: async ({ chapterId, productionId, budgetChars }) => {
+      assert.equal(productionId, "the-ledger-of-nights");
+      assert.ok(budgetChars > 0);
+      subjects.push(chapterId);
+      return "The previous chapter ends with the bell stopping.";
+    },
+  });
+  await h.runner.send(h.store, h.conversationId, "Draft from the synopsis", [], { kind: "chapter", chapterId: "neap" });
+  const view = await h.view();
+  await h.runner.retry(h.store, h.conversationId, view.messages[0]!.turnId!);
+  assert.deepEqual(subjects, ["neap", "neap"]);
+  assert.match(prompts[0]!, /previous chapter ends with the bell stopping/);
+  assert.match(prompts.at(-1)!, /previous chapter ends with the bell stopping/);
+});
+
+
+it("durably interrupts a turn cancelled while its chapter brief is being read", async () => {
+  let releaseBrief!: () => void;
+  let briefStarted!: () => void;
+  const started = new Promise<void>((resolve) => { briefStarted = resolve; });
+  const blocked = new Promise<void>((resolve) => { releaseBrief = resolve; });
+  const createdModels: Array<string | undefined> = [];
+  const h = await setup(fakeAdapter([JSON.stringify({ reply: "Ready.", candidateOperations: [], groupOperations: [] })]), {
+    entryContext: { kind: "production", productionId: "the-ledger-of-nights" },
+    createdModels,
+    chapterBrief: async () => { briefStarted(); await blocked; return "The plan."; },
+  });
+  const pending = h.runner.send(h.store, h.conversationId, "Draft", [], { kind: "chapter", chapterId: "neap" });
+  await started;
+  assert.equal(h.runner.cancel(h.conversationId), true);
+  releaseBrief();
+  assert.equal((await pending).status, "cancelled");
+  assert.equal(createdModels.length, 0);
+  const meta = (await h.store.readMeta())!;
+  const folded = foldConversation(meta.id, meta.createdAt, (await h.store.read()).events);
+  assert.equal(folded.needsInterruptedRunRepair, false);
+  const finished = (await h.store.read()).events.find((e) => e.event.type === "run.finished")!.event;
+  assert.ok(finished.type === "run.finished");
+  assert.equal(finished.run.status, "interrupted");
+  assert.equal(h.released.length, 1);
+  assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
 });

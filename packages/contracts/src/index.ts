@@ -12,9 +12,11 @@ export * from "./staging.js";
 export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";
+export * from "./artifact-access.js";
 export * from "./reference.js";
 export * from "./prop.js";
 export * from "./prose.js";
+export * from "./manuscript.js";
 export * from "./proposal.js";
 export * from "./job.js";
 export * from "./frame-run.js";
@@ -97,3 +99,10 @@ export * from "./provider-guidance.js";
 export * from "./dialogue-assessment.js";
 export * from "./take-feedback.js";
 export { referencePrompt } from "./reference-prompt.js";
+
+export * from "./stage-construction.js";
+
+export * from "./stage-camera.js";
+export * from "./world-image-references.js";
+
+export * from "./error-copy.js";

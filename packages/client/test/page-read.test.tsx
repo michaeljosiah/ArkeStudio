@@ -184,6 +184,7 @@ describe("a character sheet reads at two scales", () => {
           characterCount: 92,
           estimatedMicroUsd: 27_600,
           confirmationToken: "tok-page",
+          voices: [{ label: "Low tide", provider: "elevenlabs" }],
         } as DomainEvent),
       );
       // The whole page is priced, and none of it is sounding while the price is unanswered.
@@ -191,6 +192,7 @@ describe("a character sheet reads at two scales", () => {
         node.textContent?.startsWith("Confirm 92 characters"),
       );
       assert.ok(confirm, "the page states what it will cost");
+      assert.match(confirm.textContent ?? "", /Low tide · elevenlabs/, "and names every cloud voice the words go to (codex on PR 914)");
       assert.equal(playbackSnapshot().clip, null);
 
       await act(async () => (confirm as HTMLButtonElement).click());

@@ -7,7 +7,6 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   DOOR_CHOICES,
-  EPISODE_COUNT_CHOICES,
   EPISODE_LENGTH_CHOICES,
   FRAME_RATE_CHOICES,
   KIND_PLATES,
@@ -202,31 +201,8 @@ describe("step two offers every kind and every default (design turn 53)", () => 
   });
 
 
-  /**
-   * A season can be as long as the form actually runs (2026-08-23).
-   *
-   * This offered 5 to 12, which is a short film in slices. Vertical series run 60 to 100, and a
-   * season written to eight has a different spine from one written to eighty — the reveal sits at
-   * four instead of forty. A door that cannot say eighty makes every season it opens the wrong
-   * shape, and the author finds out where changing it is expensive.
-   */
-  it("offers the lengths a vertical series is actually written to", () => {
-    assert.ok(EPISODE_COUNT_CHOICES.includes(80), "eighty is sayable");
-    assert.ok(
-      EPISODE_COUNT_CHOICES.some((n) => n >= 60 && n <= 100),
-      "the platform range is reachable, not just its edges",
-    );
-    assert.ok(EPISODE_COUNT_CHOICES.includes(8), "and a short sample cut to sell the run still is");
-    assert.deepEqual([...EPISODE_COUNT_CHOICES].sort((a, b) => a - b), [...EPISODE_COUNT_CHOICES], "in order");
-  });
-
-  it("starts on a count that is one of the choices", () => {
-    // The default used to be 7, which stopped being in the list. A select whose value is absent
-    // from its options silently shows the first one instead — a door that lies about what it did.
-    assert.ok(
-      EPISODE_COUNT_CHOICES.includes(MICRODRAMA_DEFAULTS.episodeCount),
-      `the default ${MICRODRAMA_DEFAULTS.episodeCount} is selectable`,
-    );
+  it("starts without an episode count", () => {
+    assert.equal("episodeCount" in MICRODRAMA_DEFAULTS, false);
   });
 
   it("episode length is a range a season can be written from", () => {

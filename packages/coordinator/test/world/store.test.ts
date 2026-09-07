@@ -559,7 +559,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const second = await WorldStore.open(dir, { clock: CLOCK });
     await second.reconcileExternalEdit("characters/bray-half-hitch.md");
     assert.equal(second.getBundle().externalEdits.length, 1, "refusal preserves the pending edit");
-    assert.match(second.getBundle().externalEdits[0]?.refusal ?? "", /last committed version is unavailable/);
+    assert.match(second.getBundle().externalEdits[0]?.refusal ?? "", /earlier version of this file can't be found/);
     await second.close();
   });
 

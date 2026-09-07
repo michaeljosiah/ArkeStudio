@@ -244,7 +244,7 @@ export function enqueueNote(
       return {
         id: queueNoteId(result.requestId),
         tone: failed > 0 ? "warning" : "back",
-        title: `${failed > 0 ? `${added} of ${result.requestedCount}` : added} ${file} added to the Library`,
+        title: `${failed > 0 ? `${added} of ${result.requestedCount}` : added} ${file} imported`,
         meta: failed > 0 ? `${failed} file${failed === 1 ? "" : "s"} not added` : "ready to use",
         ...(reason ? { reason } : {}),
       };
@@ -252,7 +252,7 @@ export function enqueueNote(
     return {
       id: queueNoteId(result.requestId),
       tone: "refused",
-      title: "No files added to the Library",
+      title: "No files imported",
       meta: "nothing spent",
       ...(reason ? { reason } : {}),
     };

@@ -17,6 +17,7 @@ import {
 import {
   carriesSceneFlow,
   carriesStageBlocking,
+  carriesStageConstruction,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -189,6 +190,7 @@ type Classified =
   | { track: "scene"; production: string; file: string }
   | { track: "chapter"; production: string; file: string }
   | { track: "story"; production: string }
+  | { track: "prose-style"; production: string }
   | { track: "routing"; production: string }
   | { track: "season"; production: string }
   | { track: "episode"; production: string; file: string }
@@ -210,6 +212,8 @@ export function classify(path: string): Classified {
   if (m) return { track: "chapter", production: m[1]!, file: m[2]! };
   m = /^productions\/([a-z0-9-]+)\/story\.json$/.exec(path);
   if (m) return { track: "story", production: m[1]! };
+  m = /^productions\/([a-z0-9-]+)\/prose-style\.json$/.exec(path);
+  if (m) return { track: "prose-style", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/routing\.json$/.exec(path);
   if (m) return { track: "routing", production: m[1]! };
   m = /^productions\/([a-z0-9-]+)\/season\.json$/.exec(path);
@@ -233,6 +237,53 @@ export function classify(path: string): Classified {
  * thing.
  */
 const STAMPED_BY_COMMITTER = ["version", "updated"] as const;
+
+/** The world schema a landed prose style fences (turn 128); scan.ts's ladder names it. */
+export const PROSE_STYLE_SCHEMA_VERSION = 10;
+/**
+ * A World Chat turn held to a passage or to a reply (turn 128) is recorded under a
+ * `turn.constraints` event a build older than the constraints reads as corruption, so the
+ * world is fenced here first and that build refuses it by name instead (codex on PR 903).
+ * Past the style's and past the stage's, not the same as either (codex, round four): the build
+ * that shipped the style supports 10, the one that shipped the stage's construction supports 11,
+ * and neither has an arm for the event, so a world either can open must not hold one.
+ */
+export const TURN_CONSTRAINTS_SCHEMA_VERSION = 12;
+/**
+ * An imported chapter carries `source` (turn 131), a field of a strict record: a build without
+ * it drops every imported chapter on scan rather than refusing, so the import commit fences the
+ * world past the constraints' boundary and the older build refuses it by name (codex on PR 916).
+ */
+export const CHAPTER_SOURCE_SCHEMA_VERSION = 13;
+/**
+ * A measured `hasVideo` on an artifact sidecar (PR 944). `MediaInfoSchema` is strict, so a build
+ * older than the field parses such a sidecar as a failure and drops the artifact on scan — and
+ * with it every timeline clip that cites it. Encoded video metadata was fenced at eleven for the
+ * same reason; this field arrives on every measurement, including the audio-only ones that
+ * carry no width, so it needs a boundary of its own past the chapter's.
+ */
+export const MEDIA_HAS_VIDEO_SCHEMA_VERSION = 14;
+/** Older strict sidecar readers omit retired artifacts, breaking retained citations. */
+export const ARTIFACT_RETIREMENT_SCHEMA_VERSION = 18;
+
+/** Fence strict sidecar fields atomically with the bytes that introduce them. */
+function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: string | null }>): number {
+  let boundary = 0;
+  for (const file of files) {
+    if (!file.newContent || !file.path.endsWith(".json")) continue;
+    try {
+      const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown } | null;
+      if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
+      const info = record?.mediaInfo;
+      if (info == null) continue;
+      if ("hasVideo" in info) boundary = Math.max(boundary, MEDIA_HAS_VIDEO_SCHEMA_VERSION);
+      else if (["width", "height", "frameRate"].some((field) => field in info)) boundary = Math.max(boundary, 11);
+    } catch {
+      /* not JSON, so not a sidecar */
+    }
+  }
+  return boundary;
+}
 
 /**
  * Would writing this actually change what the world says?
@@ -302,6 +353,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
     }
     if (
       track === "story" ||
+      track === "prose-style" ||
       track === "routing" ||
       track === "season" ||
       track === "episode" ||
@@ -474,6 +526,7 @@ export class Committer {
       } else if (
         kind.track === "scene" ||
         kind.track === "story" ||
+        kind.track === "prose-style" ||
         kind.track === "routing" ||
         kind.track === "season" ||
         kind.track === "episode" ||
@@ -638,6 +691,10 @@ export class Committer {
     const landsStageRig = files.some(
       (f) => classify(f.path).track === "scene" && f.newContent != null && carriesStageRig(f.newContent),
     );
+    // The style a book is written in (turn 128) is its own boundary, decided here at the funnel
+    // rather than by each caller: an accept, a direct write and an external edit adopted into the
+    // world all land the same bytes, and a build older than the style must refuse all three.
+    const landsProseStyle = files.some((f) => classify(f.path).track === "prose-style" && f.newContent != null);
     const raiseSchemaVersion = Math.max(
       input.raiseSchemaVersion ?? 0,
       landsGraphScene ? GRAPH_SCENE_SCHEMA_VERSION : 0,
@@ -645,6 +702,20 @@ export class Committer {
       landsStagePerformance ? STAGE_PERFORMANCE_SCHEMA_VERSION : 0,
       landsStageEasing ? STAGE_EASING_SCHEMA_VERSION : 0,
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
+      // Probe metadata is also written by ordinary artifact filing/backfill.
+      sidecarBoundary(files),
+      landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
+      // Any presence of this strict field needs the retirement-aware scanner, including
+      // retired: false adopted from a portable chapter (issue 888).
+      files.some((f) => classify(f.path).track === "chapter" && f.newContent != null &&
+        "retired" in MarkdownFile.parse(f.newContent).data) ? 15 : 0,
+      // Older scanners drop an overview with these new strict fields (issue 889).
+      files.some((f) => {
+        if (classify(f.path).track !== "story" || !f.newContent) return false;
+        const record = JsonFile.parse(f.newContent).value;
+        return "question" in record || "ending" in record;
+      }) ? 16 : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

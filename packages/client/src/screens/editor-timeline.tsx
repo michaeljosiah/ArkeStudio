@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   basePictureTrack,
   detachAudioCommands,
@@ -23,7 +24,9 @@ import {
   framesFromDelta,
   pictureDragCommand,
   previewTimeline,
+  timingEntryCommand,
   type PictureGesture,
+  type TimingField,
 } from "../lib/picture-edit.js";
 import { Film } from "../components/icons.js";
 import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
@@ -38,9 +41,6 @@ import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
  */
 
 export type EditorTool = "select" | "blade" | "hand";
-
-export const CLIP_MENU_WIDTH_PX = 232;
-export const CLIP_MENU_HEIGHT_PX = 236;
 
 export interface PictureClipView {
   clip: TimelineClip;
@@ -69,12 +69,9 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
     const mediaPath = artifact ? `artifacts/${artifact.file}` : entry?.media?.path;
     return {
       clip,
-      label:
-        mediaPath
-          ? clip.source.label
-          : clip.source.kind === "shot"
-            ? `shot ${clip.source.shotNumber} · no accepted take`
-            : clip.source.label,
+      label: clip.source.kind === "shot"
+        ? `${entry?.shot.title ?? clip.source.label}${mediaPath ? "" : " · no accepted take"}`
+        : clip.source.label,
       // Imported videos have no take-directory frame.png; show their label until a poster exists.
       poster: artifact?.kind === "video" ? null : mediaPath ? posterize(mediaPath) : null,
       gap: !mediaPath,
@@ -90,6 +87,8 @@ function describeClip(view: PictureClipView, frameRate: FrameRate): string {
 }
 
 export function PictureTrack({
+  production,
+  artifacts,
   timeline,
   views,
   slug,
@@ -107,6 +106,8 @@ export function PictureTrack({
   onDrop,
   onFileDrop,
 }: {
+  production?: ProductionBundle;
+  artifacts?: readonly ArtifactSidecar[];
   timeline: ProductionTimeline;
   views: readonly PictureClipView[];
   slug: string | undefined;
@@ -130,34 +131,6 @@ export function PictureTrack({
   const [over, setOver] = useState(false);
   const [refused, setRefused] = useState(false);
   const clips = views.map((view) => view.clip);
-
-  useEffect(() => {
-    if (menu === null) return;
-    const close = () => setMenu(null);
-    // Capture-phase, so a press a clip's own handler stops still closes the menu — but a press
-    // inside the menu is the menu being used, and closing on it would unmount the item before
-    // its click could fire.
-    const closeOutside = (event: PointerEvent) => {
-      if (event.target instanceof Element && event.target.closest(".fy-clipmenu")) return;
-      close();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        close();
-        event.stopImmediatePropagation();
-      }
-    };
-    window.addEventListener("pointerdown", closeOutside, { capture: true });
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, { capture: true });
-    return () => {
-      window.removeEventListener("pointerdown", closeOutside, { capture: true });
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, { capture: true });
-    };
-  }, [menu]);
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);
@@ -266,8 +239,13 @@ export function PictureTrack({
   };
 
   const onClipKeyDown = (clipId: TimelineClipId) => (event: React.KeyboardEvent) => {
-    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (event.altKey || event.ctrlKey || event.metaKey || disabled) return;
     const key = event.key;
+    if (key === "ContextMenu" || (key === "F10" && event.shiftKey)) {
+      const box = event.currentTarget.getBoundingClientRect();
+      onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
+      event.preventDefault(); event.stopPropagation(); return;
+    }
     if (key === "Delete" || key === "Backspace") act(clipId, event.shiftKey ? "ripple" : "delete");
     else if (key === "[") act(clipId, "earlier");
     else if (key === "]") act(clipId, "later");
@@ -359,6 +337,9 @@ export function PictureTrack({
               onKeyDown={onClipKeyDown(clip.id)}
               onContextMenu={(event) => {
                 event.preventDefault();
+                event.stopPropagation();
+                if (disabled) return;
+                event.currentTarget.focus({ preventScroll: true });
                 onSelect(clip.id);
                 setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
               }}
@@ -380,16 +361,9 @@ export function PictureTrack({
         })}
       </div>
       {menu !== null && menuView !== null && (
-        <div
-          className="fy-clipmenu"
-          role="menu"
-          aria-label={`Actions for ${menuView.label}`}
-          style={{
-            left: Math.min(menu.x, Math.max(0, window.innerWidth - CLIP_MENU_WIDTH_PX - 8)),
-            top: Math.min(menu.y, Math.max(0, window.innerHeight - CLIP_MENU_HEIGHT_PX - 8)),
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-        >
+        <ClipMenu at={menu} label={`Actions for ${menuView.label}`} onClose={() => setMenu(null)}>
+          <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuView.clip}
+            disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
           {(
             [
               ["split", "Split at playhead", !playheadInside(menuView.clip)],
@@ -405,7 +379,7 @@ export function PictureTrack({
               type="button"
               role="menuitem"
               className="fy-clipmenu__item"
-              disabled={off}
+              disabled={disabled || off}
               onClick={() => {
                 act(menu.clipId, action);
                 setMenu(null);
@@ -414,26 +388,32 @@ export function PictureTrack({
               {label}
             </button>
           ))}
-        </div>
+        </ClipMenu>
       )}
     </div>
   );
 }
 
-/** Frame steppers: the keyboard path of a trim drag (R-23), one command per press. */
-function FrameStepper({
+/**
+ * One timing row: the keyboard path of a trim drag (R-23). The value is typed as timecode and
+ * committed on Enter or blur, or nudged a frame at a time; either way one command per edit.
+ */
+function TimingRow({
   label,
   value,
   frameRate,
   onStep,
+  onEnter,
   disabled,
 }: {
   label: string;
   value: number;
   frameRate: FrameRate;
   onStep: (deltaFrames: number) => void;
+  onEnter: (text: string) => void;
   disabled: boolean;
 }) {
+  const shown = formatFrames(value, frameRate);
   return (
     <div className="fy-cutinspect__row fy-framestep">
       <span>{label}</span>
@@ -441,7 +421,35 @@ function FrameStepper({
         <button type="button" className="fy-trim__step" aria-label={`${label} one frame earlier`} disabled={disabled} onClick={() => onStep(-1)}>
           −
         </button>
-        <span className="fy-mono">{formatFrames(value, frameRate)}</span>
+        <input
+          // Remounted when the record moves, so the field always starts from what was written.
+          key={shown}
+          className="fy-timecode"
+          defaultValue={shown}
+          aria-label={`${label} timecode`}
+          disabled={disabled}
+          spellCheck={false}
+          onFocus={(event) => event.currentTarget.select()}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              event.currentTarget.value = shown;
+              event.currentTarget.blur();
+              // Escape here drops the edit and nothing more: left to bubble, the Cut's pane
+              // listener reads it as "close the Inspector" on a compact layout.
+              event.stopPropagation();
+            }
+          }}
+          onBlur={(event) => {
+            const text = event.currentTarget.value.trim();
+            if (text !== shown) onEnter(text);
+            // Whatever was sent, the row shows the record: a clamped or refused value must not
+            // stay on screen as typed, reading as if it had landed.
+            event.currentTarget.value = shown;
+          }}
+        />
         <button type="button" className="fy-trim__step" aria-label={`${label} one frame later`} disabled={disabled} onClick={() => onStep(1)}>
           +
         </button>
@@ -506,41 +514,48 @@ export function TakePicker({
   );
 }
 
-/** A Picture clip's timing, as the target Inspector states it and as the keyboard trims it. */
+/**
+ * A clip's timing, as the target Inspector states it and as the keyboard edits it. A typed edge
+ * reduces through the drag's clamp, so it never asks the coordinator for a range it would refuse;
+ * a stepped one goes as it is, one frame being the finest thing there is to refuse.
+ */
 export function PictureClipTiming({
   clip,
+  clips,
   frameRate,
   disabled,
   onCommands,
+  sourceLength,
 }: {
   clip: TimelineClip;
+  /** The clip's track, so a typed edge stops where its neighbours and its source do. */
+  clips: readonly TimelineClip[];
   frameRate: FrameRate;
   disabled: boolean;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+  sourceLength: SourceLengthFrames;
 }) {
   const end = clip.startFrame + clip.durationFrames;
+  const typed = (field: TimingField, label: string) => (text: string) => {
+    const command = timingEntryCommand(clips, clip.id, field, text, frameRate, sourceLength);
+    if (command !== null) onCommands([command], label);
+  };
+  const trimEnd = (delta: number) => onCommands([{ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }], "Trim clip tail");
   return (
     <div className="fy-cutinspect__rows">
-      <FrameStepper label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
-        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")} />
-      <FrameStepper
+      <TimingRow label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
+        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")}
+        onEnter={typed("position", "Move clip")} />
+      <TimingRow
         label="In"
         value={clip.startFrame}
         frameRate={frameRate}
         disabled={disabled}
         onStep={(delta) => onCommands([{ kind: "trim", clipId: clip.id, edge: "start", deltaFrames: delta }], "Trim clip head")}
+        onEnter={typed("in", "Trim clip head")}
       />
-      <FrameStepper
-        label="Out"
-        value={end}
-        frameRate={frameRate}
-        disabled={disabled}
-        onStep={(delta) => onCommands([{ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }], "Trim clip tail")}
-      />
-      <div className="fy-cutinspect__row">
-        <span>Duration</span>
-        <strong>{formatFrames(clip.durationFrames, frameRate)}</strong>
-      </div>
+      <TimingRow label="Out" value={end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />
+      <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
       <div className="fy-cutinspect__row">
         <span>Source in</span>
         <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>

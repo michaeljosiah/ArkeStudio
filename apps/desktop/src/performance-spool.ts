@@ -7,7 +7,20 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 
 /** Process-owned opaque claims: neither renderer paths nor a prior process's ids are accepted. */
 export function createPerformanceSpool(appRoot: string) {
-  const root = resolve(appRoot, ".spool", "performance");
+  const requested = resolve(appRoot, ".spool", "performance");
+  /*
+   * The store's own canonical path, adopted once it is known (issue 871).
+   *
+   * The promise here is that nothing has substituted the store directory — not that the store
+   * sits at the exact string the app composed. Those are different, and only the first is a
+   * security property. Comparing `realpath` against the composed string enforced the second,
+   * and refused three ordinary app roots for it: a profile whose ArkeStudio folder is junctioned
+   * onto a data drive, a redirected profile, and an 8.3 short path (`RUNNER~1` on a Windows CI
+   * runner, `PROGRA~1` in an ARKE_STUDIO_ROOT) — every recording refused, permanently, on that
+   * installation. So the root is canonicalised and worked from; a link ON THE WAY to the store is
+   * an alias and accepted, and a link AT the store is still refused, as is every entry under it.
+   */
+  let root = requested;
   const entries = new Map<string, { absolutePath: string; contentType: string; sizeBytes: number; claimed: boolean }>();
   const remove = async (id: string) => {
     if (!UUID.test(id)) return;
@@ -18,8 +31,14 @@ export function createPerformanceSpool(appRoot: string) {
     if (info) await rm(target, { recursive: true, force: true });
   };
   const ready = (async () => {
-    await mkdir(root, { recursive: true });
-    if ((await lstat(root)).isSymbolicLink() || resolve(await realpath(root)).toLowerCase() !== root.toLowerCase()) throw new Error("Unsafe performance spool.");
+    await mkdir(requested, { recursive: true });
+    // A setup problem the person can act on, said as one: the generic "could not stage" used to
+    // cover this, and nothing told a user whose store was a link apart from a transient write.
+    if ((await lstat(requested)).isSymbolicLink()) {
+      throw new Error(`The recording store at ${requested} is a link. Replace it with a folder and restart.`);
+    }
+    root = resolve(await realpath(requested));
+    if (!(await lstat(root)).isDirectory()) throw new Error(`The recording store at ${root} is not a folder.`);
     for (const entry of await readdir(root, { withFileTypes: true })) {
       if (entry.isDirectory() && UUID.test(entry.name)) await remove(entry.name);
     }
@@ -28,8 +47,12 @@ export function createPerformanceSpool(appRoot: string) {
   void ready.catch(() => {});
   return {
     async stage(input: { name?: unknown; contentType?: unknown; bytes?: unknown }): Promise<{ ok: true; spoolId: string } | { ok: false; reason: string }> {
+      // A store that never opened is not a recording that failed to write: the first is a setup
+      // problem with a cause worth repeating, the second is transient and worth retrying.
+      try { await ready; } catch (error) {
+        return { ok: false, reason: `The recording store could not open. ${error instanceof Error ? error.message : String(error)}` };
+      }
       try {
-        await ready;
         const bytes = input.bytes instanceof Uint8Array ? input.bytes : input.bytes instanceof ArrayBuffer ? new Uint8Array(input.bytes) : null;
         const mime = typeof input.contentType === "string" ? input.contentType.toLowerCase() : "";
         if (!bytes?.byteLength) return { ok: false, reason: "The recording contains no audio bytes." };

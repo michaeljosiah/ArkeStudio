@@ -1,3 +1,5 @@
+import type { WorldImageReference } from "@arke-studio/contracts";
+type StagedImage = string | Pick<WorldImageReference, "file" | "role">;
 import {
   characterImageEstimateIsUsable,
   characterImageOutput,
@@ -72,18 +74,17 @@ export interface TileRequest {
 function withStaged(
   carried: readonly string[],
   carriedRole: "identity" | "environment",
-  staged: string | undefined,
+  staged: StagedImage | undefined,
   model: ManifestModel,
 ): { references: string[]; referenceRoles: Array<{ file: string; role: string }> } {
   const references = [...carried];
-  // Its own role, because it is neither of the two the surfaces already send: a staged image is
-  // there for how it looks, not for who or where it is, and a provider that reads roles should
-  // not be told this face is the identity to preserve.
+  const stagedFile = typeof staged === "string" ? staged : staged?.file;
+  const stagedRole = typeof staged === "string" ? "style" : staged?.role ?? "style";
   const fits = staged !== undefined && carried.length < referenceBudgetFor(model);
-  if (fits) references.push(staged);
+  if (fits && stagedFile && !references.includes(stagedFile)) references.push(stagedFile);
   return {
     references,
-    referenceRoles: references.map((file) => ({ file, role: fits && file === staged ? "style" : carriedRole })),
+    referenceRoles: references.map((file) => ({ file, role: fits && !carried.includes(file) && file === stagedFile ? stagedRole : carriedRole })),
   };
 }
 
@@ -233,7 +234,7 @@ export function mainPhotoRequests(
     generationKey: string;
     tier?: SizeTier;
     /** An image the author attached for this generation only (design 67). */
-    staged?: string;
+    staged?: StagedImage;
   },
 ): CharacterGenerationRequest[] {
   const budget = referenceBudgetFor(model);
@@ -293,7 +294,7 @@ export function characterSheetRequest(
   styleOverride?: string,
   requestedTier?: SizeTier,
   /** An image the author attached for this generation only (design 67). */
-  staged?: string,
+  staged?: StagedImage,
 ): CharacterGenerationRequest {
   if (referenceBudgetFor(model) === 0) {
     throw new Error(`${model.displayName} cannot receive the accepted main photo`);
@@ -354,7 +355,7 @@ export function characterLookRequests(
     tier?: SizeTier;
     generationKey: string;
     /** An image the author attached for this generation only (design 67). */
-    staged?: string;
+    staged?: StagedImage;
   },
 ): CharacterGenerationRequest[] {
   if (referenceBudgetFor(model) === 0) {
@@ -526,7 +527,7 @@ export function locationViewRequests(
     generationKey: string;
     tier?: SizeTier;
     /** An image the author attached for this generation only (design 67). */
-    staged?: string;
+    staged?: StagedImage;
   },
 ): CharacterGenerationRequest[] {
   if (sheet.type !== "location") {

@@ -180,6 +180,62 @@ interface StoreState {
       reason?: string;
     }
   >;
+  /**
+   * Deriving continuity for a chapter (turn 129), keyed by `worldId/productionId/chapterId` —
+   * the world too, because two worlds can share a production and a chapter slug and a record
+   * finished in one must never be shown in the other (codex on PR 907). What the panel shows
+   * while one runs and how it ended; the record a run finished with rides here as well.
+   */
+  deriving: Record<
+    string,
+    {
+      state: "deriving" | "derived" | "stopped" | "unavailable" | "failed";
+      placed: number;
+      dropped: number;
+      omitted: number;
+      cut: number;
+      /** The record a derivation finished with, so the open panel has the lines without a second read. */
+      record?: import("@arke-studio/contracts").ChapterContinuity;
+      reason?: string;
+    }
+  >;
+  /**
+   * Casting a chapter's lines (turn 130), keyed by `worldId/productionId/chapterId` as deriving
+   * is: what the Voices panel shows while one runs and how it ended, with the record a run
+   * finished with.
+   */
+  /**
+   * A manuscript read for import (turn 131), by request: what the file holds before anything
+   * is written, then what the import made of it. The import sheet reads this.
+   */
+  manuscripts: Record<
+    string,
+    {
+      state: "reading" | "read" | "refused" | "importing" | "imported" | "failed" | "cancelled";
+      fileName?: string;
+      words?: number;
+      chapters?: Array<{ title: string; words: number }>;
+      headingLevel?: string;
+      leftOut?: number;
+      levels?: Array<{ level: "title" | "subtitle" | "heading1" | "heading2" | "document"; label: string; count: number; chosen: boolean }>;
+      notes?: number;
+      links?: number;
+      after?: number;
+      created?: number;
+      reason?: string;
+    }
+  >;
+  casting: Record<
+    string,
+    {
+      state: "casting" | "cast" | "stopped" | "unavailable" | "failed";
+      lines: number;
+      dropped: number;
+      omitted: number;
+      record?: import("@arke-studio/contracts").ChapterVoices;
+      reason?: string;
+    }
+  >;
   /** The last word on archiving a world — said once, then dismissed. */
   archiveNote: { worldId: string; text: string; refused: boolean } | null;
   permissions: Record<string, PendingPermission>;
@@ -306,6 +362,9 @@ let current: StoreState = {
   setupStatus: null,
   diagnostics: null,
   reading: {},
+  deriving: {},
+  casting: {},
+  manuscripts: {},
   archiveNote: null,
   permissions: {},
   askResults: {},
@@ -379,6 +438,11 @@ const jobReadyListeners = new Set<(job: Job) => void>();
 export type FiledBatch = Extract<DomainEvent, { type: "artifact.filed-batch" }>;
 const filedBatchListeners = new Set<(batch: FiledBatch) => void>();
 export type BriefEnhanced = Extract<DomainEvent, { type: "bench.brief-enhanced" }>;
+type StageConstructionResult = Extract<DomainEvent, { type: "stage.construction" }>;
+const stageConstructionListeners = new Set<(result: StageConstructionResult) => void>();
+export function subscribeStageConstruction(listener: (result: StageConstructionResult) => void): () => void {
+  stageConstructionListeners.add(listener); return () => { stageConstructionListeners.delete(listener); };
+}
 const briefEnhancedListeners = new Set<(answer: BriefEnhanced) => void>();
 export function subscribeBriefEnhanced(listener: (answer: BriefEnhanced) => void): () => void {
   briefEnhancedListeners.add(listener);
@@ -397,6 +461,16 @@ const benchSubjectAcceptedListeners = new Set<(answer: BenchSubjectAccepted) => 
 export function subscribeBenchSubjectAccepted(listener: (answer: BenchSubjectAccepted) => void): () => void {
   benchSubjectAcceptedListeners.add(listener);
   return () => benchSubjectAcceptedListeners.delete(listener);
+}
+
+export type ReferenceImagesResult = Extract<DomainEvent, { type: "reference.images" }>;
+const referenceImageListeners = new Set<(result: ReferenceImagesResult) => void>();
+export function subscribeReferenceImages(listener: (result: ReferenceImagesResult) => void): () => void {
+  referenceImageListeners.add(listener);
+  return () => { referenceImageListeners.delete(listener); };
+}
+export function browseReferenceImages(slug: string, requestId: string): void {
+  send({ kind: "browse-reference-images", slug, requestId });
 }
 
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
@@ -466,6 +540,13 @@ export function subscribeVoiceUploadConfirmations(
 /** The correlated answer to one create-production request (issue 384), by requestId. */
 export type ProductionCreateResult = Extract<DomainEvent, { type: "production.create-result" }>;
 /** Refused direct scene writes (review 2026-08-22), delivered to the storyboard that sent them. */
+type CommandFailure = Extract<DomainEvent, { type: "command.failed" }>;
+const commandFailureListeners = new Set<(event: CommandFailure) => void>();
+export function subscribeCommandFailures(listener: (event: CommandFailure) => void): () => void {
+  commandFailureListeners.add(listener);
+  return () => commandFailureListeners.delete(listener);
+}
+
 const sceneRefusalListeners = new Set<
   (event: { productionId: string; sceneFile: string; reason: string }) => void
 >();
@@ -914,6 +995,11 @@ function handleFrame(json: string): void {
       voicePreviews: changedWorld ? {} : current.voicePreviews,
       voiceAudio: { ...(changedWorld ? {} : current.voiceAudio), ...durableVoiceAudio },
       voiceParts: changedWorld ? {} : current.voiceParts,
+      // A run still going is replayed after the snapshot (turn 129, turn 130); one that finished
+      // while this window was away is not, and would otherwise stay "casting" forever (codex on
+      // PR 914, round two). The snapshot's records say what stands.
+      deriving: {},
+      casting: {},
       // Both are keyed by sheet slug alone, and slugs recur across worlds: a failure left over
       // from one world would otherwise surface under the same-named character in the next one
       // (PR 241 review). They describe an action just taken here, so they do not outlive it.
@@ -936,12 +1022,19 @@ function handleFrame(json: string): void {
     let buildPlans = current.buildPlans;
     let keyArtPlans = current.keyArtPlans;
     let reading = current.reading;
+    let deriving = current.deriving;
+    let casting = current.casting;
+    let manuscripts = current.manuscripts;
     let archiveNote = current.archiveNote;
     let setupStatus = current.setupStatus;
     let permissions = current.permissions;
     const event = frame.event;
     let frameRunQuotes = current.frameRunQuotes;
     let frameRunStartResults = current.frameRunStartResults;
+    if (event.type === "command.failed") {
+      if (event.requestId) pendingQueueRequests.delete(event.requestId);
+      for (const listener of commandFailureListeners) listener(event);
+    }
     if (event.type === "queue.enqueue-result") {
       const expected = pendingQueueRequests.get(event.requestId);
       if (expected?.command === event.command) {
@@ -1036,6 +1129,7 @@ function handleFrame(json: string): void {
     if (event.type === "production.interactive-export-result") {
       for (const listener of interactiveExportListeners) listener(event);
     }
+    if (event.type === "stage.construction") for (const listener of stageConstructionListeners) listener(event);
     if (event.type === "bench.brief-enhanced") {
       for (const listener of briefEnhancedListeners) listener(event);
     }
@@ -1044,6 +1138,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "bench.subject-accepted") {
       for (const listener of benchSubjectAcceptedListeners) listener(event);
+    }
+    if (event.type === "reference.images") {
+      for (const listener of referenceImageListeners) listener(event);
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
@@ -1187,6 +1284,71 @@ function handleFrame(json: string): void {
           state: event.outcome === "found" ? "found" : event.outcome,
           found: event.found,
           dropped: event.dropped,
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "continuity.started") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "deriving", placed: 0, dropped: 0, omitted: 0, cut: 0 },
+      };
+    } else if (event.type === "continuity.finished") {
+      deriving = {
+        ...deriving,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          placed: event.placed,
+          dropped: event.dropped,
+          omitted: event.omitted,
+          cut: event.cut,
+          ...(event.record !== undefined ? { record: event.record } : {}),
+          ...(event.reason !== undefined ? { reason: event.reason } : {}),
+        },
+      };
+    } else if (event.type === "manuscript.read-result") {
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.cancelled === true
+            ? { state: "cancelled" }
+            : event.reason !== undefined
+            ? { state: "refused", ...(event.fileName !== undefined ? { fileName: event.fileName } : {}), reason: event.reason }
+            : {
+                state: "read",
+                fileName: event.fileName ?? "",
+                words: event.words ?? 0,
+                chapters: event.chapters ?? [],
+                ...(event.headingLevel !== undefined ? { headingLevel: event.headingLevel } : {}),
+                leftOut: event.leftOut ?? 0,
+                levels: event.levels ?? [],
+                notes: event.notes ?? 0,
+                links: event.links ?? 0,
+                after: event.after ?? 0,
+              },
+      };
+    } else if (event.type === "manuscript.import-result") {
+      const held = manuscripts[event.requestId] ?? { state: "read" as const };
+      manuscripts = {
+        ...manuscripts,
+        [event.requestId]:
+          event.reason !== undefined
+            ? { ...held, state: "failed", reason: event.reason }
+            : { ...held, state: "imported", created: event.created ?? 0, ...(event.after !== undefined ? { after: event.after } : {}) },
+      };
+    } else if (event.type === "voices.started") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: { state: "casting", lines: 0, dropped: 0, omitted: 0 },
+      };
+    } else if (event.type === "voices.finished") {
+      casting = {
+        ...casting,
+        [`${event.worldId}/${event.productionId}/${event.chapterId}`]: {
+          state: event.outcome,
+          lines: event.lines,
+          dropped: event.dropped,
+          omitted: event.omitted,
+          ...(event.record !== undefined ? { record: event.record } : {}),
           ...(event.reason !== undefined ? { reason: event.reason } : {}),
         },
       };
@@ -1411,6 +1573,7 @@ function handleFrame(json: string): void {
       exportsState = {
         ...exportsState,
         [event.exportId]: {
+          worldId: event.worldId,
           productionId: event.productionId,
           ...(event.episodeId !== undefined ? { episodeId: event.episodeId } : {}),
           status: event.status,
@@ -1477,6 +1640,9 @@ function handleFrame(json: string): void {
       keyArtPlans,
       setupStatus,
       reading,
+      deriving,
+      casting,
+      manuscripts,
       archiveNote,
       permissions,
       askResults,
@@ -1764,9 +1930,10 @@ export function uploadMasterLook(worldId: string): void {
  * Stage an image for a generation to look at (design 67). Same picker, same one-way street: the
  * renderer asks, and learns from the snapshot that a reference is now attached.
  */
-export function pickStagedReference(worldId: string, key: string): void {
+export function pickStagedReference(worldId: string, key: string, source?: string | { slug: string; path: string }): void {
   send({
     kind: "pick-staged-reference",
+    ...(typeof source === "string" ? { worldFile: source } : source ? { image: source } : {}),
     worldId,
     key,
     requestId: queueRequest("pick-staged-reference"),
@@ -2917,6 +3084,7 @@ export function readProsePage(
   sources: readonly ProseReadSource[],
   requestId = queueRequest("read-prose-page"),
   confirmationToken?: string,
+  voiceUploadConfirmedFor?: string,
 ): string {
   send({
     kind: "read-prose-page",
@@ -2924,6 +3092,7 @@ export function readProsePage(
     sources: [...sources],
     requestId,
     ...(confirmationToken ? { confirmationToken } : {}),
+    ...(voiceUploadConfirmedFor ? { voiceUploadConfirmedFor } : {}),
   });
   return requestId;
 }
@@ -3281,13 +3450,18 @@ export function restoreChapter(worldId: string, productionId: string, chapterFil
   send({ kind: "restore-chapter", worldId, productionId, chapterFile, version });
 }
 
-export function draftChapter(
+/** The plan on the chapter (turn 127): saved in place, no proposal, no version cut. `null` clears. */
+export function setChapterRetired(worldId: string, productionId: string, chapterFile: string, retired: boolean) {
+  send({ kind: retired ? "retire-chapter" : "restore-chapter-retired", worldId, productionId, chapterFile });
+}
+
+export function editChapterPlan(
   worldId: string,
   productionId: string,
   chapterFile: string,
-  instruction: string,
+  changes: Extract<ClientMessage, { kind: "edit-chapter-plan" }>["changes"],
 ): void {
-  send({ kind: "draft-chapter", worldId, productionId, chapterFile, instruction });
+  send({ kind: "edit-chapter-plan", worldId, productionId, chapterFile, changes });
 }
 
 export function reorderChapters(worldId: string, productionId: string, orderedFiles: string[]): void {
@@ -3581,12 +3755,16 @@ export function moveTimelineHistory(
 }
 
 /** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
-export function uploadArtifacts(worldId: string): void {
-  send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
+export function uploadArtifacts(worldId: string, files?: readonly File[]): { requestId: string | null; reason?: string } {
+  return importEditorMedia(worldId, undefined, files);
+}
+
+export function retireArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "retire-artifact", worldId, artifactId });
 }
 
 export function importEditorMedia(
-  worldId: string, editor: NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>,
+  worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[],
 ): { requestId: string | null; reason?: string } {
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
@@ -3730,6 +3908,8 @@ export function exportWorld(worldId: string): void {
 }
 
 export interface ExportState {
+  /** The world the export belongs to (codex on PR 924): a production slug recurs across worlds. */
+  worldId?: string;
   productionId: string;
   /** Set when the export is one episode's deliverable (issue 396). */
   episodeId?: string;
@@ -3762,6 +3942,75 @@ export function fileArtifactMsg(
 
 export function importFolder(worldId: string, sourcePath: string): void {
   send({ kind: "import-folder", worldId, sourcePath });
+}
+
+/** Derive continuity for one chapter (turn 129): a press, never a save. */
+export function deriveContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "derive-continuity", worldId, productionId, chapterFile });
+}
+
+export function stopContinuity(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-continuity", worldId, productionId, chapterFile });
+}
+
+/** How each chapter's derivation is going, keyed by `worldId/productionId/chapterId` — the panel reads this. */
+export function useDeriving(): StoreState["deriving"] {
+  return useStore().deriving;
+}
+
+/** Cast a chapter's lines (turn 130): a press, never a save. */
+export function castVoices(worldId: string, productionId: string, chapterFile: string): boolean {
+  return send({ kind: "cast-voices", worldId, productionId, chapterFile });
+}
+
+export function stopVoices(worldId: string, productionId: string, chapterFile: string): void {
+  send({ kind: "stop-voices", worldId, productionId, chapterFile });
+}
+
+// ---- turn 131: a manuscript out and in ------------------------------------
+
+export function exportManuscript(worldId: string, productionId: string, format: "docx" | "epub", language?: string): boolean {
+  return send({ kind: "export-manuscript", worldId, productionId, format, ...(language !== undefined && format === "epub" ? { language } : {}) });
+}
+
+export function openExportsFolder(worldId: string): void {
+  send({ kind: "open-exports-folder", worldId });
+}
+
+/** Ask the host for a `.docx` and read it; the answer arrives by this request id, and nothing is written until the import press. */
+export function pickManuscript(worldId: string, productionId: string): string {
+  const requestId = ulid();
+  emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { state: "reading" } } });
+  send({ kind: "pick-manuscript", worldId, productionId, requestId });
+  return requestId;
+}
+
+export function importManuscript(worldId: string, productionId: string, requestId: string): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "importing" } } });
+  send({ kind: "import-manuscript", worldId, productionId, requestId });
+}
+
+/** The same file again at the level the person chose; the rows are read again, nothing is written. */
+export function rereadManuscript(worldId: string, productionId: string, requestId: string, headingLevel: "title" | "subtitle" | "heading1" | "heading2" | "document"): void {
+  const held = current.manuscripts[requestId];
+  if (held !== undefined) emitChange({ ...current, manuscripts: { ...current.manuscripts, [requestId]: { ...held, state: "reading" } } });
+  send({ kind: "reread-manuscript", worldId, productionId, requestId, headingLevel });
+}
+
+export function cancelManuscript(worldId: string, requestId: string): void {
+  const { [requestId]: _dropped, ...rest } = current.manuscripts;
+  emitChange({ ...current, manuscripts: rest });
+  send({ kind: "cancel-manuscript", worldId, requestId });
+}
+
+export function useManuscripts(): StoreState["manuscripts"] {
+  return useStore().manuscripts;
+}
+
+/** How each chapter's casting is going, keyed by `worldId/productionId/chapterId` — the Voices panel reads this. */
+export function useCasting(): StoreState["casting"] {
+  return useStore().casting;
 }
 
 export function extractArtifact(worldId: string, artifactId: string): void {
@@ -3938,6 +4187,9 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
     setupStatus: null,
     diagnostics: null,
     reading: {},
+  deriving: {},
+    casting: {},
+  manuscripts: {},
     archiveNote: null,
     permissions: {},
     askResults: {},
@@ -4030,6 +4282,8 @@ export function sendWorldChat(
   attachmentIds: string[] = [],
   subject?: WorldChatSubject,
   modelId?: string,
+  /** A line that asks for a reply and nothing else (turn 128): no action the turn returns is staged. */
+  replyOnly = false,
 ): void {
   send({
     kind: "world-chat-send",
@@ -4040,6 +4294,7 @@ export function sendWorldChat(
     attachmentIds,
     ...(modelId !== undefined ? { modelId } : {}),
     ...(subject !== undefined ? { subject } : {}),
+    ...(replyOnly ? { replyOnly: true } : {}),
   });
 }
 

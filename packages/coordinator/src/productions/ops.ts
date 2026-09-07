@@ -26,17 +26,22 @@ import {
   SeasonSchema,
   SeriesSchema,
   StoryOverviewSchema,
+  StoryProgressSchema,
+  storyProgressDay,
   type Episode,
   type Scene,
   type ScenePlan,
   type Season,
   type Series,
+  type ProseStyle,
   type StoryOverview,
   type SceneRecord,
   type WorldBundle,
   type Capability,
   orderedShots,
   countWords,
+  ChapterFrontmatterSchema,
+  type ChapterImplies,
 } from "@arke-studio/contracts";
 import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
 import { posterNameFor } from "../takes/poster.js";
@@ -380,18 +385,37 @@ export async function productionCreatedBy(worldDir: string, requestId: string): 
  * helper so scene drafting and chapter drafting steer from the same accepted facts — the UI
  * says the overview steers drafting, and this is where that claim is made true.
  */
-export function overviewSteer(story: StoryOverview | null | undefined): string {
-  if (!story) return "";
+export function overviewSteer(story: StoryOverview | null | undefined, style?: ProseStyle | null): string {
+  const lines = story
+    ? [
+        ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
+        ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
+        ...(story.acts ?? []).map(
+          (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
+        ),
+        ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+      ]
+    : [];
+  const overview = story && lines.length > 0
+    ? `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`
+    : "";
+  return overview + proseStyleSteer(style);
+}
+
+/**
+ * The style the book is written in, as a drafting instruction (turn 128), or "" when none is
+ * settled. Every draft and every revision reads it; nothing applies it to prose by itself.
+ */
+export function proseStyleSteer(style: ProseStyle | null | undefined): string {
+  if (!style) return "";
   const lines = [
-    ...(story.logline !== undefined ? [`- logline: ${story.logline}`] : []),
-    ...(story.spine !== undefined ? [`- spine: ${story.spine}`] : []),
-    ...(story.acts ?? []).map(
-      (act, i) => `- act ${i + 1} · ${act.title}${act.summary !== undefined ? `: ${act.summary}` : ""}`,
-    ),
-    ...(story.targetLength !== undefined ? [`- target length: ${story.targetLength}`] : []),
+    ...(style.pov !== undefined ? [`- point of view: ${style.pov}`] : []),
+    ...(style.tense !== undefined ? [`- tense: ${style.tense}`] : []),
+    ...(style.voice !== undefined ? [`- voice: ${style.voice}`] : []),
+    ...(style.samples ?? []).map((sample) => `- sounds like: "${sample}"`),
   ];
   if (lines.length === 0) return "";
-  return `\n\nThe accepted story overview (v${story.version}) steers this draft — keep it consistent:\n${lines.join("\n")}`;
+  return `\n\nThe prose style (v${style.version}) is how this book is written — hold to it in every sentence:\n${lines.join("\n")}`;
 }
 
 /**
@@ -539,12 +563,18 @@ function newEpisodeRecord(
     id = `ep_${slug}-${n}`;
     stem = `${slug}-${n}`;
   }
+  // Same reasoning as the id above (issue 947): a caller's order can be stale by the time this
+  // runs inside the serialised region, so the record actually written never doubles one already
+  // on disk, whatever number was asked for.
+  const takenOrders = new Set(production.episodes.map((e) => e.order));
+  let order = episode.order ?? production.episodes.length + 1;
+  while (takenOrders.has(order)) order += 1;
   const content =
     JSON.stringify(
       EpisodeSchema.parse({
         id,
         version: 1,
-        order: episode.order ?? production.episodes.length + 1,
+        order,
         title,
         ...(episode.promise !== undefined ? { promise: episode.promise } : {}),
         scenes: episode.scenes ?? [],
@@ -692,7 +722,7 @@ export async function createChapter(
 }
 
 /** The highest rank any chapter file carries, `order` or the legacy `number`; 0 when none do. */
-async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
+export async function highestChapterRank(store: WorldStore, productionId: string, files: readonly string[]): Promise<number> {
   let highest = 0;
   for (const file of files) {
     const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${productionId}/chapters/${file}.md`))), "utf8").catch(() => null);
@@ -712,34 +742,51 @@ export async function saveChapter(
   body: string,
   options: { baseHash?: string } = {},
 ): Promise<{ version: number; hash: string }> {
-  const path = `productions/${productionId}/chapters/${chapterFile}.md`;
-  const file = toExtendedLength(join(store.dir, fromPortable(path)));
-  const live = await readFile(file, "utf8");
-  const doc = MarkdownFile.parse(live);
-  doc.setBody(body);
-  // The summary's word count follows the prose it summarises: every surface that reads
-  // `words` (the chapter tree, the story dashboard) would otherwise report the count the
-  // chapter had when it was last stamped by hand, indefinitely.
-  doc.setData({ words: countWords(body) });
-  // The base is the file the editor read when the caller says so (turn 126), not the file as
-  // it is now: hashing the live bytes here would make every save pass, including one written
-  // over an accepted draft the editor never saw. The committer refuses a moved base.
-  const result = await store.commit({
-    kind: "chapter-save",
-    source: "editor",
-    files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }],
+  return store.gateOp(async () => {
+    const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+    const file = toExtendedLength(join(store.dir, fromPortable(path)));
+    const live = await readFile(file, "utf8");
+    const doc = MarkdownFile.parse(live);
+    const added = Math.max(0, countWords(body) - countWords(doc.body));
+    const progressFiles: CommitFileInput[] = [];
+    if (added > 0) {
+      const progressPath = `productions/${productionId}/progress.json`;
+      const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(progressPath))), "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      const progress = raw === null ? { days: {} as Record<string, number> } : StoryProgressSchema.parse(JSON.parse(raw));
+      const day = storyProgressDay(new Date(store.now()));
+      progress.days[day] = (progress.days[day] ?? 0) + added;
+      progressFiles.push({ path: progressPath, action: raw === null ? "create" : "replace", content: `${JSON.stringify(progress, null, 2)}\n`, baseHash: raw === null ? null : sha256(raw) });
+    }
+    doc.setBody(body);
+    // The summary's word count follows the prose it summarises: every surface that reads
+    // `words` (the chapter tree, the story dashboard) would otherwise report the count the
+    // chapter had when it was last stamped by hand, indefinitely.
+    doc.setData({ words: countWords(body) });
+    // An imported chapter is the author's from its first save (turn 131): the mark comes off.
+    doc.dropData("source");
+    // The base is the file the editor read when the caller says so (turn 126), not the file as
+    // it is now: hashing the live bytes here would make every save pass, including one written
+    // over an accepted draft the editor never saw. The committer refuses a moved base.
+    const result = await store.commitUnserialised({
+      kind: "chapter-save",
+      source: "editor",
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: options.baseHash ?? sha256(live), preserveVersion: true }, ...progressFiles],
+    });
+    // The base the next save must name is the bytes this commit wrote — the committer stamps
+    // `updated` and `version` on the way through, so it is not what was handed over, and it is
+    // not the file as read back either: an outside edit landing between the commit and the read
+    // would hand the editor that edit's hash and let its next save overwrite it (codex, PR 879).
+    const committed = result.hashes?.[path];
+    const version = result.versions[path];
+    if (committed !== undefined && version !== undefined) return { version: Math.max(1, version), hash: committed };
+    const saved = await readFile(file, "utf8");
+    const stamped = MarkdownFile.parse(saved);
+    const parsed = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
+    return { version: Math.max(1, version ?? parsed), hash: committed ?? sha256(saved) };
   });
-  // The base the next save must name is the bytes this commit wrote — the committer stamps
-  // `updated` and `version` on the way through, so it is not what was handed over, and it is
-  // not the file as read back either: an outside edit landing between the commit and the read
-  // would hand the editor that edit's hash and let its next save overwrite it (codex, PR 879).
-  const committed = result.hashes?.[path];
-  const version = result.versions[path];
-  if (committed !== undefined && version !== undefined) return { version: Math.max(1, version), hash: committed };
-  const saved = await readFile(file, "utf8");
-  const stamped = MarkdownFile.parse(saved);
-  const parsed = typeof stamped.data["version"] === "number" ? (stamped.data["version"] as number) : 1;
-  return { version: Math.max(1, version ?? parsed), hash: committed ?? sha256(saved) };
 }
 
 /**
@@ -752,7 +799,7 @@ export async function openChapter(
   store: WorldStore,
   productionId: string,
   chapterId: string,
-): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; versions: number[] }> {
+): Promise<{ file: string; title: string; order: number; body: string; version: number; hash: string; bodyHash: string; versions: number[] }> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
@@ -776,7 +823,67 @@ export async function openChapter(
     .map((match) => Number(match[1]))
     .filter((candidate) => candidate >= 1 && candidate < version)
     .sort((a, b) => a - b);
-  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), versions };
+  // The hash of the prose alone beside the file's (turn 129): what a continuity record is keyed
+  // to, normalised exactly as the scanner normalises it for the summary's `bodyHash`.
+  return { file: summary.file, title: summary.title, order: summary.order, body, version, hash: sha256(live), bodyHash: sha256(body), versions };
+}
+
+/**
+ * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
+ * the draft implied, saved in place like the prose — no proposal, no version cut (SPEC-012
+ * R-5), one write for every field. `null` clears a field; the key is dropped rather than left
+ * as a null the read schema would refuse.
+ */
+export async function editChapterPlan(
+  store: WorldStore,
+  productionId: string,
+  chapterFile: string,
+  changes: {
+    title?: string;
+    synopsis?: string | null;
+    pov?: string | null;
+    when?: string | null;
+    implies?: ChapterImplies | null;
+  },
+): Promise<void> {
+  const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = MarkdownFile.parse(live);
+  const next: Record<string, unknown> = { ...doc.data };
+  for (const [key, value] of Object.entries(changes)) {
+    if (value === undefined) continue;
+    if (value === null || (typeof value === "string" && value.trim() === "")) delete next[key];
+    else next[key] = value;
+  }
+  if (Array.isArray(next["implies"])) next["implies"] = withImpliedIds(next["implies"] as ChapterImplies);
+  // A point of view must be a character the world holds; anything else is a typo written into
+  // frontmatter with the confidence of a fact.
+  if (typeof next["pov"] === "string" && !store.getBundle().sheets.some((sheet) => sheet.id === next["pov"] && sheet.type === "character")) {
+    throw new Error(`sheet ${String(next["pov"])} is not a character in this world`);
+  }
+  doc.data = next;
+  doc.setData({});
+  ChapterFrontmatterSchema.parse(doc.data);
+  await store.commit({
+    kind: "chapter-plan",
+    source: "editor",
+    files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true }],
+  });
+}
+
+/**
+ * Every implied fact carries an id and a state (codex on turn 127). Minted here, at the write,
+ * for any item that arrives without one — Arke's action and the screen both send bare facts —
+ * and kept for any that has one, so a state written by Propose survives the next edit.
+ */
+export function withImpliedIds(implies: ChapterImplies): ChapterImplies {
+  const seen = new Set<string>();
+  return implies.map((fact, index) => {
+    let id = fact.id ?? `if_${createHash("sha256").update(`${fact.kind}\n${fact.what}\n${index}`).digest("hex").slice(0, 10)}`;
+    while (seen.has(id)) id = `${id}-${index}`;
+    seen.add(id);
+    return { ...fact, id, state: fact.state ?? "open" };
+  });
 }
 
 /** Undo for a chapter (turn 126): v<n> returns as a new version through the store's own restore. */
@@ -791,6 +898,24 @@ export async function restoreChapter(
   return result.versions[path] ?? version;
 }
 
+/** Retirement keeps the chapter and its history at their original paths (issue 888). */
+export async function setChapterRetired(store: WorldStore, productionId: string, chapterFile: string, retired: boolean): Promise<void> {
+  await store.gateOp(async () => {
+    const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+    if (!production?.chapters.some((c) => c.file === chapterFile)) throw new Error("That chapter is no longer in this production.");
+    const path = `productions/${productionId}/chapters/${chapterFile}.md`;
+    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    const doc = MarkdownFile.parse(live);
+    if ((doc.data["retired"] === true) === retired) return;
+    if (retired) doc.setData({ retired: true });
+    else doc.dropData("retired");
+    await store.commitUnserialised({
+      kind: retired ? "chapter-retire" : "chapter-restore-retired", source: "editor", raiseSchemaVersion: 15,
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(live), preserveVersion: true }],
+    });
+  });
+}
+
 /** Reorder: frontmatter only — no file renamed, no history path moved (R-4, D3). */
 export async function reorderChapters(
   store: WorldStore,
@@ -798,34 +923,41 @@ export async function reorderChapters(
   orderedFiles: string[],
   options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
 ): Promise<void> {
-  const files = [];
-  for (const [index, file] of orderedFiles.entries()) {
-    const path = `productions/${productionId}/chapters/${file}.md`;
-    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-    const doc = MarkdownFile.parse(live);
-    if ((doc.data["order"] as number) === index + 1) continue;
-    doc.setData({ order: index + 1 });
-    files.push({ path, action: "replace" as const, content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
-  }
-  if (files.length === 0) {
-    if (options.precondition) {
-      await store.commit({
-        kind: "chapter-reorder",
-        source: options.source ?? "form",
-        files: [],
-        ...(options.requestId ? { requestId: options.requestId } : {}),
-      }, undefined, options.precondition);
+  return store.gateOp(async () => {
+    const chapters = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters;
+    if (!chapters || orderedFiles.length !== chapters.length || new Set(orderedFiles).size !== chapters.length ||
+        orderedFiles.some((file) => !chapters.some((c) => c.file === file))) {
+      throw new Error("The chapter list changed. Try moving the chapter again.");
     }
-    return;
-  }
-  // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
-  await store.commit({
-    kind: "chapter-reorder",
-    source: options.source ?? "form",
-    files,
-    raiseSchemaVersion: 2,
-    ...(options.requestId ? { requestId: options.requestId } : {}),
-  }, undefined, options.precondition);
+    const files = [];
+    for (const [index, file] of orderedFiles.entries()) {
+      const path = `productions/${productionId}/chapters/${file}.md`;
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+      const doc = MarkdownFile.parse(live);
+      if ((doc.data["order"] as number) === index + 1) continue;
+      doc.setData({ order: index + 1 });
+      files.push({ path, action: "replace" as const, content: doc.serialize(), baseHash: sha256(live), preserveVersion: true });
+    }
+    if (files.length === 0) {
+      if (options.precondition) {
+        await store.commitUnserialised({
+          kind: "chapter-reorder",
+          source: options.source ?? "form",
+          files: [],
+          ...(options.requestId ? { requestId: options.requestId } : {}),
+        });
+      }
+      return;
+    }
+    // Reordering writes explicit `order` fields — a version-2 shape (SPEC-023 R-23).
+    await store.commitUnserialised({
+      kind: "chapter-reorder",
+      source: options.source ?? "form",
+      files,
+      raiseSchemaVersion: 2,
+      ...(options.requestId ? { requestId: options.requestId } : {}),
+    });
+  }, options.precondition);
 }
 
 /**
@@ -1124,7 +1256,10 @@ export async function draftSceneSkeleton(
       return Number.isFinite(n) ? Math.max(a, n) : a;
     }, 0) + 1;
   const instruction = `${scope}${overviewSteer(production?.story)}\n\nDraft scene ${number} in ${path} from this brief: "${input.brief}". Populate \`flow\` as one complete Entry -> shot nodes -> Exit path. Keep the staged entry and exit nodes and their ids stable. Each shot node needs \`kind: "shot"\`, an id derived from its shot id (for example \`sh_40\` uses \`sfn_sh-40\`), and a \`shot\` with id, number, title, description with @mentions for every character and the location, camera, audio, durationSec. Replace the direct Entry -> Exit edge with sequence edges through every shot; each edge needs \`kind: "sequence"\`, \`out\` and \`in\` ports, and an id derived from its adjacent endpoints (for example \`sfe_entry-sh-40\`). Keep \`schemaVersion\`, \`entryNodeId\`, \`exitNodeId\`, and \`storyboardGroups\` intact. Shot ids are unique across the WHOLE production, not per scene: number this scene's shots sh_${shotBase}, sh_${shotBase + 1}, and so on upward, while each shot's own \`number\` field starts at 1 for this scene. Write camera as a complete value: name a fixture the location or the brief already supports and what the camera faces, then the shot size and movement — "at the kettle beside the fridge, facing the hallway; medium close-up, slow push-in". Never invent a fixture, and never write a relative correction such as "closer". Write audio as an object, never a sentence: {"kind": "vo" | "dialogue" | "sfx" | "silence"} with optional "speaker" (a sheet slug) and "line"; a texture like a hum is {"kind": "sfx", "line": "light click and focus hum"}. Propose an inherits block (location, timeOfDay, tone) where location is a lowercase-kebab slug such as "rehearsal-hall", never prose. The file must stay a valid scene record — the gate refuses anything else at accept. Check canon for anything the brief touches and keep every line consistent with it. Do not touch any other file.`;
-  return { proposalId: proposal.id, path, scope, instruction, skill };
+  const capability = production && productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
+  const look = production?.meta.styleOverride?.trim() || bundle.artDirection.description;
+  const promptInstruction = `Author each shot's promptOverride as {"text":"one complete prompt", "capability":"${capability}", "sheetVersions":{"sheet-slug":1}}. Read its characters and location through get_sheet first; record their actual versions, never the example version. Read the scene/script and respect explicit framing, duration and silence. Write for ${production?.meta.models?.[capability] ?? skill?.family ?? capability}, within that route's grammar. ${capability === "video" ? "Describe motion, camera movement, what changes across the shot and what is heard." : "Describe one visible instant, with no timing, sound or camera-movement instructions."} Translate the effective art direction into this setup; do not paste it or include backstory, other shots or absent characters. Keep @mentions in description to attach references. The application preserves the prompt and adds mechanical bindings and constraints. Effective art direction (source data for your judgment): ${JSON.stringify(look)}`;
+  return { proposalId: proposal.id, path, scope, instruction: `${instruction}\n\n${promptInstruction}`, skill };
 }
 
 // ---------------------------------------------------------------------------

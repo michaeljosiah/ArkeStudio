@@ -38,6 +38,7 @@ import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ArtifactViewer } from "../components/artifact-viewer.js";
+import { EditorDialog } from "../components/editor-dialog.js";
 import {
   characterPortraitPath,
   locationPortraitPath,
@@ -51,7 +52,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactOpenLabel } from "../lib/artifact-view.js";
+import { artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -99,6 +100,8 @@ import {
   extractArtifact,
   fileArtifactMsg,
   importFolder,
+  uploadArtifacts,
+  retireArtifact,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
@@ -731,6 +734,7 @@ const PROPOSAL_WHY: Record<string, string> = {
   "canon-settle": "a thread to settle",
   "chapter-draft": "drafted chapter",
   "story-overview": "story overview",
+  "prose-style": "prose style",
   "season-edit": "season change",
   "episode-edit": "episode change",
   "series-edit": "series change",
@@ -4344,10 +4348,16 @@ export function ArtifactsScreen() {
   const navigate = useNavigate();
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
-  const artifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const shelfArtifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
+  const artifacts = shelfArtifacts.filter(a => a.retiredAt === undefined);
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [importPath, setImportPath] = useState("");
+  const [dropActive, setDropActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const upload = (files?: readonly File[]) => {
+    if (worldId) setUploadError(uploadArtifacts(worldId, files).reason ?? null);
+  };
   // The path row appears on request (design 68a puts only the button pair in the header row).
   const [importing, setImporting] = useState(false);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
@@ -4363,12 +4373,19 @@ export function ArtifactsScreen() {
    * its import report and its scroll position.
    */
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
+  const [retireId, setRetireId] = useState<string | null>(null);
+  const retiringArtifact = artifacts.find(a => a.id === retireId) ?? null;
+  const uses = world && retiringArtifact ? artifactUses(world, retiringArtifact) : [];
   const openTrigger = useRef<HTMLButtonElement | null>(null);
+  const closeRetirement = () => {
+    setRetireId(null);
+    openTrigger.current?.focus();
+  };
   // Whatever made it, not the bench alone (issue 475): a character's generated references are
   // filed here too, and the chip that counts what this application made counts those as well.
   const madeHere = (a: (typeof artifacts)[number]) => isGeneratedArtifact(a);
   // Superseded artifacts drop out of the listing the way they drop out of pickers (R-5).
-  const superseded = new Set(artifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
+  const superseded = new Set(shelfArtifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
     (a) =>
       !superseded.has(a.id) &&
@@ -4377,7 +4394,7 @@ export function ArtifactsScreen() {
   );
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
-  const batches = artifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
+  const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
   // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
   const linkName = (link: string): string =>
@@ -4397,6 +4414,7 @@ export function ArtifactsScreen() {
           would quietly become this pair's containing block. A production's Generate has
           shots to answer to, so it never grows one. */}
       <div className="fy-artifacts-door">
+        <Button variant="outline" onClick={() => upload()}>Add files</Button>
         <Button variant="outline" onClick={() => setImporting((v) => !v)}>
           Import folder
         </Button>
@@ -4472,6 +4490,7 @@ export function ArtifactsScreen() {
         )}
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
+        {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}
         {notices.map((n, i) => (
           <Callout
             key={`${n.sourcePath}-${i}`}
@@ -4576,6 +4595,21 @@ export function ArtifactsScreen() {
       <div
         className="fy-cardgrid"
         style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))", paddingTop: 24 }}
+        onDragOver={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+          setDropActive(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropActive(false);
+        }}
+        onDrop={(event) => {
+          if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+          event.preventDefault();
+          setDropActive(false);
+          if (event.dataTransfer.files.length) upload(Array.from(event.dataTransfer.files));
+        }}
       >
         {visible.map((a) => {
           const name = a.file.split("/").pop() ?? a.file;
@@ -4611,6 +4645,8 @@ export function ArtifactsScreen() {
                   setOpenArtifactId(a.id);
                 }}
               />
+              <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
+                onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
               {isImage ? (
                 <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
                   <Portrait
@@ -4670,31 +4706,36 @@ export function ArtifactsScreen() {
           );
         })}
         {/* A cell of the same grid, filling out the last row (design 68a) — never its own band. */}
-        <div
+        <button
+          type="button"
+          aria-label="Add files"
+          onClick={() => upload()}
           className="fy-gridcard fy-gridcard--quiet"
           style={{
-            border: "1.5px dashed var(--neutral-300)",
-            background: "transparent",
+            border: `1.5px dashed ${dropActive ? "var(--foreground)" : "var(--neutral-300)"}`,
+            background: dropActive ? "var(--muted)" : "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            textAlign: "left",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             gap: 14,
             minHeight: 176,
-            boxShadow: "none",
           }}
         >
           <span className="fy-newprodcard__ring" style={{ width: 40, height: 40 }}>
             <Plus size={18} />
           </span>
           <div>
-            <div style={{ font: "600 14px var(--font-sans)" }}>Drop anything</div>
+            <div style={{ font: "600 14px var(--font-sans)" }}>{dropActive ? "Drop to add files" : "Drop files or click to add"}</div>
             <div
               style={{ font: "400 10.5px var(--font-mono)", color: "var(--muted-foreground)", marginTop: 4 }}
             >
-              audio · documents · boards · stems
+              up to 16 files · audio · documents · images
             </div>
           </div>
-        </div>
+        </button>
         {artifacts.length === 0 && (
           <EmptyState
             title="Nothing filed yet"
@@ -4707,12 +4748,28 @@ export function ArtifactsScreen() {
         artifacts={artifacts}
         worldSlug={world?.meta.slug}
         linkName={linkName}
+        onRetire={(artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
         onClose={() => {
           setOpenArtifactId(null);
           // A dialog that dropped focus leaves the keyboard at the top of the document.
-          openTrigger.current?.focus();
+          if (retireId === null) openTrigger.current?.focus();
         }}
       />
+      <EditorDialog open={retiringArtifact !== null} title="Remove from shelf?" subtitle={retiringArtifact?.file}
+        onClose={closeRetirement}>
+        <p>This retires the artifact from the shelf and file pickers. Its file and provenance stay in the world;
+          existing clips, references and exports keep working. No disk space is freed.</p>
+        <p>Import the same file again to restore it.</p>
+        <p>{uses.length ? "Current uses — kept intact:" : "No current uses found in the loaded world records. History is kept."}</p>
+        {uses.length > 0 && <ul style={{ maxHeight: 200, overflowY: "auto" }}>{uses.map(use => <li key={use}>{use}</li>)}</ul>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <Button variant="outline" onClick={closeRetirement}>Cancel</Button>
+          <Button variant="primary" onClick={() => {
+            if (worldId && retiringArtifact) retireArtifact(worldId, retiringArtifact.id);
+            setRetireId(null);
+          }}>Remove from shelf</Button>
+        </div>
+      </EditorDialog>
     </div>
   );
 }
@@ -4948,26 +5005,9 @@ const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number]
  * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
  * line makes it a setting. It reaches `season.ending` through the conversation instead.
  */
-/**
- * How many episodes a season can be promised (2026-08-23).
- *
- * This was 5 to 12, which is a short film cut into pieces rather than a vertical series. The
- * form runs 60 to 100 drops, and a season written to eight has a different spine from one
- * written to eighty: eight holds a reveal at four, eighty holds it at forty and spends the
- * difference on the audience knowing what the characters do not. A door that could not say
- * eighty made every season it opened the wrong shape, and the author found out at the point
- * where the shape is expensive to change.
- *
- * Twelve and under stay, because a sample cut to sell the run is a real thing to be making —
- * they are the exception in the list now rather than the whole of it.
- */
-export const EPISODE_COUNT_CHOICES = [8, 12, 20, 30, 40, 60, 80, 100];
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
 
 export const MICRODRAMA_DEFAULTS = {
-  // 60 rather than 7: the low end of what the form actually runs, so the season a person opens
-  // without touching this is a vertical series and not a short film in slices.
-  episodeCount: 60,
   episodeSecondsMin: 45,
   episodeSecondsMax: 75,
   hookWindowSec: 3,
@@ -4989,7 +5029,6 @@ export function NewProductionScreen() {
   // be the exact failure the grouping is meant to prevent.
   const [aspect, setAspect] = useState<string>(VIDEO_KIND_CHOICES[1].aspect);
   const [frameRate, setFrameRate] = useState<FrameRate>(24);
-  const [episodeCount, setEpisodeCount] = useState(MICRODRAMA_DEFAULTS.episodeCount);
   const [episodeLength, setEpisodeLength] = useState(
     `${MICRODRAMA_DEFAULTS.episodeSecondsMin}-${MICRODRAMA_DEFAULTS.episodeSecondsMax}`,
   );
@@ -5045,7 +5084,6 @@ export function NewProductionScreen() {
               seriesTitle: title.trim(),
               defaults: {
                 ...MICRODRAMA_DEFAULTS,
-                episodeCount,
                 ...(lengthRange
                   ? { episodeSecondsMin: lengthRange.min, episodeSecondsMax: lengthRange.max }
                   : {}),
@@ -5136,7 +5174,7 @@ export function NewProductionScreen() {
                       style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
                     />
                   ) : (
-                    <span className="fy-mono">no defaults</span>
+                    <span aria-hidden="true" style={{ color: "var(--muted-foreground)", fontSize: 24 }}>·</span>
                   )}
                 </div>
                 <div className="fy-radio__head">
@@ -5197,17 +5235,6 @@ export function NewProductionScreen() {
               </DefaultSelect>
               {isMicrodrama && (
                 <>
-                  <DefaultSelect
-                    label="EPISODES"
-                    value={String(episodeCount)}
-                    onChange={(v) => setEpisodeCount(Number(v))}
-                  >
-                    {EPISODE_COUNT_CHOICES.map((n) => (
-                      <option key={n} value={String(n)}>
-                        {n}
-                      </option>
-                    ))}
-                  </DefaultSelect>
                   {/* The range a season is written to, and the reason a Microdrama is a
                       Microdrama. It reaches season.json, where the season shows it back. */}
                   <DefaultSelect label="LENGTH" value={episodeLength} onChange={setEpisodeLength}>

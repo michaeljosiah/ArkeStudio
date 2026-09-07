@@ -6,11 +6,13 @@ import { ART_DIRECTION_PATH, LOCAL_ACTOR_ID, newId, orderedShots, orderedTrackCl
 import { ConversationActionLifecycle } from "../../src/arke-actions/lifecycle.js";
 import { openBenchSession } from "../../src/bench/service.js";
 import { Coordinator } from "../../src/coordinator.js";
+import { setOwner } from "../../src/artifacts/filing.js";
+import type { FfmpegRunner } from "../../src/takes/export.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { jobsFence, sceneFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
+import { jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -20,13 +22,13 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const AT = "2026-09-04T12:00:00.000Z";
 
-async function setup() {
+async function setup(ffmpeg?: FfmpegRunner) {
   const made = await makeTempRoot();
   const provider = new FsWorldProvider(made.root, { clock: () => AT });
   closeOnCleanup(() => provider.close());
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
-  const coordinator = new Coordinator({ provider, adapter: null, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
+  const coordinator = new Coordinator({ provider, adapter: null, ffmpeg, changeLogPath: join(made.root, "logs/changes.jsonl"), appVersion: "test", observeEvent: (event) => events.push(event) });
   const internal = coordinator as unknown as {
     handleClientMessage(message: ClientMessage): Promise<void>;
     conversationActionLifecycle(store: WorldStore): ConversationActionLifecycle;
@@ -37,6 +39,45 @@ async function setup() {
     useMasterLookForConversationAction(store: WorldStore, index: number, mutation: { source: string; requestId: string; precondition: () => string | null }): Promise<boolean>;
   };
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
+}
+
+for (const decision of ["accept", "discard", "journal-discard"] as const) {
+  it(`reconciles an overview card after ${decision} through the proposal panel (#953)`, async () => {
+    const w = await setup();
+    await w.coordinator.openWorld(WORLD_ID);
+    const production = w.store.getBundle().productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+    const conversationId = newId("cv");
+    const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
+    await log.create(conversationId, AT);
+    await log.append({ type: "conversation.created", title: "Overview", entryContext: { kind: "production", productionId: production.meta.id } }, { at: AT });
+    const lifecycle = w.internal.conversationActionLifecycle(w.store);
+    const action = await lifecycle.prepare({
+      conversationId, turnId: newId("turn"), worldId: WORLD_ID,
+      actionKind: "world-chat-production-overview", productionId: production.meta.id,
+      targets: [{ kind: "story", id: production.meta.id }],
+      payload: { kind: "world-chat-production-overview", worldId: WORLD_ID,
+        action: { kind: "production-overview", productionId: production.meta.id,
+          changes: { logline: "The last watch finds a missing page." }, checkReceiptIds: [newId("check")] } },
+      baseObservations: [{ requirement: "story", target: production.meta.id, revisionOrDigest: storyFence(production), complete: true }],
+      createdAt: AT,
+    });
+    await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+    if (decision === "journal-discard") {
+      // The authority landed, but no best-effort conversation resolution was recorded.
+      await w.gate.discard(action.authority.id);
+      w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: "discarded" });
+    } else {
+      await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
+    }
+    await Promise.all(w.internal.backgroundWork);
+    const folded = () => log.read().then(({ events }) => foldConversation(conversationId, AT, events).view);
+    assert.equal((await folded()).actions[0]!.status, decision === "accept" ? "completed" : "cancelled");
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, decision === "accept" ? "completed" : "cancelled", "the open card updates without navigation");
+    const count = (await log.read()).events.length;
+    w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: decision === "accept" ? "accepted" : "discarded" });
+    await Promise.all(w.internal.backgroundWork);
+    assert.equal((await log.read()).events.length, count, "duplicate notifications do not settle or execute twice");
+  });
 }
 
 describe("PR 815 coordinator regressions", () => {
@@ -261,6 +302,23 @@ describe("PR 815 coordinator regressions", () => {
     const failure = w.events.find((event) => event.type === "export.progress" && event.status === "failed");
     assert.ok(failure?.type === "export.progress");
     assert.match(failure.error!, /export needs ffmpeg/);
+  });
+
+  it("refuses a foreign master before starting a legacy spine export (#895)", async () => {
+    let encoded = false;
+    const w = await setup({ slateFont: "unused.ttf", async run() { encoded = true; } });
+    const artifact = w.store.getBundle().artifacts.find(a => a.kind === "audio")!;
+    await setOwner(w.store, artifact, "another-production");
+    const path = "productions/saltlight/spine.json";
+    const before = await readFile(join(w.worldDir, path), "utf8").catch(() => null);
+    await w.store.commit({ kind: "test-spine", source: "test", files: [{ path, action: before === null ? "create" : "replace", baseHash: before === null ? null : sha256(before),
+      content: JSON.stringify({ schemaVersion: 1, revision: 1, trackArtifactId: artifact.id, markers: [], anchors: {}, updatedAt: AT }) + "\n",
+    }] });
+    await w.internal.handleClientMessage({ kind: "export-cut", worldId: WORLD_ID, productionId: "saltlight", preset: "review-cut", timelineRevision: null });
+    const failure = w.events.find(event => event.type === "export.progress" && event.status === "failed");
+    assert.ok(failure?.type === "export.progress");
+    assert.match(failure.error!, /Master track cites artifact .*belongs to another production.*Import the file/);
+    assert.equal(encoded, false);
   });
 
   it("still reports an invalid editor-request file through the Timeline refusal", async () => {

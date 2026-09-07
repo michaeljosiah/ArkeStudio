@@ -1,3 +1,4 @@
+import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
@@ -59,6 +60,8 @@ import {
   ChapterSummarySchema,
   EpisodeSchema,
   ProductionSchema,
+  ProseStyleSchema,
+  StoryProgressSchema,
   SeasonSchema,
   SeriesSchema,
   SheetSchema,
@@ -141,6 +144,12 @@ export const ProductionBundleSchema = z
     performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    /**
+     * prose-style.json — the style the book is written in, or null when none (turn 128).
+     * Optional rather than defaulted so a bundle from before it existed still types as one.
+     */
+    proseStyle: ProseStyleSchema.nullable().optional(),
+    progress: z.union([StoryProgressSchema, z.object({ unreadable: z.literal(true) }).strict()]).optional(),
     /** season.json — the season beside its production, or null when none (SPEC-023 R-10). */
     season: SeasonSchema.nullable().default(null),
     /** routing.json — Interactive video's one graph authority, or null (epic #401, brief §2). */
@@ -346,6 +355,8 @@ export const WorldBundleSchema = z
      * at, so every surface it serves needs somewhere to keep one.
      */
     stagedReferences: z.record(z.string(), z.string()).default({}),
+    /** Descriptive origin of copied pictures, keyed by their local file; never a foreign link. */
+    stagedReferenceOrigins: z.record(z.string(), BorrowedImageOriginSchema).default({}),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
   })
@@ -569,6 +580,16 @@ export const ClientStateSchema = z
       productionId: z.string().min(1),
       sceneId: z.string().min(1),
       shotId: z.string().min(1),
+    }).strict()).optional(),
+    stageConstructionRequests: z.array(z.object({
+      worldId: z.string().min(1),
+      conversationId: z.string().min(1),
+      actionId: z.string().min(1),
+      productionId: z.string().min(1),
+      sceneId: z.string().min(1),
+      shotId: z.string().min(1),
+      instruction: z.string(),
+      preserve: z.enum(["blocking", "camera", "none"]),
     }).strict()).optional(),
     /** The open bench session, or null. One at a time, mirroring worldChat (issue 305 §5.3). */
     bench: BenchWorkspaceSchema.nullable().default(null),

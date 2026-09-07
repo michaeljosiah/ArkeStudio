@@ -504,6 +504,7 @@ const state: ClientState = {
     keyArtVersion: null,
     masterLookCandidates: [],
     stagedReferences: {},
+    stagedReferenceOrigins: {},
     externalEdits: [],
   },
   worldOpenFailure: null,

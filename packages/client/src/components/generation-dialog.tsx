@@ -1,3 +1,5 @@
+import { normalizePrompt, worldImageReferences, type WorldBundle, type ManifestModel } from "@arke-studio/contracts";
+import { ReferencePickerBody } from "./reference-picker.js";
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
 import { Button, Textarea } from "./ui.js";
@@ -5,6 +7,7 @@ import { DispatchBar } from "./dispatch-bar.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
+import { StagedReferencePicker } from "./staged-reference-picker.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -58,6 +61,7 @@ export function GenerationDialog({
   onPrompt,
   promptLabel = "Prompt",
   promptHint,
+  promptMetadata,
   promptPlaceholder,
   onResetPrompt,
   resetTitle,
@@ -69,6 +73,7 @@ export function GenerationDialog({
   referenceLabel = "Reference image",
   referenceHint,
   onAttachReference,
+  worldReferences,
   onClearReference,
   workflow,
   capability = "image",
@@ -92,6 +97,7 @@ export function GenerationDialog({
   commit,
   panel,
   onPanelClose,
+  referenceTarget,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -104,6 +110,8 @@ export function GenerationDialog({
   promptLabel?: string;
   /** What the app will do to these words before they are sent, said rather than left to trust. */
   promptHint?: ReactNode;
+  /** Key-art constraints and an optional assembled baseline once a comparison exists. */
+  promptMetadata?: { constraints: string; baseline?: string };
   /** Shown in an empty box — only useful where empty is a state the surface allows. */
   promptPlaceholder?: string;
   /**
@@ -149,6 +157,7 @@ export function GenerationDialog({
   referenceLabel?: string;
   referenceHint?: ReactNode;
   onAttachReference?: () => void;
+  worldReferences?: { world: WorldBundle; model: ManifestModel | null; onChoose: (file: string) => void };
   onClearReference?: () => void;
   /** Which kind of work this is, for the estimate the bar shows. */
   workflow: CharacterImageWorkflow;
@@ -219,10 +228,35 @@ export function GenerationDialog({
    */
   panel?: ReactNode;
   onPanelClose?: () => void;
+  referenceTarget?: { worldId: string; key: string; origin?: string | undefined };
 }) {
+  const [pickingReference, setPickingReference] = useState(false);
+  if (referenceTarget?.origin) referenceHint = <>from {referenceTarget.origin}{referenceHint && <><br />{referenceHint}</>}</>;
+  useEffect(() => { if (!open) setPickingReference(false); }, [open]);
+  if (pickingReference && worldReferences && referenceTarget) {
+    panel = <StagedReferencePicker worldId={referenceTarget.worldId} referenceKey={referenceTarget.key} model={worldReferences.model}
+      onClose={() => setPickingReference(false)} onUpload={() => { onAttachReference?.(); setPickingReference(false); }} />;
+    onPanelClose = () => setPickingReference(false);
+  } else if (pickingReference && worldReferences) {
+    panel = <ReferencePickerBody
+      mode="slot" only="image" title="Choose one reference image"
+      worldSlug={worldSlug} model={worldReferences.model} carried={[]} session={[]}
+      world={worldImageReferences(worldReferences.world).map((source) => ({
+        key: source.file, kind: "image", name: source.name, imagePath: source.file,
+        meta: source.role, group: source.group, durationSec: 0,
+        pick: { source: "world-file", path: source.file },
+      }))}
+      onChoose={(pick) => { if (pick.source === "world-file") worldReferences.onChoose(pick.path); setPickingReference(false); }}
+      onUpload={() => { onAttachReference?.(); setPickingReference(false); }}
+      onClose={() => setPickingReference(false)}
+    />;
+    onPanelClose = () => setPickingReference(false);
+  }
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const promptId = useId();
+  const normalizedPrompt=normalizePrompt(prompt),promptCharacters=Array.from(normalizedPrompt).length;
+  const promptDelta=promptMetadata?.baseline===undefined?undefined:promptCharacters-Array.from(normalizePrompt(promptMetadata.baseline)).length;
   /*
    * The press itself, said back immediately.
    *
@@ -243,7 +277,7 @@ export function GenerationDialog({
   }, [pressed]);
   // A dialog reopened after an answer must not still be mid-press from the last one.
   useEffect(() => {
-    if (!open) setPressed(false);
+    if (!open) { setPressed(false); setPickingReference(false); }
   }, [open]);
 
   /*
@@ -306,8 +340,9 @@ export function GenerationDialog({
         <div className="fy-gendialog__compose">
         <label className="fy-gendialog__label" htmlFor={promptId}>
           {promptLabel}
+          {promptMetadata&&<span className="fy-gendialog__info" tabIndex={0} role="img" aria-label={`Fixed constraints: ${promptMetadata.constraints}`} title={`Fixed constraints: ${promptMetadata.constraints}`}>ⓘ</span>}
         </label>
-        <div className="fy-gendialog__promptbox">
+        <div className={`fy-gendialog__promptbox${promptMetadata?" fy-gendialog__promptbox--counted":""}`}>
           <Textarea
             id={promptId}
             className="fy-gendialog__prompt"
@@ -316,6 +351,9 @@ export function GenerationDialog({
             {...(promptPlaceholder !== undefined ? { placeholder: promptPlaceholder } : {})}
             onChange={(event) => onPrompt(event.target.value)}
           />
+          {promptMetadata&&<span className="fy-gendialog__count" title={`${promptCharacters} Unicode characters · ${new TextEncoder().encode(normalizedPrompt).length} UTF-8 bytes`}>
+            {promptCharacters}{promptDelta!==undefined&&<> · {promptDelta>=0?"+":""}{promptDelta}</>}
+          </span>}
           {onResetPrompt && (
             <button
               type="button"
@@ -337,10 +375,10 @@ export function GenerationDialog({
         */}
         {reference !== undefined && (
           <>
-            <div className="fy-gendialog__label">{referenceLabel}</div>
+            <div className="fy-gendialog__label">{referenceLabel}{worldReferences && " · one optional image"}</div>
             <div className="fy-gendialog__reference">
               {reference === null ? (
-                <button type="button" className="fy-gendialog__slot" onClick={onAttachReference}>
+                <button type="button" className="fy-gendialog__slot" onClick={worldReferences ? () => setPickingReference(true) : onAttachReference}>
                   <Plus size={16} />
                   <span>Add a reference image</span>
                 </button>
@@ -349,6 +387,10 @@ export function GenerationDialog({
                   <span className="fy-gendialog__thumb">
                     <Portrait worldSlug={worldSlug} path={reference} label="Reference image" radius={7} />
                   </span>
+                  {worldReferences && <span>{(() => {
+                    const source = worldImageReferences(worldReferences.world).find((image) => image.file === reference);
+                    return source ? `${source.name} · ${source.role}` : "Uploaded reference · style";
+                  })()}</span>}
                   <button type="button" className="fy-gendialog__remove" onClick={onClearReference}>
                     Remove
                   </button>
