@@ -69,7 +69,7 @@ export const ProseReadSourceSchema = z.discriminatedUnion("of", [
     .object({
       of: z.literal("story"),
       productionId: SlugSchema,
-      field: z.enum(["logline", "spine", "acts", "treatment", "voice", "samples"]),
+      field: z.enum(["logline", "spine", "question", "ending", "acts", "treatment", "voice", "samples"]),
       /**
        * One sample, counted from zero, rather than all of them (codex on turn 128): six samples
        * at their bound outrun a narrator's prompt cap read as one, so each is its own block.

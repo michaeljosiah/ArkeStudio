@@ -268,3 +268,30 @@ describe("the style the book is written in (turn 128)", () => {
     assert.equal(overviewSteer(null, null), "");
   });
 });
+
+
+it("stages a planned outline as one reviewable proposal and accepts every chapter together (issue 889)", async () => {
+  const { dir, store, gate, intent } = await open();
+  const original = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters;
+  const proposal = await stageWorldChatProductionAuthoredAction(store, gate, intent, {
+    kind: "world-chat-production-chapter", worldId: store.worldId,
+    action: { kind: "production-chapter", productionId: PRODUCTION, checkReceiptIds: [],
+      change: { operation: "outline", chapters: [
+        { title: "The answer", synopsis: "Maren finds the page.", pov: "maren-kest", when: "Next morning" },
+        { title: "The answer", synopsis: "She writes the missing night." },
+      ] },
+    },
+  });
+  assert.equal(proposal.targets.length, 2);
+  assert.notEqual(proposal.targets[0]!.path, proposal.targets[1]!.path);
+  assert.equal(store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters.length, original.length);
+  const review = (await scanWorld(dir)).bundle.proposals.find((p) => p.proposal.id === proposal.id)!.review!;
+  assert.equal(review.targets.length, 2);
+  assert.ok(review.targets.every((target) => target.fields.some((field) => field.field === "Synopsis")));
+  assert.equal((await gate.accept(proposal.id)).status, "accepted");
+  const chapters = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters;
+  assert.deepEqual(chapters.slice(0, original.length), original);
+  assert.deepEqual(chapters.slice(original.length).map((c) => [c.synopsis, c.words, c.draftedAgainst]), [
+    ["Maren finds the page.", 0, undefined], ["She writes the missing night.", 0, undefined],
+  ]);
+});

@@ -102,7 +102,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Fourteen is a measured `hasVideo` on an artifact sidecar (PR 944): the strict sidecar parse
 // fails on a build without the field, which drops the artifact and every clip that cites it.
 // Fifteen adds chapter retirement to strict frontmatter (issue 888).
-export const SUPPORTED_SCHEMA_VERSION = 15;
+// Sixteen adds the dramatic question and ending to the strict story overview (issue 889).
+export const SUPPORTED_SCHEMA_VERSION = 16;
 
 export class WorldOpenError extends Error {
   constructor(

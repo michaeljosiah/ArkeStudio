@@ -592,6 +592,8 @@ const ProductionOverviewModelActionSchema = z
     productionId: SlugSchema,
     changes: z
       .object({
+        question: z.string().trim().min(1).max(2_000).nullable().optional(),
+        ending: z.string().trim().min(1).max(2_000).nullable().optional(),
         logline: z.string().min(1).max(1_000).nullable().optional(),
         spine: z.string().min(1).max(4_000).nullable().optional(),
         acts: z.array(z.object({ title: z.string().min(1).max(200), summary: z.string().max(2_000).optional() }).strict()).max(20).nullable().optional(),
@@ -668,6 +670,15 @@ const ProductionChapterModelActionSchema = z
     kind: z.literal("production-chapter"),
     productionId: SlugSchema,
     change: z.discriminatedUnion("operation", [
+      z.object({
+        operation: z.literal("outline"),
+        chapters: z.array(z.object({
+          title: z.string().trim().min(1).max(200),
+          synopsis: z.string().trim().min(1).max(600),
+          pov: SlugSchema.optional(),
+          when: z.string().trim().max(80).optional(),
+        }).strict()).min(1).max(100),
+      }).strict().describe("Append a planned outline as one proposal: chapters in order, with synopses and no prose. Existing chapters are kept."),
       z
         .object({
           operation: z.literal("create"),

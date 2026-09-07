@@ -2091,6 +2091,8 @@ function OverviewStoryScreen() {
       [
         ["logline", "Logline", story?.logline ?? ""],
         ["spine", "Spine", story?.spine ?? ""],
+        ["question", "Dramatic question", story?.question ?? ""],
+        ["ending", "Ending", story?.ending ?? ""],
         ["acts", "Acts", actsSpoken],
         ["treatment", "Treatment", production?.treatment ?? ""],
         ["voice", "Voice", style?.voice ?? ""],
@@ -2150,6 +2152,14 @@ function OverviewStoryScreen() {
                   />
                 </div>
               )}
+              {(["question", "ending"] as const).map((field) => story?.[field] ? (
+                <div key={field} className="fy-draftcard fy-texthost">
+                  <div className="fy-eyebrow-sm">{field === "question" ? "DRAMATIC QUESTION" : "ENDING"}</div>
+                  <div style={{ whiteSpace: "pre-wrap" }}>{story[field]}</div>
+                  <ReadAloud source={{ of: "story", productionId: prodId ?? "", field }}
+                    title={field === "question" ? "Dramatic question" : "Ending"} text={story[field]} />
+                </div>
+              ) : null)}
               {spineLines.length > 0 && (
                 <div className="fy-draftcard fy-texthost">
                   <div className="fy-eyebrow-sm">SPINE</div>

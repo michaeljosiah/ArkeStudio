@@ -590,7 +590,7 @@ function productionActionTargets(
         : []),
     ];
     case "production-chapter": {
-      const draws = action.change.operation === "create" ? action.change.draws : action.change.changes.draws;
+      const draws = action.change.operation === "create" ? action.change.draws : action.change.operation === "edit" ? action.change.changes.draws : undefined;
       // A passage is quoted from a read of that chapter (turn 128), so the read is required by
       // name, and its fence is the chapter's own hash: a chapter saved since the quote was taken
       // sends the model back to read it again rather than to guess.
@@ -1087,7 +1087,9 @@ function worldActionTargets(
       id: action.change.operation === "edit" ? action.change.episodeId : fallbackId,
       label: action.change.operation === "edit" ? action.change.episodeId : action.change.title,
     }];
-    case "production-chapter": return [{
+    case "production-chapter": return action.change.operation === "outline"
+      ? action.change.chapters.map((chapter, index) => ({ kind: "chapter" as const, id: `${fallbackId}-${index}`, label: chapter.title }))
+      : [{
       kind: "chapter",
       id: action.change.operation === "edit" ? action.change.chapterId : fallbackId,
       label: action.change.operation === "edit" ? action.change.chapterId : action.change.title,

@@ -434,6 +434,8 @@ export type Episode = z.infer<typeof EpisodeSchema>;
 /** story.json — the authored overview a story production drafts against (§8.3). Versioned. */
 export const StoryOverviewSchema = z
   .object({
+    question: z.string().optional(),
+    ending: z.string().optional(),
     version: z.number().int().min(1),
     logline: z.string().optional(),
     spine: z.string().optional(),

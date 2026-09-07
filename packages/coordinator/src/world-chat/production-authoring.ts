@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { withImpliedIds } from "../productions/ops.js";
+import { highestChapterRank, withImpliedIds } from "../productions/ops.js";
 import { join } from "node:path";
 import {
   ChapterFrontmatterSchema,
@@ -462,6 +462,25 @@ export async function stageWorldChatProductionAuthoredAction(
       throw new Error(`${production.meta.title} does not use chapters`);
     }
     const change = payload.action.change;
+    if (change.operation === "outline") {
+      const taken = [...production.chapters.flatMap((chapter) => [chapter.id, chapter.file]),
+        ...proposedTargetStems(store, new RegExp(`^productions/${production.meta.id}/chapters/([^/]+)\\.md$`))];
+      const rank = await highestChapterRank(store, production.meta.id, production.chapters.map((chapter) => chapter.file));
+      const targets = change.chapters.map((chapter, index) => {
+        requirePov(store, chapter.pov);
+        const stem = uniqueSlug(chapter.title, "chapter", taken);
+        taken.push(stem);
+        const doc = MarkdownFile.create({
+          id: stem, title: chapter.title, order: rank + index + 1, status: "planned", version: 1, words: 0,
+          synopsis: chapter.synopsis, ...(chapter.pov ? { pov: chapter.pov } : {}),
+          ...(chapter.when ? { when: chapter.when } : {}),
+          created: store.now().slice(0, 10), updated: store.now().slice(0, 10),
+        }, "");
+        ChapterFrontmatterSchema.parse(doc.data);
+        return { path: `productions/${production.meta.id}/chapters/${stem}.md`, content: doc.serialize() };
+      });
+      return gate.stage({ kind: "chapter-draft", summary: `Plan ${targets.length} chapters`, ...context, targets }, precondition);
+    }
     if (change.operation === "create") {
       requireDraws(store, change.draws);
       requirePov(store, change.pov);

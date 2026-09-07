@@ -98,6 +98,8 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
       const overview = StoryOverviewSchema.parse(JSON.parse(content));
       const fields = new Map<string, string>();
       if (overview.logline !== undefined) fields.set("Logline", overview.logline);
+      if (overview.question !== undefined) fields.set("Dramatic question", overview.question);
+      if (overview.ending !== undefined) fields.set("Ending", overview.ending);
       if (overview.spine !== undefined) fields.set("Spine", overview.spine);
       for (const [i, act] of (overview.acts ?? []).entries()) {
         fields.set(`Act ${i + 1} · ${act.title}`, act.summary ?? "—");

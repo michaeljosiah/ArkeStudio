@@ -702,6 +702,12 @@ export class Committer {
       // Probe metadata is also written by ordinary artifact filing/backfill.
       mediaInfoBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
+      // Older scanners drop an overview with these new strict fields (issue 889).
+      files.some((f) => {
+        if (classify(f.path).track !== "story" || !f.newContent) return false;
+        const record = JsonFile.parse(f.newContent).value;
+        return "question" in record || "ending" in record;
+      }) ? 16 : 0,
     );
     if (raiseSchemaVersion > 0) {
       const current = (worldDoc.value["schemaVersion"] as number) ?? 1;

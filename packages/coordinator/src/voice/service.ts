@@ -273,7 +273,7 @@ export function authoritativeProseSpeech(
           .join(". ");
         return spoken(acts, "Acts", story.version, subjectId);
       }
-      return spoken(story[source.field], source.field === "logline" ? "Logline" : "Spine", story.version, subjectId);
+      return spoken(story[source.field], ({ logline: "Logline", spine: "Spine", question: "Dramatic question", ending: "Ending" })[source.field], story.version, subjectId);
     }
     case "season": {
       const season = production(source.productionId).season;
