@@ -1,5 +1,4 @@
 import { imageConstraintSuffix, type WorldBundle } from "@arke-studio/contracts";
-import { bibleExcerpt } from "./key-art-references.js";
 import { normalizePrompt, promptHash, reviewPrompt, PromptDispatchProvenanceSchema, type PromptSourceSnapshot, type ManifestModel } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 
@@ -46,8 +45,9 @@ export function keyArtReviewContext(bundle:WorldBundle,model:ManifestModel,base:
   const add=(ref:string,text:string|undefined,kind:PromptSourceSnapshot["kind"]="accepted-world")=>{if(text?.trim())sources.push({kind,ref,text});};
   add("world/name",bundle.meta.name);add("world/logline",bundle.meta.logline);add("world/tone",bundle.meta.tone);add("world/genre",bundle.meta.genre);
   add("art-direction",bundle.artDirection.description);
-  if(bundle.bible.present)add("bible/excerpt",bibleExcerpt(bundle.bible.text));
+  if(bundle.bible.present)add("bible",bundle.bible.text);
   for(const canon of bundle.canon.filter(c=>c.status!=="open").slice(0,6))add(`canon/${canon.id}`,canon.title);
+  for(const sheet of bundle.sheets.filter(s=>s.type==="character"||s.type==="location"))add(`sheet/${sheet.id}`,JSON.stringify(sheet));
   add("key-art/brief",briefText,"user-instruction");
   return {worldId:bundle.meta.worldId,model,base:keyArtCreativeBody(base),sources,references,
     fixed:` No text, no logos${hasCast?"":", no character portraits"}.${imageConstraintSuffix(bundle.artDirection)}`};

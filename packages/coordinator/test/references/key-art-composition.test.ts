@@ -28,7 +28,7 @@ describe("the key-art composition (issue 906)", () => {
     assert.equal(bibleExcerpt(bible), "The horror is quiet. It is plain. a list a quote");
   });
 
-  it("never doubles a full stop between clauses", () => {
+  it("sends the authored image intact without wrapping world backstory around it", () => {
     const prompt = keyArtComposition({
       meta: {
         name: "The Forty-First Name",
@@ -36,12 +36,10 @@ describe("the key-art composition (issue 906)", () => {
         tone: "hushed, exact.",
       } as WorldMeta,
       direction: { description: "Sodium light, ruled paper, one lamp." } as ResolvedArtDirection,
-      bible: "",
-      brief: { subject: "A hand on a bedframe.", moment: "Lights-out roll call.", stakes: "Whose name is missing.", characters: [] },
+      bible: "Everyone knows whose name is missing except Ade.",
+      brief: { prompt: "A hand grips a bedframe under a single sodium lamp. Tight framing, ruled paper in the foreground.", subject: "A hand on a bedframe.", moment: "Lights-out roll call.", stakes: "Whose name is missing.", characters: [] },
       cast: [],
     });
-    assert.ok(!prompt.includes(".."), prompt);
-    assert.ok(prompt.includes("one lamp. Only the name on the page and the answer on the soundtrack. Tone: hushed, exact."), prompt);
-    assert.ok(prompt.includes("The image: A hand on a bedframe. The moment: Lights-out roll call. At stake: Whose name is missing."), prompt);
+    assert.equal(prompt, "A hand grips a bedframe under a single sodium lamp. Tight framing, ruled paper in the foreground. No text, no logos.");
   });
 });

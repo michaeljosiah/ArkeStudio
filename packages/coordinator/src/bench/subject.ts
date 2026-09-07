@@ -469,13 +469,14 @@ export async function prepareBenchSubject(
       : playblastToken(staging, scene, world, shown);
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
-    const prompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode).text;
+    const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);
+    const prompt = plannedPrompt.text;
     const brief = staging === undefined
       ? prompt
       : `${prompt}\n\n${stagingPromptClause(resolvedShotStaging(scene, staging), nameOf, shown.durationSec)}`;
-    const promptSheetVersions = shot.promptOverride === undefined
+    const promptSheetVersions = !plannedPrompt.overridden
       ? assembledPromptSheetVersions([shot], scene, world)
-      : { ...shot.promptOverride.sheetVersions };
+      : { ...shot.promptOverride!.sheetVersions };
     const subject: BenchSubject = {
       kind: "shot",
       ...subjectContext(production, scene),

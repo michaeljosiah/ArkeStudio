@@ -866,7 +866,7 @@ function Row({
     .slice(0, 2);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
   const assembledPrompt = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const currentPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const durablePromptOverride = shot.promptOverride?.text ?? null;
@@ -1040,6 +1040,7 @@ function Row({
       kind: "set-prompt-override",
       shotId: shot.id,
       text: replacement,
+      capability,
     })) {
       setPromptDraft(null);
       return false;
@@ -1072,7 +1073,7 @@ function Row({
       return;
     }
     const expected = next === "" || next === assembledPrompt.trim() ? null : next;
-    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected })) {
+    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected, capability })) {
       promptDirty.current = true;
       setPromptDraft(value);
       return;
@@ -1442,7 +1443,7 @@ function Row({
         </div>
         {promptOpen ? null : (
           <div className="fy-swrow__slot">
-            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · edited by you"}</span>
+            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · authored"}</span>
             <button type="button" disabled={disabled} onClick={() => setPromptOpen(true)}>Edit</button>
           </div>
         )}

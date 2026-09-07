@@ -144,7 +144,12 @@ terms and name any entry that overlaps, so a contradiction is caught while it is
     needsProposal: true,
     brief: `You draft scene JSON files: numbered shots with titles, one-sentence descriptions using
 @slug references for cast and places, camera notes, audio direction and durations. Check
-get_sheet for every character you cast so descriptions match their sheets.`,
+get_sheet for every character and location you use. Author each shot's complete promptOverride
+from those sheets, the scene/script and the effective art direction supplied in the task.
+The look informs one setup; never paste production-wide prose around the prompt. Set its
+image/video capability and cite only sheetVersions actually read. Video describes motion,
+camera movement, change over the duration and sound; an image holds one visible instant
+without timing, sound or movement instructions. Keep @mentions in description for references.`,
   },
   {
     name: "story-writer",
@@ -174,9 +179,10 @@ Respond with ONLY a JSON object: {"prompt": "..."}
   materials, colour, lens or medium, and mood. Concrete nouns beat adjectives.
 - Stay inside what you were told. Every element must be traceable to the world as described —
   do not add a lighthouse, a dragon or a moon because the sentence felt like it wanted one.
-- One establishing image of a place: no people in the foreground, no text, no logos, no
-  watermarks, no collages or panels.
-- Around 60 words. One paragraph, no line breaks, no lists, no headings.`,
+- One still image, with the characters and place the brief names. Translate world lore and
+  production art direction into visible choices; omit plot exposition, invisible stakes,
+  timing and rules for other shots. No text, logos, watermarks, collages or panels.
+- Up to about 300 words. One paragraph, no lists or headings.`,
   },
   {
     name: "prompt-enhancer",
@@ -191,6 +197,9 @@ Respond with ONLY a JSON object: {"prompt": "..."}
   ceiling - follow it exactly; it outranks any habit about length or subject matter.
 - Keep the author's subject and intent; translate the wording toward what the named model
   wants: subject, action, setting, time of day, light, materials, lens or medium, motion.
+- Translate the world's look into this setup; omit backstory and rules for other shots or absent characters.
+- Video describes motion, camera movement, change across the duration and what is heard.
+  A still describes one visible instant, without timing, sound or camera-movement instructions.
 - Keep reference names like "Image 1" or "Audio 2" verbatim wherever the ask uses them.
 - Invent nothing the task did not state.`,
   },
@@ -336,7 +345,13 @@ Rules that are not yours to break:
   held back and the person has to ask you again for the same character.
 - Nothing you say writes to the world. Typed changes become permission cards, and only the
   person's Approve writes them, so never tell them a change has been made.`,
-    postscript: worldChatResultShapeGuide(),
+    postscript: `${worldChatResultShapeGuide()}
+
+### Authored generation prompts
+
+- For key art, read get_world_metadata, get_bible, get_art_direction, list_sheets and list_references; read the chosen character/location sheets before authoring keyArtIntent.prompt. Write one complete image-model prompt (about 300 words or fewer), concrete and present-tense: one frame, subjects, composition, light, materials and treatment. Translate lore into visible choices; omit backstory, invisible stakes, timing and rules for other shots. The prompt is sent intact, with only fixed application constraints appended. Set characters and location to the full sheet names of its subjects, and revise the prompt when its sources change.
+
+- For shot prompts, read get_production_metadata, get_scene, get_scene_script, get_scene_shots, the characters actually cited, the location, get_art_direction and list_references. Use the selected model and route shown in the production or generation context; never invent model capabilities. Author one complete editable prompt through scene-command / set-prompt-override, setting capability to image or video. For a new shot, create it first, then read its assigned id and author its prompt. Translate the effective production/world look into this setup; never paste the look, backstory, rules for other shots or absent characters. Video describes motion, camera movement, change over the duration and what is heard, respecting silence. Image describes one visible instant without motion instructions, timing or sound. Preserve explicit shot framing and reference identities. Keep reference bindings, duration parameters, costs and fixed constraints application-owned. Regenerate by proposing a replacement through the same command after rereading the current sources; never silently overwrite the approved prompt at paid dispatch.`,
   },
 ];
 

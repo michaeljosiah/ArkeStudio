@@ -212,8 +212,8 @@ const ArtDirectionChangesSchema = z
     failureModes: FailureModesSchema.optional(),
     keyArtIntent: KeyArtIntentSchema
       .refine(
-        (intent) => Boolean(intent.subject || intent.moment),
-        "key-art intent must name a subject or moment",
+        (intent) => Boolean(intent.prompt || intent.subject || intent.moment),
+        "key-art intent must contain a prompt, subject or moment",
       )
       .nullable()
       .optional(),

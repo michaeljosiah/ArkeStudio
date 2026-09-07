@@ -848,8 +848,8 @@ const DevelopmentSceneScriptPayload = {
  * how long it runs, how it should feel. What is deliberately absent is everything that is not a
  * creative decision — `id` and `number` are identity and position, minted once and moved only by
  * the storyboard's drag; `covers` is a digest computed at citation time; and `promptOverride` is
- * production output whose whole meaning is that a person typed it in the sheet, so a proposition
- * writing one would forge that provenance.
+ * saved separately through set-prompt-override so a shot amendment never silently replaces
+ * the approved image/video prompt.
  */
 const ShotDraftSchema = z
   .object({
@@ -2232,6 +2232,7 @@ const exampleWorldActions = {
       audio: { music: "environmental-only", subtitles: "never" },
       failureModes: ["Hands stay whole and countable."],
       keyArtIntent: {
+        prompt: "Maren Kest stands beneath the slack-water bells of The Vigil, salt-stained coat lit by a low amber lamp. Close framing, dark sea beyond, painterly salt-air naturalism.",
         subject: "Maren beneath the slack-water bells",
         characters: ["Maren Kest"],
         location: "The Vigil",
@@ -2511,7 +2512,7 @@ const exampleWorldActions = {
     kind: "production-scene-command",
     productionId: "saltlight",
     sceneId: "sc_04",
-    command: { kind: "set-prompt-override", shotId: "sh_001", text: "Salt-lit close-up of the missing page." },
+    command: { kind: "set-prompt-override", shotId: "sh_001", capability: "video", text: "Close on the missing page under a salt-stained amber lamp. Over six seconds the camera pushes slowly toward the torn edge; the loose paper trembles in a draught. A distant bell sounds once, then only the soft rustle of paper." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-board-compile": {

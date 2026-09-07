@@ -112,7 +112,8 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
     .object({
       kind: z.literal("set-prompt-override"),
       shotId: ShotIdSchema,
-      text: z.string().max(4000).nullable(),
+      text: z.string().trim().min(1).max(4000).nullable(),
+      capability: z.enum(["image", "video"]).optional(),
     })
     .strict(),
   z.object({ kind: z.literal("delete-shot"), shotId: ShotIdSchema }).strict(),

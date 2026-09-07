@@ -503,6 +503,7 @@ describe("the founding build (SPEC-031)", () => {
         bible: "The sea keeps what the town will not say aloud, and Maren is done keeping it with it.",
         threads: [],
         keyArt: {
+          prompt: "Maren Kest, Brother Ellum and The Warden stand at the tideline beneath The Vigil. Salt-bleached watercolour, a low amber light on their faces.",
           subject: "The cast at the tideline as the bell answers",
           characters: ["Maren Kest", "Brother Ellum", "The Warden"],
           location: "The Vigil",
@@ -527,9 +528,8 @@ describe("the founding build (SPEC-031)", () => {
     assert.ok(dropped.some((d) => d.name === "The Warden" && /2 reference images/.test(d.reason)), "the surplus is named");
     assert.ok(dropped.some((d) => d.name === "The Vigil"), "the place that did not fit is named too");
     const prompt = String(keyArtJob.params["prompt"]);
-    assert.match(prompt, /the town will not say aloud/, "the prompt draws on the bible (R-58)");
-    assert.match(prompt, /Maren Kest, Brother Ellum/, "and names the cast actually in frame");
-    assert.match(prompt, /The cast at the tideline/, "and the brief's subject");
+    assert.ok(prompt.startsWith("Maren Kest, Brother Ellum and The Warden stand at the tideline beneath The Vigil. Salt-bleached watercolour, a low amber light on their faces. No text, no logos."));
+    assert.ok(!prompt.includes("the town will not say aloud"), "world lore informs the writer, never wraps the image prompt");
     const provenance = keyArtJob.params["provenance"] as { sheets: Record<string, number> };
     assert.ok(Object.keys(provenance.sheets).length === 2, "each carried reference's frozen version rides (R-61)");
 
@@ -538,6 +538,7 @@ describe("the founding build (SPEC-031)", () => {
     const store = h.provider.openStore()!;
     const brief = await readKeyArtBrief(store.dir);
     assert.ok(brief, "the brief survives the conversation in the build record");
+    assert.ok(prompt.startsWith(brief.prompt!), "regeneration reads the same durable authored prompt");
     const again = await assembleKeyArt(store, store.getBundle(), brief, twoSlot);
     assert.deepEqual(again.references, references, "same assembly, either path (R-62)");
   });

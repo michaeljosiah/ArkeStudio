@@ -66,7 +66,7 @@ plus one-line entries for any cast or places you have not yet written files for:
  "locations": [{"name": "...", "line": "one line on the place"}],
  "threads": ["an open question worth pulling later"],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
- "keyArt": {"subject": "what the world's one image holds", "moment": "the moment it catches",
+ "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names in frame"], "location": "the place in frame"}}
 
 Omit anything not settled. If nothing has been settled yet, return {}.`;
@@ -102,7 +102,7 @@ discussed before finishing your conversational reply — and touch only the file
  "look": "how everything this world renders should look, in your own words — palette, light, medium, mood",
  "threads": ["an open question worth pulling later"],
  "bible": "a few paragraphs of prose: the through-line, the shape, what it is about",
- "keyArt": {"subject": "what the world's one image holds", "moment": "the moment it catches",
+ "keyArt": {"prompt": "one complete prompt for an image model", "subject": "what the world's one image holds", "moment": "the moment it catches",
   "stakes": "what is at stake in it", "characters": ["names of cast members in frame"],
   "location": "the place in frame, if one"}}
 
@@ -125,6 +125,14 @@ A location's brief instead holds {"establishingView": "what one establishing vie
 subject facts only — who or what would be in a picture. Never style, medium, lens or anything
 aimed at an image model; the look covers that once, for everything. If the author takes an
 entity back out of the story, set "withdrawn": true in its file.
+
+Author "keyArt.prompt" after reading the bible, look, characters and locations in this sandbox.
+Write one complete, concrete, present-tense image prompt, up to about 300 words: what is in
+one frame, its composition, light, materials and treatment. Translate the lore and production
+art direction into visible choices for this still; omit plot exposition, invisible stakes,
+shot rules and timing. These words go to the image model intact, with only fixed application
+constraints appended. Keep "characters" and "location" aligned with the subjects in the prompt,
+using their full sheet names. Revise the prompt when those sources or the chosen image change.
 
 "keyArt" is sent to an image model with the cast's photos alongside it, so compose it the way
 a poster would: a face, a hand, an object, a doorway, the thing the story turns on — one
