@@ -11,7 +11,7 @@ import { MemoryRouter } from "react-router";
 import type { ArtifactSidecar, ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { artifactIsServable, artifactOpenLabel, artifactViewer } from "../src/lib/artifact-view.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -44,6 +44,44 @@ const source = (file: string): string => readFileSync(join(here, "../src", file)
 const VIEWER = source("components/artifact-viewer.tsx");
 const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 const W = `/w/${FIXTURE_WORLD_ID}`;
+
+it("adds shelf files with the picker or desktop drop and reports unsupported drops", async () => {
+  const sent: Array<{ kind: string; worldId: string; editor?: unknown }> = [];
+  const dropped: File[][] = [];
+  const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {},
+    send(json: string) { sent.push(JSON.parse(json)); },
+    importDroppedMedia(target: { worldId: string; editor?: unknown }, files: readonly File[]) {
+      assert.equal(target.worldId, FIXTURE_WORLD_ID);
+      assert.equal(target.editor, undefined);
+      dropped.push([...files]);
+      return { submitted: true, unresolved: [1] };
+    },
+  };
+  __setBridgeForTest(bridge);
+  const mounted = await mountShelf();
+  try {
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>('button.fy-gridcard[aria-label="Add files"]')!.click());
+    assert.ok(sent.some(m => m.kind === "upload-artifacts" && m.worldId === FIXTURE_WORLD_ID && m.editor === undefined));
+    const files = [new File(["a"], "a.txt"), new File(["b"], "b.txt")];
+    const grid = mounted.container.querySelector(".fy-cardgrid")!;
+    const dispatch = async (type: string, selected = files) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.assign(event, { dataTransfer: { types: ["Files"], files: selected, dropEffect: "none" } });
+      await act(async () => grid.dispatchEvent(event));
+      assert.equal(event.defaultPrevented, true);
+    };
+    await dispatch("dragover");
+    assert.match(mounted.container.textContent!, /Drop to add files/);
+    await dispatch("drop");
+    assert.deepEqual(dropped, [files], "preserves every File and its position for preload path resolution");
+    await dispatch("drop", Array.from({ length: 17 }, () => files[0]!));
+    assert.equal(dropped.length, 1);
+    assert.match(mounted.container.textContent!, /up to 16 files at a time/);
+    __setBridgeForTest({ ...bridge, importDroppedMedia: undefined });
+    await dispatch("drop");
+    assert.match(mounted.container.textContent!, /File drops are available in the desktop app/);
+  } finally { await unmount(mounted); __setBridgeForTest(null); }
+});
 
 function artifact(over: Partial<ArtifactSidecar>): ArtifactSidecar {
   return {

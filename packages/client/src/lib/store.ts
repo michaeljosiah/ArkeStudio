@@ -3742,12 +3742,12 @@ export function moveTimelineHistory(
 }
 
 /** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
-export function uploadArtifacts(worldId: string): void {
-  send({ kind: "upload-artifacts", worldId, requestId: queueRequest("upload-artifacts") });
+export function uploadArtifacts(worldId: string, files?: readonly File[]): { requestId: string | null; reason?: string } {
+  return importEditorMedia(worldId, undefined, files);
 }
 
 export function importEditorMedia(
-  worldId: string, editor: NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>,
+  worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
   files?: readonly File[],
 ): { requestId: string | null; reason?: string } {
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
