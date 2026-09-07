@@ -102,3 +102,5 @@ export * from "./stage-construction.js";
 
 export * from "./stage-camera.js";
 export * from "./world-image-references.js";
+
+export * from "./error-copy.js";

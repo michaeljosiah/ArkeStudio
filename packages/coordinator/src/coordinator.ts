@@ -333,6 +333,7 @@ import { atomicWriteFile } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
+import { describeCoordinatorError } from "./errors/user-message.js";
 import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 import { WorldOpenError } from "./world/scan.js";
@@ -1267,7 +1268,7 @@ export class Coordinator {
         // streamed read has already been heard, so this closes it rather than announcing it.
         if (streamed === 0) ready(block, result.file, result.cached);
       } catch (error) {
-        fail(error instanceof Error ? error.message : "Local voice failed.", characters);
+        fail(describeCoordinatorError(error), characters);
       }
       return;
     }
@@ -1628,7 +1629,7 @@ export class Coordinator {
         }
       }
     } catch (error) {
-      fail(error instanceof Error ? error.message : "Local voice failed.", characters);
+      fail(describeCoordinatorError(error), characters);
       return;
     }
     if (this.stoppedReads.has(requestId)) {
@@ -2705,7 +2706,7 @@ export class Coordinator {
               type: "health.changed",
               component,
               status: "unavailable",
-              reason: `capability probe failed: ${err instanceof Error ? err.message : String(err)}`,
+              reason: `capability probe failed: ${describeCoordinatorError(err)}`,
             });
           });
         return;
@@ -4176,7 +4177,7 @@ export class Coordinator {
         path: input.path(proposal),
         disposition: "refused",
         ...(proposal !== undefined ? { proposalId: proposal.id } : {}),
-        reason: err instanceof Error ? err.message : "The change could not be written.",
+        reason: describeCoordinatorError(err),
       });
     }
   }
@@ -4216,7 +4217,7 @@ export class Coordinator {
         try {
           return { content: input.edit(content) };
         } catch (err) {
-          return { reason: err instanceof Error ? err.message : "That draft could not be edited." };
+          return { reason: describeCoordinatorError(err) };
         }
       },
     });
@@ -4365,7 +4366,7 @@ export class Coordinator {
             folder: basename(folder),
           });
         } catch (err) {
-          refuse(err instanceof Error ? err.message : String(err));
+          refuse(describeCoordinatorError(err));
         }
         this.transport.broadcastSnapshot();
         return;
@@ -4395,7 +4396,7 @@ export class Coordinator {
           });
           this.emit({ at: new Date().toISOString(), type: "sample-world.installed", worldId, slug, name });
         } catch (err) {
-          refuse(err instanceof Error ? err.message : String(err));
+          refuse(describeCoordinatorError(err));
         }
         this.transport.broadcastSnapshot();
         return;
@@ -4549,7 +4550,7 @@ export class Coordinator {
             await gate.discard(proposal.id);
           }
         } catch (err) {
-          answer("refused", { reason: err instanceof Error ? err.message : "This sheet edit could not be saved." });
+          answer("refused", { reason: describeCoordinatorError(err) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -4578,7 +4579,7 @@ export class Coordinator {
             path: msg.path,
             action: "undo",
             disposition: "refused",
-            reason: err instanceof Error ? err.message : "That version could not be restored.",
+            reason: describeCoordinatorError(err),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -4643,7 +4644,7 @@ export class Coordinator {
             operation: "art-direction-edit",
             path: ART_DIRECTION_PATH,
             disposition: "refused",
-            reason: err instanceof Error ? err.message : "The world look could not be changed.",
+            reason: describeCoordinatorError(err),
           });
         }
         await this.refreshWorldSnapshot(msg.worldId);
@@ -4825,10 +4826,7 @@ export class Coordinator {
                       : "That question has already been answered or removed.";
           }
         } catch (err) {
-          detail =
-            err instanceof Error
-              ? err.message
-              : "This answer could not be applied, so the proposal was left alone.";
+          detail = describeCoordinatorError(err);
         }
         if (detail) {
           this.emit({
@@ -5607,7 +5605,7 @@ export class Coordinator {
           // Fire and watch: turns, the draft and the final status arrive as events.
           this.trackBackground(this.genesis.run(dir, msg.genesisId, msg.text));
         } catch (err) {
-          failed(err instanceof Error ? err.message : String(err));
+          failed(describeCoordinatorError(err));
         }
         return;
       }
@@ -5742,7 +5740,7 @@ export class Coordinator {
             genesisId: msg.genesisId,
             requestId: msg.requestId,
             plan: null,
-            reason: err instanceof Error ? err.message : "the build could not begin",
+            reason: describeCoordinatorError(err),
           });
         }
         return;
@@ -5895,7 +5893,7 @@ export class Coordinator {
               operation: "canon-amend",
               path,
               disposition: "refused",
-              reason: err instanceof Error ? err.message : "The amendment could not be saved.",
+              reason: describeCoordinatorError(err),
             });
             return true;
           })
@@ -5950,7 +5948,7 @@ export class Coordinator {
               operation: "canon-settle",
               path,
               disposition: "refused",
-              reason: err instanceof Error ? err.message : "The settlement could not be saved.",
+              reason: describeCoordinatorError(err),
             });
             return true;
           })
@@ -6116,7 +6114,7 @@ export class Coordinator {
             });
           }
         } catch (err) {
-          refuse(err instanceof Error ? err.message : "That change could not be undone.");
+          refuse(describeCoordinatorError(err));
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -6230,7 +6228,7 @@ export class Coordinator {
               operation: "sheet-status",
               path: msg.path,
               disposition: "refused",
-              reason: err instanceof Error ? err.message : "The sheet status could not be changed.",
+              reason: describeCoordinatorError(err),
             });
             return true;
           })
@@ -6270,7 +6268,7 @@ export class Coordinator {
               operation: "sheet-rename",
               path: msg.path,
               disposition: "refused",
-              reason: err instanceof Error ? err.message : "The sheet could not be renamed.",
+              reason: describeCoordinatorError(err),
             });
             return true;
           })
@@ -6309,7 +6307,7 @@ export class Coordinator {
               operation: "guest-promotion",
               path: msg.path,
               disposition: "refused",
-              reason: err instanceof Error ? err.message : "The guest could not be promoted.",
+              reason: describeCoordinatorError(err),
             });
             return true;
           })
@@ -6416,7 +6414,7 @@ export class Coordinator {
         try {
           await applyVoiceAssignment(store, { path: msg.path, voice: assigned });
         } catch (error) {
-          result("refused", error instanceof Error ? error.message : "The voice could not be assigned.");
+          result("refused", describeCoordinatorError(error));
           return;
         }
         result(msg.voice ? "assigned" : "cleared");
@@ -6485,7 +6483,7 @@ export class Coordinator {
           void this.appLog?.append({ kind: "credential.store-failed", provider: msg.provider, message });
           // The log alone left the same silence on screen: the store threw, the key was not
           // written, and Settings showed exactly what it had shown a moment earlier.
-          this.reportProviderFault(msg.provider, `the key was not saved — ${message}`);
+          this.reportProviderFault(msg.provider, `the key was not saved — ${describeCoordinatorError(err)}`);
         }
         return;
       }
@@ -6505,7 +6503,7 @@ export class Coordinator {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           void this.appLog?.append({ kind: "credential.clear-failed", provider: msg.provider, message });
-          this.reportProviderFault(msg.provider, `the key was not cleared — ${message}`);
+          this.reportProviderFault(msg.provider, `the key was not cleared — ${describeCoordinatorError(err)}`);
         }
         return;
       }
@@ -6993,7 +6991,7 @@ export class Coordinator {
           this.transport.broadcastSnapshot();
           answer({
             disposition: "failed",
-            reason: err instanceof Error ? err.message.slice(0, 300) : "the production could not be created",
+            reason: describeCoordinatorError(err),
           });
         } finally {
           if (requestId) this.creatingProductions.delete(requestId);
@@ -7030,7 +7028,7 @@ export class Coordinator {
         } catch (err) {
           answer({
             disposition: "failed",
-            reason: err instanceof Error ? err.message : "the scene could not be created",
+            reason: describeCoordinatorError(err),
           });
           return;
         }
@@ -7120,7 +7118,7 @@ export class Coordinator {
             worldId: msg.worldId,
             productionId: msg.productionId,
             sceneFile: msg.sceneFile,
-            reason: err instanceof Error ? err.message : "the edit could not be applied",
+            reason: describeCoordinatorError(err),
           });
         });
         await this.refreshWorldSnapshot(msg.worldId);
@@ -7141,7 +7139,7 @@ export class Coordinator {
             worldId: msg.worldId,
             productionId: msg.productionId,
             sceneFile: msg.sceneFile,
-            reason: err instanceof Error ? err.message : "the restore could not be applied",
+            reason: describeCoordinatorError(err),
           });
         });
         await this.refreshWorldSnapshot(msg.worldId);
@@ -7159,7 +7157,7 @@ export class Coordinator {
               worldId: msg.worldId,
               productionId: msg.productionId,
               sceneFile: msg.sceneFile,
-              reason: err instanceof Error ? err.message : "the scene could not be deleted",
+              reason: describeCoordinatorError(err),
             });
           },
         );
@@ -7189,7 +7187,7 @@ export class Coordinator {
         try {
           chapterId = await createChapter(store, msg.productionId, { title: msg.title, order: msg.order });
         } catch (err) {
-          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be created" });
+          answer({ disposition: "failed", reason: describeCoordinatorError(err) });
           return;
         }
         // The snapshot before the answer, so the sender opens a chapter its state already holds.
@@ -7244,7 +7242,7 @@ export class Coordinator {
             ...(voices === "unreadable" ? { voicesUnreadable: true as const } : voices !== null ? { voices } : {}),
           });
         } catch (err) {
-          answer({ disposition: "failed", reason: err instanceof Error ? err.message : "the chapter could not be opened" });
+          answer({ disposition: "failed", reason: describeCoordinatorError(err) });
         }
         return;
       }
@@ -7287,7 +7285,7 @@ export class Coordinator {
           const saved = await saving;
           answer({ disposition: "saved", ...saved });
         } catch (err) {
-          answer({ disposition: "refused", reason: err instanceof Error ? err.message : "the chapter was not saved" });
+          answer({ disposition: "refused", reason: describeCoordinatorError(err) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -7650,8 +7648,7 @@ export class Coordinator {
           performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
           masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
-          const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
-          fail(reason);
+          fail(describeCoordinatorError(error));
           return;
         }
         const audioDesign = await audioDesignFor(store, production.meta.id);
@@ -7731,7 +7728,7 @@ export class Coordinator {
             });
           }
         } catch (err) {
-          fail(err instanceof Error ? err.message : String(err));
+          fail(describeCoordinatorError(err));
         } finally {
           this.creatingPlans.delete(msg.requestId);
         }
@@ -7891,7 +7888,7 @@ export class Coordinator {
           });
           return;
         } catch (err) {
-          emitStartResult({ disposition: "refused", reason: err instanceof Error ? err.message : String(err) });
+          emitStartResult({ disposition: "refused", reason: describeCoordinatorError(err) });
           void this.appLog?.append({
             kind: "frame-run.refused",
             reason: err instanceof Error ? err.message : String(err),
@@ -8098,7 +8095,7 @@ export class Coordinator {
         const result = await exportInteractive(store, production, () => new Date().toISOString()).catch(
           (err): InteractiveExportResult => ({
             ok: false,
-            blockers: [err instanceof Error ? err.message : String(err)],
+            blockers: [describeCoordinatorError(err)],
           }),
         );
         this.emit({
@@ -8192,7 +8189,7 @@ export class Coordinator {
           performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
           masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
-          const reason = error instanceof Error ? error.message : "Performance references are unavailable.";
+          const reason = describeCoordinatorError(error);
           this.rejectEnqueue(msg.requestId, msg.kind, reason);
           return;
         }
@@ -8255,13 +8252,15 @@ export class Coordinator {
         try {
           dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle, this.opts.manifest, msg.acknowledgedRecommendationIds, this.nowIso());
         } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
+          // appLog keeps the raw diagnostic (composeDispatches' own words, whatever they are);
+          // the enqueue's refusal gets the translated sentence — the two audiences read different
+          // text for the same failure, same as the credential and extraction handlers already do.
           void this.appLog?.append({
             kind: "dispatch.refused",
-            reason,
+            reason: err instanceof Error ? err.message : String(err),
             detail: { sceneFile: msg.sceneFile },
           });
-          this.rejectEnqueue(msg.requestId, msg.kind, reason);
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
           return;
         }
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
@@ -8296,7 +8295,7 @@ export class Coordinator {
           adapter, sessionInput: this.sessionInput, model: configured,
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
           emit, current: () => this.opts.provider.openStore?.() === store,
-        }).catch(error => fail(error instanceof Error ? error.message : String(error))));
+        }).catch(error => fail(describeCoordinatorError(error))));
         return;
       }
       case "stage-playblast": {
@@ -8327,7 +8326,7 @@ export class Coordinator {
           ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
         }, this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}).catch((err: unknown) => ({
           outcome: "refused" as const,
-          reason: err instanceof Error ? err.message : "the playblast could not be filed",
+          reason: describeCoordinatorError(err),
         }));
         if (outcome.outcome === "refused") {
           refuse(outcome.reason);
@@ -8463,7 +8462,7 @@ export class Coordinator {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            `The image was kept as a Variant, but could not be selected: ${error instanceof Error ? error.message : String(error)}`,
+            `The image was kept as a Variant, but could not be selected: ${describeCoordinatorError(error)}`,
           );
           this.refreshIfStillOpen(store);
         }
@@ -8485,7 +8484,7 @@ export class Coordinator {
           source: "clear-shot-frame",
         }).catch((error: unknown) => ({
           ok: false as const,
-          reason: error instanceof Error ? error.message : String(error),
+          reason: describeCoordinatorError(error),
         }));
         if (!cleared.ok) {
           this.rejectEnqueue(msg.requestId, msg.kind, `That frame could not be cleared: ${cleared.reason}`);
@@ -8725,10 +8724,10 @@ export class Coordinator {
           }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
+          // appLog keeps the raw diagnostic; the emitted refusal gets the translated sentence.
           void this.appLog?.append({
             kind: "timeline.refused",
-            reason,
+            reason: error instanceof Error ? error.message : String(error),
             detail: { productionId: msg.productionId, verb: msg.kind },
           });
           this.emit({
@@ -8736,7 +8735,7 @@ export class Coordinator {
             type: "timeline.command-refused",
             worldId: msg.worldId,
             productionId: msg.productionId,
-            reason: reason.slice(0, 500),
+            reason: describeCoordinatorError(error),
           });
           this.transport.broadcastSnapshot();
         }
@@ -9251,9 +9250,7 @@ export class Coordinator {
           const reason =
             error instanceof EditorRequestRefused || error instanceof TimelineCommandRefused
               ? error.reason
-              : error instanceof Error
-                ? error.message
-                : String(error);
+              : describeCoordinatorError(error);
           this.emit({
             at: new Date().toISOString(),
             type: "timeline.command-refused",
@@ -9302,7 +9299,7 @@ export class Coordinator {
           }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
-          refuse(error instanceof TimelineCommandRefused ? error.reason : error instanceof Error ? error.message : String(error));
+          refuse(error instanceof TimelineCommandRefused ? error.reason : describeCoordinatorError(error));
         }
         return;
       }
@@ -9446,7 +9443,7 @@ export class Coordinator {
           });
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
-          refuse(error instanceof Error ? error.message : String(error));
+          refuse(describeCoordinatorError(error));
         }
         return;
       }
@@ -9523,7 +9520,7 @@ export class Coordinator {
           this.transport.broadcastSnapshot();
           answer(sessionId);
         } catch (error) {
-          answer(null, error instanceof Error ? error.message : String(error));
+          answer(null, describeCoordinatorError(error));
         }
         return;
       }
@@ -9583,7 +9580,7 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           answer(msg.sessionId);
         } catch (error) {
-          answer(null, error instanceof Error ? error.message : String(error));
+          answer(null, describeCoordinatorError(error));
         }
         return;
       }
@@ -9775,7 +9772,7 @@ export class Coordinator {
             this.rejectEnqueue(
               msg.requestId,
               msg.kind,
-              error instanceof Error ? error.message : String(error),
+              describeCoordinatorError(error),
             );
             return;
           }
@@ -10002,12 +9999,13 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           answer(true);
         } catch (error) {
-          const reason = error instanceof Error ? error.message : String(error);
+          // appLog keeps the raw diagnostic; `answer`'s refusal gets the translated sentence —
+          // same split as the dispatch-refused handler above.
           void this.appLog?.append({
             kind: "bench.accept-failed",
             worldId: msg.worldId,
             takeId: msg.takeId,
-            error: reason,
+            error: error instanceof Error ? error.message : String(error),
           });
           const filed = existingBenchSubjectFiling(store, bench.session, take);
           if (filed !== null) {
@@ -10031,7 +10029,7 @@ export class Coordinator {
           }
           await this.refreshWorldSnapshot(msg.worldId);
           await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, reason);
+          answer(false, describeCoordinatorError(error));
         }
         return;
       }
@@ -10635,7 +10633,7 @@ export class Coordinator {
             artifact: artifact.file,
             message: err instanceof Error ? err.message : String(err),
           });
-          finished("failed", 0, 0, err instanceof Error ? err.message.slice(0, 200) : String(err));
+          finished("failed", 0, 0, describeCoordinatorError(err));
         } finally {
           this.reading.delete(msg.artifactId);
         }
@@ -10716,7 +10714,7 @@ export class Coordinator {
             return;
           }
           void this.appLog?.append({ kind: "continuity.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          finished("failed", none, { reason: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+          finished("failed", none, { reason: describeCoordinatorError(err) });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.derivingContinuity.delete(key);
@@ -10762,11 +10760,12 @@ export class Coordinator {
             progress("done", 100, made.output, null);
             return { status: "done" as const, output: made.output };
           } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            if (control.signal.aborted || message === "cancelled") {
+            const rawMessage = error instanceof Error ? error.message : String(error);
+            if (control.signal.aborted || rawMessage === "cancelled") {
               progress("cancelled", 0, null, null);
               return { status: "cancelled" as const };
             }
+            const message = describeCoordinatorError(error);
             progress("failed", 0, null, message);
             return { status: "failed" as const, error: message };
           } finally {
@@ -10903,7 +10902,7 @@ export class Coordinator {
         } catch (error) {
           // Held again, so a refusal can be retried from the same sheet.
           this.manuscriptReads.set(key, held);
-          answer({ reason: error instanceof Error ? error.message : "the manuscript was not imported" });
+          answer({ reason: describeCoordinatorError(error) });
         }
         await this.refreshWorldSnapshot(msg.worldId);
         return;
@@ -10975,7 +10974,7 @@ export class Coordinator {
             return;
           }
           void this.appLog?.append({ kind: "voices.failed", chapter: chapter.file, message: err instanceof Error ? err.message : String(err) });
-          finished("failed", none, { reason: err instanceof Error ? err.message.slice(0, 200) : String(err) });
+          finished("failed", none, { reason: describeCoordinatorError(err) });
         } finally {
           store.closingSignal.removeEventListener("abort", onClose);
           this.castingVoices.delete(key);
@@ -11203,7 +11202,7 @@ export class Coordinator {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            err instanceof Error ? err.message : "The line could not be prepared.",
+            describeCoordinatorError(err),
           );
           return;
         }
@@ -11309,7 +11308,7 @@ export class Coordinator {
               cached: false,
               characterCount: normalizeSpeechText(line.text).length,
               estimatedMicroUsd: 0,
-              error: err instanceof Error ? err.message : "Local voice failed.",
+              error: describeCoordinatorError(err),
             });
           }
           this.emitEnqueueResult(msg.requestId, msg.kind, 0, [], [], true);
@@ -11453,7 +11452,7 @@ export class Coordinator {
         try {
           bibleText = authoritativeBibleSpeech(bible.text, msg.sectionHeading).text;
         } catch (error) {
-          failBible(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          failBible(describeCoordinatorError(error));
           return;
         }
         await this.narrateSection({
@@ -11503,7 +11502,7 @@ export class Coordinator {
         try {
           resolved = await this.resolveProse(store, msg.source);
         } catch (error) {
-          failProse(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          failProse(describeCoordinatorError(error));
           return;
         }
         await this.narrateSection({
@@ -11679,7 +11678,7 @@ export class Coordinator {
         try {
           resolved = authoritativeSheetSpeech(sheet, msg.sectionHeading);
         } catch (error) {
-          fail(error instanceof Error ? error.message : "Read aloud is unavailable.");
+          fail(describeCoordinatorError(error));
           return;
         }
         await this.narrateSection({
@@ -11890,7 +11889,7 @@ export class Coordinator {
         const context=keyArtReviewContext(bundle,model,base,assembly.referenceRoles,castInFrame.length>0,brief?keyArtBriefProse(brief):undefined);
         let approved;
         try {approved=await this.keyArtPromptReviews.approve(context,msg.promptReviewId,authored);}
-        catch(error){this.rejectEnqueue(msg.requestId,msg.kind,error instanceof Error?error.message:"Prompt approval changed.");return;}
+        catch(error){this.rejectEnqueue(msg.requestId,msg.kind,describeCoordinatorError(error));return;}
         const words=approved.prompt;
         // Every candidate is asked for from the same words. They differ because the model is
         // sampled afresh, not because we quietly reword the brief per slot — the author wrote
@@ -11933,7 +11932,7 @@ export class Coordinator {
             await this.refreshWorldSnapshot(msg.worldId);
             this.emitEnqueueResult(msg.requestId, msg.kind, chosen.length, [], failures, true);
           } catch (error) {
-            this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error ? error.message : String(error));
+            this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
             if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
           }
           return;
@@ -11953,7 +11952,7 @@ export class Coordinator {
             production: null,
           }).catch((err: unknown) => ({
             outcome: "refused" as const,
-            reason: err instanceof Error ? err.message : String(err),
+            reason: describeCoordinatorError(err),
           }));
           if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") {
             failures.push({ index, reason: `${basename(sourcePath)}: ${outcome.reason}` });
@@ -12781,7 +12780,7 @@ export class Coordinator {
           this.rejectEnqueue(
             msg.requestId,
             msg.kind,
-            err instanceof Error ? `${err.message}. Nothing was queued.` : "Nothing was queued.",
+            `${describeCoordinatorError(err)}. Nothing was queued.`,
           );
           return;
         }
@@ -13009,7 +13008,7 @@ export class Coordinator {
             reason: msg.kind === "record-dialogue-feedback" ? "Diagnostic feedback saved." : "Review the staged scene proposal before these facts change." });
         } catch (error) {
           this.emit({ type: "dialogue.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused",
-            reason: error instanceof Error ? error.message : "Dialogue update refused." });
+            reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -13091,7 +13090,7 @@ export class Coordinator {
           this.emit({type:"proposal.staged",at:this.nowIso(),worldId:msg.worldId,proposalId:proposal.id});
           this.emit({type:"performance.result",at:this.nowIso(),worldId:msg.worldId,requestId:msg.requestId,productionId:msg.productionId,status:"reviewed",reason:`Review timing proposal ${proposal.id} before it changes the scene.`});
         } catch(error) {
-          this.emit({type:"performance.result",at:this.nowIso(),worldId:msg.worldId,requestId:msg.requestId,productionId:msg.productionId,status:"refused",reason:error instanceof Error?error.message:"Timing proposal refused."});
+          this.emit({type:"performance.result",at:this.nowIso(),worldId:msg.worldId,requestId:msg.requestId,productionId:msg.productionId,status:"refused",reason:describeCoordinatorError(error)});
         }
         return;
       }
@@ -13105,7 +13104,7 @@ export class Coordinator {
             productionId: msg.productionId, status: "reviewed", reason: "Selected performance placed in the cut. Picture selection is unchanged." });
         } catch (error) {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Performance placement refused." });
+            productionId: msg.productionId, status: "refused", reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -13144,7 +13143,7 @@ export class Coordinator {
         const model = this.opts.manifest?.models.find(m => m.id === msg.modelId);
         if (!store || store.worldId !== msg.worldId || !model) { this.rejectEnqueue(msg.requestId, msg.kind, "Open the performance world and choose an available conversion model."); return; }
         try { await this.enqueueBatch(msg.requestId, msg.kind, [await performanceConversionRequest(store, model, msg)]); }
-        catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, error instanceof Error && !/[\\/]/.test(error.message) ? error.message : "The performance could not be cleared for conversion. Check its bytes, wording, rights and current target."); }
+        catch (error) { this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error)); }
         return;
       }
       case "keep-performance-recording": {
@@ -13172,7 +13171,7 @@ export class Coordinator {
             productionId: msg.productionId, status: "prepared", masterAudioReference });
         } catch (error) {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Master audio preparation failed." });
+            productionId: msg.productionId, status: "refused", reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -13185,7 +13184,7 @@ export class Coordinator {
             productionId: msg.productionId, status: "prepared", audioReference });
         } catch (error) {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "refused", reason: error instanceof Error ? error.message : "Audio preparation failed." });
+            productionId: msg.productionId, status: "refused", reason: describeCoordinatorError(error) });
         }
         return;
       }
@@ -14167,7 +14166,7 @@ export class Coordinator {
       ...opts,
     }).catch((err) => ({
       outcome: "refused" as const,
-      reason: err instanceof Error ? err.message : String(err),
+      reason: describeCoordinatorError(err),
     }));
     if (outcome.outcome === "needs-consent" || outcome.outcome === "refused") {
       this.emit({
