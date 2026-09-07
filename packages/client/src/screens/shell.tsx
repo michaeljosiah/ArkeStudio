@@ -787,8 +787,13 @@ export function NewWorldScreen() {
   const draftCharacters = (blueprint?.characters ?? []).filter((c) => c.name !== charSeed?.name);
   const draftLocations = (blueprint?.locations ?? []).filter((l) => l.name !== locSeed?.name);
   const railCharacters = [
-    ...(charSeed ? [{ ...charSeed, brief: false }] : []),
-    ...draftCharacters.map((c) => ({ name: c.name, sentence: oneLine(c), brief: hasBrief(c) })),
+    ...(charSeed ? [{ ...charSeed, brief: false, neverDepicted: false }] : []),
+    ...draftCharacters.map((c) => ({
+      name: c.name,
+      sentence: oneLine(c),
+      brief: hasBrief(c),
+      neverDepicted: c.neverDepicted === true,
+    })),
   ];
   const railLocations = [
     ...(locSeed ? [{ ...locSeed, brief: false }] : []),
@@ -1441,7 +1446,12 @@ export function NewWorldScreen() {
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 8 }}>
                     <span className="fy-dot fy-dot--sketch" style={{ width: 5, height: 5 }} />
                     <span className="fy-mono" style={{ fontSize: 9.5 }}>
-                      {c.brief ? "sketch · brief kept" : "sketch · no face yet"}
+                      {/*
+                       * "no face yet" promises a face, which is the opposite of the rule for a
+                       * character the author has ruled out (issue 945). The build card names the
+                       * same rule as "never depicted"; the two surfaces say it the same way.
+                       */}
+                      {c.neverDepicted ? "sketch · never depicted" : c.brief ? "sketch · brief kept" : "sketch · no face yet"}
                     </span>
                   </div>
                 </div>

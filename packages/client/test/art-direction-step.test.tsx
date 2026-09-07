@@ -692,4 +692,35 @@ describe("location views ask in the dialog (design 66)", () => {
     );
     assert.match(locations, /promptOptional/, "and location views are the surface that opts out");
   });
+
+});
+
+describe("a character who is never depicted (issue 945)", () => {
+  /*
+   * A character the author ruled out is not waiting for anything (issue 945). The build card
+   * already says "never depicted"; the rail said "no face yet", which promises the picture the
+   * rule forbids — and the two sat on screen together.
+   */
+  it("says a never-depicted character is never depicted, not that a face is coming", async () => {
+    const mounted = await mountGenesis({
+      ...genesisBlueprint(),
+      characters: [
+        { name: "Boma Abbey", slug: "boma-abbey", description: "Sixteen, and she has started answering." },
+        { name: "Ibinabo", slug: "ibinabo", description: "A voice on a band that carries no station.", neverDepicted: true },
+      ],
+    });
+    try {
+      const text = mounted.container.textContent ?? "";
+      assert.ok(text.includes("sketch · never depicted"), "the ruled-out character says the rule");
+      assert.ok(text.includes("sketch · no face yet"), "an ordinary character still awaits its face");
+      assert.equal(
+        (text.match(/no face yet/g) ?? []).length,
+        1,
+        "only the character without the rule is told a face is coming",
+      );
+    } finally {
+      await unmountGenesis(mounted);
+    }
+  });
+
 });
