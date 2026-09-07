@@ -34,16 +34,19 @@ const MAX_LENGTH = 300;
 
 /**
  * A filesystem path — Windows drive-letter, UNC (`\\server\share\...` and its extended form
- * `\\?\UNC\server\share\...`, both supported per `world/paths.ts`), or a multi-segment
- * POSIX-shaped run — inside a message. Node's own fs errors (`readFile`, `open`, ...) interpolate
- * the full path by default, quoted, with no space before it; an fs failure whose code isn't one
- * of `SYSTEM_ERROR_COPY`'s known set (`EIO`, `EMFILE`, ...) would otherwise fall through to the
- * "trust it, it's already plain" branch below and hand a local disk layout — this machine's
- * username, a network share's name, the world's folder location — to whoever reads the screen.
- * The POSIX half asks for two full segments before the last, not merely one slash, so an ordinary
- * sentence's "either/or" doesn't trip it.
+ * `\\?\UNC\server\share\...`, both supported per `world/paths.ts`), or POSIX-rooted — inside a
+ * message. Node's own fs errors (`readFile`, `open`, ...) interpolate the full path by default,
+ * quoted, with no space before it; an fs failure whose code isn't one of `SYSTEM_ERROR_COPY`'s
+ * known set (`EIO`, `EMFILE`, ...) would otherwise fall through to the "trust it, it's already
+ * plain" branch below and hand a local disk layout — this machine's username, a network share's
+ * name, a host-picked file outside any world (`fileArtifact` reads those too, not only world
+ * storage) — to whoever reads the screen. The POSIX branch is anchored on what actually precedes
+ * a real path in an fs error — the quote, paren or space Node itself puts there, or the start of
+ * the message — rather than counting segments, so a shallow `/tmp/recording.wav` is caught the
+ * same as a deep one; a mid-word slash like "either/or" has a letter immediately before it, which
+ * the anchor excludes.
  */
-const HAS_PATH = /[A-Za-z]:[\\/]|\\\\[^\s'"()]+|\/(?:[^\s'"()]+\/){2,}[^\s'"()]+/;
+const HAS_PATH = /[A-Za-z]:[\\/]|\\\\[^\s'"()]+|(?:^|['"( ])\/[^\s'"()]+/;
 
 /**
  * The outermost system-error code in the cause chain, or null when the chain names none.
@@ -74,18 +77,23 @@ function codeInChain(err: unknown): string | null {
  * The shared fallback: a system-error code anywhere in the cause chain gets its own sentence; a
  * plain `Error` (the overwhelming case in this codebase — `throw new Error("a sentence a reader
  * could stand in front of")`) is trusted as already being that sentence and passed through,
- * bounded; the engine's own error types (`SyntaxError`, `TypeError`, `RangeError` — a bad JSON
- * parse, an unexpected shape) report positions and internals nobody authored for a screen, so
- * those fall back to the generic line rather than being shown.
+ * bounded; every native diagnostic subclass the engine itself throws — `SyntaxError` (a bad JSON
+ * parse), `TypeError`/`RangeError` (an unexpected shape or value), `ReferenceError` ("x is not
+ * defined"), `URIError` ("URI malformed"), `EvalError`, and an `AggregateError` that reached here
+ * still carrying no mapped code (`AggregateError`'s own `.message`, "All promises were rejected",
+ * says nothing any of them didn't already say better) — report positions and internals nobody
+ * authored for a screen, so all of them fall back to the generic line rather than being shown.
  *
  * App-specific error classes with their own developer-facing `.message` (a stale commit, a
  * malformed plan) are not handled here — they are known only where they are thrown, so the
  * package that defines them wraps this function with its own cases first.
  */
+const NATIVE_DIAGNOSTIC_TYPES = [SyntaxError, TypeError, RangeError, ReferenceError, URIError, EvalError, AggregateError];
+
 export function describeError(err: unknown): string {
   const code = codeInChain(err);
   if (code !== null) return SYSTEM_ERROR_COPY.get(code)!;
-  if (err instanceof SyntaxError || err instanceof TypeError || err instanceof RangeError) {
+  if (NATIVE_DIAGNOSTIC_TYPES.some((type) => err instanceof type)) {
     return GENERIC_ERROR_COPY;
   }
   if (err instanceof Error && err.message.length > 0) {

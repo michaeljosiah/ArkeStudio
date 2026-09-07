@@ -8723,10 +8723,10 @@ export class Coordinator {
           }
           await this.refreshWorldSnapshot(msg.worldId);
         } catch (error) {
-          const reason = describeCoordinatorError(error);
+          // appLog keeps the raw diagnostic; the emitted refusal gets the translated sentence.
           void this.appLog?.append({
             kind: "timeline.refused",
-            reason,
+            reason: error instanceof Error ? error.message : String(error),
             detail: { productionId: msg.productionId, verb: msg.kind },
           });
           this.emit({
@@ -8734,7 +8734,7 @@ export class Coordinator {
             type: "timeline.command-refused",
             worldId: msg.worldId,
             productionId: msg.productionId,
-            reason: reason.slice(0, 500),
+            reason: describeCoordinatorError(error),
           });
           this.transport.broadcastSnapshot();
         }
@@ -9998,12 +9998,13 @@ export class Coordinator {
           await this.refreshBench(msg.worldId, msg.sessionId);
           answer(true);
         } catch (error) {
-          const reason = describeCoordinatorError(error);
+          // appLog keeps the raw diagnostic; `answer`'s refusal gets the translated sentence —
+          // same split as the dispatch-refused handler above.
           void this.appLog?.append({
             kind: "bench.accept-failed",
             worldId: msg.worldId,
             takeId: msg.takeId,
-            error: reason,
+            error: error instanceof Error ? error.message : String(error),
           });
           const filed = existingBenchSubjectFiling(store, bench.session, take);
           if (filed !== null) {
@@ -10027,7 +10028,7 @@ export class Coordinator {
           }
           await this.refreshWorldSnapshot(msg.worldId);
           await this.refreshBench(msg.worldId, msg.sessionId);
-          answer(false, reason);
+          answer(false, describeCoordinatorError(error));
         }
         return;
       }

@@ -63,10 +63,22 @@ it("does not mistake an ordinary slash-bearing sentence for a path", () => {
   assert.equal(describeError(new Error("choose either/or, not both")), "choose either/or, not both");
 });
 
+it("redacts a shallow absolute path too, not only a deep one", () => {
+  const err = new Error("EIO: i/o error, read '/tmp/recording.wav'");
+  assert.equal(describeError(err), GENERIC_ERROR_COPY);
+});
+
 it("falls back to the generic line for the engine's own error types", () => {
   assert.equal(describeError(new SyntaxError("Unexpected token < in JSON at position 0")), GENERIC_ERROR_COPY);
   assert.equal(describeError(new TypeError("Cannot read properties of undefined")), GENERIC_ERROR_COPY);
   assert.equal(describeError(new RangeError("Invalid array length")), GENERIC_ERROR_COPY);
+  assert.equal(describeError(new ReferenceError("foo is not defined")), GENERIC_ERROR_COPY);
+  assert.equal(describeError(new URIError("URI malformed")), GENERIC_ERROR_COPY);
+  assert.equal(describeError(new EvalError("eval failed")), GENERIC_ERROR_COPY);
+  assert.equal(
+    describeError(new AggregateError([new Error("a"), new Error("b")], "All promises were rejected")),
+    GENERIC_ERROR_COPY,
+  );
 });
 
 it("falls back to the generic line for anything that isn't an Error at all", () => {
