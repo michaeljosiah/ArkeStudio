@@ -18,7 +18,7 @@ import { EmptyState } from "../components/layout.js";
 import { Badge } from "../components/ui.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
-import { useProduction } from "../lib/selectors.js";
+import { nextEpisodeOrder, pendingEpisodes, useProduction } from "../lib/selectors.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { createEpisode, proposeEpisode, reorderEpisodes } from "../lib/store.js";
@@ -413,31 +413,13 @@ function EpisodesBoard() {
   const episodes = production?.episodes ?? [];
   const findings = production ? seasonFindings(production, world?.sheets ?? []) : [];
   /*
-   * Episodes that have been started and are waiting on the gate (turn 92). A staged proposal
-   * against a file that is not yet an episode on disk is a started one: it has a name and an
-   * order and no record, so it belongs on the board between the written and the untouched.
-   * Without this the press that staged it changed nothing anybody could see.
+   * Episodes that have been started and are waiting on the gate (turn 92): a staged proposal
+   * against a file that is not yet an episode on disk. It belongs on the board between the
+   * written and the untouched — without this the press that staged it changed nothing anybody
+   * could see.
    */
-  const stems = new Set(Object.values(production?.episodeFiles ?? {}));
-  const started = (world?.proposals ?? []).flatMap((sp) =>
-    sp.proposal.targets.flatMap((t) => {
-      // Prefix and suffix rather than a built pattern: a production id interpolated into a
-      // regular expression is a pattern the caller did not write, and `\.` inside a template
-      // literal is just a dot, so the escape that looked like it was there never was.
-      const prefix = `productions/${prodId}/episodes/`;
-      if (!t.path.startsWith(prefix) || !t.path.endsWith(".json")) return [];
-      const stem = t.path.slice(prefix.length, -".json".length);
-      if (stem.length === 0 || stem.includes("/") || stems.has(stem)) return [];
-      // The gate labels its review fields for reading — "Title", "Order" — so they are matched
-      // case-insensitively rather than by the record's own key names.
-      const fields = sp.review?.targets.flatMap((rt) => rt.fields) ?? [];
-      const field = (name: string) => fields.find((f) => f.field.toLowerCase() === name)?.proposed;
-      const title = field("title") ?? sp.proposal.summary;
-      const order = Number(field("order") ?? Number.NaN);
-      return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
-    }),
-  );
-  const nextOrder = Math.max(0, ...episodes.map((e) => e.order), ...started.map((e) => e.order ?? 0)) + 1;
+  const started = pendingEpisodes(world, prodId, production);
+  const nextOrder = nextEpisodeOrder(world, prodId, production);
   const move = (index: number, delta: number) => {
     if (!worldId || !prodId) return;
     const ids = episodes.map((e) => e.id);
