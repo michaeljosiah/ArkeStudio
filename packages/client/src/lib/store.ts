@@ -3437,6 +3437,10 @@ export function restoreChapter(worldId: string, productionId: string, chapterFil
 }
 
 /** The plan on the chapter (turn 127): saved in place, no proposal, no version cut. `null` clears. */
+export function setChapterRetired(worldId: string, productionId: string, chapterFile: string, retired: boolean) {
+  send({ kind: retired ? "retire-chapter" : "restore-chapter-retired", worldId, productionId, chapterFile });
+}
+
 export function editChapterPlan(
   worldId: string,
   productionId: string,

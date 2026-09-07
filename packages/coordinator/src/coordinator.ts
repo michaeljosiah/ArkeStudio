@@ -179,6 +179,7 @@ import {
   openChapter,
   restoreChapter,
   editChapterPlan,
+  setChapterRetired,
 } from "./productions/ops.js";
 import {
   advancePlan,
@@ -7291,6 +7292,14 @@ export class Coordinator {
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }
+      case "retire-chapter":
+      case "restore-chapter-retired": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) return;
+        await setChapterRetired(store, msg.productionId, msg.chapterFile, msg.kind === "retire-chapter");
+        await this.refreshWorldSnapshot(msg.worldId);
+        return;
+      }
       case "edit-chapter-plan": {
         // The plan saves in place like the prose (turn 127): swallowed like every other direct
         // save, world-checked like every other chapter write, and the snapshot says what landed.
@@ -7607,8 +7616,8 @@ export class Coordinator {
       }
       case "reorder-chapters": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
-        await reorderChapters(store, msg.productionId, msg.orderedFiles).catch(() => {});
+        if (!store || store.worldId !== msg.worldId) return;
+        await reorderChapters(store, msg.productionId, msg.orderedFiles);
         await this.refreshWorldSnapshot(msg.worldId);
         return;
       }

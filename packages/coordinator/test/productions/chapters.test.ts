@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter } from "../../src/productions/ops.js";
+import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -315,5 +315,27 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(back.version, 6);
     assert.equal(back.body.trim(), before.body.trim());
     assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
+  });
+});
+
+
+describe("chapter retirement (issue 888)", () => {
+  it("keeps prose, version and history, projects retirement, restores, and refuses foreign files", async () => {
+    const { dir, store } = await open();
+    const productionId = "the-ledger-of-nights";
+    const file = "01-neap";
+    const before = await openChapter(store, productionId, "neap");
+    await setChapterRetired(store, productionId, file, true);
+    assert.equal((await chaptersOf(dir, productionId))[0]?.retired, true);
+    const after = await openChapter(store, productionId, "neap");
+    assert.equal(after.body, before.body);
+    assert.equal(after.version, before.version);
+    assert.deepEqual(after.versions, before.versions);
+    assert.equal(store.getBundle().meta.schemaVersion, 15);
+    await assert.rejects(setChapterRetired(store, productionId, "../story", true), /no longer/);
+    await assert.rejects(reorderChapters(store, productionId, [file, file]), /list changed/);
+    await setChapterRetired(store, productionId, file, false);
+    assert.equal((await chaptersOf(dir, productionId))[0]?.retired, undefined);
+    assert.equal((await openChapter(store, productionId, "neap")).body, before.body);
   });
 });

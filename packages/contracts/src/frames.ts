@@ -1966,6 +1966,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       baseHash: z.string().min(1).optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("retire-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: SlugSchema }).strict(),
+  z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: SlugSchema }).strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
    * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a

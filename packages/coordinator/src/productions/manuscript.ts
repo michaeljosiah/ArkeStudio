@@ -473,7 +473,7 @@ export async function manuscriptOf(store: WorldStore, productionId: string): Pro
   const bundle = store.getBundle();
   const production = bundle.productions.find((entry) => entry.meta.id === productionId);
   if (!production) throw new Error("That production is not in this world.");
-  const ordered = [...production.chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  const ordered = production.chapters.filter((chapter) => !chapter.retired).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const chapters: Array<{ title: string; body: string }> = [];
   for (const chapter of ordered) {
     const opened = await openChapter(store, productionId, chapter.id);

@@ -541,6 +541,7 @@ export const ChapterFrontmatterSchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131); the first editor save drops it. */
     source: z.string().min(1).optional(),
     created: z.string().optional(),
@@ -784,6 +785,7 @@ export const ChapterSummarySchema = z
     when: z.string().optional(),
     implies: ChapterImpliesSchema.optional(),
     draftedAgainst: z.number().int().min(1).optional(),
+    retired: z.boolean().optional(),
     /** The file an imported chapter came from (turn 131), while it is still the import's. */
     source: z.string().min(1).optional(),
   })

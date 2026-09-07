@@ -101,7 +101,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // the file it came from, and a build without the field would drop the chapter on scan.
 // Fourteen is a measured `hasVideo` on an artifact sidecar (PR 944): the strict sidecar parse
 // fails on a build without the field, which drops the artifact and every clip that cites it.
-export const SUPPORTED_SCHEMA_VERSION = 14;
+// Fifteen adds chapter retirement to strict frontmatter (issue 888).
+export const SUPPORTED_SCHEMA_VERSION = 15;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -548,6 +549,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       ...(fm.when !== undefined ? { when: fm.when } : {}),
       ...(fm.implies !== undefined ? { implies: fm.implies } : {}),
       ...(fm.draftedAgainst !== undefined ? { draftedAgainst: fm.draftedAgainst } : {}),
+      ...(fm.retired !== undefined ? { retired: fm.retired } : {}),
       ...(fm.source !== undefined ? { source: fm.source } : {}),
     }));
 
