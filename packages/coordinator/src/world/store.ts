@@ -573,7 +573,11 @@ export class WorldStore {
         await this.rescan();
         await this.afterExternalEditsCleared();
       } catch (err) {
-        const refusal = describeCoordinatorError(err);
+        // Bounded to ExternalEditSchema's 300-char `refusal` field (D2): most caught errors are
+        // already a short plain sentence, but an unclassified one — a ZodError enumerating many
+        // issues, say — can run well past that, and an oversized refusal fails the snapshot's
+        // own schema on broadcast rather than reaching the screen.
+        const refusal = describeCoordinatorError(err).slice(0, 300);
         this.externalEdits = this.externalEdits.map((candidate) =>
           candidate.path === portablePath
             ? { path: candidate.path, kind: candidate.kind, refusal }
@@ -622,7 +626,8 @@ export class WorldStore {
         {
           path: `productions/${styled.meta.id}/prose-style.json`,
           kind: "modified",
-          refusal: describeCoordinatorError(err),
+          // Bounded to ExternalEditSchema's 300-char field — see the sibling catch above.
+          refusal: describeCoordinatorError(err).slice(0, 300),
         },
       ];
     }

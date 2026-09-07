@@ -2,7 +2,8 @@ import { describeError } from "@arke-studio/contracts";
 import { CommitPlanError, CommitStaleError } from "../world/commit.js";
 
 /**
- * What a caught error becomes when it reaches a screen (§ plain error copy). `CommitStaleError`
+ * What a caught error becomes when it reaches a screen (see `error-copy.ts`'s module doc for the
+ * house rule this implements). `CommitStaleError`
  * and `CommitPlanError` carry `.message` strings written for `commit.test.ts`, not for a person —
  * "commit refused: base moved for references/tunde/kit.json — staleness is detected, never
  * merged" told nobody what to do. They are special-cased here, ahead of `describeError`'s generic
@@ -36,10 +37,18 @@ function describeCommitPlanError(err: CommitPlanError): string {
 }
 
 const COMMIT_PLAN_COPY: ReadonlyArray<readonly [RegExp, string]> = [
-  [/history snapshot (conflicts with|moved while)/, "Something changed while this was saving — try again."],
+  // A conflict names a history file that already holds bytes outside this commit's allowed set —
+  // rollback leaves it exactly as it was, so retrying deterministically fails the same way. A
+  // move, in contrast, is the staging-window race closing on someone else's write and clears on
+  // its own the moment that write is done — retrying is the actual remedy there.
+  [/history snapshot conflicts with/, "A saved version of this file doesn't match what Arke Studio expected — trying again won't fix it."],
+  [/history snapshot moved while .* was staged/, "Something changed while this was saving — try again."],
   [/cannot be restored/, "That earlier version can't be restored."],
   [/^world\.json missing/, "This folder isn't a world Arke Studio recognizes."],
-  [/^world has external edits awaiting reconciliation$/, "This world was edited outside Arke Studio — reopen it before saving again."],
+  [
+    /^world has external edits awaiting reconciliation$/,
+    "This world has changes made outside Arke Studio waiting to be reviewed — resolve them before saving again.",
+  ],
   [/^no history snapshot at /, "That earlier version can't be found."],
   [/last committed version is unavailable$/, "An earlier version of this file can't be found."],
   [/^restore is not defined for/, "That can't be restored to an earlier version."],

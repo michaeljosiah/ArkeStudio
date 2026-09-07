@@ -8251,13 +8251,15 @@ export class Coordinator {
         try {
           dispatches = composeDispatches(msg.worldId, msg.productionId, scene, plan, model, bundle, this.opts.manifest, msg.acknowledgedRecommendationIds, this.nowIso());
         } catch (err) {
-          const reason = describeCoordinatorError(err);
+          // appLog keeps the raw diagnostic (composeDispatches' own words, whatever they are);
+          // the enqueue's refusal gets the translated sentence — the two audiences read different
+          // text for the same failure, same as the credential and extraction handlers already do.
           void this.appLog?.append({
             kind: "dispatch.refused",
-            reason,
+            reason: err instanceof Error ? err.message : String(err),
             detail: { sceneFile: msg.sceneFile },
           });
-          this.rejectEnqueue(msg.requestId, msg.kind, reason);
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(err));
           return;
         }
         await this.enqueueBatch(msg.requestId, msg.kind, dispatches);
