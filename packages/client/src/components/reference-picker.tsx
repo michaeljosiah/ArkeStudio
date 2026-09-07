@@ -258,9 +258,11 @@ export function ReferencePickerBody({
   note,
   only,
   budget = "model",
+  worldChoices,
 }: {
   /** "bench": ordered multi-pick with tokens. "slot": exactly one, no token namespace. */
   mode: "bench" | "slot";
+  worldChoices?: React.ReactNode;
   /** The dialog's own words, where the default headline is not the ask (keyframes). */
   title?: string;
   note?: string;
@@ -327,8 +329,8 @@ export function ReferencePickerBody({
     if (source.active || staged(source)) return null; // a state, not a refusal
     if (source.kind === "document") return "a document cannot be sent";
     if (source.kind === "other") return "this file cannot be sent";
-    if (!model) return "choose a model first";
     if (budget === "none") return null;
+    if (!model) return "choose a model first";
     const verdict = admitReference({ kind: source.kind, durationSec: source.durationSec }, effectiveCarried, model);
     if (verdict.ok) return null;
     // At the image ceiling in bench mode the tile stays pickable — picking asks which token
@@ -432,10 +434,11 @@ export function ReferencePickerBody({
         </button>
       </div>
 
+      {worldChoices}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div className="fy-refpicker__lanes" role="group" aria-label="Where from">
           <button type="button" aria-pressed={lane === "world"} onClick={() => setLane("world")}>
-            {`${world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
+            {`${worldChoices || world.some((source) => source.group) ? "World images" : "World artifacts"} ${offered(world).length}`}
           </button>
           {offered(characters ?? []).length > 0 && (
             <button

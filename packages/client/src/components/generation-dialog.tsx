@@ -7,6 +7,7 @@ import { DispatchBar } from "./dispatch-bar.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
+import { StagedReferencePicker } from "./staged-reference-picker.js";
 import { Plus, X } from "./icons.js";
 
 /**
@@ -95,6 +96,7 @@ export function GenerationDialog({
   commit,
   panel,
   onPanelClose,
+  referenceTarget,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -223,9 +225,16 @@ export function GenerationDialog({
    */
   panel?: ReactNode;
   onPanelClose?: () => void;
+  referenceTarget?: { worldId: string; key: string; origin?: string | undefined };
 }) {
   const [pickingReference, setPickingReference] = useState(false);
-  if (pickingReference && worldReferences) {
+  if (referenceTarget?.origin) referenceHint = <>from {referenceTarget.origin}{referenceHint && <><br />{referenceHint}</>}</>;
+  useEffect(() => { if (!open) setPickingReference(false); }, [open]);
+  if (pickingReference && worldReferences && referenceTarget) {
+    panel = <StagedReferencePicker worldId={referenceTarget.worldId} referenceKey={referenceTarget.key} model={worldReferences.model}
+      onClose={() => setPickingReference(false)} onUpload={() => { onAttachReference?.(); setPickingReference(false); }} />;
+    onPanelClose = () => setPickingReference(false);
+  } else if (pickingReference && worldReferences) {
     panel = <ReferencePickerBody
       mode="slot" only="image" title="Choose one reference image"
       worldSlug={worldSlug} model={worldReferences.model} carried={[]} session={[]}

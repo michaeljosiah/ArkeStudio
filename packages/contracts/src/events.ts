@@ -115,6 +115,8 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("reference.images"), requestId: UlidSchema,
+    slug: SlugSchema, images: z.array(z.string()), error: z.string().optional() }).strict(),
   /** Unexpected command failures are transient notices, never evidence of rollback (#926). */
   z.object({ ...base, type: z.literal("command.failed"), command: z.string(),
     requestId: z.string().nullable(), reason: z.string() }).strict(),

@@ -1,3 +1,4 @@
+import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
@@ -354,6 +355,8 @@ export const WorldBundleSchema = z
      * at, so every surface it serves needs somewhere to keep one.
      */
     stagedReferences: z.record(z.string(), z.string()).default({}),
+    /** Descriptive origin of copied pictures, keyed by their local file; never a foreign link. */
+    stagedReferenceOrigins: z.record(z.string(), BorrowedImageOriginSchema).default({}),
     /** Closed-world edits awaiting reconciliation (SPEC-002 R-28). */
     externalEdits: z.array(ExternalEditSchema).default([]),
   })

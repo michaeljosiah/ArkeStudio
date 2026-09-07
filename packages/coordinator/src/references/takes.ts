@@ -123,7 +123,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     return existing;
   }
   const frozen = job.params["provenance"] as
-    | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number; anchorFile?: string }
+    | { canonRevision?: number; sheets?: Record<string, number>; artDirectionVersion?: number; anchorFile?: string; borrowedImages?: Take["provenance"]["borrowedImages"] }
     | undefined;
   const sheetVersion = frozen?.sheets?.[sheetId];
   if (frozen?.canonRevision === undefined || sheetVersion === undefined) return null;
@@ -140,6 +140,7 @@ export async function recordReferenceTake(store: WorldStore, job: Job, ledgerEnt
     model: job.model,
     provenance: {
       canonRevision: frozen.canonRevision,
+      ...(frozen.borrowedImages ? { borrowedImages: frozen.borrowedImages } : {}),
       sheets: { [sheetId]: sheetVersion },
       ...(frozen.artDirectionVersion ?? artDirection?.version
         ? { artDirectionVersion: frozen.artDirectionVersion ?? artDirection!.version }

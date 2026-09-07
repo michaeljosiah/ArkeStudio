@@ -445,6 +445,7 @@ export function LocationReferenceScreen() {
             promptHint="Optional. The place, its look and the angle's name are sent whether or not you write here."
             worldSlug={world.meta.slug}
             reference={world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? null}
+            referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("location-view", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("location-view", sheetId)] ?? ""]?.worldName }}
             referenceHint="Optional. A photograph or a plate of the place to work from. The establishing view goes first, so this rides only where the model has room for a second image."
             onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId))}
             worldReferences={{ world, model: resolveModel(state, "image", choice.modelId).model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("location-view", sheetId), file) }}

@@ -193,6 +193,7 @@ const CLIENT_COMMAND_METADATA = {
   "use-world-image": action("world", "authored-diff", "world-store", "authored-change", ["world-metadata", "references"], { preparation: MEDIA_TARGET }),
   "discard-world-image": action("world", "destructive", "world-store", "destructive-change", ["world-metadata", "references"]),
   "generate-master-look": action("world", "generation", "job-queue", "spend-and-compute", ["art-direction", "references"], { preparation: GENERATION_QUOTE }),
+  "browse-reference-images": readOnly("Lists image files without opening another world."),
   "pick-staged-reference": action("world", "host-action", "host", "host-file-access", ["references"]),
   "clear-staged-reference": action("world", "command", "world-store", "destructive-change", ["references"]),
   "upload-master-look": action("world", "host-action", "host", "host-file-access", ["art-direction"]),

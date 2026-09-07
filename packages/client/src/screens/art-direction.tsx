@@ -429,6 +429,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         </div>}
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("world-image")] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("world-image"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("world-image")] ?? ""]?.worldName }}
         referenceHint={`${carriedLine}${droppedLine}Optional: stage one more image — a photograph, a painting, a frame — and it rides in the style role.`}
         onAttachReference={() => pickStagedReference(worldId, stagedReferenceKey("world-image"))}
         worldReferences={{ world, model, onChoose: (file) => pickStagedReference(worldId, stagedReferenceKey("world-image"), file) }}
@@ -572,6 +573,7 @@ export function ArtDirectionScreen() {
         promptHint="Starts as the look's own words. Whatever is here is sent as written — with the standing clause forbidding people, faces, text and montage added after it, because this image rides along with other characters' portraits."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("master-look")] ?? null}
+        referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("master-look"), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("master-look")] ?? ""]?.worldName }}
         referenceHint="Optional. A palette, a frame or a lighting study for the model to look at while it works."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"))}
         worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("master-look"), file) }}
