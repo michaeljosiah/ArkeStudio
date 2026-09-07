@@ -41,7 +41,7 @@ async function setup(ffmpeg?: FfmpegRunner) {
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
 }
 
-for (const decision of ["accept", "discard"] as const) {
+for (const decision of ["accept", "discard", "journal-discard"] as const) {
   it(`reconciles an overview card after ${decision} through the proposal panel (#953)`, async () => {
     const w = await setup();
     await w.coordinator.openWorld(WORLD_ID);
@@ -62,7 +62,13 @@ for (const decision of ["accept", "discard"] as const) {
       createdAt: AT,
     });
     await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
-    await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
+    if (decision === "journal-discard") {
+      // The authority landed, but no best-effort conversation resolution was recorded.
+      await w.gate.discard(action.authority.id);
+      w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: "discarded" });
+    } else {
+      await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
+    }
     await Promise.all(w.internal.backgroundWork);
     const folded = () => log.read().then(({ events }) => foldConversation(conversationId, AT, events).view);
     assert.equal((await folded()).actions[0]!.status, decision === "accept" ? "completed" : "cancelled");

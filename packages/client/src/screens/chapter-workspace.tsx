@@ -99,6 +99,7 @@ function flushAfter(
   // takes the parked text up and settles it against what is on disk (codex, PR 879).
   const key = parkedKey(save.worldId, save.prodId, save.file);
   const waiting: ParkedDraft = { value: save.value, baseHash: save.baseHash, landedBody: save.landedBody };
+  parkedDrafts.get(key)?.cancel?.();
   parkedDrafts.set(key, waiting);
   const unsubscribe = subscribeChapterSaveResults((result) => {
     if (result.requestId !== pending) return;
@@ -113,6 +114,7 @@ function flushAfter(
     parkedDrafts.set(key, held);
     keepUntilSaved(key, held, saveChapter(save.worldId, save.prodId, save.file, save.value, result.hash));
   });
+  waiting.cancel = unsubscribe;
 }
 
 /**
@@ -123,7 +125,7 @@ function flushAfter(
  * older save of the same screen carried, `landedBody`, if that is what is on disk — and says so
  * if the record has genuinely moved.
  */
-type ParkedDraft = { value: string; baseHash: string; landedBody: string | null; conflict?: boolean };
+type ParkedDraft = { value: string; baseHash: string; landedBody: string | null; conflict?: boolean; cancel?: () => void };
 const parkedDrafts = new Map<string, ParkedDraft>();
 const parkedKey = (worldId: string, prodId: string, file: string): string => `${worldId}/${prodId}/${file}`;
 
@@ -137,6 +139,7 @@ function keepUntilSaved(key: string, held: ParkedDraft, requestId: string | null
     if (result.disposition === "saved") parkedDrafts.delete(key);
     else held.conflict = true;
   });
+  held.cancel = unsubscribe;
 }
 
 /** The most paragraphs one page read carries — the frame's own cap, so a longer chapter reads its first thousand. */
@@ -343,6 +346,7 @@ export function ChapterWorkspace({
   useEffect(() => {
     // Nothing leaves the client while the transport is down; the connection coming back is a
     // dependency so a chapter opened during an outage does not sit on "Opening…" for good.
+    parkedDrafts.get(parkedKey(worldId, prodId, chapter.file))?.cancel?.();
     if (connection !== "open") return;
     // Taken up above, at mount; the next screen must not take it up again after this one sends it.
     parkedDrafts.delete(parkedKey(worldId, prodId, chapter.file));
@@ -513,8 +517,6 @@ export function ChapterWorkspace({
         // base to distinguish a plan-only change from competing prose, never merge blindly.
         unsentDraft.current = draftRef.current ?? queuedDraft.current ?? savedText.current;
         unsentBase.current = recordRef.current?.hash ?? null;
-        conflictRef.current = true;
-        setDraftConflict(true);
         if (timer.current !== null) clearTimeout(timer.current);
         timer.current = null;
         setSaving(false);
@@ -578,6 +580,7 @@ export function ChapterWorkspace({
       if (current !== null && value === current.body && unsentDraft.current === null) return;
       const key = parkedKey(worldId, prodId, chapter.file);
       const held: ParkedDraft = { value, baseHash: base, landedBody: savedText.current, conflict: conflictRef.current };
+      parkedDrafts.get(key)?.cancel?.();
       parkedDrafts.set(key, held);
       if (conflictRef.current) return;
       if (pendingSave.current !== null) {

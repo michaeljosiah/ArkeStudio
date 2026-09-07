@@ -249,6 +249,23 @@ async function leave(m: Mounted) {
 }
 
 describe("chapter autosave recovery (#954)", () => {
+  it("retries a refused save when the refreshed record only changed the plan", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m);
+    const value = `${BODY}\n\nKeep this paragraph.`;
+    await typeProse(m, value);
+    const read = Array.from(m.container.querySelectorAll("button")).find((b) => b.textContent === "Read the chapter")!;
+    await act(async () => read.click());
+    const save = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    await answerSave(save, "refused");
+    const nextHash = `sha256:${"e".repeat(64)}`;
+    await answerOpen(m, BODY, nextHash);
+    const retry = m.sent.findLast((m) => m.kind === "save-chapter")!;
+    assert.notEqual(retry.requestId, save.requestId);
+    assert.equal(retry.baseHash, nextHash);
+    assert.equal(retry.body, value);
+    await answerSave(retry, "saved", nextHash);
+  });
   it("refreshes a plan-only hash change and saves current typing against the new base", async () => {
     const state = inkbound();
     const m = await mount(state);
@@ -304,7 +321,7 @@ describe("chapter autosave recovery (#954)", () => {
     const newest = `${BODY}\n\nFirst edit. More words while saving.`;
     await typeProse(m, newest);
     await answerSave(save, "refused");
-    await answerOpen(m, BODY, `sha256:${"d".repeat(64)}`);
+    await answerOpen(m, `${BODY}\n\nCompeting prose.`, `sha256:${"d".repeat(64)}`);
     assert.equal(sourceProps(m).value, newest);
     assert.match(text(m), /Not saved/);
     assert.equal(m.sent.filter((m) => m.kind === "save-chapter").length, 1, "a refusal is not retried automatically");
