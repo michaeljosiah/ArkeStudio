@@ -99,19 +99,34 @@ export async function assembleKeyArt(
   }
 
   const room = () => carried.length < budget;
-  const sheetByName = (type: Sheet["type"], name: string): Sheet | undefined =>
-    bundle.sheets.find((sheet) => sheet.type === type && sheet.name.toLowerCase() === name.toLowerCase());
+  const normalize = (name: string) => name.trim().toLowerCase().replace(/[’‘]/g, "'");
+  const sheetByName = (type: Sheet["type"], name: string): Sheet | undefined => {
+    const wanted = normalize(name);
+    const candidates = bundle.sheets.filter((sheet) => sheet.type === type);
+    const exact = candidates.filter((sheet) => normalize(sheet.name) === wanted || normalize(sheet.id) === wanted);
+    if (exact.length) return exact.length === 1 ? exact[0] : undefined;
+    const aliases = candidates.filter((sheet) => type === "character"
+      ? [...sheet.name.matchAll(/["“]([^"“”]+)["”]/g)].some((match) => normalize(match[1]!) === wanted)
+      : wanted.startsWith(`${normalize(sheet.name)},`));
+    // Never guess between people with the same nickname. For places, prefer the longest
+    // complete name: "House, Ikoyi" is more specific than "House".
+    if (type === "location") aliases.sort((a, b) => b.name.length - a.name.length);
+    if (aliases.length === 1 || (type === "location" && aliases[0] && aliases[1] && aliases[0].name.length > aliases[1].name.length)) return aliases[0];
+    return undefined;
+  };
 
   const seen = new Set<string>();
   for (const name of brief?.characters ?? []) {
     // A name the brief repeats is one person, one slot.
     if (seen.has(name.toLowerCase())) continue;
-    seen.add(name.toLowerCase());
+
     const sheet = sheetByName("character", name);
     if (!sheet) {
       dropped.push({ name, reason: "is not in the world" });
       continue;
     }
+    if (seen.has(sheet.id)) continue;
+    seen.add(sheet.id);
     const kit = (await readKit(store, sheet.id))?.kit ?? null;
     const photo = kit?.mainPhoto?.file ?? kit?.anchor;
     if (photo === undefined) {
@@ -194,7 +209,7 @@ export function keyArtComposition(input: {
     excerpt !== "" ? `The story: ${excerpt}` : "",
     `The image: ${keyArtBriefProse(input.brief)}.`,
     input.cast.length > 0
-      ? `In frame: ${input.cast.join(", ")} â€” preserve each supplied identity exactly.`
+      ? `Identity references supplied for: ${input.cast.join(", ")} â€” preserve each supplied identity exactly.`
       : "",
     "A single evocative cinematic image of this world and what is at stake in it. No text, no logos.",
   ];

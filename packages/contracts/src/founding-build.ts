@@ -161,6 +161,7 @@ export const BuildJournalEntrySchema = z.discriminatedUnion("kind", [
       kind: z.literal("intent"),
       key: z.string().min(1),
       idempotencyKey: UlidSchema.optional(),
+      detail: z.string().optional(),
       at: IsoDateTimeSchema,
     })
     .strict(),
@@ -281,11 +282,16 @@ export function foldFoundingBuild(
   // Last word wins, per key: a terminal followed by a fresh intent is the item running
   // again — the shape every Activity re-run leaves behind (R-48, R-49).
   const lastByKey = new Map<string, Extract<BuildJournalEntry, { kind: "intent" | "terminal" }>>();
+  const detailByKey = new Map<string, string>();
   const jobIdByKey = new Map<string, string>();
   let stopped = false;
   let completed = false;
   let noticeDismissed = false;
   for (const entry of entries) {
+    if (entry.kind === "intent") {
+      detailByKey.delete(entry.key);
+      if (entry.detail) detailByKey.set(entry.key, entry.detail);
+    }
     if (entry.kind === "intent" || entry.kind === "terminal") lastByKey.set(entry.key, entry);
     else if (entry.kind === "enqueued") jobIdByKey.set(entry.key, entry.jobId);
     else if (entry.kind === "stopped") stopped = true;
@@ -301,6 +307,7 @@ export function foldFoundingBuild(
       stage: item.stage,
       subject: item.subject,
       name: item.name,
+      ...(detailByKey.has(item.key) ? { detail: detailByKey.get(item.key)! } : {}),
       authorized: item.authorized,
       estimatedMicroUsd: item.estimatedMicroUsd,
       ...(jobId !== undefined ? { jobId } : {}),

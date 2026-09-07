@@ -1089,7 +1089,11 @@ export class FoundingBuildService {
     } else {
       const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
       idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
-      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, at: this.ports.nowIso() });
+      const dropped = input.params["droppedReferences"] as Array<{ name: string; reason: string }> | undefined;
+      const detail = dropped?.length
+        ? `Key art will be made without references for: ${dropped.map(({ name, reason }) => `${name} (${reason})`).join("; ")}.`
+        : undefined;
+      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, ...(detail ? { detail } : {}), at: this.ports.nowIso() });
     }
     this.publish(active);
     try {
