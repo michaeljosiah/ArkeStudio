@@ -17,6 +17,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
+import { hashMedia } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
@@ -208,11 +209,9 @@ async function artifactMediaMatches(
   const path = join(store.dir, "artifacts", artifact.file);
   const info = await lstat(toExtendedLength(path)).catch(() => null);
   if (!info?.isFile() || info.isSymbolicLink()) return false;
-  const bytes = await readFile(toExtendedLength(path)).catch(() => null);
-  return (
-    bytes !== null &&
-    `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expectedHash
-  );
+  // Retained audio and video can be gigabytes; reuse the scanner's bounded streaming hash.
+  const hash = await hashMedia(path);
+  return hash !== null && hash.slice(0, "sha256:".length + 16) === expectedHash;
 }
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */
