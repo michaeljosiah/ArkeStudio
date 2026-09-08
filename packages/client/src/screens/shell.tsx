@@ -2284,7 +2284,7 @@ export function SettingsGeneralScreen() {
     return locality === "remote" ? "another machine" : "this machine";
   };
   return (
-    <div data-screen="settings-general" className="fy-set">
+    <div data-screen="settings-general" className="fy-set fy-set--general">
       <div className="fy-set__eyebrow">DEFAULTS</div>
       {/* A default that cannot run is stated, never repaired (design turn 40d). It gets a callout
           rather than a footnote because the next dispatch of that capability has nowhere to go. */}
@@ -2303,7 +2303,7 @@ export function SettingsGeneralScreen() {
         const usable = (m: (typeof options)[number]) => modelEligible(m, eligibility);
         const stranded = selectedModel !== undefined && !usable(selectedModel);
         return (
-          <div key={capability} className="fy-set__row">
+          <div key={capability} className="fy-set__row fy-set__row--routing">
             <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
             <select
               className="fy-set__pill"
@@ -2340,7 +2340,7 @@ export function SettingsGeneralScreen() {
                 {sourceOf(selectedModel)} · {strandReason(state, selectedModel)}
               </span>
             )}
-            <span className={cx("fy-set__dot", stranded ? "fy-set__dot--warn" : selectedModel && "fy-set__dot--ok")} />
+            {stranded && <span className="fy-set__dot fy-set__dot--warn" aria-hidden="true" />}
           </div>
         );
       })}

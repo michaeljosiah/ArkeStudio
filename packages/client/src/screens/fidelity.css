@@ -3231,6 +3231,18 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 }
 .fy-set__pill:hover { background: var(--accent); }
 .fy-set__pill:disabled { opacity: 0.5; cursor: default; }
+/* Turn 124: a pane of rows keeps a 760px reading column. Native selects must shrink
+   independently of their longest option; the state stays readable below the same control. */
+.fy-set--general { grid-template-columns: minmax(0, 760px); }
+.fy-set--general .fy-set__row { min-width: 0; overflow-wrap: anywhere; }
+.fy-set--general .fy-set__row--routing {
+  display: grid;
+  grid-template-columns: 118px minmax(0, 1fr) 6px;
+  gap: 6px 12px;
+}
+.fy-set__row--routing > .fy-set__pill { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+.fy-set__row--routing > .fy-set__state { grid-column: 2; }
+.fy-set__row--routing > .fy-set__dot { grid-column: 3; grid-row: 1; }
 /*
  * Archiving, on a world card. The button hides until the card is hovered — a world you are
  * looking at should not be advertising the way to put it away — and the confirm covers the
