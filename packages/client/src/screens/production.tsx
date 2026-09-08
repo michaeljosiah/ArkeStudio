@@ -140,7 +140,7 @@ import { PageReadControl, useProsePageRead, type PageReadBlock } from "../compon
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { productionModel } from "../components/dispatch-bar.js";
-import { Portrait, sheetPortraitPath } from "../components/portrait.js";
+import { characterPortraitPath, locationPortraitPath, Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
@@ -1300,7 +1300,10 @@ export function ProductionCastScreen() {
       }
     >
       <div className="fy-gridcard__frame" style={{ height: 210 }}>
-        <Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(sheet.id)} label={sheet.name} />
+        <Portrait worldSlug={world.meta.slug}
+          path={sheet.type === "character" ? characterPortraitPath(world, sheet.id)
+            : sheet.type === "location" ? locationPortraitPath(world, sheet.id) : sheetPortraitPath(sheet.id)}
+          label={sheet.name} />
       </div>
       <div className="fy-gridcard__pad">
         <div className="fy-gridcard__title">
@@ -1324,16 +1327,6 @@ export function ProductionCastScreen() {
 
   return (
     <div data-screen="production-cast">
-      <div className="fy-corner">
-        <Button
-          variant="primary"
-          onClick={() =>
-            setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)
-          }
-        >
-          New guest
-        </Button>
-      </div>
       <div className="fy-hero">
         <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
@@ -1343,6 +1336,15 @@ export function ProductionCastScreen() {
           Guests belong to this production alone. The world's cast is shared with everything else{" "}
           {world.meta.name} holds — change one and every production sees it.
         </p>
+        <Button
+          variant="primary"
+          style={{ marginTop: 16 }}
+          onClick={() =>
+            setDrafting(drafting === null ? { type: "character", name: "", sentence: "" } : null)
+          }
+        >
+          New guest
+        </Button>
       </div>
 
       {drafting !== null && (
@@ -1413,7 +1415,7 @@ export function ProductionCastScreen() {
         <div style={{ padding: "0 90px" }}>
           <EmptyState
             title="No guests yet"
-            hint="People and places this production needs but the world does not — the barman with two lines, the room above the chandlery."
+            hint="Add characters, locations or factions that belong only to this production."
           />
         </div>
       ) : (

@@ -31,6 +31,7 @@ import {
   isClonedVoice,
   isGeneratedArtifact,
   orderedShots,
+  sortScenes,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
@@ -52,7 +53,7 @@ import { DictationButton } from "../components/dictation.js";
 import { ExtractionOffer } from "../components/extraction-offer.js";
 import { PageReadControl, usePageRead, type PageReadBlock } from "../components/page-read.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
-import { Wave } from "./production.js";
+import { episodeThumbnailPath, takeMediaPath, Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
 import { artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
@@ -4767,10 +4768,12 @@ export function ProductionsScreen() {
   const navigate = useNavigate();
   const productions = world?.productions ?? [];
   const artOf = (p: (typeof productions)[number]): string => {
+    const accepted = episodeThumbnailPath(p, { scenes: sortScenes(p.scenes).map((scene) => scene.id) });
+    if (accepted) return accepted;
     const board = p.scenes.find((s) => s.board)?.board;
     if (board) return `productions/${p.meta.id}/${board.image}`;
     const take = p.takes.find((t) => t.media);
-    if (take) return `productions/${p.meta.id}/takes/${take.id}/${take.media}`;
+    if (take) return takeMediaPath(p, take) ?? world?.keyArt ?? "";
     return world?.keyArt ?? "";
   };
   return (
