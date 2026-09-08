@@ -225,6 +225,17 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     assert.doesNotMatch(plain(render("/settings/general")), /which model runs each writing agent/);
     assert.match(plain(render("/settings/harness")), /which model runs each writing agent/);
   });
-});
 
+  it("does not mark an untested default green, and retains the warning for a refused default (#991)", () => {
+    const state = stateWith({
+      routing: { defaults: { video: CLOUD_VIDEO.id }, faults: [] },
+      providers: [{ id: CLOUD_VIDEO.provider, configured: true, validation: "untested", probes: [], fault: null }],
+    });
+    const untested = render("/settings/general", state);
+    assert.match(plain(untested), /untested/);
+    assert.doesNotMatch(untested, /fy-set__dot--ok|fy-set__dot--warn/);
+    state.app.providers[0]!.configured = false;
+    assert.match(render("/settings/general", state), /fy-set__dot--warn/);
+  });
+});
 

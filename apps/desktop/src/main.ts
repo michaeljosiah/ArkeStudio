@@ -426,6 +426,11 @@ function registerHostIpc(): void {
       applyHostTheme(preference);
     }
   });
+  ipcMain.on("arke:get-theme", (event) => {
+    event.returnValue = window && event.sender === window.webContents
+      ? { preference: themePreference, resolved: resolvedTheme }
+      : null;
+  });
   ipcMain.on("arke:chrome-over-plate", (event, over: unknown) => {
     if (!window || event.sender !== window.webContents) return;
     chromeOverPlate = over === true;
@@ -452,6 +457,7 @@ function registerHostIpc(): void {
 }
 
 async function createWindow(): Promise<void> {
+  applyHostTheme(themePreference, false);
   const palette = themePalette(resolvedTheme);
   window = new BrowserWindow({
     width: 1440,
@@ -478,8 +484,6 @@ async function createWindow(): Promise<void> {
       plugins: true,
       additionalArguments: [
         `--arke-app-version=${__APP_VERSION__}`,
-        `--arke-theme-preference=${themePreference}`,
-        `--arke-resolved-theme=${resolvedTheme}`,
       ],
     },
   });

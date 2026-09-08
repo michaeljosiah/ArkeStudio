@@ -4,6 +4,31 @@ import { runInNewContext } from "node:vm";
 import { it } from "node:test";
 import { build } from "esbuild";
 
+it("each preload reads the current host theme instead of replaying window-creation arguments", async () => {
+  const result = await build({ entryPoints: [fileURLToPath(new URL("../src/preload.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", external: ["electron"] });
+  let hostTheme = { preference: "system", resolved: "dark" };
+  let bridge: { theme: typeof hostTheme } | undefined;
+  const reload = () => runInNewContext(result.outputFiles[0]!.text, {
+    module: { exports: {} }, exports: {},
+    process: { argv: ["--arke-theme-preference=system", "--arke-resolved-theme=light"], platform: "win32" },
+    require: () => ({
+      contextBridge: { exposeInMainWorld: (_name: string, value: typeof bridge) => { bridge = value; } },
+      ipcRenderer: { on: () => {}, send: () => {}, sendSync: (channel: string) => {
+        assert.equal(channel, "arke:get-theme");
+        return { ...hostTheme };
+      } },
+    }),
+  });
+  reload();
+  assert.deepEqual(bridge?.theme, hostTheme);
+  hostTheme = { preference: "dark", resolved: "dark" };
+  reload();
+  assert.deepEqual(bridge?.theme, hostTheme);
+  hostTheme = { preference: "light", resolved: "light" };
+  reload();
+  assert.deepEqual(bridge?.theme, hostTheme);
+});
+
 it("the bundled preload injects hello credentials but exposes neither the token nor a credentialled media URL", async () => {
   const result = await build({ entryPoints: [fileURLToPath(new URL("../src/preload.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "cjs", external: ["electron"] });
   let bridge: { startupState(): unknown; coordinatorHttpBase(): string; send(json: string): void; subscribe(frame: (json: string) => void, status: (state: string) => void): void;
@@ -23,7 +48,7 @@ it("the bundled preload injects hello credentials but exposes neither the token 
       assert.equal(name, "electron");
       return {
         contextBridge: { exposeInMainWorld: (_name: string, value: typeof bridge) => { bridge = value; } },
-        ipcRenderer: { on: (name: string, fn: (...args: unknown[]) => void) => ipc.set(name, fn), send: () => {} },
+        ipcRenderer: { on: (name: string, fn: (...args: unknown[]) => void) => ipc.set(name, fn), send: () => {}, sendSync: () => ({ preference: "system", resolved: "light" }) },
         webUtils: { getPathForFile: (file: { nativePath?: string }) => file.nativePath ?? "" },
       };
     },
