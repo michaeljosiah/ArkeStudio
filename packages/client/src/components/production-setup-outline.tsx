@@ -4,7 +4,9 @@ export function ProductionSetupOutline({ draft, sheetName }: { draft: Production
   const scene = (key: string) => {
     const item = draft.scenes.find(item => item.key === key);
     return item ? <li key={key}><strong>{item.title}</strong>{item.synopsis && <p>{item.synopsis}</p>}
-      {item.inherits?.location && <span className="fy-mono">{sheetName(item.inherits.location)}</span>}
+      {item.inherits?.location && <p>Location: {sheetName(item.inherits.location)}</p>}
+      {item.inherits?.timeOfDay && <p>Time: {item.inherits.timeOfDay}</p>}
+      {item.inherits?.tone && <p>Tone: {item.inherits.tone}</p>}
       {!!item.scriptBlocks?.length && <details><summary>{item.scriptBlocks.length} script block{item.scriptBlocks.length === 1 ? "" : "s"}</summary>
         {item.scriptBlocks.map(block => <p key={block.id}>{block.speaker && <strong>{sheetName(block.speaker)}: </strong>}{block.text}</p>)}</details>}
     </li> : <li key={key}>Scene removed: {key}</li>;

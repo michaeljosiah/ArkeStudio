@@ -4352,9 +4352,23 @@ export class Coordinator {
             setupId: msg.setupId, requestId: msg.requestId, state });
           this.transport.broadcastSnapshot();
         } catch (error) {
+          let detail = error instanceof Error ? error.message : "This production setup could not be updated.";
+          let state: Extract<DomainEvent, { type: "production-setup.result" }>["state"];
+          // A refusal can reset review or leave an uncertain creation locked. Publish the
+          // durable state before answering so the rail cannot offer actions from the old review.
+          if (store && store.worldId === msg.worldId && this.stillOpen(store) && !store.isClosed()) {
+            try {
+              await this.refreshWorldSnapshot(msg.worldId);
+              await this.refreshConversations(store);
+              await this.openWorldChat(store, msg.setupId);
+              const workspace = this.readModel.getState().worldChat;
+              if (workspace?.conversationId === msg.setupId) state = workspace.productionSetup;
+            } catch {
+              detail += " Reopen this setup to refresh its current state.";
+            }
+          }
           this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
-            setupId: msg.setupId, requestId: msg.requestId,
-            detail: error instanceof Error ? error.message : "This production setup could not be updated." });
+            setupId: msg.setupId, requestId: msg.requestId, state, detail });
         }
         return;
       }

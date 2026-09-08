@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { access, readFile } from "node:fs/promises";
+import { access, cp, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid, type ConversationId } from "@arke-studio/contracts";
 import { ProductionSetupService, recoverProductionSetups } from "../../src/productions/setup.js";
@@ -12,12 +12,13 @@ import { WorldChatService } from "../../src/world-chat/service.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
 import { WorldStore } from "../../src/world/store.js";
 import { CrashSignal } from "../../src/world/commit.js";
-import { makeTempWorld } from "../world/helpers.js";
-import { closeOnCleanup } from "../tmp.js";
+import { toExtendedLength } from "../../src/world/paths.js";
+import { FIXTURE_WORLD, makeTempWorld } from "../world/helpers.js";
+import { closeOnCleanup, tempDir } from "../tmp.js";
 
 const CLOCK = "2026-09-08T09:00:00.000Z";
-async function open() {
-  const store = await WorldStore.open(await makeTempWorld(), { clock: () => CLOCK });
+async function open(worldDir?: string) {
+  const store = await WorldStore.open(worldDir ?? await makeTempWorld(), { clock: () => CLOCK });
   closeOnCleanup(() => store.close());
   const service = new ProductionSetupService(store);
   const id = `cv_${ulid()}` as ConversationId;
@@ -136,9 +137,13 @@ describe("durable production setup lifecycle (issue #976)", () => {
     assert.equal((await service.resume(other)).status, "draft");
   });
 
-  it("finishes attachment after a crash between authored commit and conversation acknowledgement", async () => {
-    const { store, service, id } = await open();
+  it("finishes attachment after a crash with a creation record beyond the Windows classic path limit", async () => {
+    const parent = join(await tempDir("arke-setup-deep-"), "a".repeat(80));
+    const worldDir = join(parent, "b".repeat(230 - parent.length - 1));
+    await cp(FIXTURE_WORLD, toExtendedLength(worldDir), { recursive: true });
+    const { store, service, id } = await open(worldDir);
     const reviewed = await service.review(id, 2);
+    assert.ok(join(worldDir, "productions", reviewed.review!.plan.production.id, "setup-origin.json").length > 260);
     const log = new WorldChatStore(conversationDir(store.dir, id));
     await store.ownedWrite(() => log.append({
       type: "production-setup.updated", state: { ...reviewed, status: "creating" },

@@ -83,6 +83,16 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("shows every inherited scene field in the outline the author reviews", async () => {
+    const setup = draft();
+    setup.draft.scenes[0]!.inherits = { location: "the-crossing", timeOfDay: "Before sunrise", tone: "Quiet unease" };
+    const m = await mount(fixture(setup));
+    await answer(m.commands()[0]!, setup);
+    assert.match(m.container.textContent!, /Location: the-crossing/);
+    assert.match(m.container.textContent!, /Time: Before sunrise/);
+    assert.match(m.container.textContent!, /Tone: Quiet unease/);
+  });
+
   it("the film door opens a private conversation without sending create-production", async () => {
     const m = await mount(FIXTURE_STATE, true);
     const film = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Make a film"));

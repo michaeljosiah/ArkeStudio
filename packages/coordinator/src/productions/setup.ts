@@ -14,6 +14,7 @@ import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
 import { CommitStaleError } from "../world/commit.js";
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
+import { toExtendedLength } from "../world/paths.js";
 
 function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
   return { status: "draft", review: null, draft: ProductionSetupDraftSchema.parse({
@@ -124,7 +125,7 @@ export class ProductionSetupService {
     const productionId = state.review?.plan.production.id ?? state.productionId;
     if (!productionId) return null;
     let raw: string;
-    try { raw = await readFile(join(this.world.dir, "productions", productionId, "setup-origin.json"), "utf8"); }
+    try { raw = await readFile(toExtendedLength(join(this.world.dir, "productions", productionId, "setup-origin.json")), "utf8"); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
     const link = ProductionSetupOriginSchema.parse(JSON.parse(raw));
     if (link.worldId !== this.world.worldId || link.setupId !== id ||
