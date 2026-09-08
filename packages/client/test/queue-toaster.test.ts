@@ -44,6 +44,7 @@ const manifest = {
     { id: "gpt-image-2", provider: "fal", displayName: "GPT Image 2" },
     { id: "seedance-2.0", provider: "fal", displayName: "Seedance 2.0" },
     { id: "indextts-2-5", provider: "comfyui", displayName: "IndexTTS 2.5" },
+    { id: "h3-reference-video", provider: "comfyui", displayName: "Local · H3 Reference Video" },
   ],
 } as unknown as ModelManifest;
 
@@ -89,6 +90,12 @@ describe("queue notification", () => {
     const note = enqueueNote(result({ command: "dispatch-scene" }), [local], manifest);
     assert.equal(note?.meta, "IndexTTS 2.5 · local");
     assert.doesNotMatch(note!.meta, /\$/);
+  });
+
+  it("says local once when the recipe already prefixes its model name (issue 1001)", () => {
+    const local = job({ provider: "comfyui", model: "h3-reference-video", estimatedMicroUsd: 0 });
+    assert.equal(enqueueNote(result(), [local], manifest)?.meta, "H3 Reference Video · local");
+    assert.equal(readyNote(local, manifest, undefined).meta, "H3 Reference Video · local");
   });
 
   it("does not count a batch's own siblings as ahead of it", () => {

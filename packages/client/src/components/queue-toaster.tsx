@@ -108,6 +108,19 @@ export function noteNow(
  */
 const StableNote = memo(Note);
 
+/** Receipts expire even if Sonner's hover/drag state stays paused (issue 1001). */
+function ToastNote(props: Parameters<typeof Note>[0]) {
+  const { note, onDismiss } = props;
+  const dismiss = useRef(onDismiss);
+  dismiss.current = onDismiss;
+  useEffect(() => {
+    // A new outcome gets its own reading time. Store frames and navigation do not renew it.
+    const timer = setTimeout(() => dismiss.current(), note.tone === "refused" ? 12000 : 6000);
+    return () => clearTimeout(timer);
+  }, [note.id, note.tone]);
+  return <StableNote {...props} />;
+}
+
 /** Re-derives from the store, so the row follows the job it is about. */
 function LiveNote({
   result,
@@ -124,12 +137,7 @@ function LiveNote({
   const derived = noteNow(result, state?.app.jobs ?? [], state?.app.manifest ?? null) ?? seed;
   const key = JSON.stringify([derived.tone, derived.title, derived.meta, derived.reason, derived.live, derived.action?.label]);
   const note = useMemo(() => derived, [key]);
-  return <StableNote note={note} onAct={() => onAct(note)} onDismiss={onDismiss} />;
-}
-
-function duration(note: QueueNote): number {
-  // A refusal has something to read; everything else is a receipt.
-  return note.tone === "refused" ? 12000 : 6000;
+  return <ToastNote note={note} onAct={() => onAct(note)} onDismiss={onDismiss} />;
 }
 
 export function QueueToaster() {
@@ -181,8 +189,8 @@ export function QueueToaster() {
           reason: event.reason,
         };
         toast.custom(
-          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
-          { id: note.id, duration: duration(note) },
+          (id) => <ToastNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: Infinity },
         );
       }),
     [],
@@ -203,8 +211,8 @@ export function QueueToaster() {
           reason: result.reason ?? "the scene could not be created",
         };
         toast.custom(
-          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
-          { id: note.id, duration: duration(note) },
+          (id) => <ToastNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: Infinity },
         );
       }),
     [],
@@ -224,8 +232,8 @@ export function QueueToaster() {
           reason: result.reason ?? "the chapter could not be created",
         };
         toast.custom(
-          (id) => <StableNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
-          { id: note.id, duration: duration(note) },
+          (id) => <ToastNote note={note} onAct={() => toast.dismiss(id)} onDismiss={() => toast.dismiss(id)} />,
+          { id: note.id, duration: Infinity },
         );
       }),
     [],
@@ -249,7 +257,7 @@ export function QueueToaster() {
             onDismiss={() => toast.dismiss(id)}
           />
         ),
-        { id: seed.id, duration: duration(seed) },
+        { id: seed.id, duration: Infinity },
       );
     });
   }, [navigate]);
@@ -264,7 +272,7 @@ export function QueueToaster() {
         const note = readyNote(job, store.current.manifest, existing);
         toast.custom(
           (id) => (
-            <Note
+            <ToastNote
               note={note}
               onAct={() => {
                 if (note.action) navigate(note.action.to);
@@ -273,7 +281,7 @@ export function QueueToaster() {
               onDismiss={() => toast.dismiss(id)}
             />
           ),
-          { id: note.id, duration: duration(note) },
+          { id: note.id, duration: Infinity },
         );
       }),
     [navigate],
