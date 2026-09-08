@@ -243,8 +243,10 @@ export function targetWords(targetLength: string | undefined, chapterCount?: num
     const figure = Number(match[1]!.replace(/,/g, ""));
     const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
     if (!Number.isFinite(words) || words < 100) continue;
+    const before = targetLength.slice(0, match.index);
     const after = targetLength.slice(match.index + match[0].length);
-    if (/^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b)/i.test(after)) {
+    if (/\b(?:per\s+chapter|each\s+chapter)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
+        /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b)/i.test(after)) {
       perChapter = words;
     } else {
       return Math.round(words);

@@ -3587,8 +3587,10 @@ function threadQuestion(entry: CanonEntry): string | null {
   if (entry.status !== "open") return null;
   const title = entry.title.trim().replace(/\s+/g, " ");
   const question = entry.body.trim().replace(/\s+/g, " ");
-  const prefix = title.replace(/(?:…|\.{3})$/, "").trimEnd();
-  return question && (title === question || (prefix !== title && prefix !== "" && question.startsWith(prefix)))
+  const body = entry.body.trim();
+  // Only the known 77-character truncation is generated; an authored ellipsis is a title.
+  const generated = body.length > 80 && entry.title.trim() === `${body.slice(0, 77)}…`;
+  return question && (title === question || generated)
     ? entry.body
     : null;
 }
@@ -3811,11 +3813,13 @@ export function CanonEntryScreen() {
   // fills that tail and the panel would then say an entry has no history while its records sit
   // intact on disk. Undefined until the detail arrives, so the empty line waits for an answer.
   const history = detail?.history;
+  const citedBy = detail && detail.canonRevision === canonRevision ? detail.citedBy : undefined;
   const question = threadQuestion(entry);
-  const referenceLink = (id: string) => {
-    const canon = world?.canon.find((candidate) => candidate.id === id);
-    const sheet = world?.sheets.find((candidate) => candidate.id === id);
-    const production = world?.productions.find((candidate) => candidate.meta.id === id);
+  const referenceLink = (id: string, kind: "canon" | "sheet" | "production" | null) => {
+    // Slugs are unique within a kind, not across sheets and productions.
+    const canon = kind === "canon" ? world?.canon.find((candidate) => candidate.id === id) : undefined;
+    const sheet = kind === "sheet" ? world?.sheets.find((candidate) => candidate.id === id) : undefined;
+    const production = kind === "production" ? world?.productions.find((candidate) => candidate.meta.id === id) : undefined;
     const to = canon ? `canon/${id}` : sheet ? `${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${id}` : production ? `p/${id}` : null;
     const label = canon ? `${id} · ${canon.title}` : sheet?.name ?? production?.meta.title ?? id;
     return to ? <Link key={id} to={`/w/${worldId}/${to}`}>{label}</Link> : <span key={id}>{label}</span>;
@@ -3854,9 +3858,9 @@ export function CanonEntryScreen() {
             {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
             {entry.amendedAt !== undefined && ` · last amended v${entry.amendedAt}`}
           </div>
-          {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+          {citedBy && (citedBy.sheets.length > 0 || citedBy.entries.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
-              {detail.citedBy.sheets.map((s) => (
+              {citedBy.sheets.map((s) => (
                 <span key={s.id} className="fy-pill">
                   <span className="fy-pill__avatar">
                     <Portrait
@@ -3866,16 +3870,16 @@ export function CanonEntryScreen() {
                       radius={99}
                     />
                   </span>
-                  {referenceLink(s.id)}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? ` · v${s.atVersion}` : ""}
                 </span>
               ))}
-              {detail.citedBy.entries.map((id) => (
+              {citedBy.entries.map((id) => (
                 <span
                   key={id}
                   className="fy-pill"
                 >
-                  {referenceLink(id)}
+                  {referenceLink(id, "canon")}
                 </span>
               ))}
             </div>
@@ -3883,33 +3887,33 @@ export function CanonEntryScreen() {
         </div>
           <section aria-label="Cited by" style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
             <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
-            {!detail && <div className="fy-mono">Loading citations…</div>}
-            {detail && detail.citedBy.sheets.length + detail.citedBy.entries.length + detail.citedBy.productions.length === 0 && (
+            {!citedBy && <div className="fy-mono">Loading citations…</div>}
+            {citedBy && citedBy.sheets.length + citedBy.entries.length + citedBy.productions.length === 0 && (
               <div className="fy-mono">No citations yet.</div>
             )}
-            {detail?.citedBy.sheets.map((s) => (
+            {citedBy?.sheets.map((s) => (
               <div key={s.id} className="fy-citerow">
                 <span style={{ flex: 1 }}>
-                  {referenceLink(s.id)}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? `, sheet v${s.atVersion}` : ""}
                 </span>
                 <span className="fy-mono">canon reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-            {detail?.citedBy.entries.map((id) => (
+            {citedBy?.entries.map((id) => (
               <div
                 key={id}
                 className="fy-citerow"
               >
-                <span style={{ flex: 1 }}>{referenceLink(id)}</span>
+                <span style={{ flex: 1 }}>{referenceLink(id, "canon")}</span>
                 <span className="fy-mono">canon cross-reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-            {detail?.citedBy.productions.map((id) => (
+            {citedBy?.productions.map((id) => (
               <div key={id} className="fy-citerow">
-                <span style={{ flex: 1 }}>{referenceLink(id)}</span>
+                <span style={{ flex: 1 }}>{referenceLink(id, "production")}</span>
                 <span className="fy-mono">production reference</span>
                 <ChevronRight size={13} />
               </div>
@@ -3955,7 +3959,8 @@ export function CanonEntryScreen() {
                   <div>
                     {r.summary}
                     {r.targets.length > 0 && <div className="fy-mono" style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 4 }}>
-                      {r.targets.map(referenceLink)}
+                      {r.targets.map((id) => referenceLink(id, r.kind === "productions-see-new-revision" ? "production" :
+                        r.kind === "contradiction-candidates" || r.kind === "gains-cross-reference" ? "canon" : null))}
                     </div>}
                   </div>
                 </div>

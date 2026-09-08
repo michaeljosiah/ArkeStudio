@@ -10,8 +10,8 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
 const ENTRY = "CANON-002";
 
-function render(canonRefs: Record<string, CanonRefsState>): string {
-  __setStateForTest(FIXTURE_STATE, { canonRefs });
+function render(canonRefs: Record<string, CanonRefsState>, state = FIXTURE_STATE): string {
+  __setStateForTest(state, { canonRefs });
   return renderToString(
     <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/canon/${ENTRY}`]}>
       <App />
@@ -25,7 +25,7 @@ function detail(history: CanonRefsState["history"], historyTruncated: boolean): 
       citedBy: { sheets: [], entries: [], productions: [] },
       history,
       historyTruncated,
-      canonRevision: 4,
+      canonRevision: FIXTURE_STATE.world!.meta.canonRevision,
       ripples: [],
     },
   };
@@ -92,14 +92,16 @@ describe("the entry's amendment vocabulary", () => {
 
 describe("readable canon context (issue 1003)", () => {
   it("names ripple targets and keeps production-only citations visible", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    state.world!.sheets.push({ ...state.world!.sheets[0]!, id: "saltlight", name: "A guest with the production's slug" });
     const html = render({ [ENTRY]: {
       citedBy: { sheets: [], entries: [], productions: ["saltlight"] },
-      history: [], historyTruncated: false, canonRevision: 4,
+      history: [], historyTruncated: false, canonRevision: state.world!.meta.canonRevision,
       ripples: [
         { kind: "contradiction-candidates", summary: "1 existing entry shares this vocabulary — check for conflict.", targets: ["CANON-044"] },
         { kind: "productions-see-new-revision", summary: "1 production sees the new revision on its next dispatch", targets: ["saltlight"] },
       ],
-    } });
+    } }, state);
     const { document } = parseHTML(html);
     const citedBy = document.querySelector('[aria-label="Cited by"]')!;
     assert.match(citedBy.textContent!, /Saltlight/);
@@ -109,12 +111,18 @@ describe("readable canon context (issue 1003)", () => {
     assert.match(ripples.textContent!, /Saltlight/);
     assert.doesNotMatch(ripples.textContent!, /contradiction-candidates|productions-see-new-revision/);
     assert.equal(ripples.querySelector("a")?.getAttribute("href"), `/w/${FIXTURE_WORLD_ID}/canon/CANON-044`);
+    assert.equal(ripples.querySelectorAll("a")[1]?.getAttribute("href"), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    assert.doesNotMatch(html, /A guest with the production/);
   });
 
   it("does not call citations empty before their answer arrives", () => {
     assert.match(render({}), /Loading citations/);
     assert.doesNotMatch(render({}), /No citations yet/);
     assert.match(render(detail([], false)), /No citations yet/);
+    const stale = detail([], false);
+    stale[ENTRY]!.canonRevision--;
+    assert.match(render(stale), /Loading citations/);
+    assert.doesNotMatch(render(stale), /No citations yet/);
   });
 
   it("shows the whole thread question once on the list, entry, and thread page", () => {
@@ -142,5 +150,21 @@ describe("readable canon context (issue 1003)", () => {
     const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/canon/CANON-044`]}><App /></MemoryRouter>);
     assert.match(html, /Who taught the Chorister/);
     assert.match(html, /True notes are taught, not overheard/);
+  });
+
+  it("preserves an authored ellipsis title even when the body starts with the same words", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const entry = state.world!.canon.find((candidate) => candidate.id === "CANON-044")!;
+    entry.title = "The Bell Song…";
+    entry.body = "The Bell Song… was it taught by the Chorister or learned from the oldest bell?";
+    __setStateForTest(state);
+    try {
+      const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/canon/CANON-044`]}><App /></MemoryRouter>);
+      const { document } = parseHTML(html);
+      assert.equal(document.querySelector(".fy-entry__title")?.textContent, entry.title);
+      assert.equal(document.querySelector(".fy-entry__body")?.textContent, entry.body);
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
   });
 });
