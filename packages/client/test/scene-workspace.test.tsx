@@ -1032,7 +1032,7 @@ describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
 
     const incomplete = await mountState(withEpisode(false), episodePath);
     const incompleteCard = all(incomplete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
-    assert.match(incompleteCard.textContent ?? "", /sc_04 · in progress/);
+    assert.match(incompleteCard.textContent ?? "", /Scene 4 · in progress/);
     await click(incompleteCard.querySelector("button") as HTMLElement);
     assert.ok(q(incomplete, '[data-testid="scene-workspace"]'));
     assert.equal(q(incomplete, ".fy-sw__done"), null, "the incomplete workspace has no Done control");
@@ -1043,7 +1043,7 @@ describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
     await click(done);
     assert.ok(q(complete, '[data-screen="episode-detail"]'), "Done navigates back to the owning episode");
     const completeCard = all(complete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
-    assert.match(completeCard.textContent ?? "", /sc_04 · done/);
+    assert.match(completeCard.textContent ?? "", /Scene 4 · done/);
   });
 });
 
