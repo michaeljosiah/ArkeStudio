@@ -96,7 +96,6 @@ import {
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
 import { Badge, Button, Card, Input, Textarea, cx } from "../components/ui.js";
 import {
-  Archive,
   Book,
   ChevronDown,
   ChevronLeft,
@@ -131,7 +130,6 @@ import {
   Upload,
   Users,
   VideoMark,
-  Waveform,
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
 import { AppChrome } from "../components/chrome.js";
@@ -628,7 +626,6 @@ export function ProductionLayout() {
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
-  const exportsState = useExports();
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
   const shape = production ? productionShape(production.meta) : null;
@@ -667,13 +664,7 @@ export function ProductionLayout() {
       filmSec = planned.ok ? planned.plan.totalSec : 0;
     } else filmSec = placedFilmSec(production.cut.overlays, world?.artifacts ?? []);
   }
-  const audioCount =
-    (artifactsFor(world?.artifacts ?? [], prodId).filter((a) => a.kind === "audio").length ?? 0) +
-    (production?.scenes
-      .flatMap((s) => orderedShots(s))
-      .filter((s) => s.audio?.kind === "vo" || s.audio?.kind === "dialogue").length ?? 0);
   const artifactCount = (world?.artifacts ?? []).filter((artifact) => artifact.production === undefined).length;
-  const exportCount = Object.values(exportsState).filter((e) => e.productionId === prodId).length;
   const guestCount = prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
     : 0;
@@ -718,8 +709,6 @@ export function ProductionLayout() {
     takes: VideoMark,
     generate: Sparkle,
     cut: VideoMark,
-    audio: Waveform,
-    exports: Archive,
   };
   /*
    * An episode is reached by drilling into the episode tree, and both of its screens live outside
@@ -999,7 +988,6 @@ export function ProductionLayout() {
                 false,
                 `/w/${worldId}/artifacts`,
               )}
-              {item("audio", "Audio", String(audioCount))}
               {item(
                 "generate",
                 "Generate",
@@ -1011,7 +999,6 @@ export function ProductionLayout() {
                 generateActive,
               )}
               {item("cut", "Cut", cut ? railFigure : "0:00")}
-              {item("exports", "Exports", String(exportCount))}
             </>
           ) : (
             <>
@@ -1025,8 +1012,6 @@ export function ProductionLayout() {
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
-                  {item("audio", "Audio", String(audioCount))}
-                  {item("exports", "Exports", String(exportCount))}
                 </>
               ) : (
                 <>
@@ -1047,8 +1032,6 @@ export function ProductionLayout() {
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
                   {item("cut", "Cut", cut ? railFigure : "0:00")}
-                  {item("audio", "Audio", String(audioCount))}
-                  {item("exports", "Exports", String(exportCount))}
                 </>
               )}
             </>
@@ -1056,6 +1039,7 @@ export function ProductionLayout() {
           <div className="fy-prodrail__spacer" />
           <NavLink
             to={`/w/${worldId}`}
+            end
             className="fy-prodrail__foot"
             title={folded ? `Part of ${world?.meta.name ?? "the world"}` : undefined}
           >

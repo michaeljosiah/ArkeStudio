@@ -512,12 +512,42 @@ describe("an episodic production's front page is its season (design turn 93)", (
     const html = home(PROD);
     const labels = [...html.matchAll(/<span class="fy-prodrail__label">([^<]*)</g)].map((m) => m[1]);
     assert.deepEqual(
-      labels.slice(0, 9),
-      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Audio", "Generate", "Cut", "Exports"],
+      labels.slice(0, 7),
+      ["Overview", "Episodes", "New scene", "Takes", "Artifacts", "Generate", "Cut"],
     );
     assert.ok(!labels.includes("Dashboard"), "a series has an overview and episodes instead");
     assert.ok(!labels.includes("Cast"), "the scene workspace keeps the production hierarchy quiet");
     assert.match(html, /series · 1 episode · 0 scenes/);
+  });
+
+  it("keeps only the current production destination selected and omits retired destinations (#995)", () => {
+    const activeLabels = (html: string) =>
+      [...html.matchAll(/<a[^>]*class="fy-prodrail__item[^"]*--active[^>]*>[\s\S]*?<span class="fy-prodrail__label">([^<]*)/g)]
+        .map((match) => match[1]);
+    for (const [suffix, expected] of [
+      ["", ["Overview"]],
+      ["/generate", ["Takes"]],
+      ["/generate?view=stills", ["Takes"]],
+      ["/generate?view=bench", ["Generate"]],
+      ["/cast", []],
+    ] as const) {
+      const html = home(`${PROD}${suffix}`);
+      assert.deepEqual(activeLabels(html), expected, suffix || "Overview");
+      assert.doesNotMatch(html, /fy-prodrail__label">(?:Audio|Exports)</);
+      assert.doesNotMatch(html, /<a[^>]*aria-current="page"[^>]*class="fy-prodrail__foot/, "the parent world is not the current page");
+    }
+    const base = `/w/${FIXTURE_WORLD_ID}/p/saltlight`;
+    const video = renderApp(FIXTURE_STATE, `${base}/narrative`);
+    assert.deepEqual(activeLabels(video), ["Overview"]);
+    assert.doesNotMatch(video, /fy-prodrail__label">(?:Audio|Exports)</);
+    const storyState = structuredClone(FIXTURE_STATE);
+    const story = storyState.world!.productions.find((production) => production.meta.id === "saltlight")!;
+    story.meta.medium = "story";
+    story.meta.kind = "novel";
+    const manuscript = renderApp(storyState, `${base}/story/chapters`);
+    assert.deepEqual(activeLabels(manuscript), ["Chapters"]);
+    assert.doesNotMatch(manuscript, /fy-prodrail__label">(?:Audio|Exports)</);
+    assert.match(manuscript, /data-testid="export-manuscript"/, "manuscript delivery remains on Chapters");
   });
 
   it("opens the current episode in the rail and shows its scene in place", () => {

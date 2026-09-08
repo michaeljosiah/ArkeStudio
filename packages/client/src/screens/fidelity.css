@@ -1243,7 +1243,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-decoration: none;
   transition: var(--transition-control);
 }
-.fy-prodrail__item:hover { background: var(--accent); color: var(--foreground); }
+/* Only the current destination gets a fill; hover must not look like a second selection. */
+.fy-prodrail__item:hover { color: var(--foreground); }
 .fy-prodrail__item--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 /* A rail item that presses rather than navigates (New scene): a button wearing the link's face,
    so the rail reads as one column whichever kind of thing each row is. */
