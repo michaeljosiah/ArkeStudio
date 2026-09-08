@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter, on } from "node:events";
-import type { HarnessAdapter, HarnessEvent, SendMessageInput, SessionConfigInput } from "@arke-studio/contracts";
+import type { HarnessAdapter, HarnessEvent, ModelInfo, SendMessageInput, SessionConfigInput } from "@arke-studio/contracts";
 import type { LocalGpu } from "../local-ai/gpu.js";
 
 /** Cover every harness caller, including fire-and-watch turns outside the provider queue. */
@@ -31,10 +31,12 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
       const model = models.get(input.sessionId);
       // A failed default lookup can still return a catalogue. When none is marked, an
       // available Ollama model may be the actual default; an explicit cloud choice never waits.
-      const catalog = model === undefined ? await adapter.listModels?.() : undefined;
+      let catalog: ModelInfo[] | undefined;
+      try { catalog = model === undefined ? await adapter.listModels?.() : undefined; }
+      catch { /* Discovery is optional; an unknown catalogue must still allow the turn. */ }
       const hasDefault = catalog?.some((row) => row.isDefault) === true;
       const local = model !== undefined ? model.startsWith("ollama/") :
-        catalog?.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault)) === true;
+        catalog === undefined || catalog.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault));
       const signal = AbortSignal.any([turn.abort.signal, closed.signal]);
       if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({
         type: "tool.activity", sessionId: input.sessionId, tool: "local-inference",

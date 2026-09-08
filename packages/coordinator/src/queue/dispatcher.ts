@@ -346,6 +346,8 @@ export class JobQueue {
   private readonly submitAborts = new Map<string, AbortController>();
   /** A poll fault pauses observation, not the engine's work. Retain its card until settled. */
   private readonly gpuReservations = new Map<string, () => void>();
+  /** Recovery may already own the card while waiting for the other engine to unload. */
+  private readonly pendingGpuReservations = new Set<string>();
   /**
    * Jobs whose cancellation is underway, held from the moment the abort fires until the terminal
    * row is written. The abort makes the in-flight submit reject, and that rejection reaches the
@@ -1151,13 +1153,17 @@ export class JobQueue {
   private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
     if (!reserved && this.opts.acquireLocalGpu) {
       const abort = new AbortController();
+      const runKey = this.engineRunKey(job);
       this.submitAborts.set(job.id, abort);
+      this.pendingGpuReservations.add(runKey);
       let release: (() => void) | undefined;
       try {
-        release = this.gpuReservations.get(this.engineRunKey(job)) ?? await this.opts.acquireLocalGpu(job, abort.signal, () => {});
-        if (release) this.gpuReservations.set(this.engineRunKey(job), release);
+        release = this.gpuReservations.get(runKey) ?? await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+        if (release) this.gpuReservations.set(runKey, release);
+        this.pendingGpuReservations.delete(runKey);
         if (!abort.signal.aborted && !this.disposed) await this.pollToTerminal(job, client, key, true);
       } finally {
+        this.pendingGpuReservations.delete(runKey);
         if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
         if (release && (this.disposed || !this.stillPolling(job))) this.releaseGpu(job);
       }
@@ -1237,13 +1243,16 @@ export class JobQueue {
   private async reserveHeldGpu(job: Job): Promise<void> {
     if (!this.opts.acquireLocalGpu || !this.stillPolling(job)) return;
     const abort = new AbortController();
+    const runKey = this.engineRunKey(job);
     this.submitAborts.set(job.id, abort);
+    this.pendingGpuReservations.add(runKey);
     try {
       const release = await this.opts.acquireLocalGpu(job, abort.signal, () => {});
       if (!release) return;
       if (this.disposed || !this.stillPolling(job)) release();
-      else this.gpuReservations.set(this.engineRunKey(job), release);
+      else this.gpuReservations.set(runKey, release);
     } finally {
+      this.pendingGpuReservations.delete(runKey);
       if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
     }
   }
@@ -1566,11 +1575,17 @@ export class JobQueue {
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
     lane.notBefore.delete(jobId);
     const submitAbort = this.submitAborts.get(jobId);
+    const runKey = this.engineRunKey(job);
+    const recoveringGpu = this.pendingGpuReservations.has(runKey) && this.stillPolling(job);
     // Claimed before the abort, not after: the rejection it causes races this method, and the
     // submit's error path has to be able to tell a cancellation from a transport failure.
     this.cancelling.add(jobId);
-    submitAbort?.abort();
-    if (submitAbort !== undefined) await Promise.resolve();
+    // A recovered running job may already be executing in its engine. Keep its pending
+    // reservation alive until the engine acknowledges cancellation.
+    if (!recoveringGpu) {
+      submitAbort?.abort();
+      if (submitAbort !== undefined) await Promise.resolve();
+    }
     if (TERMINAL.has(this.jobs.get(jobId)?.status ?? "")) return;
     // Attempt the remote cancel where there is remote work to cancel; best-effort.
     if (job.providerJobId) {
@@ -1588,13 +1603,14 @@ export class JobQueue {
           .cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model })
           .then(() => true, () => false);
       }
-      if (!acknowledged && this.gpuReservations.has(this.engineRunKey(job)) && this.stillPolling(job)) {
+      if (!acknowledged && (this.gpuReservations.has(runKey) || this.pendingGpuReservations.has(runKey)) && this.stillPolling(job)) {
         const error = "Cancellation was not acknowledged; the local engine may still be running. Retry cancellation or resume checking its result.";
         await this.transition({ ...job, failureClass: "provider-fault", error, updatedAt: this.clock() });
         this.pauseLane(job.provider, "fault", error);
         return;
       }
     }
+    if (recoveringGpu) submitAbort?.abort();
     // A local abort ends our wait, not necessarily the provider's work. Preserve that distinction
     // without turning a deliberate cancellation into a reconciliation hold.
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -2211,6 +2227,7 @@ export class JobQueue {
     this.submitAborts.clear();
     for (const release of this.gpuReservations.values()) release();
     this.gpuReservations.clear();
+    this.pendingGpuReservations.clear();
     for (const lane of this.lanes.values()) {
       if (lane.timer) clearTimeout(lane.timer);
       lane.timer = null;
