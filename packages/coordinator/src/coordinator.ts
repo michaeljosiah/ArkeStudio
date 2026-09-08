@@ -3196,7 +3196,9 @@ export class Coordinator {
   private async recoverWorldChat(store: WorldStore): Promise<void> {
     const now = () => new Date().toISOString();
     try {
-      const outcome = await recoverConversations(store.dir, now);
+      // Setup transcripts share this recovery path. Repairing a torn tail or interrupted turn
+      // writes private world data, so it needs the same ownership gate as a live setup turn.
+      const outcome = await store.ownedWrite(() => recoverConversations(store.dir, now));
       const gate = this.opts.provider.gate?.();
       const wrapUps = gate ? await recoverWrapUps(store, gate, now) : { repaired: [] };
       await this.durableExportReads(store.worldId);
