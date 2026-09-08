@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent, WorldBundle } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { WorldLockedError } from "../../src/world/lock.js";
+import { CommitPlanError } from "../../src/world/commit.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "./helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -20,7 +21,7 @@ import { closeOnCleanup } from "../tmp.js";
  */
 
 const CLOCK = "2026-08-27T12:00:00.000Z";
-const SNAPSHOT = join(".history", "characters", "bray-half-hitch", "v6.md");
+const REFUSAL = "characters/bray-half-hitch.md: test commit refused";
 
 type OpenFailed = Extract<DomainEvent, { type: "world.open-failed" }>;
 
@@ -61,15 +62,13 @@ async function harness(root: string) {
 }
 
 /**
- * Make the world refuse to open, the way the reported one did: seeded history that disagrees
- * with the committed entity. The store already refuses this and words the refusal — what is
- * under test is what happens to the refusal afterwards.
+ * Exercise refusal reporting independently of history health: current snapshot conflicts no
+ * longer refuse a world (issue 979). Keep authored words in the error to test log redaction.
  */
-async function breakWorldOpen(root: string, worldDir: string): Promise<void> {
-  const seeding = new FsWorldProvider(root, { clock: () => CLOCK });
-  await seeding.loadWorld(WORLD_ID);
-  await seeding.close();
-  await writeFile(join(worldDir, SNAPSHOT), "conflicting history", "utf8");
+function breakWorldOpen(provider: FsWorldProvider): () => void {
+  const loadWorld = provider.loadWorld.bind(provider);
+  provider.loadWorld = async () => { throw new CommitPlanError(REFUSAL); };
+  return () => { provider.loadWorld = loadWorld; };
 }
 
 describe("a refused world open (issue 571)", () => {
@@ -103,9 +102,9 @@ describe("a refused world open (issue 571)", () => {
   });
 
   it("states the reason instead of leaving the screen on the loader", async () => {
-    const { root, worldDir } = await makeTempRoot();
-    await breakWorldOpen(root, worldDir);
+    const { root } = await makeTempRoot();
     const h = await harness(root);
+    breakWorldOpen(h.provider);
 
     await h.send({ kind: "open-world", worldId: WORLD_ID });
 
@@ -113,7 +112,7 @@ describe("a refused world open (issue 571)", () => {
     const [failed] = h.failures();
     assert.ok(failed, "the refusal is an event of its own, not an absence of world.opened");
     assert.equal(failed.worldId, WORLD_ID);
-    assert.match(failed.reason, /history snapshot conflicts/, "the store's own words, carried whole");
+    assert.equal(failed.reason, REFUSAL, "the provider's own words, carried whole");
     assert.deepEqual(
       h.state().worldOpenFailure,
       { worldId: WORLD_ID, reason: failed.reason },
@@ -123,9 +122,9 @@ describe("a refused world open (issue 571)", () => {
   });
 
   it("writes the cause to app.jsonl", async () => {
-    const { root, worldDir } = await makeTempRoot();
-    await breakWorldOpen(root, worldDir);
+    const { root } = await makeTempRoot();
     const h = await harness(root);
+    breakWorldOpen(h.provider);
 
     await h.send({ kind: "open-world", worldId: WORLD_ID });
 
@@ -150,16 +149,16 @@ describe("a refused world open (issue 571)", () => {
      * and `world.json does not parse` carries V8's excerpt of the source — the world's own title.
      * So the log takes a classification and never the message.
      */
-    const { root, worldDir } = await makeTempRoot();
-    await breakWorldOpen(root, worldDir);
+    const { root } = await makeTempRoot();
     const h = await harness(root);
+    breakWorldOpen(h.provider);
 
     await h.send({ kind: "open-world", worldId: WORLD_ID });
 
     const log = await readFile(join(root, "logs", "app.jsonl"), "utf8");
     assert.equal(log.includes("bray-half-hitch"), false, "no character slug reaches the log");
-    assert.equal(log.includes(".history"), false, "and no world path either");
-    assert.equal(log.includes("history snapshot conflicts"), false, "nor the refusal's own words");
+    assert.equal(log.includes("characters/"), false, "and no world path either");
+    assert.equal(log.includes(REFUSAL), false, "nor the refusal's own words");
     assert.match(log, /"kind":"commit-plan"/, "what stands is a name this repository owns");
 
     // The screen and the event are not the bundle, and the person looking at the refusal is the
@@ -192,14 +191,13 @@ describe("a refused world open (issue 571)", () => {
   });
 
   it("clears the refusal once the world opens", async () => {
-    const { root, worldDir } = await makeTempRoot();
-    const live = await readFile(join(worldDir, "characters", "bray-half-hitch.md"), "utf8");
-    await breakWorldOpen(root, worldDir);
+    const { root } = await makeTempRoot();
     const h = await harness(root);
+    const restore = breakWorldOpen(h.provider);
     await h.send({ kind: "open-world", worldId: WORLD_ID });
     assert.ok(h.state().worldOpenFailure, "refused first");
 
-    await writeFile(join(worldDir, SNAPSHOT), live, "utf8");
+    restore();
     await h.send({ kind: "open-world", worldId: WORLD_ID });
 
     assert.equal(h.state().worldOpenFailure, null, "a stale refusal outliving its question is worse than none");
