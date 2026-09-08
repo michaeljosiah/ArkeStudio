@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest, type CanonRefsState } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -86,5 +87,60 @@ describe("the entry's amendment vocabulary", () => {
     });
     assert.ok(html.includes("ripple-checked, then versioned"), "the ripple note is still there");
     assert.ok(!html.includes("a change is proposed"), "but no longer names a step the press skips");
+  });
+});
+
+describe("readable canon context (issue 1003)", () => {
+  it("names ripple targets and keeps production-only citations visible", () => {
+    const html = render({ [ENTRY]: {
+      citedBy: { sheets: [], entries: [], productions: ["saltlight"] },
+      history: [], historyTruncated: false, canonRevision: 4,
+      ripples: [
+        { kind: "contradiction-candidates", summary: "1 existing entry shares this vocabulary — check for conflict.", targets: ["CANON-044"] },
+        { kind: "productions-see-new-revision", summary: "1 production sees the new revision on its next dispatch", targets: ["saltlight"] },
+      ],
+    } });
+    const { document } = parseHTML(html);
+    const citedBy = document.querySelector('[aria-label="Cited by"]')!;
+    assert.match(citedBy.textContent!, /Saltlight/);
+    assert.equal(citedBy.querySelector("a")?.getAttribute("href"), `/w/${FIXTURE_WORLD_ID}/p/saltlight`);
+    const ripples = document.querySelector(".fy-entry__side .fy-draftcard")!;
+    assert.match(ripples.textContent!, /Who taught the Chorister/);
+    assert.match(ripples.textContent!, /Saltlight/);
+    assert.doesNotMatch(ripples.textContent!, /contradiction-candidates|productions-see-new-revision/);
+    assert.equal(ripples.querySelector("a")?.getAttribute("href"), `/w/${FIXTURE_WORLD_ID}/canon/CANON-044`);
+  });
+
+  it("does not call citations empty before their answer arrives", () => {
+    assert.match(render({}), /Loading citations/);
+    assert.doesNotMatch(render({}), /No citations yet/);
+    assert.match(render(detail([], false)), /No citations yet/);
+  });
+
+  it("shows the whole thread question once on the list, entry, and thread page", () => {
+    const question = "Who taught the Chorister the song that the oldest bell repeats when nobody living remembers hearing it before?";
+    const state = structuredClone(FIXTURE_STATE);
+    const entry = state.world!.canon.find((candidate) => candidate.id === "CANON-044")!;
+    entry.title = `${question.slice(0, 77)}…`;
+    entry.body = question;
+    try {
+      for (const path of ["canon", "canon/CANON-044", "canon/CANON-044/thread"]) {
+        __setStateForTest(state);
+        const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/${path}`]}><App /></MemoryRouter>);
+        const text = parseHTML(html).document.querySelector('[data-screen^="canon"]')!.textContent!;
+        assert.equal(text.split(question).length - 1, 1, `${path} shows the whole question once`);
+        assert.ok(!text.includes(entry.title), `${path} drops the truncated repeat`);
+        assert.doesNotMatch(text, /answers come only from entries/);
+      }
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("preserves an authored thread title with a distinct supporting body", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/canon/CANON-044`]}><App /></MemoryRouter>);
+    assert.match(html, /Who taught the Chorister/);
+    assert.match(html, /True notes are taught, not overheard/);
   });
 });
