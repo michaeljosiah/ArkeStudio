@@ -276,20 +276,23 @@ a dispatch to discover.
 
 ## 5 · Recommended follow-ups
 
-Ranked by value over cost. None of these is in flight; each would need its own issue and, where it
-changes behaviour, a spec amendment.
+Ranked by value over cost. All six are now filed. Items 1–4 carry their spec work:
+[SPEC-044](../specifications/044.one-card-several-engines.md) is new and covers 1 and 2; SPEC-012
+R-23 and SPEC-019 R-56 are amendments. Item 5 is documentation only. Item 6 is a decision and
+deliberately has no spec yet.
 
 | # | Change | Where it lands | Why |
 |---|---|---|---|
-| 1 | Arbitrate VRAM across engines: one owner between the local LLM and ComfyUI, queueing rather than refusing, with the wait reason surfaced | `coordinator/src/comfyui/engine.ts`, `queue/dispatcher.ts`, a new cross-engine lock; SPEC-021 §2.7 / SPEC-033 | We currently blame the user for contention we created (§3.1) |
-| 2 | Verify local-model residency and warn on CPU fallback | Ollama client + Local AI rows (SPEC-033) | A model silently on CPU reads as "our app is slow" (§3.1) |
-| 3 | Capability-truth check on drafted prompts against `accepts.*` | `references/prompt-review.ts` boundary | Catches invented sockets before dispatch, generalised across the manifest (§3.4) |
-| 4 | Move skill bodies to shipped markdown read at run time, keeping id/version/provenance | `contracts/src/skills.ts` → shipped docs; SPEC-019 R-14..R-20 | Prompt iteration without a release; a supported override path (§3.3) |
-| 5 | A numbered "add a recipe" procedure with exact files and the tests to run | `docs/development/code-map.md` | Their operator documentation is better than ours (§3.5) |
-| 6 | Consider an opt-in user-supplied ComfyUI graph behind an authored boundary — inspect, confirm, validate, test, activate, snapshot, fall back | New; would need a SPEC-021 amendment reconciling with R-1 | The largest open design question this comparison raises (§3.2) |
+| 1 | [#984](https://github.com/michaeljosiah/ArkeStudio/issues/984) — arbitrate the accelerator across engines: one owner, queueing rather than refusing, wait reason surfaced | New arbiter above the queue and the harness; [SPEC-044](../specifications/044.one-card-several-engines.md) §1.3–§1.4 | We currently blame the user for contention we created (§3.1) |
+| 2 | [#985](https://github.com/michaeljosiah/ArkeStudio/issues/985) — measure local-model residency and warn on processor fallback | `providers/src/clients/ollama.ts`, Local AI rows; [SPEC-044](../specifications/044.one-card-several-engines.md) §1.5 | A model silently on CPU reads as "our app is slow" (§3.1) |
+| 3 | [#986](https://github.com/michaeljosiah/ArkeStudio/issues/986) — check drafted prompts against `accepts.*` | `references/prompt-review.ts`; [SPEC-012](../specifications/012.productions-scenes-shots-boards.md) R-23 | Catches invented sockets before dispatch, generalised across the manifest (§3.4) |
+| 4 | [#987](https://github.com/michaeljosiah/ArkeStudio/issues/987) — move skill bodies to shipped documents read from disk | `contracts/src/skills.ts`; [SPEC-019](../specifications/019.long-form-video-and-rich-references.md) R-56 | Prompt iteration without a release; a supported override path (§3.3) |
+| 5 | [#988](https://github.com/michaeljosiah/ArkeStudio/issues/988) — a numbered "add a recipe" procedure | `docs/development/code-map.md` — documentation only, no spec | Their operator documentation is better than ours (§3.5) |
+| 6 | [#989](https://github.com/michaeljosiah/ArkeStudio/issues/989) — **decide** whether a user may substitute a graph behind an authored boundary | Decision first; no spec until it is made | The largest open design question this comparison raises (§3.2) |
 
 Items 1–3 are defect-shaped and independent of any product decision. Item 6 is a genuine
-product/architecture question and should not be started without one.
+product/architecture question and should not be started without one — #989 states the question and
+what would have to be settled, and deliberately proposes no answer.
 
 ## 6 · Method and limits
 
