@@ -1380,7 +1380,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-decoration: none;
   transition: var(--transition-control);
 }
-.fy-prodrail__scene:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail__scene:hover { color: var(--foreground); }
 .fy-prodrail__scene--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-prodrail__scene--missing { color: var(--neutral-400); }
 .fy-prodrail__scene-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
