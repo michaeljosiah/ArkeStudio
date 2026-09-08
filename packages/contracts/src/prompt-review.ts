@@ -28,7 +28,18 @@ export async function promptLayer(raw:string):Promise<z.infer<typeof PromptLayer
   const text=normalizePrompt(raw);return PromptLayerSchema.parse({text,hash:await promptHash(text),characters:Array.from(text).length,utf8Bytes:new TextEncoder().encode(text).length});
 }
 type Token={text:string;start:number;end:number};
-function tokens(text:string):Token[]{return Array.from(text.matchAll(/\s+|[\p{L}\p{N}_'-]+|[^\s\p{L}\p{N}_'-]+/gu),m=>({text:m[0],start:m.index,end:m.index+m[0].length}));}
+function tokens(text:string):Token[]{
+  const result:Token[]=[];
+  for(const match of text.matchAll(/\s+|[\p{L}\p{N}_'-]+|[^\s\p{L}\p{N}_'-]+/gu)){
+    let start=match.index,part="";
+    for(const character of match[0]){
+      if(part.length+character.length>240){result.push({text:part,start,end:start+part.length});start+=part.length;part="";}
+      part+=character;
+    }
+    if(part)result.push({text:part,start,end:start+part.length});
+  }
+  return result;
+}
 type Edit={op:"equal"|"add"|"delete";token:Token};
 /** Myers shortest edit script, with a stable deletion-first tie and bounded work/memory. */
 function edits(a:Token[],b:Token[]):Edit[]{
@@ -71,7 +82,7 @@ export async function reviewPrompt(baseText:string,candidateText:string,sources:
     if(edit.op==="equal"){before+=length;after+=length;continue;}
     let region=regions.at(-1);
     const gap=region?candidate.text.slice(region.afterEnd,after):"";
-    if(!region || /[.!?;\n]/u.test(gap) || (gap.match(/[\p{L}\p{N}]+/gu)?.length??0)>3
+    if(!region || /[.!?;\n]/u.test(base.text.slice(region.beforeStart,before)+candidate.text.slice(region.afterStart,after)) || (gap.match(/[\p{L}\p{N}]+/gu)?.length??0)>3
       || Math.max(after+length-region.afterStart,before+length-region.beforeStart)>240){
       region={beforeStart:before,beforeEnd:before,afterStart:after,afterEnd:after,added:"",deleted:false};
       regions.push(region);
@@ -87,7 +98,7 @@ export async function reviewPrompt(baseText:string,candidateText:string,sources:
       const text=op==="add"?candidate.text:base.text;
       let start=op==="add"?region.afterStart:region.beforeStart,end=op==="add"?region.afterEnd:region.beforeEnd;
       const fragment=text.slice(start,end).trim();
-      if(Array.from(fragment).length<12 || (fragment.match(/[\p{L}\p{N}]+/gu)?.length??0)<2){
+      if(!/[.!?;\n]/u.test(text.slice(start,end)) && (Array.from(fragment).length<12 || (fragment.match(/[\p{L}\p{N}]+/gu)?.length??0)<2)){
         // A lone function word needs its neighbouring words to be readable. Do not steal
         // context from another change or cross a sentence to manufacture a quotation.
         const previous=regions[index-1],next=regions[index+1];
@@ -95,12 +106,12 @@ export async function reviewPrompt(baseText:string,candidateText:string,sources:
         const ceiling=next?(op==="add"?next.afterStart:next.beforeStart):text.length;
         let words=0;
         for(const token of tokens(text.slice(floor,start)).reverse()){
-          if(/[.!?;\n]/u.test(token.text)||words===2)break;
+          if(/[.!?;\n]/u.test(token.text)||words===2||end-(floor+token.start)>240)break;
           start=floor+token.start;if(/[\p{L}\p{N}]/u.test(token.text))words++;
         }
         words=0;const originalEnd=end;
         for(const token of tokens(text.slice(end,ceiling))){
-          if(/[.!?;\n]/u.test(token.text)||words===2)break;
+          if(/[.!?;\n]/u.test(token.text)||words===2||originalEnd+token.end-start>240)break;
           end=originalEnd+token.end;if(/[\p{L}\p{N}]/u.test(token.text))words++;
         }
       }

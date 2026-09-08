@@ -21,7 +21,7 @@ import { initialBible } from "./bible.js";
 import { appendChanges } from "./change-writer.js";
 import { checkPathBudget, fromPortable, toExtendedLength, type PathBudget } from "./paths.js";
 import { installSampleWorld } from "./sample-world.js";
-import { findKeyArt, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
+import { findKeyArt, hashMedia, readWorldMeta, scanWorld, WorldOpenError } from "./scan.js";
 import { uniqueSlug } from "./slug.js";
 import { WorldStore } from "./store.js";
 
@@ -610,12 +610,26 @@ export class FsWorldProvider implements WorldProvider {
 
   async listReferenceImages(slug: string): Promise<WorldImageReference[]> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return [];
-    const { bundle } = await scanWorld(join(this.worldsDir(), slug));
+    const bundle = this.store?.getBundle().meta.slug === slug
+      ? this.store.getBundle() : (await scanWorld(join(this.worldsDir(), slug))).bundle;
     const images: WorldImageReference[] = [];
+    const available = new Map<string, string>();
     for (const image of worldImageReferences(bundle)) {
-      if (await this.serveMedia(slug, image.file)) images.push(image);
+      const media = await this.serveMedia(slug, image.file);
+      if (media) { images.push(image); available.set(image.file, media.path); }
     }
-    return images;
+    const aliases = new Set<string>();
+    for (const artifact of bundle.artifacts) {
+      if (artifact.generation?.source !== "character-reference") continue;
+      const file = `artifacts/${artifact.file}`;
+      const source = available.get(artifact.generation.sourceFile), copy = available.get(file);
+      if (!source || !copy) continue;
+      // A source path can be regenerated, removed or externally edited. Suppress its filed
+      // copy only when both current files still match the artifact's recorded identity.
+      const [sourceHash, copyHash] = await Promise.all([hashMedia(source), hashMedia(copy)]);
+      if (sourceHash && sourceHash === copyHash && sourceHash.startsWith(artifact.hash)) aliases.add(file);
+    }
+    return images.filter(image => !aliases.has(image.file));
   }
 
   async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {

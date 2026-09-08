@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ulid, worldImageReferences, type WorldImageReference, type ManifestModel } from "@arke-studio/contracts";
+import { ulid, type WorldImageReference, type ManifestModel } from "@arke-studio/contracts";
 import { browseReferenceImages, pickStagedReference, subscribeReferenceImages, useStore } from "../lib/store.js";
 import { ReferencePickerBody, type PickerSource } from "./reference-picker.js";
 
@@ -15,7 +15,7 @@ export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload
   const [images, setImages] = useState<WorldImageReference[]>([]);
   const [status, setStatus] = useState<string | null>("Loading images…");
   useEffect(() => {
-    if (!slug || slug === current?.slug) { setStatus(null); return; }
+    if (!slug) { setStatus(null); return; }
     setImages([]);
     setStatus("Loading images…");
     const requestId = ulid();
@@ -26,10 +26,10 @@ export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload
     });
     browseReferenceImages(slug, requestId);
     return unsubscribe;
-  }, [slug, current?.slug]);
+  }, [slug]);
   const source = worlds.find(world => world.slug === slug);
   const borrowed = source?.worldId !== worldId;
-  const rows: PickerSource[] = (!borrowed && state?.world ? worldImageReferences(state.world) : images).map(image => ({
+  const rows: PickerSource[] = images.map(image => ({
     key: image.file, kind: "image", name: image.name, imagePath: image.file,
     meta: borrowed ? `${image.role} · from ${source?.name ?? slug}` : image.role,
     group: image.group, durationSec: 0, pick: { source: "world-file", path: image.file },

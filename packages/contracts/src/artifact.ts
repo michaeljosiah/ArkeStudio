@@ -266,16 +266,3 @@ export function pickableArtifacts(artifacts: readonly ArtifactSidecar[]): Artifa
 export function isGeneratedArtifact(artifact: ArtifactSidecar): boolean {
   return artifact.origin.by === "system" && artifact.generation !== undefined;
 }
-
-/**
- * Which of two artifacts filed from one source file is the later one.
- *
- * By stamp, then by id: an artifact id is a ULID, so it breaks a tie in the order the two were
- * actually minted rather than in whatever order they happened to be read.
- */
-export function newerArtifact(candidate: ArtifactSidecar, incumbent: ArtifactSidecar): boolean {
-  const a = Date.parse(candidate.created);
-  const b = Date.parse(incumbent.created);
-  if (Number.isFinite(a) && Number.isFinite(b) && a !== b) return a > b;
-  return candidate.id > incumbent.id;
-}

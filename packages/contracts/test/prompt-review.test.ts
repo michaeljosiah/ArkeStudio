@@ -53,3 +53,23 @@ it("keeps warnings for inserted style words separated by unchanged context",asyn
   const review=await reviewPrompt("quiet harbour, small boat","neon harbour, epic boat",[]);
   assert.deepEqual(review.hunks.filter(h=>h.op==="add").flatMap(h=>h.warnings),['Added style term: "neon"','Added style term: "epic"']);
 });
+
+it("keeps changed sentence punctuation from joining adjacent sentences",async()=>{
+  for(const candidate of ["One green! Two gold.","One green\nTwo gold."]){
+    const review=await reviewPrompt("One red. Two blue.",candidate,[]);
+    assert.ok(review.hunks.filter(h=>h.op==="add").length>=2);
+    for(const h of review.hunks)assert.doesNotMatch(h.text,/[.!?;\n]\s*\p{L}/u);
+  }
+});
+it("bounds unbroken tokens and their context without losing text or splitting Unicode",async()=>{
+  const review=await reviewPrompt("Before "+"x".repeat(1300)+" after.","Before "+"𐐀".repeat(1300)+" after.",[]);
+  for(const h of review.hunks){
+    assert.ok(h.text.length<=240);
+    assert.doesNotMatch(h.text,/\p{Surrogate}/u);
+    const text=h.op==="add"?review.candidate.text:review.base.text;
+    const start=h.op==="add"?h.afterStart:h.beforeStart,end=h.op==="add"?h.afterEnd:h.beforeEnd;
+    assert.equal(text.slice(start,end),h.text);
+  }
+  assert.equal(review.hunks.filter(h=>h.op==="add").map(h=>h.text).join("").match(/𐐀/gu)?.length,1300);
+  assert.equal(review.hunks.filter(h=>h.op==="delete").map(h=>h.text).join("").match(/x/g)?.length,1300);
+});

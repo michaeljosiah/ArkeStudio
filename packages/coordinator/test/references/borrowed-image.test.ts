@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { it } from "node:test";
 import { mkdir, readFile, unlink, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { ulid, type ClientMessage, type DomainEvent, type Job } from "@arke-studio/contracts";
+import { newId, ulid, type ClientMessage, type DomainEvent, type Job } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { recordReferenceTake } from "../../src/references/takes.js";
@@ -93,4 +94,48 @@ it("does not browse or serve image paths escaping the source world", async () =>
     assert.equal(await provider.serveMedia("the-undersong", "references/escape/private.png"), null);
     assert.ok(!(await provider.listReferenceImages("the-undersong")).some(image => image.file.includes("escape")));
   } finally { await unlink(join(worldDir, "references/escape")); await provider.close(); }
+});
+
+it("deduplicates verified aliases but retains historical, changed and missing-source copies", async () => {
+  const { root, worldDir } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  const reader = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  const store = provider.openStore()!;
+  const sourceFile = "references/maren-kest/head-front.png";
+  const bytes = Buffer.from(pngBytes()), oldBytes = Buffer.from(bytes);
+  oldBytes[20] = 1;
+  const oldFile = "older-reference.png", currentFile = "current-reference.png";
+  try {
+    await store.gateOp(async () => {
+      await writeFile(join(worldDir, sourceFile), bytes);
+      for (const [file, content] of [[oldFile, oldBytes], [currentFile, bytes]] as const) {
+        await writeFile(join(worldDir, "artifacts", file), content);
+        await writeFile(join(worldDir, "artifacts", `${file}.json`), JSON.stringify({
+          id: newId("ar"), kind: "image", file, hash: `sha256:${createHash("sha256").update(content).digest("hex").slice(0,16)}`,
+          origin: { by: "system", producedBy: "character-reference" }, links: ["maren-kest"], created: "2026-09-08T00:00:00Z",
+          generation: { source: "character-reference", sourceFile, jobId: newId("jb"), sheetId: "maren-kest", workflow: "reference-tile",
+            prompt: "A portrait", references: [], provider: "test", model: "test", params: {},
+            provenance: { canonRevision: 0, sheets: {} }, estimatedMicroUsd: 0, costMicroUsd: null },
+        }));
+      }
+    });
+    const paths = async (owner: FsWorldProvider) => (await owner.listReferenceImages("the-undersong")).map(image => image.file);
+    for (const owner of [provider, reader]) {
+      const offered = await paths(owner);
+      assert.ok(offered.includes(sourceFile));
+      assert.ok(offered.includes(`artifacts/${oldFile}`));
+      assert.equal(offered.includes(`artifacts/${currentFile}`), false);
+    }
+    const changed = Buffer.from(bytes); changed[20] = 2;
+    await writeFile(join(worldDir, sourceFile), changed);
+    for (const owner of [provider, reader]) assert.ok((await paths(owner)).includes(`artifacts/${currentFile}`));
+    await unlink(join(worldDir, sourceFile));
+    for (const owner of [provider, reader]) {
+      const offered = await paths(owner);
+      assert.equal(offered.includes(sourceFile), false);
+      assert.ok(offered.includes(`artifacts/${oldFile}`));
+      assert.ok(offered.includes(`artifacts/${currentFile}`));
+    }
+  } finally { await provider.close(); await reader.close(); }
 });
