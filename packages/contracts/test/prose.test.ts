@@ -119,6 +119,15 @@ describe("a chapter is prose the read-aloud can address", () => {
     // A figure too small to be a book's length is a number in a sentence.
     assert.equal(targetWords("12 words"), null);
   });
+
+  it("uses the book total rather than a per-chapter target (issue 1002)", () => {
+    assert.equal(targetWords("6 chapters at 3,000 words each", 6), 18_000);
+    assert.equal(targetWords("3k words per chapter", 6), 18_000);
+    assert.equal(targetWords("3,000 words/chapter"), null);
+    assert.equal(targetWords("6 chapters at 3,000 words each", 5), 18_000, "the authored planned count is the target");
+    assert.equal(targetWords("3,000 words per chapter; 20,000 words total", 6), 20_000);
+    assert.equal(targetWords("80,000 words", 6), 80_000, "a whole-book target is not multiplied");
+  });
 });
 
 describe("continuity after a chapter (turn 129, SPEC-012 §2.4.1)", () => {

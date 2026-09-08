@@ -290,6 +290,8 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /role="textbox"/, "a composer, not a form");
     assert.match(html, /EPISODE CHAT · 01/, "the subject is named");
     assert.match(html, /What happens in this one\?/);
+    assert.match(html, /Develop the-missing-night here/);
+    assert.doesNotMatch(html, /Nothing written/, "an empty thread is not an unwritten episode");
     assert.doesNotMatch(html, /Edit the promise|Propose the promise/, "the promise editor is retired");
   });
 
@@ -306,6 +308,8 @@ describe("an episode is a chat and a page, not one screen doing both (design tur
     assert.match(html, /The page is gone\./);
     assert.match(html, /No scenes yet\./, "an empty membership is said, not hidden");
     assert.match(html, /data-dock="conversation"/, "the chat is docked here now (turn 100)");
+    assert.match(html, /Develop the-missing-night here/);
+    assert.doesNotMatch(html, /Nothing written/, "the dock acknowledges the existing promise");
     assert.doesNotMatch(html, /Edit the promise/, "authoring happens in the conversation");
   });
 

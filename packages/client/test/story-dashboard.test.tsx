@@ -2,12 +2,41 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { storyProgressDay } from "@arke-studio/contracts";
-import { ProductionDashboardScreen } from "../src/screens/production.js";
+import { ChapterTreeScreen, ProductionChatScreen, ProductionDashboardScreen } from "../src/screens/production.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+
+it("shows a six-chapter book's total and accepted context without repeating the in-hand chapter (issue 1002)", () => {
+  const state = structuredClone(FIXTURE_STATE);
+  const production = state.world!.productions[0]!;
+  production.meta.format = "story";
+  production.story = { version: 2, targetLength: "6 chapters at 3,000 words each" };
+  production.chapters = Array.from({ length: 6 }, (_, i) => ({
+    id: `chapter-${i + 1}`, file: `chapter-${i + 1}`, order: i + 1, title: `Chapter ${i + 1}`, status: "planned", version: 1,
+  }));
+  __setStateForTest(state);
+  const render = (screen: React.ReactNode) => renderToString(
+    <MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${production.meta.id}`]}>
+      <Routes><Route path="/w/:worldId/p/:prodId" element={screen} /></Routes>
+    </MemoryRouter>,
+  ).replace(/<!-- -->/g, "");
+  try {
+    const dashboard = render(<ProductionDashboardScreen />);
+    assert.match(dashboard, /0 \/ 18,000 words in the book/);
+    assert.equal(dashboard.match(/Chapter 1</g)?.length, 1, "the in-hand card is not repeated as a row");
+    assert.match(render(<ChapterTreeScreen />), /6 chapters · 0 drafted · 0 of 18,000 words/);
+    const develop = render(<ProductionChatScreen />);
+    assert.match(develop, /all 6 chapters/);
+    assert.match(develop, /Accepted work is in Overview and Chapters/);
+    assert.doesNotMatch(develop, /season question|each episode|all 0 scenes|nothing yet|Nothing decided yet/);
+  } finally {
+    __setStateForTest(FIXTURE_STATE);
+  }
+});
 
 it("shows the plan and daily count, updates from a snapshot, and opens the chapter", async () => {
   const dom = parseHTML("<!doctype html><html><body></body></html>");

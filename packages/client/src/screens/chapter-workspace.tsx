@@ -783,8 +783,9 @@ export function ChapterWorkspace({
 
   // The words of the text on screen once it is here; the summary's count only while it is not.
   const words = record === null ? (chapter.words ?? 0) : countWords(text);
-  const bookWords = production.chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
-  const target = targetWords(production.story?.targetLength);
+  const activeChapters = production.chapters.filter((c) => !c.retired);
+  const bookWords = activeChapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
+  const target = targetWords(production.story?.targetLength, activeChapters.length);
   // The versions a snapshot exists for, newest first — read off the open answer, never counted
   // down from the number, so no Restore is offered that would silently fail.
   const history = useMemo(() => [...(record?.versions ?? [])].sort((a, b) => b - a).slice(0, 12), [record?.versions]);
