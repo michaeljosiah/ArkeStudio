@@ -3586,8 +3586,9 @@ function ClosestList({
 function threadQuestion(entry: CanonEntry): string | null {
   if (entry.status !== "open") return null;
   const title = entry.title.trim().replace(/\s+/g, " ");
-  const question = entry.body.trim().replace(/\s+/g, " ");
-  const body = entry.body.trim();
+  // Refused asks append candidate context; it is not part of the generated title.
+  const body = entry.body.replace(/\n+Considered when this was asked: [^\n]* — none of them decides it\.\s*$/, "").trim();
+  const question = body.replace(/\s+/g, " ");
   // Only the known 77-character truncation is generated; an authored ellipsis is a title.
   const generated = body.length > 80 && entry.title.trim() === `${body.slice(0, 77)}…`;
   return question && (title === question || generated)

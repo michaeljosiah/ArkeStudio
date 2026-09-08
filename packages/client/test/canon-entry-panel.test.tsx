@@ -152,6 +152,26 @@ describe("readable canon context (issue 1003)", () => {
     assert.match(html, /True notes are taught, not overheard/);
   });
 
+  it("deduplicates short refused questions while retaining candidate context", () => {
+    const question = "Who taught the Chorister?";
+    const context = "Considered when this was asked: CANON-002 — none of them decides it.";
+    const state = structuredClone(FIXTURE_STATE);
+    const entry = state.world!.canon.find((candidate) => candidate.id === "CANON-044")!;
+    entry.title = question;
+    entry.body = `${question}\n\n${context}`;
+    try {
+      for (const path of ["canon", "canon/CANON-044", "canon/CANON-044/thread"]) {
+        __setStateForTest(state);
+        const html = renderToString(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/${path}`]}><App /></MemoryRouter>);
+        const text = parseHTML(html).document.querySelector('[data-screen^="canon"]')!.textContent!;
+        assert.equal(text.split(question).length - 1, 1, `${path} shows the question once`);
+        assert.equal(text.split(context).length - 1, 1, `${path} retains the considered candidates`);
+      }
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("preserves an authored ellipsis title even when the body starts with the same words", () => {
     const state = structuredClone(FIXTURE_STATE);
     const entry = state.world!.canon.find((candidate) => candidate.id === "CANON-044")!;
