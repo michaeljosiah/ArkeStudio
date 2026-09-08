@@ -3071,7 +3071,12 @@ function TakeTileMedia({
 }) {
   const view = takeMediaView(production, take);
   const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [view?.sourcePath]);
+  const [playing, setPlaying] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    setFailed(false);
+    setPlaying(false);
+  }, [view?.sourcePath]);
 
   if (view === null) return <span className="fy-mono">running…</span>;
   if (!view.isVideo || worldSlug === undefined || failed) {
@@ -3094,30 +3099,55 @@ function TakeTileMedia({
     }
   };
   return (
-    <video
-      className="fy-take__video"
-      src={mediaUrl(worldSlug, view.sourcePath)}
-      poster={mediaUrl(worldSlug, view.posterPath)}
-      controls
-      playsInline
-      preload="metadata"
-      aria-label={`Take ${number} video`}
-      onPointerDown={onPick}
-      onLoadedMetadata={(event) => {
-        const segment = take.segment;
-        if (segment !== undefined) event.currentTarget.currentTime = segment.inSec;
-      }}
-      onPlay={(event) => {
-        const segment = take.segment;
-        if (segment !== undefined &&
-            (event.currentTarget.currentTime < segment.inSec || event.currentTarget.currentTime >= segment.outSec)) {
-          event.currentTarget.currentTime = segment.inSec;
-        }
-        onPlay(event.currentTarget);
-      }}
-      onTimeUpdate={(event) => keepInsideSegment(event.currentTarget)}
-      onError={() => setFailed(true)}
-    />
+    <>
+      <video
+        ref={videoRef}
+        className="fy-take__video"
+        src={mediaUrl(worldSlug, view.sourcePath)}
+        poster={mediaUrl(worldSlug, view.posterPath)}
+        playsInline
+        preload="metadata"
+        aria-label={`Take ${number} video`}
+        onPointerDown={onPick}
+        onLoadedMetadata={(event) => {
+          const segment = take.segment;
+          if (segment !== undefined) event.currentTarget.currentTime = segment.inSec;
+        }}
+        onPlay={(event) => {
+          const segment = take.segment;
+          if (segment !== undefined &&
+              (event.currentTarget.currentTime < segment.inSec || event.currentTarget.currentTime >= segment.outSec)) {
+            event.currentTarget.currentTime = segment.inSec;
+          }
+          setPlaying(true);
+          onPlay(event.currentTarget);
+        }}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+        onTimeUpdate={(event) => keepInsideSegment(event.currentTarget)}
+        onError={() => setFailed(true)}
+      />
+      <button
+        type="button"
+        className="fy-playbtn fy-take__play"
+        aria-label={`${playing ? "Pause" : "Play"} Take ${number}`}
+        onClick={() => {
+          const video = videoRef.current;
+          if (video === null) return;
+          onPick();
+          if (video.paused) {
+            void video.play().catch((error: unknown) => {
+              // Switching takes can interrupt a pending play request without a media failure.
+              if (!(error instanceof Error && error.name === "AbortError")) setFailed(true);
+            });
+          } else {
+            video.pause();
+          }
+        }}
+      >
+        {playing ? <PauseSolid size={18} /> : <Play size={18} />}
+      </button>
+    </>
   );
 }
 
@@ -3344,7 +3374,7 @@ function TakesView({
             )}
             <div className="fy-takes__filter">
               <span className="fy-takes__filter-label">SHOT</span>
-              <div className="fy-takechips" role="group" aria-label="Shot">
+              <div className="fy-takechips fy-takechips--shots" role="group" aria-label="Shot">
                 {shots.map((candidate) => {
                   const done = acceptedTakeId(production, candidate.id) !== null;
                   const has = coveredShotIds.has(candidate.id);
@@ -3427,6 +3457,7 @@ function TakesView({
             })}
           </div>
         )}
+        {picked && worldId && shotId && <TakeDialogueFeedbackPanel key={`${picked.id}/${shotId}`} worldId={worldId} production={production} take={picked} shotId={shotId} />}
         <div className="fy-takes__foot">
           {/* The two verdicts and the one thing that spends (review 2026-08-22): the first cut
               of this view had no way to generate and no way to reject, so "Generate frame" from
@@ -3465,21 +3496,21 @@ function TakesView({
           >
             Reject
           </Button>
-          <span className="fy-mono">
+          <span className="fy-mono fy-takes__explanation">
             {acceptedHidden
               ? "accepted take holds no preview — accepting a visible one replaces it"
               : "accepting locks it into the cut · rejections teach the shot"}
           </span>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="fy-linkbtn" onClick={() => onContact(shotId)}>
-            Contact sheet
-          </button>
-          <button type="button" className="fy-linkbtn" disabled={generating} onClick={() => onAdvanced(shotId)}>
-            Advanced
-          </button>
+          <span className="fy-takes__links">
+            <button type="button" className="fy-linkbtn" onClick={() => onContact(shotId)}>
+              Contact sheet
+            </button>
+            <button type="button" className="fy-linkbtn" disabled={generating} onClick={() => onAdvanced(shotId)}>
+              Advanced
+            </button>
+          </span>
         </div>
       </div>
-      {picked && worldId && shotId && <TakeDialogueFeedbackPanel key={`${picked.id}/${shotId}`} worldId={worldId} production={production} take={picked} shotId={shotId} />}
       {/* Layer two, in the same column it holds everywhere else (turns 99, 100, 102). */}
       <ProductionConversation
         worldId={worldId}

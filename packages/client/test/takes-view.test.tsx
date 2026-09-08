@@ -218,7 +218,7 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(html.includes("Reject"), "and teach");
     assert.ok(html.includes("Contact sheet") && html.includes("Advanced"), "the other lenses are doors, not tabs");
     assert.ok(html.includes("<video"), "a clip is playable where it is reviewed");
-    assert.ok(!html.includes('class="fy-playbtn"'), "the grid promises no inert play control");
+    assert.ok(html.includes('aria-label="Play Take 1"'), "video has an accessible play control");
   });
 
   it("shows each take's duration and falls back to the shot's planned duration (#782)", () => {
@@ -241,16 +241,38 @@ describe("the takes, watched (turn 102c)", () => {
     const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
     assert.ok(video.getAttribute("src")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4"));
     assert.ok(video.getAttribute("poster")?.endsWith("/productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png"));
-    assert.equal(video.getAttribute("controls"), "");
+    assert.equal(video.hasAttribute("controls"), false, "review cards use the designed transport");
     assert.equal(video.getAttribute("preload"), "metadata");
     assert.ok(video.getAttributeNames().some((name) => name.toLowerCase() === "playsinline"));
     assert.equal(video.hasAttribute("autoplay"), false, "opening Takes never starts sound");
-    assert.equal(video.closest("button"), null, "native media controls are never nested in the selection control");
+    assert.equal(video.closest("button"), null, "media is separate from the selection control");
+
+    const transport = mounted.container.querySelector<HTMLButtonElement>(".fy-take__play")!;
+    let playing = false;
+    Object.defineProperty(video, "paused", { get: () => !playing });
+    video.play = async () => {
+      playing = true;
+      video.dispatchEvent(new dom.window.Event("play"));
+    };
+    video.pause = () => {
+      playing = false;
+      video.dispatchEvent(new dom.window.Event("pause"));
+    };
+    await act(async () => transport.click());
+    assert.equal(playing, true);
+    assert.equal(transport.getAttribute("aria-label"), "Pause Take 1");
+    await act(async () => transport.click());
+    assert.equal(playing, false);
+    assert.equal(transport.getAttribute("aria-label"), "Play Take 1");
+    await act(async () => transport.click());
+    await act(async () => video.dispatchEvent(new dom.window.Event("ended")));
+    assert.equal(transport.getAttribute("aria-label"), "Play Take 1", "completion restores replay");
 
     const cards = mounted.container.querySelectorAll<HTMLElement>(".fy-take");
     assert.equal(cards.length, 2);
     assert.ok(cards[1]!.querySelector("img"), "a frame take stays an image");
     assert.equal(cards[1]!.querySelector("video"), null);
+    assert.equal(cards[1]!.querySelector(".fy-take__play"), null, "stills have no inert transport");
     const choices = mounted.container.querySelectorAll<HTMLButtonElement>(".fy-take__pick");
     assert.equal(choices.length, 2);
     assert.equal(choices[0]!.getAttribute("aria-pressed"), "true", "the accepted take is initially picked");
@@ -277,6 +299,23 @@ describe("the takes, watched (turn 102c)", () => {
     assert.ok(challenger.textContent?.includes("Could not play video"));
     assert.ok(challenger.querySelector("img"), "the poster remains when playback fails");
     assert.ok(challenger.querySelector(".fy-take__pick"), "failure does not strand selection or acceptance");
+  });
+
+  it("keeps interrupted playback retryable and a failed play request reviewable", async () => {
+    const mounted = await mount(FIXTURE_STATE);
+    const video = mounted.container.querySelector<HTMLVideoElement>(".fy-take video")!;
+    const transport = mounted.container.querySelector<HTMLButtonElement>(".fy-take__play")!;
+    Object.defineProperty(video, "paused", { value: true });
+    video.play = async () => { throw new DOMException("Interrupted", "AbortError"); };
+    await act(async () => transport.click());
+    assert.ok(mounted.container.contains(video), "an interrupted request can be retried");
+    video.play = async () => { throw new DOMException("Unsupported media", "NotSupportedError"); };
+    await act(async () => transport.click());
+    const card = mounted.container.querySelector(".fy-take")!;
+    assert.ok(card.textContent?.includes("Could not play video"));
+    assert.ok(card.querySelector("img"));
+    assert.ok(card.querySelector(".fy-take__pick"));
+    assert.equal(card.querySelector(".fy-take__play"), null);
   });
 
   it("plays a selectable pass segment from its backing media and inside its authored range", async () => {
