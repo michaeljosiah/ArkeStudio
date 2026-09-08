@@ -2215,7 +2215,7 @@ export class Coordinator {
               if (job.provider === "comfyui" && this.opts.comfyui?.service.engineIdentity()?.locality === "local") {
                 return this.localGpu.acquire("ComfyUI", signal, waiting);
               }
-              return Promise.resolve(() => {});
+              return Promise.resolve(undefined);
             },
             // Recovery folds immediately, but recovered local work cannot reach a child that is
             // still importing its runtime. URL engines resolve synchronously and return at once.

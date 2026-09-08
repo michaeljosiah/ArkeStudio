@@ -85,6 +85,7 @@ it("holds the card for an async harness turn, reports its wait, and lets an expl
   let finish!: () => void;
   const raw: HarnessAdapter = {
     id: "test", capabilities: () => new Set(), readiness: () => ({ ready: true }),
+    listModels: async () => [{id:"ollama/gemma4",displayName:"Gemma",provider:"ollama"}],
     createSession: async (input) => ({ sessionId: input.title! }),
     sendMessage: async (input) => {
       sent.push(input.sessionId);
@@ -107,6 +108,8 @@ it("holds the card for an async harness turn, reports its wait, and lets an expl
       await adapter.createSession({ purpose: "ask", title, preparationId: title });
     }
     await adapter.dispatchAsync({ sessionId: "local", parts: [] });
+    await adapter.createSession({purpose:"ask",title:"unknown-default"});
+    await adapter.dispatchAsync({sessionId:"unknown-default",parts:[]});
     await adapter.sendMessage({ sessionId: "cloud", parts: [] });
     await until(() => seen.some((event) => event.type === "tool.activity" && event.summary.includes("ComfyUI")), "writing wait line");
     assert.deepEqual(sent, ["cloud"]);
@@ -117,5 +120,54 @@ it("holds the card for an async harness turn, reports its wait, and lets an expl
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(nextAcquired, false);
     finish(); (await next)();
+    await until(() => sent.includes("unknown-default"), "unknown Ollama default also reserves the card");
   } finally { generation(); finish?.(); gpu.stop(); stop.abort(); await observe; await adapter.dispose!(); }
+});
+
+it("retains a fault-held generation's GPU through resumed polling and unacknowledged cancellation", async () => {
+  for (const outcome of ["resume", "cancel", "recovery"] as const) {
+    const dir=await tempDir("arke-gpu-held-");
+    const unloaded: string[]=[];
+    const gpu=new LocalGpu(async engine => {unloaded.push(engine);});
+    const client=new FakeProvider();
+    client.pollError=new Error("HTTP 401 credential rejected while polling");
+    const options: ConstructorParameters<typeof JobQueue>[0]={journalPath:join(dir,"jobs.jsonl"),clients:{comfyui:client},getKey:async()=>"",emit:()=>{},
+      landInWorld:async(_world,work)=>{await work(dir);return true;},
+      ledger:{readJobIds:async()=>new Set(),has:async()=>false,append:async()=>{}},
+      acquireLocalGpu:(_job,signal,waiting)=>gpu.acquire("ComfyUI",signal,waiting),pollIntervalMs:1,baseIntervalMs:1};
+    let queue=new JobQueue(options);
+    await queue.start();
+    try {
+      const job=await queue.enqueue({worldId:"01J8F3K2QW9VZX4N7M0RTYB6HC",target:{kind:"shot",id:"sh_12"},capability:"image",provider:"comfyui",model:"test",params:{},estimatedMicroUsd:0});
+      await until(()=>queue.queueStatus("comfyui").paused,"provider hold");
+      await queue.waitForIdle();
+      if(outcome==="recovery") {
+        queue.dispose();await queue.drain();
+        queue=new JobQueue(options);
+        await queue.start();await queue.waitForIdle();
+      }
+      let writingStarted=false;
+      const writing=gpu.acquire("Ollama",new AbortController().signal).then(release=>{writingStarted=true;return release;});
+      await new Promise(resolve=>setImmediate(resolve));
+      assert.equal(writingStarted,false);
+      assert.deepEqual(unloaded,outcome==="recovery"?["Ollama","Ollama"]:["Ollama"]);
+      if(outcome!=="cancel") {
+        client.pollError=null;
+        queue.resume("comfyui");
+        await until(()=>queue.listJobs().find(j=>j.id===job.id)?.status==="succeeded","resumed job settles");
+      } else {
+        const cancel=client.cancel.bind(client);
+        client.cancel=async()=>{throw new Error("cancel connection lost");};
+        await queue.cancel(job.id);
+        assert.equal(queue.listJobs().find(j=>j.id===job.id)?.status,"running");
+        assert.equal(writingStarted,false);
+        client.cancel=cancel;
+        await queue.cancel(job.id);
+        assert.equal(queue.listJobs().find(j=>j.id===job.id)?.status,"cancelled");
+      }
+      (await writing)();
+      assert.equal(client.submitCount,1);
+      assert.deepEqual(unloaded,outcome==="recovery"?["Ollama","Ollama","ComfyUI"]:["Ollama","ComfyUI"]);
+    } finally {gpu.stop();queue.dispose();await queue.waitForIdle();await queue.drain();}
+  }
 });

@@ -226,7 +226,7 @@ export interface JobQueueOptions {
   /** Provider-specific safe caps. A local GPU runtime normally supplies one here. */
   providerConcurrency?: Readonly<Record<string, number>>;
   /** Held across local inference; waiting stays on the queued side of the outbox. */
-  acquireLocalGpu?: (job: Job, signal: AbortSignal, waiting: (reason: string | null) => void) => Promise<() => void>;
+  acquireLocalGpu?: (job: Job, signal: AbortSignal, waiting: (reason: string | null) => void) => Promise<(() => void) | undefined>;
   /** Recovered work for this provider is not pumped until the runtime has settled. */
   awaitRecoveryReady?: (provider: string) => Promise<boolean>;
   baseIntervalMs?: number;
@@ -344,6 +344,8 @@ export class JobQueue {
   private readonly retryTimers = new Set<NodeJS.Timeout>();
   /** Submits without a remote id can still be interrupted, notably queue-backed local speech. */
   private readonly submitAborts = new Map<string, AbortController>();
+  /** A poll fault pauses observation, not the engine's work. Retain its card until settled. */
+  private readonly gpuReservations = new Map<string, () => void>();
   /**
    * Jobs whose cancellation is underway, held from the moment the abort fires until the terminal
    * row is written. The abort makes the in-flight submit reject, and that rejection reaches the
@@ -781,6 +783,7 @@ export class JobQueue {
           this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
         }
       });
+      if (release) this.gpuReservations.set(this.engineRunKey(job), release);
       if (waiting.signal.aborted || this.disposed || !this.stillQueued(job)) return;
       this.submitAborts.delete(job.id);
       await this.runQueuedJob(job);
@@ -790,7 +793,8 @@ export class JobQueue {
       }
     } finally {
       if (this.submitAborts.get(job.id) === waiting) this.submitAborts.delete(job.id);
-      release?.();
+      const current = this.jobs.get(job.id);
+      if (release && (this.disposed || current?.status !== "running" || this.engineRunKey(current) !== this.engineRunKey(job))) this.releaseGpu(job);
     }
   }
 
@@ -1150,11 +1154,12 @@ export class JobQueue {
       this.submitAborts.set(job.id, abort);
       let release: (() => void) | undefined;
       try {
-        release = await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+        release = this.gpuReservations.get(this.engineRunKey(job)) ?? await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+        if (release) this.gpuReservations.set(this.engineRunKey(job), release);
         if (!abort.signal.aborted && !this.disposed) await this.pollToTerminal(job, client, key, true);
       } finally {
         if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
-        release?.();
+        if (release && (this.disposed || !this.stillPolling(job))) this.releaseGpu(job);
       }
       return;
     }
@@ -1220,6 +1225,27 @@ export class JobQueue {
       current.providerJobId === job.providerJobId &&
       current.attempt === job.attempt &&
       this.engineRunKey(current) === this.engineRunKey(job);
+  }
+
+  private releaseGpu(job: Job): void {
+    const key = this.engineRunKey(job);
+    const release = this.gpuReservations.get(key);
+    this.gpuReservations.delete(key);
+    release?.();
+  }
+
+  private async reserveHeldGpu(job: Job): Promise<void> {
+    if (!this.opts.acquireLocalGpu || !this.stillPolling(job)) return;
+    const abort = new AbortController();
+    this.submitAborts.set(job.id, abort);
+    try {
+      const release = await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+      if (!release) return;
+      if (this.disposed || !this.stillPolling(job)) release();
+      else this.gpuReservations.set(this.engineRunKey(job), release);
+    } finally {
+      if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
+    }
   }
 
   // ---- artifacts (§2.9) ----------------------------------------------------
@@ -1438,6 +1464,7 @@ export class JobQueue {
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
+    this.releaseGpu(job);
     if (this.disposed) return;
     // An append that landed this pass is proof enough; asking the file again could only be
     // wrong. A lock arriving in that window (a scanner opening the file we just wrote) used to
@@ -1555,10 +1582,17 @@ export class JobQueue {
       // test skipped the remote cancel for all of them: a Higgsfield job kept running after
       // the user cancelled it, and SPEC-021 R-17's targeted cancellation was unreachable.
       // Only a genuinely missing in-app credential (null) means there is nobody to ask.
+      let acknowledged = false;
       if (client && key !== null) {
-        await client
+        acknowledged = await client
           .cancel(key, job.providerJobId, { jobId: job.id, attempt: job.attempt, model: job.model })
-          .catch(() => {});
+          .then(() => true, () => false);
+      }
+      if (!acknowledged && this.gpuReservations.has(this.engineRunKey(job)) && this.stillPolling(job)) {
+        const error = "Cancellation was not acknowledged; the local engine may still be running. Retry cancellation or resume checking its result.";
+        await this.transition({ ...job, failureClass: "provider-fault", error, updatedAt: this.clock() });
+        this.pauseLane(job.provider, "fault", error);
+        return;
       }
     }
     // A local abort ends our wait, not necessarily the provider's work. Preserve that distinction
@@ -1728,17 +1762,21 @@ export class JobQueue {
         continue;
       }
       if (job.status === "running") {
-        if (job.failureClass === "provider-fault") {
-          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
-          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
-          continue;
-        }
         // A local engine's job first consults the per-source policy (SPEC-021 §2.11): a spawned
         // engine's old prompt id means nothing, and an old id is never polled against a
         // different engine. Cloud jobs keep the standing behaviour untouched.
         const decision = this.opts.recoverLocal?.(job, prior) ?? null;
         if (decision !== null && decision.action !== "resume") {
           report.push(await this.applyLocalRecovery(job, decision));
+          continue;
+        }
+        if (job.failureClass === "provider-fault") {
+          this.pauseLane(job.provider, "fault", job.error ?? "the provider requires attention");
+          const lane = this.lane(job.provider), runKey = this.engineRunKey(job);
+          lane.inFlight.add(runKey);
+          this.trackRun(this.runAfterRecoveryGate(job.provider, () => this.reserveHeldGpu(job))
+            .finally(() => lane.inFlight.delete(runKey)));
+          report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "provider fault" });
           continue;
         }
         // R-5: a recorded remote id resumes by polling, never by resubmitting.
@@ -2027,6 +2065,7 @@ export class JobQueue {
       if (replacement !== null) {
         const retiredRun = this.engineRunKey(job);
         this.retiredEngineRuns.add(retiredRun);
+        this.releaseGpu(job);
         lane.inFlight.delete(retiredRun);
         this.submitAborts.get(job.id)?.abort();
         const requeued: Job = {
@@ -2170,6 +2209,8 @@ export class JobQueue {
     for (const client of new Set(Object.values(this.opts.clients))) client.dispose?.();
     for (const controller of this.submitAborts.values()) controller.abort();
     this.submitAborts.clear();
+    for (const release of this.gpuReservations.values()) release();
+    this.gpuReservations.clear();
     for (const lane of this.lanes.values()) {
       if (lane.timer) clearTimeout(lane.timer);
       lane.timer = null;

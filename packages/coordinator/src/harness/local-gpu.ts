@@ -29,10 +29,12 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
     let release: (() => void) | undefined;
     try {
       const model = models.get(input.sessionId);
-      // v2 identifies its actual default. v1 can report several provider defaults, so reserve
-      // conservatively when Ollama is among them; an explicit cloud choice never waits.
+      // A failed default lookup can still return a catalogue. When none is marked, an
+      // available Ollama model may be the actual default; an explicit cloud choice never waits.
+      const catalog = model === undefined ? await adapter.listModels?.() : undefined;
+      const hasDefault = catalog?.some((row) => row.isDefault) === true;
       const local = model !== undefined ? model.startsWith("ollama/") :
-        (await adapter.listModels?.())?.some((row) => row.provider === "ollama" && row.isDefault) === true;
+        catalog?.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault)) === true;
       const signal = AbortSignal.any([turn.abort.signal, closed.signal]);
       if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({
         type: "tool.activity", sessionId: input.sessionId, tool: "local-inference",
