@@ -5,7 +5,8 @@ import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscrib
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip } from "../lib/audio.js";
-import { Button } from "./ui.js";
+import { Button, cx } from "./ui.js";
+import { Portrait, sheetPortraitPath } from "./portrait.js";
 
 const ReviewOperationId = z.string().uuid();
 
@@ -24,8 +25,31 @@ export function costLabel(model: ManifestModel, durationSec: number): string {
   return run === undefined ? "free · minutes, not seconds" : `free · about ${Math.max(1, Math.round(run / 60))} min`;
 }
 
-/** Design 114: sample audio and TTS assignment have separate authorities and separate actions. */
-export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle; sheet: Sheet }) {
+/** A tick that is a human attestation, never an automated finding (design 114). */
+function Tick({ on, onChange, label, note, testId }: {
+  on: boolean; onChange: (next: boolean) => void; label: string; note?: string; testId?: string;
+}) {
+  return <label className="fy-vstick">
+    <input type="checkbox" checked={on} data-testid={testId} onChange={event => onChange(event.target.checked)} />
+    <span>{label}</span>
+    {note !== undefined && <span className="fy-mono">{note}</span>}
+  </label>;
+}
+
+/**
+ * Setting the voice a character speaks with on screen (design 132f/132g; issue 1011).
+ *
+ * Two sheets rather than one panel, and the order is what turn 114 bound: a source is generated
+ * or chosen, prepared locally, and only then reviewed and assigned. Nothing here assigns as a
+ * side effect of anything else — generation lands a candidate and stops, preparation lands a
+ * review and stops, and `Use on screen` is the single press that designates.
+ *
+ * The panel this replaces did all three in one column of native selects and checkboxes. What has
+ * not changed is underneath it: the same preparation, the same quality report, the same
+ * attestations and the same rights ledger, including every recovery path — a review that
+ * outlives a reload, a legacy sample that has to be revalidated, a source that vanished.
+ */
+export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle; sheet: Sheet; onClose: () => void }) {
   const { state } = useStore();
   const sample = world.referenceKits.find(k => k.sheetId === sheet.id)?.designatedVoiceSample;
   const models = characterSpeakingVideoRoutes(state?.app.manifest?.models ?? []);
@@ -45,6 +69,7 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
   const kit = world.referenceKits.find(k => k.sheetId === sheet.id);
   const photo = kit?.mainPhoto?.file ?? kit?.anchor;
   const artifacts = pickableArtifacts(world.artifacts).filter(a => ["audio", "video"].includes(a.kind));
+  const takes = world.productions.flatMap(p => p.takes.filter(t => (t.kind === "voice" || t.kind === "clip") && (t.media || t.segment)).map(t => ({ production: p.meta.id, take: t.id })));
   const selectedArtifact = sourceId.startsWith("artifact:") ? artifacts.find(a => a.id === sourceId.slice(9)) : undefined;
   const model = models.find(m => m.id === modelId) ?? models[0];
   // Only lengths this route declares. The coordinator refuses one it does not, and now that a
@@ -73,80 +98,153 @@ export function CharacterVoiceSamplePanel({ world, sheet }: { world: WorldBundle
   };
   const hear = (file: string, title: string, range?: { inSec: number; outSec: number }) => { void playClip({ ...(range ? { range } : {}), id: `${world.meta.worldId}/${file}`, url: mediaUrl(world.meta.slug, file), title }); };
   const validRange = Number.isFinite(inSec) && Number.isFinite(outSec) && inSec >= 0 && outSec > inSec;
-  return <section aria-label="Character voice reference" style={{ borderBottom: "1px solid var(--border)", padding: "20px 0", marginBottom: 20 }}>
-    <h2 style={{ fontSize: 18 }}>Character voice reference</h2>
-    <p>{sample ? "One assigned clip guides this character’s voice in compatible scene models." : "Assign a clip once to reuse this character’s voice in compatible scene models."}</p>
-    {sample && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <Button onClick={() => hear(`references/${sheet.id}/${sample.file}`, `${sheet.name} · assigned voice sample`)}>Hear assigned clip</Button>
-      <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "clear-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id,
-        requestId: ulid(), expectedHash: "schemaVersion" in sample ? sample.provenance.outputHash : sample.file })}>Clear sample</Button>
-      {"schemaVersion" in sample && sample.acknowledgementId && <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "withdraw-character-voice-sample",
-        worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(), expectedHash: sample.provenance.outputHash })}>Withdraw cloud reuse</Button>}
-      {!("schemaVersion" in sample) && <><p>Legacy sample: review its audio before cloud reuse.</p><Button disabled={busy} onClick={() => act({ kind: "prepare-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, source: { kind: "legacy-character-sample", sheetId: sheet.id } })}>Revalidate legacy sample</Button></>}
-    </div>}
-    <details style={{ marginTop: 12 }}><summary>Generate speaking sample</summary>
-      <label style={{ display: "block", marginTop: 12 }}>Reference script
-        <textarea aria-label="Reference script" value={script} maxLength={2000} onChange={e => setScript(e.target.value)} style={{ display: "block", width: "100%", minHeight: 80 }} />
-      </label>
-      <p>The character speaks these words in a clean, isolated voice. Later scenes use their own dialogue.</p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-        <label>Model <select value={model?.id ?? ""} onChange={e => setModelId(e.target.value)}>{models.map(m => <option key={m.id} value={m.id}>{m.displayName}{m.speechVideo === "verified" ? "" : " · untested"} · {costLabel(m, length)}</option>)}</select></label>
-        <label>Duration <select value={length} onChange={e => setDurationSec(Number(e.target.value))}>{durations.map(n => <option key={n} value={n}>{n} seconds</option>)}</select></label>
-      </div>
-      {photo && <img alt={`${sheet.name} · accepted character imagery`} src={mediaUrl(world.meta.slug, `references/${sheet.id}/${photo}`)} style={{ width: 100, maxHeight: 140, objectFit: "contain" }} />}
-      {!photo && <p>Accept a character photo before generating a speaking video.</p>}
-      {models.length === 0 && <p>No route here can carry a photo and make sound.</p>}
-      {/* The trade a local route makes, said where the price would be (issue 863). It is the free
-          option for someone willing to wait, not the default — so it is stated rather than left
-          to be discovered by a $0.00 button that takes a quarter of an hour. The figure is the
-          row's measured run where it recorded one (issue 868), and "minutes" where it did not. */}
-      {model?.pricing.kind === "unmetered" && <p>Runs on this machine · {costLabel(model, length)}</p>}
-      {model && model.speechVideo !== "verified" && <p>Untested for speech. It may not lip-sync or speak clearly.</p>}
-      <p>Uses the accepted character photo. Creates a video candidate with speech; audition before assigning.</p>
-      <Button disabled={busy || !model || !script.trim() || !world.referenceKits.some(k => k.sheetId === sheet.id && (k.mainPhoto || k.anchor))}
-        onClick={() => { if (!model) return; setBusy(true); generation.current = generateCharacterVoiceSample({ worldId: world.meta.worldId,
-          sheetId: sheet.id, modelId: model.id, script, durationSec: length, confirmedMicroUsd: estimate });
-          if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>Generate speaking video · {model ? costLabel(model, length) : "$0.00"}</Button>
-    </details>
-    <div style={{ marginTop: 16 }}>
-      <label>Audio or video source <select aria-label="Voice sample source" style={{ maxWidth: "100%" }} value={sourceId} onChange={e => { setSourceId(e.target.value); setReview(null); }}>
-        <option value="">Choose a source…</option>
-        {artifacts.map(a => <option key={a.id} value={`artifact:${a.id}`}>{a.file}{a.generation ? " · generated" : ""}</option>)}
-        {world.productions.flatMap(p => p.takes.filter(t => (t.kind === "voice" || t.kind === "clip") && (t.media || t.segment)).map(t => <option key={t.id} value={`take:${p.meta.id}:${t.id}`}>{p.meta.id} · {t.id}</option>))}
-      </select></label>
-      {selectedArtifact && <Button onClick={() => hear(`artifacts/${selectedArtifact.file}`, `${sheet.name} · selected source`)}>Hear source</Button>}
-      {selectedArtifact?.kind === "video" && <video aria-label="Speaking video picture preview" controls muted src={mediaUrl(world.meta.slug, `artifacts/${selectedArtifact.file}`)} style={{ display: "block", width: "100%", maxHeight: 240 }} />}
-      <Button variant="ghost" onClick={() => sendAttachFilesCorrelated(world.meta.worldId, [sheet.id])}>Import audio or video</Button>
-      <label style={{ display: "block" }}><input type="checkbox" checked={trim} onChange={e => setTrim(e.target.checked)} /> Extract a range</label>
-      {(trim || sourceId.startsWith("take:")) && <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-        <label>Start seconds <input type="number" min={0} step={0.1} value={inSec} onChange={e => { setInSec(Number(e.target.value)); setReview(null); }} /></label>
-        <label>End seconds <input type="number" min={0} step={0.1} value={outSec} onChange={e => { setOutSec(Number(e.target.value)); setReview(null); }} /></label>
-      </div>}
-      <Button disabled={busy || !sourceId || (sourceId.startsWith("artifact:") && !selectedArtifact) || ((trim || sourceId.startsWith("take:")) && !validRange)} onClick={() => {
-        const parts = sourceId.split(":");
-        const source = parts[0] === "artifact" ? { kind: "artifact" as const, artifactId: parts[1]!, ...(trim ? { range: { inSec, outSec } } : {}) }
-          : { kind: "production-take" as const, productionId: parts[1]!, takeId: parts[2]!, range: { inSec, outSec } };
-        act({ kind: "prepare-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, source });
-      }}>{busy ? "Working…" : "Prepare audio locally"}</Button>
+  const prepare = (id: string) => {
+    const parts = id.split(":");
+    const ranged = trim || parts[0] === "take";
+    const source = parts[0] === "artifact" ? { kind: "artifact" as const, artifactId: parts[1]!, ...(trim ? { range: { inSec, outSec } } : {}) }
+      : { kind: "production-take" as const, productionId: parts[1]!, takeId: parts[2]!, range: { inSec, outSec } };
+    if (ranged && !validRange) { setNotice("Give a range that ends after it starts."); return; }
+    act({ kind: "prepare-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, source });
+  };
+  const head = <header className="fy-voicesheet__head">
+    <span className="fy-voicesheet__avatar"><Portrait worldSlug={world.meta.slug} path={sheetPortraitPath(sheet.id)} label="" radius={99} /></span>
+    <div>
+      <strong>{review ? "Review the sample" : "The voice on screen"}</strong>
+      <span className="fy-mono">{review ? "one speaker, no music — your review, not a finding" : `${sheet.name} speaking, for routes that carry a voice`}</span>
     </div>
-    {recovery && !review && <Button disabled={busy} onClick={() => act({ kind: "resume-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, operationId: recovery })}>Resume prepared review</Button>}
-    {review && <div style={{ marginTop: 16 }}>
-      <Button onClick={() => hear(review.sourceFile, `${sheet.name} · original source`, (() => { const settings = review.provenance.preparation[0]?.settings; return typeof settings?.inSec === "number" && typeof settings.outSec === "number" ? { inSec: settings.inSec, outSec: settings.outSec } : undefined; })())}>Hear source</Button>{" "}
-      <Button onClick={() => hear(review.preparedFile, `${sheet.name} · prepared sample`)}>Hear prepared clip</Button>
-      <p>{review.provenance.outputTechnical.durationSec?.toFixed(2)} seconds · mono 48 kHz PCM WAV</p>
-      <p>Speaker/music detection and loudness analysis are unavailable. These confirmations are your review, not automated findings.</p>
-      {warnings.length > 0 && <label style={{ display: "block" }}><input type="checkbox" checked={ackWarnings} onChange={e => setAckWarnings(e.target.checked)} /> I reviewed these warnings: {warnings.join(", ")}</label>}
-      <label style={{ display: "block" }}><input type="checkbox" checked={singleSpeaker} onChange={e => setSingleSpeaker(e.target.checked)} /> This clip contains one speaker.</label>
-      <label style={{ display: "block" }}><input type="checkbox" checked={noMusic} onChange={e => setNoMusic(e.target.checked)} /> This clip contains no music.</label>
-      <label style={{ display: "block", margin: "12px 0" }}>Cloud reference reuse <select value={rightsBasis} onChange={e => setRightsBasis(e.target.value as typeof rightsBasis)}>
-        <option value="">Local-only assignment</option><option value="self">I performed this audio and authorize reference upload</option>
-        <option value="authorized">I have authorization to upload this audio as a reference</option><option value="licensed">My license permits uploading this audio as a reference</option>
-      </select></label>
-      <Button disabled={busy || !singleSpeaker || !noMusic || (warnings.length > 0 && !ackWarnings)} onClick={() => act({ kind: "accept-character-voice-sample",
-        worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(), operationId: review.operationId, warningCodes: warnings,
-        singleSpeaker, noMusic, rightsBasis: rightsBasis || null })}>Use as character voice reference</Button>{" "}
-      <Button variant="ghost" onClick={() => { setReview(null); retainReview(null); }}>Cancel review</Button>
-    </div>}
-    <p role="status" aria-live="polite">{notice}</p>
-  </section>;
+  </header>;
+  if (review) return <>
+    <div className="fy-voicescrim" onClick={onClose} />
+    <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="Review the sample" data-testid="voice-review">
+      {head}
+      <div className="fy-vsbody">
+        <div className="fy-vsab">
+          <Button onClick={() => hear(review.sourceFile, `${sheet.name} · original source`, (() => { const settings = review.provenance.preparation[0]?.settings; return typeof settings?.inSec === "number" && typeof settings.outSec === "number" ? { inSec: settings.inSec, outSec: settings.outSec } : undefined; })())}>Hear source</Button>
+          <Button onClick={() => hear(review.preparedFile, `${sheet.name} · prepared clip`)}>Hear prepared</Button>
+          <span className="fy-mono">{review.provenance.outputTechnical.durationSec?.toFixed(2)} s · mono 48 kHz</span>
+        </div>
+        {/* The report as it is: a check the tool could not run says so rather than passing. */}
+        <div className="fy-vschecks">
+          {Object.values(review.provenance.qualityReport.checks).map(check => <div key={check.code} className={cx("fy-vscheck", check.outcome === "warning" && "fy-vscheck--warn")}>
+            <span>{check.code}</span><span>{check.outcome}</span>
+          </div>)}
+        </div>
+        <div className="fy-vsticks">
+          <Tick on={singleSpeaker} onChange={setSingleSpeaker} label="One speaker" testId="sample-one-speaker" />
+          <Tick on={noMusic} onChange={setNoMusic} label="No music" testId="sample-no-music" />
+          {warnings.length > 0 && <Tick on={ackWarnings} onChange={setAckWarnings} label="I reviewed the warnings" note={warnings.join(", ")} testId="sample-warnings" />}
+        </div>
+        <div className="fy-vsrights">
+          <span className="fy-vsrights__label">Cloud reuse</span>
+          <div className="fy-seg">
+            {([["", "Local only"], ["self", "I performed it"], ["authorized", "Authorised"], ["licensed", "Licensed"]] as const).map(([value, label]) =>
+              <button key={label} type="button" className={cx("fy-seg__item", rightsBasis === value && "fy-seg__item--active")} onClick={() => setRightsBasis(value)}>{label}</button>)}
+          </div>
+        </div>
+      </div>
+      <footer className="fy-voicesheet__foot">
+        <span className="fy-mono">sets on screen · source kept</span>
+        <span className="fy-voicesheet__push" />
+        <Button variant="ghost" onClick={() => { setReview(null); retainReview(null); }}>Cancel</Button>
+        <Button variant="primary" data-testid="sample-use" disabled={busy || !singleSpeaker || !noMusic || (warnings.length > 0 && !ackWarnings)}
+          onClick={() => act({ kind: "accept-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(),
+            operationId: review.operationId, warningCodes: warnings, singleSpeaker, noMusic, rightsBasis: rightsBasis || null })}>Use on screen</Button>
+      </footer>
+      <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
+    </div>
+  </>;
+  return <>
+    <div className="fy-voicescrim" onClick={onClose} />
+    <div className="fy-voicesheet fy-voicesheet--wide" role="dialog" aria-label="The voice on screen" data-testid="voice-sample">
+      {head}
+      <div className="fy-vsbody">
+        {sample && <div className="fy-vsassigned">
+          <span className="fy-vsassigned__what">{"schemaVersion" in sample ? "Assigned clip" : "Legacy clip · review before cloud reuse"}</span>
+          <Button variant="ghost" onClick={() => hear("schemaVersion" in sample ? sample.file : `references/${sheet.id}/${sample.file}`, `${sheet.name} · assigned clip`)}>Hear</Button>
+          {!("schemaVersion" in sample) && <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "prepare-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, source: { kind: "legacy-character-sample", sheetId: sheet.id } })}>Revalidate</Button>}
+          {"schemaVersion" in sample && sample.acknowledgementId && <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "withdraw-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(), expectedHash: sample.provenance.outputHash })}>Withdraw cloud reuse</Button>}
+          <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "clear-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(),
+            expectedHash: "schemaVersion" in sample ? sample.provenance.outputHash : sample.file })}>Clear</Button>
+        </div>}
+        {recovery && <div className="fy-vsassigned">
+          <span className="fy-vsassigned__what">A prepared review is waiting</span>
+          <Button variant="ghost" disabled={busy} data-testid="sample-resume" onClick={() => act({ kind: "resume-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, operationId: recovery })}>Resume</Button>
+        </div>}
+        <section className="fy-vsgen">
+          <div className="fy-vsgen__photo">
+            {photo
+              ? <Portrait worldSlug={world.meta.slug} path={`references/${sheet.id}/${photo}`} label={`${sheet.name} · accepted photo`} radius={10} />
+              : <p className="fy-mono">Accept a photo first</p>}
+          </div>
+          <div className="fy-vsgen__form">
+            <label className="fy-vsfield">
+              <span>Script</span>
+              <textarea aria-label="Reference script" value={script} maxLength={2000} rows={3} onChange={e => setScript(e.target.value)} />
+            </label>
+            {models.length > 0 && <div className="fy-vsgen__row">
+              <span className="fy-vsgen__key">Model</span>
+              <div className="fy-seg">
+                {models.map(m => <button key={m.id} type="button" className={cx("fy-seg__item", m.id === model?.id && "fy-seg__item--active")} onClick={() => setModelId(m.id)}>
+                  {`${m.displayName}${m.speechVideo === "verified" ? "" : " · untested"}`}
+                </button>)}
+              </div>
+            </div>}
+            {durations.length > 0 && <div className="fy-vsgen__row">
+              <span className="fy-vsgen__key">Length</span>
+              <div className="fy-seg">
+                {durations.map(n => <button key={n} type="button" className={cx("fy-seg__item", n === length && "fy-seg__item--active")} onClick={() => setDurationSec(n)}>{`${n} s`}</button>)}
+              </div>
+              <span className="fy-mono fy-vsgen__price">{model ? costLabel(model, length) : ""}</span>
+            </div>}
+            {models.length === 0 && <p className="fy-mono">No route here can carry a photo and make sound.</p>}
+            {model && model.speechVideo !== "verified" && <p className="fy-mono">Untested for speech · may not lip-sync</p>}
+            <Button variant="primary" data-testid="sample-generate" disabled={busy || !model || !script.trim() || !photo}
+              onClick={() => { if (!model) return; setBusy(true); generation.current = generateCharacterVoiceSample({ worldId: world.meta.worldId,
+                sheetId: sheet.id, modelId: model.id, script, durationSec: length, confirmedMicroUsd: estimate });
+                if (!generation.current) { setBusy(false); setNotice("The studio is disconnected."); } }}>
+              {`Generate · ${model ? costLabel(model, length) : "$0.00"}`}
+            </Button>
+          </div>
+        </section>
+        <section className="fy-vssources">
+          <div className="fy-vssources__head">
+            <h3>Or use something already here</h3>
+            <label className="fy-vstick">
+              <input type="checkbox" checked={trim} data-testid="sample-trim" onChange={e => setTrim(e.target.checked)} />
+              <span>Take a range</span>
+            </label>
+            {(trim || sourceId.startsWith("take:")) && <span className="fy-vsrange">
+              <label><span className="fy-mono">from</span><input type="number" aria-label="Start seconds" min={0} step={0.1} value={inSec} onChange={e => { setInSec(Number(e.target.value)); setReview(null); }} /></label>
+              <label><span className="fy-mono">to</span><input type="number" aria-label="End seconds" min={0} step={0.1} value={outSec} onChange={e => { setOutSec(Number(e.target.value)); setReview(null); }} /></label>
+            </span>}
+            <span className="fy-voicesheet__push" />
+            <Button variant="ghost" onClick={() => sendAttachFilesCorrelated(world.meta.worldId, [sheet.id])}>Import a file</Button>
+          </div>
+          <div className="fy-voicelist">
+            {artifacts.length === 0 && takes.length === 0 && <p className="fy-voicesheet__none">Nothing filed yet · generate one, or import a file</p>}
+            {artifacts.map(a => <div key={a.id} className="fy-vssource" data-source={`artifact:${a.id}`}>
+              <span className="fy-vssource__name">{a.file}</span>
+              <span className="fy-mono">{a.kind}{a.generation ? " · generated" : ""}</span>
+              <span className="fy-voicesheet__push" />
+              <Button variant="ghost" onClick={() => hear(`artifacts/${a.file}`, `${sheet.name} · ${a.file}`)}>Hear</Button>
+              <Button disabled={busy} onClick={() => { setSourceId(`artifact:${a.id}`); prepare(`artifact:${a.id}`); }}>Review</Button>
+            </div>)}
+            {takes.map(({ production, take }) => <div key={`${production}/${take}`} className="fy-vssource" data-source={`take:${production}:${take}`}>
+              <span className="fy-vssource__name">{take}</span>
+              <span className="fy-mono">{production}</span>
+              <span className="fy-voicesheet__push" />
+              <Button disabled={busy} onClick={() => { setSourceId(`take:${production}:${take}`); prepare(`take:${production}:${take}`); }}>Review</Button>
+            </div>)}
+          </div>
+          {selectedArtifact?.kind === "video" && <video aria-label="Speaking video picture preview" controls muted src={mediaUrl(world.meta.slug, `artifacts/${selectedArtifact.file}`)} className="fy-vsvideo" />}
+        </section>
+      </div>
+      <footer className="fy-voicesheet__foot">
+        <span className="fy-mono">nothing here assigns · review first</span>
+        <span className="fy-voicesheet__push" />
+        <Button variant="ghost" onClick={onClose}>Close</Button>
+      </footer>
+      <p className="fy-vsnotice" role="status" aria-live="polite">{notice}</p>
+    </div>
+  </>;
 }

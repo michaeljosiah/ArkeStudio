@@ -49,7 +49,7 @@ export const SCREENS: ScreenEntry[] = [
   { id: "character-looks", samplePath: `${W}/cast/maren-kest/looks` },
   { id: "replace-main-photo", samplePath: `${W}/cast/maren-kest/main-photo` },
   { id: "model-sheet-generate", samplePath: `${W}/cast/maren-kest/model-sheet` },
-  { id: "voice-picker", samplePath: `${W}/cast/maren-kest/voice` },
+  { id: "character-voice", samplePath: `${W}/cast/maren-kest/voice` },
   { id: "new-character", samplePath: `${W}/cast/new` },
   { id: "locations", samplePath: `${W}/locations` },
   { id: "location-detail", samplePath: `${W}/locations/the-vigil` },

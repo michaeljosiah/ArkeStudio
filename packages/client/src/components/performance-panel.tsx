@@ -1,3 +1,4 @@
+import { PerformanceBiblePanel } from "./performance-bible-panel.js";
 import { PerformanceTimingPanel } from "./performance-timing-panel.js";
 import { PerformanceGenerationPanel } from "./performance-generation-panel.js";
 import { useEffect, useRef, useState } from "react";
@@ -135,6 +136,10 @@ export function PerformancePanel({ world, production, scene, shotId }: {
       {production.performanceReview.selections[performanceLineKey(record.target)]?.performanceId === record.id && <PerformanceTimingPanel key={record.id} world={world} production={production} performance={record} />}
       {record.kind === "scratch" && <PerformanceConversionControls record={record} voice={sheet?.voice} worldId={world.meta.worldId} />}
     </div>)}
+    {/* Delivery examples belong where their sources are (design 132). Designating one needs an
+        accepted performance, which only exists here, and the character's Voice page carried the
+        control with nothing to point it at until a production had already made something. */}
+    {sheet && <PerformanceBiblePanel world={world} sheet={sheet} />}
   </section>;
 }
 

@@ -207,7 +207,7 @@ describe("screen inventory", () => {
   it("renders the degraded reasons when children are unavailable (R-6)", () => {
     const html = renderAt(SCREENS.find((s) => s.id === "character-edit")!.samplePath);
     assert.ok(html.includes("OpenCode is not configured"), "harness reason is stated, not silent");
-    const voiceHtml = renderAt(SCREENS.find((s) => s.id === "voice-picker")!.samplePath);
+    const voiceHtml = renderAt(SCREENS.find((s) => s.id === "character-voice")!.samplePath);
     assert.ok(voiceHtml.includes("Voxa is not configured"));
   });
 

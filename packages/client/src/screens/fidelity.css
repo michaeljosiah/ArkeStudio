@@ -8061,3 +8061,126 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-key-art-review > p { margin: 6px 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
 .fy-key-art-review > button { margin: 0 6px 6px 0; }
 .fy-prompt-review abbr { cursor: help; text-decoration: underline dotted; }
+
+/* ---- The character's voice (design 132; issue 1011) ------------------------
+   One voice with two uses. The page is a hero that names it and two rows that
+   say where each use came from, then the four entrances that set them. Every
+   flow behind an entrance is a sheet over the page rather than another band of
+   the page: the panels this replaced competed for what the screen was for. */
+.fy-voicepage { padding: 22px 90px 40px; display: flex; flex-direction: column; gap: 18px; animation: fy-fade-up .7s var(--ease-out) .16s both; }
+.fy-voicehero { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 264px; border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: var(--card); box-shadow: var(--shadow-sm); }
+.fy-voicehero__art { position: relative; overflow: hidden; background: var(--neutral-950); }
+.fy-voicehero__art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; }
+.fy-voicehero__pill { position: absolute; left: 12px; bottom: 12px; padding: 4px 9px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--media-control-bg) 92%, transparent); color: var(--media-control-fg); font: 500 9.5px var(--font-mono); }
+.fy-voicehero__body { padding: 24px 28px 18px; display: flex; flex-direction: column; min-width: 0; }
+.fy-voicehero__top { display: flex; align-items: flex-start; gap: 16px; }
+.fy-voicehero__naming { flex: 1; min-width: 0; }
+.fy-voicehero__name { font: 650 30px/1.05 var(--font-sans); letter-spacing: -.025em; }
+.fy-voicehero__name--empty { color: var(--neutral-400); }
+.fy-voicehero__written { margin-top: 8px; max-width: 60ch; font: 400 13.5px/1.6 var(--font-sans); color: var(--muted-foreground); }
+.fy-voicehero__uses { margin-top: 14px; border-top: 1px solid var(--border); }
+.fy-voicehero__line { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px; color: var(--neutral-400); }
+.fy-voicehero__line span { color: var(--muted-foreground); font: 400 12px var(--font-sans); }
+
+/* Two rows, one per use, at the same weight: neither is a subheading of the other. */
+.fy-voiceuse { display: flex; align-items: center; gap: 14px; min-height: 56px; border-bottom: 1px solid var(--border); }
+.fy-voiceuse:last-child { border-bottom: 0; }
+.fy-voiceuse__noplay { width: 30px; flex: none; }
+.fy-voiceuse__name { width: 96px; flex: none; font: 600 13px var(--font-sans); }
+.fy-voiceuse__source { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font: 400 12.5px var(--font-sans); }
+.fy-voiceuse__source svg { flex: none; color: var(--neutral-400); }
+.fy-voiceuse--empty .fy-voiceuse__source { color: var(--neutral-400); }
+.fy-voiceuse__meta { white-space: nowrap; color: var(--neutral-400); }
+
+.fy-voiceways__head { display: flex; align-items: baseline; gap: 12px; }
+.fy-voiceways__head h2 { font: 600 13px var(--font-sans); }
+.fy-voiceways__head .fy-mono { margin-left: auto; color: var(--neutral-400); }
+.fy-voiceways { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+/* An entrance says what it sets before it is pressed, so the four read as one row of choices
+   rather than four unrelated buttons. */
+.fy-voicetile { display: flex; flex-direction: column; align-items: flex-start; min-height: 168px; padding: 18px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); text-align: left; cursor: pointer; transition: var(--transition-control); }
+.fy-voicetile:hover { border-color: var(--neutral-400); box-shadow: var(--shadow-sm); }
+.fy-voicetile:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-voicetile__icon { width: 40px; height: 40px; border-radius: var(--radius-pill); background: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+.fy-voicetile__title { margin-top: 14px; font: 600 14px var(--font-sans); }
+.fy-voicetile__what { margin-top: 4px; color: var(--muted-foreground); }
+.fy-voicetile__where { color: var(--neutral-400); }
+.fy-voicetile__sets { display: flex; gap: 6px; margin-top: auto; padding-top: 12px; }
+.fy-usebadge { display: inline-flex; align-items: center; height: 18px; padding: 0 7px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--neutral-400); font: 500 10px var(--font-mono); }
+.fy-usebadge--on { border-color: var(--foreground); color: var(--foreground); }
+
+/* A sheet is modal, so the page behind it dims: the click-catcher the bench uses paints nothing,
+   and an undimmed page under a 660px card reads as two screens at once. */
+.fy-voicescrim { position: fixed; inset: 0; z-index: 39; background: color-mix(in srgb, var(--neutral-950) 34%, transparent); }
+
+/* The sheets. One shell for the catalogue, the sample and its review, so a flow that moves
+   between them does not appear to change surface. */
+.fy-voicesheet { position: fixed; z-index: 40; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 660px; max-width: calc(100% - 48px); max-height: calc(100vh - 72px); display: flex; flex-direction: column; background: var(--background); border: 1px solid var(--border); border-radius: 15px; box-shadow: var(--shadow-lg); overflow: hidden; }
+.fy-voicesheet--wide { width: 760px; }
+.fy-voicesheet__head { display: flex; align-items: center; gap: 12px; padding: 20px 22px 14px; }
+.fy-voicesheet__head strong { display: block; font: 650 18px var(--font-sans); letter-spacing: -.02em; }
+.fy-voicesheet__head .fy-mono { display: block; margin-top: 2px; color: var(--neutral-400); }
+.fy-voicesheet__avatar { width: 34px; height: 34px; flex: none; border-radius: var(--radius-pill); overflow: hidden; }
+.fy-voicesheet__filters { display: flex; align-items: center; gap: 10px; padding: 0 22px 12px; flex-wrap: wrap; }
+.fy-voicesheet__filters .fy-mono { margin-left: auto; color: var(--neutral-400); }
+.fy-voicesheet__none { padding: 16px 22px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+.fy-voicesheet .fy-voicelist { padding: 0 22px; }
+.fy-voicesheet__foot { display: flex; align-items: center; gap: 8px; padding: 14px 22px; border-top: 1px solid var(--border); }
+.fy-voicesheet__foot .fy-mono { color: var(--neutral-400); }
+.fy-voicesheet__push { flex: 1; }
+
+/* A catalogue row: the circle previews, the body chooses, and the price sits beside the
+   circle that would spend it. */
+.fy-voicerow--picked { border-color: var(--foreground); background: var(--muted); }
+.fy-voicerow__pick { flex: 1; min-width: 0; display: block; padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+.fy-voicerow__pick:disabled { cursor: default; }
+.fy-voicerow__pick:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 6px; }
+.fy-voicerow__pick .fy-voicerow__name { display: block; }
+.fy-voicerow__pick .fy-voicerow__sub { display: block; }
+.fy-voicerow__where { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.fy-voicerow__where svg { color: var(--neutral-400); }
+.fy-voicerow__where .fy-mono { color: var(--muted-foreground); }
+.fy-voicerow__note { width: 132px; flex: none; text-align: right; color: var(--neutral-400); overflow: hidden; text-overflow: ellipsis; }
+
+/* The sample sheet and its review. */
+.fy-vsbody { padding: 0 22px 4px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.fy-vsassigned { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--muted); }
+.fy-vsassigned__what { flex: 1; min-width: 0; font: 500 12.5px var(--font-sans); }
+.fy-vsgen { display: flex; gap: 20px; }
+.fy-vsgen__photo { width: 176px; flex: none; }
+.fy-vsgen__photo img { display: block; width: 100%; border-radius: 10px; }
+.fy-vsgen__form { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+.fy-vsgen__row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; width: 100%; }
+.fy-vsgen__key { width: 52px; flex: none; font: 500 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-vsgen__price { margin-left: auto; }
+.fy-vsfield { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.fy-vsfield > span { font: 500 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-vsfield textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 13px/1.5 var(--font-sans); resize: vertical; }
+.fy-vssources__head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fy-vssources__head h3 { font: 600 12.5px var(--font-sans); }
+.fy-vsrange { display: inline-flex; align-items: center; gap: 8px; }
+.fy-vsrange label { display: inline-flex; align-items: center; gap: 5px; }
+.fy-vsrange input { width: 68px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 400 12px var(--font-mono); }
+.fy-vssource { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-vssource__name { max-width: 280px; font: 500 12.5px var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-vssource .fy-mono { color: var(--neutral-400); }
+.fy-vsvideo { display: block; width: 100%; max-height: 220px; margin-top: 10px; border-radius: 10px; }
+.fy-vsab { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.fy-vsab .fy-mono { color: var(--neutral-400); }
+.fy-vschecks { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-vscheck { display: flex; justify-content: space-between; gap: 12px; font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-vscheck--warn { color: var(--warning); }
+.fy-vsticks { display: flex; gap: 18px; flex-wrap: wrap; }
+.fy-vstick { display: inline-flex; align-items: center; gap: 8px; font: 400 12.5px var(--font-sans); cursor: pointer; }
+.fy-vstick .fy-mono { color: var(--neutral-400); }
+.fy-vsrights { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.fy-vsrights__label { font: 500 11px var(--font-sans); color: var(--muted-foreground); }
+.fy-vsnotice { padding: 0 22px 12px; font: 400 11.5px var(--font-sans); color: var(--muted-foreground); }
+
+@media (max-width: 1100px) {
+  .fy-voicepage { padding-inline: 22px; }
+  .fy-voicehero { grid-template-columns: 1fr; }
+  .fy-voicehero__art { height: 220px; }
+  .fy-voiceways { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-vsgen { flex-wrap: wrap; }
+}

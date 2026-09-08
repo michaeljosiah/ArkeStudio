@@ -72,7 +72,7 @@ function CharacterSheetPreview({
   );
 }
 
-function CharacterHeader({ active }: { active: "reference" | "looks" }) {
+export function CharacterHeader({ active }: { active: "reference" | "looks" | "voice" }) {
   const { worldId, sheetId } = useParams();
   const navigate = useNavigate();
   const world = useOpenWorldGuard(worldId);
@@ -124,7 +124,7 @@ function CharacterHeader({ active }: { active: "reference" | "looks" }) {
         </button>
         <button
           type="button"
-          className="fy-seg__item"
+          className={cx("fy-seg__item", active === "voice" && "fy-seg__item--active")}
           onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/voice`)}
         >
           Voice
