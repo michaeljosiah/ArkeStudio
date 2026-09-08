@@ -3295,6 +3295,7 @@ export class Coordinator {
    * forever over four probes that almost always say the same thing.
    */
   private residencyRefresh: Promise<void> | null = null;
+  private residencyRefreshPending = false;
   private residencyEpoch = 0;
 
   private clearLocalResidency(provider: "ollama" | "comfyui"): void {
@@ -3307,7 +3308,10 @@ export class Coordinator {
 
   private refreshLocalResidency(): Promise<void> {
     if (this.stopping) return Promise.resolve();
-    if (this.residencyRefresh) return this.residencyRefresh;
+    if (this.residencyRefresh) {
+      this.residencyRefreshPending = true;
+      return this.residencyRefresh;
+    }
     const epoch = this.residencyEpoch;
     const activeComfy = this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
     const work = Promise.all((["ollama", "comfyui"] as const).map(async (provider) => {
@@ -3328,7 +3332,14 @@ export class Coordinator {
     });
     this.residencyRefresh = work;
     this.backgroundWork.add(work);
-    void work.finally(() => { this.residencyRefresh = null; this.backgroundWork.delete(work); });
+    void work.finally(() => {
+      this.residencyRefresh = null;
+      this.backgroundWork.delete(work);
+      if (this.residencyRefreshPending) {
+        this.residencyRefreshPending = false;
+        void this.refreshLocalResidency();
+      }
+    });
     return work;
   }
 
