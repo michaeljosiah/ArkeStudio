@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { newId, ulid, type ConversationId, type HarnessAdapter, type WorldChatMessage } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
@@ -44,6 +46,21 @@ const reply = (setupUpdate?: unknown) => JSON.stringify({
 });
 
 describe("setup turns share conversation durability but no world-mutation authority", () => {
+  it("carries conversational episode bounds and seeded delivery defaults into the created season (#1012)", async () => {
+    const h = await setup(() => reply({ expectedRevision: 1, fields: {
+      title: "The dead air", kind: "microdrama", aspect: "9:16",
+      defaults: { episodeSecondsMin: 30, episodeSecondsMax: 45 },
+    }, episodes: [{ key: "one", title: "One", scenes: [] }] }));
+    assert.equal((await h.runner.send(h.log, h.id, "Micro drama: episodes forty seconds each, min thirty, max forty-five.")).status, "completed");
+    const defaults = { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 3, exportPreset: "social-1080x1920" };
+    assert.deepEqual((await h.view())!.productionSetup!.draft.defaults, defaults);
+    const review = await h.service.review(h.id, 2);
+    assert.deepEqual(review.review!.plan.initialSeason!.defaults, defaults);
+    const created = await h.service.create(h.id, 2, review.review!.id);
+    const season = JSON.parse(await readFile(join(h.world.dir, "productions", created.productionId!, "season.json"), "utf8"));
+    assert.deepEqual(season.defaults, defaults);
+  });
+
   it("refuses a retry record that races with completed production creation", async () => {
     const h = await setup(() => reply({ expectedRevision: 1, fields: { title: "The crossing" } }));
     await h.runner.send(h.log, h.id, "Name this film.");
@@ -143,6 +160,7 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.ok(reads.includes(bundle.canon[0]!.id));
     assert.ok(!reads.includes("foreign-guest"));
     assert.match(brief, /openQuestions/);
+    assert.match(brief, /defaults\?:\{episodeSecondsMin\?,episodeSecondsMax\?,hookWindowSec\?,exportPreset\?\}/);
     await assert.rejects(productionSetupBrief(bundle, draft, async () => ({ result: {}, receipt: { status: "complete" } }) as never, 100), /larger writing-model context/);
   });
 });

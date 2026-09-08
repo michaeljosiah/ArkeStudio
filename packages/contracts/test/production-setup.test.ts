@@ -17,6 +17,21 @@ export function draft(): ProductionSetupDraft {
 }
 
 describe("conversational production setup (SPEC-012 §4)", () => {
+  it("seeds missing microdrama delivery fields while preserving explicit values and clearing", () => {
+    const seeded = applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "microdrama" } });
+    assert.deepEqual(seeded.defaults, { episodeSecondsMin: 45, episodeSecondsMax: 75, hookWindowSec: 3, exportPreset: "social-1080x1920" });
+    const explicit = applyProductionSetupUpdate({ ...draft(), defaults: { hookWindowSec: 2 } }, {
+      expectedRevision: 1, fields: { kind: "microdrama", defaults: { episodeSecondsMin: 30, episodeSecondsMax: 45 } },
+    });
+    assert.deepEqual(explicit.defaults, { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 2, exportPreset: "social-1080x1920" });
+    const edited = applyProductionSetupUpdate(explicit, { expectedRevision: 2, fields: { defaults: { episodeSecondsMax: 40 } } });
+    assert.deepEqual(edited.defaults, { ...explicit.defaults, episodeSecondsMax: 40 });
+    const cleared = applyProductionSetupUpdate(edited, { expectedRevision: 3, fields: { kind: "microdrama", defaults: null } });
+    assert.equal(cleared.defaults, undefined);
+    assert.equal(applyProductionSetupUpdate(cleared, { expectedRevision: 4, fields: { title: "A new title" } }).defaults, undefined);
+    assert.equal(applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "film" } }).defaults, undefined);
+  });
+
   it("retains unmentioned episode promise and scene inheritance fields", () => {
     const before = { ...draft(), episodes: [{ key: "one", title: "One", scenes: ["arrival"],
       promise: { opens: "Return", turn: "Revelation" } }], scenes: [{ key: "arrival", title: "Arrival",

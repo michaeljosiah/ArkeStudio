@@ -5,12 +5,12 @@ import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { MICRODRAMA_DEFAULTS } from "@arke-studio/contracts";
 import {
   DOOR_CHOICES,
   EPISODE_LENGTH_CHOICES,
   FRAME_RATE_CHOICES,
   KIND_PLATES,
-  MICRODRAMA_DEFAULTS,
   VIDEO_KIND_CHOICES,
   parseEpisodeLength,
 } from "../src/screens/world.js";
