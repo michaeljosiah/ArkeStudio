@@ -92,6 +92,9 @@ Follow the refusal cases too: stale bases, pending review, unresolved choices/co
 
 Client `components/route-error-boundary.tsx` contains route render errors and resets on navigation.
 World and production layouts wait for the routed world before mounting their outlets (issue 981).
+Production navigation lives in `screens/production.tsx` (`ProductionLayout`); `screens/fidelity.css`
+distinguishes the current rail item from hover. The rail omits retired Audio/Exports destinations;
+`App.tsx` retains their redirects into the Cut (SPEC-039 R-1, issue 995).
 
 `WorldStore.checkCurrentHistorySnapshots` reports current snapshot conflicts as world problems;
 the art-direction page shows its own history warning. Writable open repairs only the known

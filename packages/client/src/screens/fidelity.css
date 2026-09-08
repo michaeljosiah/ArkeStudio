@@ -1243,7 +1243,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-decoration: none;
   transition: var(--transition-control);
 }
-.fy-prodrail__item:hover { background: var(--accent); color: var(--foreground); }
+/* Only the current destination gets a fill; hover must not look like a second selection. */
+.fy-prodrail__item:hover { color: var(--foreground); }
 .fy-prodrail__item--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 /* A rail item that presses rather than navigates (New scene): a button wearing the link's face,
    so the rail reads as one column whichever kind of thing each row is. */
@@ -1379,7 +1380,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   text-decoration: none;
   transition: var(--transition-control);
 }
-.fy-prodrail__scene:hover { background: var(--accent); color: var(--foreground); }
+.fy-prodrail__scene:hover { color: var(--foreground); }
 .fy-prodrail__scene--active { background: var(--secondary); color: var(--foreground); font-weight: 500; }
 .fy-prodrail__scene--missing { color: var(--neutral-400); }
 .fy-prodrail__scene-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -6461,12 +6462,13 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 /* ---- The takes, watched (design turn 102) --------------------------------------------------
    Layer one on the Generate workspace is the takes themselves. The bench that used to be here —
    composer, parameters, model picker — is behind Advanced, which is where layer three lives. */
-.fy-takes { gap: 14px; }
+.fy-takes { gap: 14px; container-type: inline-size; }
 .fy-takes__head { position: sticky; top: 0; z-index: 3; flex: none; display: flex; flex-direction: column; gap: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); background: var(--background); }
 .fy-takes__filters { display: flex; flex-direction: column; gap: 7px; }
 .fy-takes__filter { min-width: 0; display: grid; grid-template-columns: 66px minmax(0, 1fr); align-items: center; gap: 10px; }
 .fy-takes__filter-label { font: 500 10px var(--font-mono); letter-spacing: .08em; color: var(--neutral-400); }
 .fy-takes__filter .fy-takechips { min-width: 0; flex-wrap: nowrap; overflow-x: auto; padding: 1px; }
+.fy-takes__filter .fy-takechips--shots { flex-wrap: wrap; overflow: visible; }
 .fy-takes__filter .fy-takechip { flex: none; }
 .fy-takes__filter--episode-scenes .fy-takechip--scene { flex: 0 1 auto; max-width: none; }
 .fy-takes__episode-picker { position: relative; width: min(420px, 100%); }
@@ -6528,6 +6530,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-takes__episode-copy > span { color: var(--muted-foreground); font: 400 9.5px var(--font-mono); }
 .fy-takes__episode-empty { padding: 12px; color: var(--muted-foreground); font: 400 10.5px var(--font-sans); }
 .fy-takegrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@container (max-width: 600px) { .fy-takegrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 400px) { .fy-takegrid { grid-template-columns: minmax(0, 1fr); } }
 .fy-take {
   position: relative;
   box-sizing: border-box;
@@ -6561,6 +6565,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   pointer-events: none;
 }
 .fy-take__video { width: 100%; height: 100%; object-fit: contain; background: var(--media-overlay-bg); pointer-events: auto; }
+.fy-take__play { width: 44px; height: 44px; pointer-events: auto; }
+.fy-take__play:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-take__media-failed { position: absolute; bottom: 7px; left: 8px; padding: 3px 6px; border-radius: 5px; background: color-mix(in srgb, var(--background) 88%, transparent); color: var(--muted-foreground); font: 500 9px var(--font-mono); }
 .fy-take__foot { position: relative; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 0 2px; pointer-events: none; }
 .fy-take__name { font: 600 12.5px var(--font-sans); }
@@ -6586,11 +6592,15 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-takes__foot {
   margin-top: auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   padding-top: 14px;
   border-top: 1px solid var(--border);
 }
+.fy-takes__foot button { flex: none; white-space: nowrap; }
+.fy-takes__explanation { flex: 1 1 280px; line-height: 1.5; }
+.fy-takes__links { display: flex; flex: none; gap: 14px; margin-left: auto; }
 
 /* ---------------------------------------------------------------------------
    the scene workspace (SPEC-029 R-21..R-29, SPEC-036 §1.5) — rows, not a strip
