@@ -2643,7 +2643,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
   z
     .object({
-      kind: z.literal("retire-artifact"),
+      kind: z.enum(["retire-artifact", "restore-artifact"]),
       worldId: UlidSchema,
       artifactId: ArtifactIdSchema,
     })

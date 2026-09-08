@@ -171,6 +171,14 @@ async function currentSidecar(
 
 /** Retirement changes only shelf membership; every reference still resolves to the same bytes. */
 export async function retireArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, true);
+}
+
+export async function restoreArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, false);
+}
+
+async function setArtifactRetired(store: WorldStore, artifactId: string, retired: boolean): Promise<void> {
   await store.gateOp(async () => {
     const artifact = store.getBundle().artifacts.find(a => a.id === artifactId);
     if (!artifact) throw new Error("This artifact is no longer in the world.");
@@ -179,8 +187,11 @@ export async function retireArtifact(store: WorldStore, artifactId: string): Pro
     if (!current?.raw || current.sidecar.id !== artifactId || current.sidecar.file !== artifact.file) {
       throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
     }
-    if (current.sidecar.retiredAt !== undefined) return;
-    await writeSidecar(store, { ...current.sidecar, retiredAt: new Date().toISOString() }, current.raw);
+    if ((current.sidecar.retiredAt !== undefined) === retired) return;
+    const next = { ...current.sidecar };
+    if (retired) next.retiredAt = new Date().toISOString();
+    else delete next.retiredAt;
+    await writeSidecar(store, next, current.raw);
   });
 }
 

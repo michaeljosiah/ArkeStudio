@@ -101,6 +101,7 @@ import {
   fileArtifactMsg,
   uploadArtifacts,
   retireArtifact,
+  restoreArtifact,
   providerIdOf,
   requestVoiceCandidates,
   requestVoicePreview,
@@ -4348,7 +4349,9 @@ export function ArtifactsScreen() {
   // The world's own shelf (SPEC-020 R-13): artifacts a production owns are shown there, and
   // counting them here would make "12 files" a number no filter on this screen can reach.
   const shelfArtifacts = (world?.artifacts ?? []).filter((a) => a.production === undefined);
-  const artifacts = shelfArtifacts.filter(a => a.retiredAt === undefined);
+  const [retiredOnly, setRetiredOnly] = useState(false);
+  const retiredCount = shelfArtifacts.filter(a => a.retiredAt !== undefined).length;
+  const artifacts = shelfArtifacts.filter(a => (a.retiredAt !== undefined) === retiredOnly);
   const report = useImportReport();
   const notices = useArtifactNotices();
   const [dropActive, setDropActive] = useState(false);
@@ -4384,7 +4387,7 @@ export function ArtifactsScreen() {
   const superseded = new Set(shelfArtifacts.map((a) => a.supersedes).filter((s): s is string => s !== undefined));
   const visible = artifacts.filter(
     (a) =>
-      !superseded.has(a.id) &&
+      (retiredOnly || !superseded.has(a.id)) &&
       (kindFilter === null || a.kind === kindFilter) &&
       (!madeHereOnly || madeHere(a)),
   );
@@ -4434,10 +4437,14 @@ export function ArtifactsScreen() {
         <div className="fy-filterrow">
           <button
             type="button"
-            className={cx("fy-filterchip", kindFilter === null && "fy-filterchip--active")}
-            onClick={() => setKindFilter(null)}
+            className={cx("fy-filterchip", !retiredOnly && kindFilter === null && "fy-filterchip--active")}
+            onClick={() => { setRetiredOnly(false); setKindFilter(null); }}
           >
-            All {artifacts.filter((a) => !superseded.has(a.id)).length}
+            All {shelfArtifacts.filter((a) => a.retiredAt === undefined && !superseded.has(a.id)).length}
+          </button>
+          <button type="button" className={cx("fy-filterchip", retiredOnly && "fy-filterchip--active")}
+            onClick={() => { setRetiredOnly(true); setKindFilter(null); setMadeHereOnly(false); }}>
+            Retired {retiredCount}
           </button>
           {kinds.map((k) => (
             <button
@@ -4447,7 +4454,7 @@ export function ArtifactsScreen() {
               onClick={() => setKindFilter(k)}
             >
               {kindLabel[k] ?? k.charAt(0).toUpperCase() + k.slice(1)}{" "}
-              {artifacts.filter((a) => a.kind === k && !superseded.has(a.id)).length}
+              {artifacts.filter((a) => a.kind === k && (retiredOnly || !superseded.has(a.id))).length}
             </button>
           ))}
           {madeHereCount > 0 && (
@@ -4599,7 +4606,7 @@ export function ArtifactsScreen() {
             <div
               key={a.id}
               className="fy-gridcard fy-gridcard--openable"
-              style={isImage ? { padding: "10px 10px 14px" } : { padding: 16 }}
+              style={{ padding: isImage ? "10px 10px 14px" : 16, opacity: a.retiredAt ? 0.65 : 1 }}
             >
               {/*
                 * The open target: one real <button> laid over the card, so a pointer and a
@@ -4618,8 +4625,13 @@ export function ArtifactsScreen() {
                   setOpenArtifactId(a.id);
                 }}
               />
-              <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
-                onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
+              {a.retiredAt ? (
+                <button type="button" className="fy-artifact-retire" aria-label={`Restore ${name}`}
+                  onClick={() => { if (worldId) restoreArtifact(worldId, a.id); }}>Restore</button>
+              ) : (
+                <button type="button" className="fy-artifact-retire" aria-label={`Remove ${name} from shelf`}
+                  onClick={(event) => { openTrigger.current = event.currentTarget; setRetireId(a.id); }}>Remove</button>
+              )}
               {isImage ? (
                 <div className="fy-imghost" style={{ width: "100%", height: 110 }}>
                   <Portrait
@@ -4659,6 +4671,7 @@ export function ArtifactsScreen() {
               <div style={isImage ? { padding: "0 6px" } : undefined}>
                 <div style={{ font: "600 14px var(--font-sans)", margin: "12px 0 3px" }}>{name}</div>
                 <div className="fy-mono">{meta}</div>
+                {a.retiredAt && <Badge tone="danger">retired</Badge>}
                 {a.supersedes !== undefined && (
                   <div className="fy-mono">supersedes {a.supersedes.slice(0, 10)}…</div>
                 )}
@@ -4711,7 +4724,7 @@ export function ArtifactsScreen() {
         </button>
         {artifacts.length === 0 && (
           <EmptyState
-            title="Nothing filed yet"
+            title={retiredOnly ? "No retired artifacts" : "Nothing filed yet"}
             hint="Drop recordings, documents, boards or images to file them against the world."
           />
         )}
@@ -4721,7 +4734,7 @@ export function ArtifactsScreen() {
         artifacts={artifacts}
         worldSlug={world?.meta.slug}
         linkName={linkName}
-        onRetire={(artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
+        onRetire={retiredOnly ? undefined : (artifactId) => { setOpenArtifactId(null); setRetireId(artifactId); }}
         onClose={() => {
           setOpenArtifactId(null);
           // A dialog that dropped focus leaves the keyboard at the top of the document.
@@ -4732,7 +4745,7 @@ export function ArtifactsScreen() {
         onClose={closeRetirement}>
         <p>This retires the artifact from the shelf and file pickers. Its file and provenance stay in the world;
           existing clips, references and exports keep working. No disk space is freed.</p>
-        <p>Import the same file again to restore it.</p>
+        <p>Retired items stay on the shelf behind the Retired filter, where you can restore them.</p>
         <p>{uses.length ? "Current uses — kept intact:" : "No current uses found in the loaded world records. History is kept."}</p>
         {uses.length > 0 && <ul style={{ maxHeight: 200, overflowY: "auto" }}>{uses.map(use => <li key={use}>{use}</li>)}</ul>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

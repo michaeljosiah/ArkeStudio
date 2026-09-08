@@ -3759,6 +3759,10 @@ export function uploadArtifacts(worldId: string, files?: readonly File[]): { req
   return importEditorMedia(worldId, undefined, files);
 }
 
+export function restoreArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "restore-artifact", worldId, artifactId });
+}
+
 export function retireArtifact(worldId: string, artifactId: string): void {
   send({ kind: "retire-artifact", worldId, artifactId });
 }

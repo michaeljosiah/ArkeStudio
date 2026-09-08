@@ -240,6 +240,7 @@ import {
   fileGeneratedArtifact,
   importFolder,
   retireArtifact,
+  restoreArtifact,
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
@@ -10482,10 +10483,11 @@ export class Coordinator {
         });
         return;
       }
+      case "restore-artifact":
       case "retire-artifact": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is not open.");
-        await retireArtifact(store, msg.artifactId);
+        await (msg.kind === "restore-artifact" ? restoreArtifact : retireArtifact)(store, msg.artifactId);
         this.refreshIfStillOpen(store);
         return;
       }
