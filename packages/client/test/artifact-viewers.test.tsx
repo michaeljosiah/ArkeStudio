@@ -10,7 +10,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { applyTimelineCommands, orderedShots, seedEmptyPictureTimeline, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { CharacterVoiceSamplePanel } from "../src/components/character-voice-sample.js";
+import { VoiceSampleFlow } from "../src/components/character-voice-sample.js";
 import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } from "../src/lib/artifact-view.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -185,9 +185,11 @@ it("keeps retired extraction review reachable while hiding retired voice sources
     assert.ok([...mounted.container.querySelectorAll("button")].some(button => button.textContent === "Accept — commits on its own"));
     const world = structuredClone(FIXTURE_STATE.world!);
     world.artifacts = [{ ...BELLS, retiredAt: "2026-09-07T12:00:00Z" }, CLIP];
-    const html = renderToString(<CharacterVoiceSamplePanel world={world} sheet={world.sheets.find(sheet => sheet.type === "character")!} />);
-    assert.ok(!html.includes(`value="artifact:${BELLS.id}"`));
-    assert.ok(html.includes(`value="artifact:${CLIP.id}"`));
+    const html = renderToString(
+      <VoiceSampleFlow world={world} sheet={world.sheets.find(sheet => sheet.type === "character")!} onClose={() => {}} />,
+    );
+    assert.ok(!html.includes(`data-source="artifact:${BELLS.id}"`));
+    assert.ok(html.includes(`data-source="artifact:${CLIP.id}"`));
   } finally { await unmount(mounted); }
 });
 

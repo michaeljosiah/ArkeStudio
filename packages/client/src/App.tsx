@@ -35,6 +35,7 @@ import {
   GenerateCharacterSheetScreen,
   ReplaceMainPhotoScreen,
 } from "./screens/character-reference.js";
+import { CharacterVoiceScreen } from "./screens/character-voice.js";
 import { LocationReferenceScreen } from "./screens/location-reference.js";
 import { PropDetailScreen, PropsScreen } from "./screens/props.js";
 import {
@@ -53,7 +54,6 @@ import {
   NewLocationScreen,
   NewProductionScreen,
   ProductionsScreen,
-  VoicePickerScreen,
   WorldLayout,
   WorldOverviewScreen,
 } from "./screens/world.js";
@@ -240,7 +240,7 @@ export function App() {
           <Route path="cast/:sheetId/looks" element={<CharacterLooksScreen />} />
           <Route path="cast/:sheetId/main-photo" element={<ReplaceMainPhotoScreen />} />
           <Route path="cast/:sheetId/model-sheet" element={<GenerateCharacterSheetScreen />} />
-          <Route path="cast/:sheetId/voice" element={<VoicePickerScreen />} />
+          <Route path="cast/:sheetId/voice" element={<CharacterVoiceScreen />} />
           <Route path="proposals" element={<ProposalsScreen />} />
           <Route path="locations" element={<LocationsScreen />} />
           <Route path="locations/new" element={<NewLocationScreen />} />

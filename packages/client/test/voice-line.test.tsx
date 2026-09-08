@@ -270,8 +270,9 @@ describe("the voice-line dialog", () => {
  * Six local voices were otherwise lost among fifty cloud ones, and "can this machine say it
  * without spending" is the first question anyone asks of the list.
  */
-describe("choosing a character's voice", () => {
+describe("a character's voice", () => {
   const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
+  const page = `/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`;
   const candidate = (voiceId: string, provider: string, local: boolean) => ({
     candidate: {
       provider,
@@ -298,11 +299,92 @@ describe("choosing a character's voice", () => {
       previewMicroUsdByVoice: {},
     },
   };
+  /** The sheet as it is before anything has been chosen for it — the state most characters are in. */
+  const withoutVoice = (): ClientState => ({
+    ...FIXTURE_STATE,
+    world: {
+      ...FIXTURE_STATE.world!,
+      referenceKits: FIXTURE_STATE.world!.referenceKits.map((kit) =>
+        kit.sheetId === sheetId ? { ...kit, designatedVoiceSample: undefined } : kit,
+      ),
+      sheets: FIXTURE_STATE.world!.sheets.map((sheet) =>
+        sheet.id === sheetId ? { ...sheet, voice: undefined } : sheet,
+      ),
+    },
+  });
+
+  it("presents one voice with two uses, not two panels", () => {
+    // The build these replace stacked a reference panel, a bible and a catalogue in one column,
+    // and two headings competed for what the page was for (issue 1011).
+    const html = render(page, FIXTURE_STATE, { voiceCandidates: candidates });
+    assert.match(html, /Reads lines/);
+    assert.match(html, /On screen/);
+    assert.doesNotMatch(html, /Performance bible/);
+    assert.doesNotMatch(html, /Text-to-speech voice/);
+  });
+
+  it("says who reads her lines while nothing is assigned, and offers no Change", () => {
+    const html = render(page, withoutVoice(), { voiceCandidates: candidates });
+    assert.match(html, /No voice yet/);
+    assert.match(html, /the narrator reads their lines/);
+    // A press that says Change when there is nothing to change is the empty state lying.
+    assert.match(html, />Set</);
+    assert.doesNotMatch(html, />Change</);
+  });
+
+  it("names what each entrance sets before it is pressed", () => {
+    const html = render(page, FIXTURE_STATE, { voiceCandidates: candidates });
+    for (const entrance of ["Choose a voice", "Clone a voice", "Upload a recording", "Generate a speaking sample"]) {
+      assert.match(html, new RegExp(entrance));
+    }
+    // The two words on a tile are the two the rows use, so a tile can be read against them.
+    assert.match(html, /fy-usebadge fy-usebadge--on">reads</);
+    assert.match(html, /fy-usebadge fy-usebadge--on">on screen</);
+  });
+
+  it("carries the open sheet in the address, so a reload comes back to it", () => {
+    // Every flow is a link — a dispatch that refused for want of a voice can point straight at one.
+    assert.doesNotMatch(render(page, FIXTURE_STATE, { voiceCandidates: candidates }), /data-testid="voice-catalogue"/);
+    assert.match(
+      render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates }),
+      /data-testid="voice-catalogue"/,
+    );
+    assert.match(render(`${page}?sample=1`, FIXTURE_STATE, { voiceCandidates: candidates }), /data-testid="voice-sample"/);
+  });
+
+  it("offers the assigned clip back, and says what was attested of it", () => {
+    // The clip's path comes from the shared resolver, because both sample shapes store a
+    // basename beneath references/<sheetId>/ and reading `file` straight asks the world root for
+    // a path that does not exist — a playback failure with nothing on screen to explain it.
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        referenceKits: FIXTURE_STATE.world!.referenceKits.map((kit) =>
+          kit.sheetId === sheetId
+            ? {
+                ...kit,
+                designatedVoiceSample: {
+                  file: "voice/sha256-" + "a".repeat(64) + ".wav",
+                  schemaVersion: 1,
+                  operationId: "00000000-0000-4000-8000-000000000000",
+                  designatedAt: "2026-09-08T00:00:00Z",
+                  warningCodes: [],
+                  attestations: [],
+                  provenance: { outputTechnical: { durationSec: 7.4 } },
+                } as never,
+              }
+            : kit,
+        ),
+      },
+    };
+    const html = render(page, state, { voiceCandidates: candidates });
+    assert.match(html, /7\.4 s/);
+    assert.match(html, /Play .* · voice sample/);
+  });
 
   it("sorts the catalogue by where a voice lives, and counts each", () => {
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, FIXTURE_STATE, {
-      voiceCandidates: candidates,
-    });
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
     assert.match(html, /data-testid="voice-tab-all"/);
     assert.match(html, /data-testid="voice-tab-cloud"/);
     assert.match(html, /data-testid="voice-tab-local"/);
@@ -313,15 +395,19 @@ describe("choosing a character's voice", () => {
   });
 
   it("scrolls the catalogue in place rather than growing the page", () => {
-    // A world with fifty cloud voices would otherwise push the assign controls below the fold,
-    // which is the one place a long list must not reach.
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, FIXTURE_STATE, {
-      voiceCandidates: candidates,
-    });
+    // A world with fifty cloud voices would otherwise push the press that spends money below the
+    // fold, which is the one place a long list must not reach.
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
     assert.match(html, /class="fy-voicelist"/);
   });
 
-  it("keeps the current unready clone visible, with Preview and Assign disabled", () => {
+  it("states a cloud preview's price on the row whose circle would spend it", () => {
+    const html = render(`${page}?choose=1`, FIXTURE_STATE, { voiceCandidates: candidates });
+    assert.match(html, /\$0\.03 preview/);
+    assert.match(html, /kokoro · free/);
+  });
+
+  it("keeps the current unready clone visible, and refuses to preview or assign it", () => {
     const baseSheet = FIXTURE_STATE.world!.sheets[0]!;
     const clone = {
       candidate: {
@@ -358,19 +444,16 @@ describe("choosing a character's voice", () => {
         ),
       },
     };
-    const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}/voice`, state, {
-      voiceCandidates: {
-        [sheetId]: {
-          ...candidates[sheetId],
-          ranked: [clone],
-        },
-      },
+    const html = render(`${page}?choose=1`, state, {
+      voiceCandidates: { [sheetId]: { ...candidates[sheetId], ranked: [clone] } },
     });
+    // Still listed, still named as the current one: a voice that cannot run today is not a voice
+    // the character has stopped having.
     assert.match(html, /Harbour/);
     assert.match(html, /current/);
     assert.match(html, /Cloned voice setup is unavailable in this build/);
-    assert.match(html, /<button[^>]*disabled=""[^>]*>Preview · free<\/button>/);
-    assert.match(html, /<button[^>]*disabled=""[^>]*>Assigned<\/button>/);
+    assert.match(html, /<button[^>]*class="fy-voicerow__pick"[^>]*disabled=""/);
+    assert.match(html, /<button[^>]*data-testid="voice-assign"[^>]*disabled=""/);
   });
 });
 
