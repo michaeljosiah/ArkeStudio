@@ -375,22 +375,20 @@ describe("choosing a character's voice", () => {
 });
 
 describe("the narrator in Settings", () => {
-  // The narrator moved to Appearance with SPEC-033's split. It was in Local runtime's Voice
-  // group and it is the one thing there that was never about a runtime: it is a voice the app
-  // speaks in, and it may be a cloud one — so Local AI is forbidden it and Engines is wrong in
-  // kind. What is left is how the app presents itself.
+  // General owns the reading voice; Appearance holds theme choices (issue 1004).
   it("names the shipped local voice, and says it is free, until one is chosen", () => {
-    const html = render("/settings/appearance");
+    const html = render("/settings/general");
     assert.match(html, /data-testid="narrator-name"/);
     assert.match(html, /George/);
     assert.match(html, /reads on this machine · free/);
+    assert.doesNotMatch(render("/settings/appearance"), /data-testid="narrator-name"/);
     // Nothing to reset when nothing was chosen.
     assert.doesNotMatch(html, /data-testid="narrator-reset"/);
   });
 
   it("is on no engine pane, which may not carry a cloud voice at all", () => {
     // An engine is not a provider and this control picks between them, so it belongs to neither
-    // half of the Providers rail — it is Appearance's, where the reading voice is chosen.
+    // half of the Providers rail — it is General's, where the reading voice is chosen.
     for (const engine of ["comfyui", "ollama", "voxa"]) {
       const pane = render(`/settings/providers?provider=${engine}`);
       assert.match(pane, /data-screen="settings-providers"/);
@@ -405,7 +403,7 @@ describe("the narrator in Settings", () => {
       ...FIXTURE_STATE,
       app: { ...FIXTURE_STATE.app, narrator: { provider: "elevenlabs", voiceId: "v_roger", label: "Roger" } },
     };
-    const html = render("/settings/appearance", chosen);
+    const html = render("/settings/general", chosen);
     assert.match(html, /Roger · elevenlabs/);
     assert.match(html, /billed per character/);
     // And there is a way back to the free one.

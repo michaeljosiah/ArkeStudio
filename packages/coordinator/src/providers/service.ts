@@ -11,7 +11,7 @@ import type { CredentialStore } from "../credentials/store.js";
 /**
  * Provider status orchestration (SPEC-008 R-1..R-4): who is configured, what the last
  * validation found, and mid-session provider faults. Statuses carry no key material — the
- * renderer sees booleans and probe results only (R-6).
+ * renderer sees status, probe results and a digest of the stored encrypted record (R-6).
  */
 
 /** The one slice of a provider client the coordinator needs; SPEC-009 wires the rest. */
@@ -42,6 +42,7 @@ export class ProviderService {
       this.statuses.set(id, {
         id,
         configured: credential === "none" || (credential === "in-app" && configured.has(id)),
+        credentialFingerprint: credential === "in-app" && configured.has(id) ? await this.credentials?.fingerprint(id) : undefined,
         validation: "untested",
         probes: [],
         fault: null,
@@ -67,8 +68,9 @@ export class ProviderService {
   }
 
   /** A credential landed or was cleared; validation resets to untested. */
-  setConfigured(id: ProviderId, configured: boolean): void {
-    this.patch(id, { configured, validation: "untested", probes: [], fault: null });
+  async setConfigured(id: ProviderId, configured: boolean): Promise<void> {
+    const credentialFingerprint = configured ? await this.credentials?.fingerprint(id) : undefined;
+    this.patch(id, { configured, credentialFingerprint, validation: "untested", probes: [], lastValidated: undefined, fault: null });
   }
 
   /**
@@ -76,6 +78,7 @@ export class ProviderService {
    * unlocked; the probes themselves are the real answer either way.
    */
   async validate(id: ProviderId): Promise<ProviderStatus> {
+    const before = this.statuses.get(id);
     const validator = this.validators[id];
     if (!validator) {
       // A local provider whose runtime was never wired has no client to ask, so there is nothing
@@ -94,6 +97,7 @@ export class ProviderService {
     // runtime needs none, and the external tool holds its own.
     const external = PROVIDERS[id].credential === "external";
     const key = PROVIDERS[id].credential === "in-app" ? ((await this.credentials?.get(id)) ?? null) : "";
+    if (this.statuses.get(id) !== before) return this.statuses.get(id)!;
     if (key === null) {
       return this.patch(id, {
         validation: "invalid",
@@ -104,9 +108,10 @@ export class ProviderService {
         })),
       });
     }
-    this.patch(id, { validation: "testing" });
+    const testing = this.patch(id, { validation: "testing" });
     try {
       const probes = await validator.validateKey(key);
+      if (this.statuses.get(id) !== testing) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
       void this.log?.append({ kind: "provider.validated", provider: id, probes });
       return this.patch(id, {
@@ -119,6 +124,7 @@ export class ProviderService {
         ...(external ? { configured: anyAvailable } : {}),
       });
     } catch (err) {
+      if (this.statuses.get(id) !== testing) return this.statuses.get(id)!;
       const message = err instanceof Error ? err.message : String(err);
       void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
       return this.patch(id, {

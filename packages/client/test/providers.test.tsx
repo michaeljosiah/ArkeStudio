@@ -92,6 +92,17 @@ function sectionFor(html: string, name: string): string {
 }
 
 describe("Providers holds the credential (SPEC-042 R-3, R-9, R-18)", () => {
+  it("distinguishes a stored key from a tested connection and shows its fingerprint (#1004)", () => {
+    const state = stateWith({});
+    state.app.providers = [{ id: "fal", configured: true, credentialFingerprint: "1C7D9A20", validation: "untested", probes: [], fault: null }];
+    __setStateForTest(state);
+    const html = providers("/settings/providers?provider=fal");
+    const pane = plain(html.slice(html.indexOf('data-testid="provider-pane"')));
+    assert.match(pane, /untested/);
+    assert.match(pane, /Not yet/);
+    assert.match(pane, /fingerprint 1C7D9A20/);
+    assert.doesNotMatch(pane, /connected/);
+  });
   it("carries no model, and says one line about them", () => {
     __setStateForTest(stateWith({}));
     const html = providers("/settings/providers?provider=fal");

@@ -1916,13 +1916,8 @@ const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; de
 ];
 
 export function SettingsAppearanceScreen() {
-  const { state } = useStore();
   const preference = useThemePreference();
   const resolved = useResolvedTheme();
-  const stored = state?.app.narrator ?? null;
-  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
-  const worldIdForVoices = state?.world?.meta.worldId;
-  const [narratorOpen, setNarratorOpen] = useState(false);
   return (
     <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
       <div className="fy-set__eyebrow">THEME</div>
@@ -1945,52 +1940,6 @@ export function SettingsAppearanceScreen() {
         ))}
       </fieldset>
       <div className="fy-set__note">currently using {resolved}</div>
-      {/*
-       * The narrator arrived here from the Voice group inside Local runtime, and it is the one
-       * thing on that group that was never about a runtime. It is a voice the app speaks in, and
-       * it may be a cloud one — so Local AI is forbidden it (R-2) and Engines is wrong in kind,
-       * because an engine is not a provider (R-72). What is left is how the app presents itself.
-       */}
-      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
-          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
-          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
-          no other preference here spends money on one. */}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">NARRATOR</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path" data-testid="narrator-name">
-            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
-            {" · "}
-            {narrator === null || narrator.provider === "kokoro"
-              ? "reads on this machine · free"
-              : "reads in the cloud · billed per character"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
-            Choose voice
-          </button>
-          {narrator !== null && (
-            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
-              Use the local voice
-            </button>
-          )}
-        </div>
-      </div>
-      <VoicePickerDialog
-        open={narratorOpen}
-        use="narration"
-        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
-        chosenId={narrator?.voiceId}
-        chosenProvider={narrator?.provider}
-        chosenModel={
-          narrator?.model ??
-          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
-        }
-        onClose={() => setNarratorOpen(false)}
-        onPick={(voice: ReadingVoice) => {
-          setNarratorOpen(false);
-          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
-        }}
-      />
       {/*
        * The two themes, side by side. Fixed swatches rather than a live preview of the current
        * one: the point is to show what the choice above would look like, and a card that followed
@@ -2040,7 +1989,7 @@ export function SettingsHarnessScreen() {
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
   const asked = searchParams.get("harness");
-  const current = harnesses.some((h) => h.id === asked) ? asked! : harnesses[0]!.id;
+  const current = harnesses.some((h) => h.id === asked) ? asked! : (harnesses.find((h) => h.id === engine) ?? harnesses[0]!).id;
   const chosen = harnesses.find((h) => h.id === current) ?? harnesses[0]!;
 
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -2242,6 +2191,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  */
 export function SettingsGeneralScreen() {
   const { state } = useStore();
+  const stored = state?.app.narrator ?? null;
+  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
+  const worldIdForVoices = state?.world?.meta.worldId;
+  const [narratorOpen, setNarratorOpen] = useState(false);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
@@ -2354,6 +2307,46 @@ export function SettingsGeneralScreen() {
         <span style={{ flex: 1 }} />
       </div>
 
+      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
+          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
+          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
+          no other preference here spends money on one. */}
+      <div className="fy-rt__keyline">
+        <div className="fy-rt__eyebrow">NARRATOR</div>
+        <div className="fy-set__field">
+          <span className="fy-rt__path" data-testid="narrator-name">
+            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
+            {" · "}
+            {narrator === null || narrator.provider === "kokoro"
+              ? "reads on this machine · free"
+              : "reads in the cloud · billed per character"}
+          </span>
+          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
+            Choose voice
+          </button>
+          {narrator !== null && (
+            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
+              Use the local voice
+            </button>
+          )}
+        </div>
+      </div>
+      <VoicePickerDialog
+        open={narratorOpen}
+        use="narration"
+        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
+        chosenId={narrator?.voiceId}
+        chosenProvider={narrator?.provider}
+        chosenModel={
+          narrator?.model ??
+          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
+        }
+        onClose={() => setNarratorOpen(false)}
+        onPick={(voice: ReadingVoice) => {
+          setNarratorOpen(false);
+          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
+        }}
+      />
       {drift.length > 0 && (
         <>
           <div className="fy-set__eyebrow">MANIFEST DRIFT</div>

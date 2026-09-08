@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { OPENCODE_AVAILABILITY, PROVIDERS, type ClientState, type ManifestModel } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { CAPABILITY_ROWS } from "../src/screens/settings-parts.js";
@@ -115,6 +116,15 @@ function localVideoReady(
 }
 
 describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => {
+  it("opens Harness on the engine in use and honors an explicit selection (#1004)", () => {
+    const state = stateWith({ harness: {
+      engine: "claude", claudePath: null,
+      harnesses: [OPENCODE_AVAILABILITY, { ...OPENCODE_AVAILABILITY, id: "claude", label: "Claude Code", bundled: false }],
+    } });
+    const selected = (path: string) => parseHTML(render(path, state)).document.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
+    assert.match(selected("/settings/harness")!, /Claude Code/);
+    assert.match(selected("/settings/harness?harness=opencode")!, /OpenCode/);
+  });
   it("mounts under its own name", () => {
     const app = render("/settings/general");
     assert.match(app, /data-screen="settings-general"/);
@@ -238,4 +248,3 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     assert.match(render("/settings/general", state), /fy-set__dot--warn/);
   });
 });
-

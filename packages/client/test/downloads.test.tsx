@@ -119,6 +119,21 @@ const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<
 // The model's row is on AI models now, under the kind it makes (SPEC-042 R-12).
 const LANGUAGE_ROW = "/settings/models?half=local&kind=llm";
 
+it("states shared weights once and gives a URL-based engine its address (#1004)", () => {
+  const ids = ["h3", "h3-768", "h3-reference"];
+  const weights = ids.map((id) => component({ id, displayName: id, sizeMb: 42_400, state: "present", sharedWith: ids.filter((other) => other !== id) }));
+  const state = stateWith([component({ id: "comfyui-runtime", state: "present", installLocation: null }), ...weights]);
+  state.app.comfyui = { engine: { source: "user-url", state: "ready", locality: "local", location: "http://127.0.0.1:8188", version: null, instanceId: "test", detail: null, detected: [] }, recipes: [], checkedAt: "2026-09-09T00:00:00Z" };
+  const text = plain(render("/settings/downloads", state));
+  assert.equal(text.split("41.4 GB").length - 1, 1);
+  assert.match(text, /Shared weights · h3/);
+  assert.match(text, /Address · http:\/\/127\.0\.0\.1:8188/);
+  assert.doesNotMatch(text, /Unavailable/);
+  weights.forEach((entry) => { entry.state = "queued"; });
+  const queued = plain(render("/settings/downloads", state));
+  assert.match(queued, /41\.4 GB to go/);
+});
+
 describe("the row states the whole chain's size, and only the count of the rest (R-40, R-41)", () => {
   it("quotes the closure, not the model's own weights", () => {
     // 7.6 GB of model plus a 750 MB runtime is an 8.2 GB press. Quoting the model alone while

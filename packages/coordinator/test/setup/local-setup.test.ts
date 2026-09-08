@@ -18,6 +18,20 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("reports sharing only for the same files at the same destination (#1004)", async () => {
+  const weights = catalogue()[2]!;
+  assert.equal(weights.spec.kind, "files");
+  if (weights.spec.kind !== "files") return;
+  const service = new LocalSetupService(deps(), () => {}, {
+    appRoot: await root(),
+    catalogue: [weights, { ...weights, id: "shared" }, { ...weights, id: "different", spec: { ...weights.spec, dir: "other" } }],
+  });
+  const components = service.status().components;
+  assert.deepEqual(components[0]!.sharedWith, ["shared"]);
+  assert.deepEqual(components[1]!.sharedWith, ["weights"]);
+  assert.deepEqual(components[2]!.sharedWith, []);
+});
+
 /** A tiny catalogue: one file download, one installer, one pull that needs the installer. */
 function catalogue(): CatalogueEntry[] {
   return [

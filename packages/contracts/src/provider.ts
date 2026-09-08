@@ -175,6 +175,8 @@ export const ProviderStatusSchema = z
     id: ProviderIdSchema,
     /** A credential is stored (or the runtime is local and needs none). */
     configured: z.boolean(),
+    /** A short digest identifying the stored encrypted credential, never a substring of its key. */
+    credentialFingerprint: z.string().regex(/^[A-F0-9]{8}$/).optional(),
     validation: ProviderValidationSchema,
     /** Per-capability probe results from the last validation (R-3). */
     probes: z.array(CapabilityProbeSchema),

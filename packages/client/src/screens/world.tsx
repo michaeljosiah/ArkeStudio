@@ -1901,7 +1901,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           }
           disabled={sheetTalkStarting}
         >
-          {sheetTalkStarting ? "Starting…" : "Talk about them"}
+          {sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}
         </Button>
         {/* Page scale (issue 859). The speaker on each paragraph reads that paragraph; this
               reads the sheet through, in the order declared above. Offered only when there is

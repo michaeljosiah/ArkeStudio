@@ -7,7 +7,7 @@ import {
 } from "@arke-studio/contracts";
 import { Button, cx } from "../components/ui.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup } from "../lib/store.js";
+import { setupCancel, setupRemove, setupRepair, setupRetry, setupSkip, useSetup, useStore } from "../lib/store.js";
 import { RuntimeHead, RuntimeSection, RuntimeStatus, sizeMb } from "./settings-parts.js";
 
 /**
@@ -37,16 +37,21 @@ function needsAttention(component: SetupComponent): boolean {
   return component.state === "failed" || component.state === "blocked";
 }
 
-function ProgressRow({ component, progress }: { component: SetupComponent; progress: TransferProgress }) {
+function ProgressRow({ component, progress, sharedOwner }: { component: SetupComponent; progress: TransferProgress; sharedOwner?: SetupComponent }) {
+  const { state } = useStore();
+  const engine = component.id === "comfyui-runtime" ? state?.app.comfyui?.engine : undefined;
+  const address = engine?.source === "user-url" ? engine.location : null;
   return (
     <div className="fy-set__row fy-set__row--stack" data-testid="download-row">
       <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">{component.displayName}</div>
           <div className="fy-set__caps">
-            {component.purpose} · {sizeMb(component.sizeMb)}
+            {sharedOwner
+              ? `Shared weights · ${sharedOwner.displayName}`
+              : `${component.purpose} · ${sizeMb(component.sizeMb)}${component.sharedWith?.length ? " · shared weights" : ""}`}
           </div>
-          <div className="fy-set__caps">Location · {component.installLocation ?? "Unavailable"}</div>
+          <div className="fy-set__caps">{address ? `Address · ${address}` : `Location · ${component.installLocation ?? "Not reported"}`}</div>
         </div>
         <RuntimeStatus tone={needsAttention(component) ? "warn" : componentIsSettled(component.state) ? "ok" : "idle"}>
           {component.state === "paused"
@@ -127,7 +132,17 @@ export function SettingsDownloadsScreen() {
     (c) => (c.leftovers?.length ?? 0) > 0 && !needsAttention(c) && !isMoving(c) && !componentIsSettled(c.state),
   );
   const installed = components.filter((c) => componentIsSettled(c.state));
-  const remaining = moving.reduce((sum, c) => sum + Math.max(0, c.sizeMb - transferProgress(c).doneMb), 0);
+  const visible = [...moving, ...attention, ...leftovers, ...installed];
+  const sharedOwner = (component: SetupComponent) => visible.find((candidate) =>
+    candidate.id === component.id || component.sharedWith?.includes(candidate.id),
+  );
+  const remainingByFiles = new Map<string, number>();
+  for (const component of moving) {
+    const id = sharedOwner(component)!.id;
+    const remaining = Math.max(0, component.sizeMb - transferProgress(component).doneMb);
+    remainingByFiles.set(id, Math.min(remainingByFiles.get(id) ?? Infinity, remaining));
+  }
+  const remaining = [...remainingByFiles.values()].reduce((sum, size) => sum + size, 0);
 
   return (
     <div data-screen="settings-downloads" className="fy-set">
@@ -145,7 +160,7 @@ export function SettingsDownloadsScreen() {
             </button>
           </RuntimeSection>
           {moving.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sharedOwner={sharedOwner(c)?.id === c.id ? undefined : sharedOwner(c)} />
           ))}
         </>
       )}
@@ -153,7 +168,7 @@ export function SettingsDownloadsScreen() {
         <>
           <RuntimeSection label="NEEDS ATTENTION" />
           {attention.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sharedOwner={sharedOwner(c)?.id === c.id ? undefined : sharedOwner(c)} />
           ))}
         </>
       )}
@@ -161,7 +176,7 @@ export function SettingsDownloadsScreen() {
         <>
           <RuntimeSection label="LEFT BEHIND" />
           {leftovers.map((c) => (
-            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+            <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sharedOwner={sharedOwner(c)?.id === c.id ? undefined : sharedOwner(c)} />
           ))}
         </>
       )}
@@ -169,7 +184,7 @@ export function SettingsDownloadsScreen() {
         <span className="fy-rt__count">{installed.length}</span>
       </RuntimeSection>
       {installed.map((c) => (
-        <ProgressRow key={c.id} component={c} progress={transferProgress(c)} />
+        <ProgressRow key={c.id} component={c} progress={transferProgress(c)} sharedOwner={sharedOwner(c)?.id === c.id ? undefined : sharedOwner(c)} />
       ))}
       {/* Reached from Providers and owned by it no more than it was owned by the two screens
           Providers absorbed (SPEC-034 R-25). One way back, because there is now one place to

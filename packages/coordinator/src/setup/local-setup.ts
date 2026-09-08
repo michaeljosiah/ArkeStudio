@@ -208,12 +208,26 @@ export class LocalSetupService {
   }
 
   status(): SetupStatus {
+    // Recipes can share every weight. Compare the declared files at their resolved destination,
+    // not model names or folder alone: unrelated models can live in the same mapped library.
+    const fileGroups = new Map<string, string[]>();
+    const groupOf = new Map<string, string>();
+    for (const { entry } of this.components.values()) {
+      const location = this.installLocationOf(entry);
+      if (entry.spec.kind !== "files" || !location || entry.spec.files.length === 0) continue;
+      const key = JSON.stringify(entry.spec.files.map((file) =>
+        [join(location, file.file), file.sha256 ?? file.url, file.sizeMb],
+      ).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+      groupOf.set(entry.id, key);
+      fileGroups.set(key, [...(fileGroups.get(key) ?? []), entry.id]);
+    }
     return {
       components: [...this.components.values()].map(({ entry, ...c }) => ({
         ...c,
         // Resolved at publication time because a newly activated or remapped engine can change
         // where dependent weights land without rebuilding the setup service.
         installLocation: this.installLocationOf(entry),
+        sharedWith: (fileGroups.get(groupOf.get(entry.id) ?? "") ?? []).filter((id) => id !== entry.id),
       })),
       running: this.running,
       diskFreeMb: this.diskFreeMb,

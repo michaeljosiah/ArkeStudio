@@ -45,6 +45,41 @@ async function makeService(probes: CapabilityProbe[] | Error) {
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("refreshes credential fingerprints and discards validation of a replaced key (#1004)", async () => {
+    const dir = await tempDir("arke-provider-identity-");
+    const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+    await credentials.set("fal", "first-secret-key");
+    let finish!: (probes: CapabilityProbe[]) => void;
+    let started!: () => void;
+    const inFlight = new Promise<void>((resolve) => { started = resolve; });
+    const response = new Promise<CapabilityProbe[]>((resolve) => { finish = resolve; });
+    let wait = false;
+    const service = new ProviderService(credentials, { fal: { validateKey: async () => {
+      if (!wait) return [{ capability: "image", available: true }];
+      started();
+      return response;
+    } } }, null);
+    await service.init();
+    const first = service.list().find((provider) => provider.id === "fal")!.credentialFingerprint;
+    assert.match(first!, /^[A-F0-9]{8}$/);
+    assert.equal(first, await credentials.fingerprint("fal"), "stable for the stored record");
+    assert.doesNotMatch(JSON.stringify(service.list()), /first-secret-key/);
+    await service.validate("fal");
+    wait = true;
+    const validating = service.validate("fal");
+    await inFlight;
+    await credentials.set("fal", "replacement-secret-key");
+    await service.setConfigured("fal", true);
+    finish([{ capability: "image", available: true }]);
+    const current = await validating;
+    assert.equal(current.validation, "untested");
+    assert.equal(current.lastValidated, undefined);
+    assert.deepEqual(current.probes, []);
+    assert.notEqual(current.credentialFingerprint, first);
+    await credentials.clear("fal");
+    await service.setConfigured("fal", false);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.credentialFingerprint, undefined);
+  });
   it("a key that authenticates but lacks video reports image available, video not (R-3)", async () => {
     const service = await makeService([
       { capability: "image", available: true },

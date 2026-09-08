@@ -6627,7 +6627,7 @@ export class Coordinator {
         }
         try {
           await this.credentials.set(msg.provider, msg.key);
-          this.providerService.setConfigured(msg.provider, true);
+          await this.providerService.setConfigured(msg.provider, true);
           // An LLM key change re-delivers the spawn environment, which restarts the harness
           // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
@@ -6651,7 +6651,7 @@ export class Coordinator {
         if (!this.credentials) return;
         try {
           await this.credentials.clear(msg.provider);
-          this.providerService.setConfigured(msg.provider, false);
+          await this.providerService.setConfigured(msg.provider, false);
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
             void this.refreshHarnessEnv();
           }
