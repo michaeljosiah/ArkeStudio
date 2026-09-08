@@ -1011,23 +1011,29 @@ export class ComfyUiClient implements ProviderClient {
    * work on a shared engine, or a prompt already terminal — is left exactly alone.
    */
   async cancel(_key: string, remoteId: string, _context?: ProviderCallContext): Promise<void> {
-    if (this.disposed) return;
+    if (this.disposed) throw new Error("comfyui: the client is disposed; cancellation was not acknowledged");
     const base = this.require();
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {});
-    if (status >= 400) throw new Error(`comfyui: the engine answered HTTP ${status} to /queue`);
+    if (status < 200 || status >= 300) throw new Error(`comfyui: the engine answered HTTP ${status} to /queue`);
     const parsed = body as { queue_running?: QueueEntryish[]; queue_pending?: QueueEntryish[] } | null;
+    if (!Array.isArray(parsed?.queue_running) || !Array.isArray(parsed?.queue_pending) ||
+      ![...parsed.queue_running, ...parsed.queue_pending].every(entry => Array.isArray(entry) && typeof entry[1] === "string")) {
+      throw new Error("comfyui: the engine returned an invalid queue; cancellation was not acknowledged");
+    }
     const pending = (parsed?.queue_pending ?? []).some((e) => Array.isArray(e) && e[1] === remoteId);
     if (pending) {
-      await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {
+      const result = await jsonRequest(this.fetchImpl, this.id, `${base}/queue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ delete: [remoteId] }),
       });
+      if (result.status < 200 || result.status >= 300) throw new Error(`comfyui: the engine answered HTTP ${result.status} to queue deletion`);
       return;
     }
     const runningOurs = (parsed?.queue_running ?? []).some((e) => Array.isArray(e) && e[1] === remoteId);
     if (runningOurs) {
-      await jsonRequest(this.fetchImpl, this.id, `${base}/interrupt`, { method: "POST" });
+      const result = await jsonRequest(this.fetchImpl, this.id, `${base}/interrupt`, { method: "POST" });
+      if (result.status < 200 || result.status >= 300) throw new Error(`comfyui: the engine answered HTTP ${result.status} to /interrupt`);
     }
     // Neither pending nor ours-running: terminal, or another user's work. Nothing to touch.
   }

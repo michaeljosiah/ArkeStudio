@@ -1150,6 +1150,17 @@ describe("cancellation targets only the requested prompt (R-17)", () => {
     assert.ok(calls.some((c) => c.url.endsWith("/interrupt")));
   });
 
+  it("rejects failed cancellation POSTs and an unreadable queue instead of acknowledging them", async () => {
+    for (const pending of [false, true]) {
+      const fetch: FetchLike = async (_url, init) => new Response(JSON.stringify(
+        init?.method === "POST" ? {} : queue(pending ? "someone-elses" : "mine", pending ? ["mine"] : []),
+      ), {status:init?.method === "POST" ? 503 : 200});
+      await assert.rejects(new ComfyUiClient(fetch,BASE,OK_PREFLIGHT).cancel("","mine"), /HTTP 503/);
+    }
+    const {fetch}=engineFake([{match:/\/queue$/,status:200,body:{}}]);
+    await assert.rejects(new ComfyUiClient(fetch,BASE,OK_PREFLIGHT).cancel("","mine"), /invalid queue/);
+  });
+
   it("a stranger's running prompt on a shared engine is left exactly alone", async () => {
     const { fetch, calls } = engineFake([
       { match: /\/queue$/, status: 200, body: queue("someone-elses", []) },
