@@ -68,6 +68,7 @@ import {
 } from "../lib/store.js";
 import { Button, Badge, cx } from "../components/ui.js";
 import { AppChrome } from "../components/chrome.js";
+import { Loading } from "../components/loading.js";
 import { ComposerMic } from "../components/dictation.js";
 import { dismissQueueNote } from "../components/queue-toaster.js";
 import {
@@ -206,8 +207,10 @@ export function BenchScreen() {
       : null;
   if (!worldId || !world || !session) {
     return (
-      <div data-screen="bench" style={{ padding: 40 }}>
-        <p style={{ color: "var(--muted-foreground)" }}>Opening the bench…</p>
+      <div className="fy-app" data-screen="bench">
+        <AppChrome back={{ label: "Artifacts", to: `/w/${worldId}/artifacts` }}
+          context={world ? { label: world.meta.name } : undefined} />
+        <Loading label="Opening the bench…" />
       </div>
     );
   }

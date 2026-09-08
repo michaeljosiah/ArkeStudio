@@ -15,6 +15,7 @@ import {
 import { mediaUrl } from "../lib/media.js";
 import { Pin } from "../components/icons.js";
 import { EmptyState } from "../components/layout.js";
+import { Loading } from "../components/loading.js";
 import { Badge } from "../components/ui.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
@@ -675,10 +676,18 @@ export function EpisodeDetailScreen() {
   const navigate = useNavigate();
   const edit = useSingleAct();
   const episode: Episode | undefined = production?.episodes.find((e) => e.id === episodeId);
+  if (!world) {
+    return <div className="fy-prodmain" data-screen="episode-detail"><Loading label="Opening episode…" /></div>;
+  }
   if (!production || !episode) {
     return (
       <div className="fy-prodmain" data-screen="episode-detail">
-        <EmptyState title="Opening episode…" />
+        <EmptyState
+          title={production ? "Episode not found" : "Production not found"}
+          hint={production ? "This episode is not in the production." : "This production is not in the world."}
+          action={<NavLink to={production ? `/w/${worldId}/p/${prodId}/season` : `/w/${worldId}/productions`}
+            className="fy-linkbtn">{production ? "Back to episodes" : "Back to productions"}</NavLink>}
+        />
       </div>
     );
   }

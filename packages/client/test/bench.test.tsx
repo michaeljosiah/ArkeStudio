@@ -102,6 +102,14 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the bench screen (issue 305 §3)", () => {
+  it("keeps the themed app frame and a way back while opening a session (issue 1000)", () => {
+    const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench`, { ...FIXTURE_STATE, bench: null });
+    assert.match(html, /class="fy-app" data-screen="bench"/);
+    assert.match(html, /role="status"/);
+    assert.match(html, /Opening the bench/);
+    assert.match(html, />Artifacts<\/button>/);
+  });
+
   it("restores the session whole: title, brief, token, numbered take, selection", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, stateWithBench());
     assert.match(html, /Harbour night studies/);
