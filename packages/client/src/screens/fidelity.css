@@ -6650,6 +6650,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-ch__pick:disabled { cursor: default; }
 /* Story time is an inline chip, not the script editor's 72px writing area (issue 996). */
 .fy-sw__context .fy-ch__when { min-width: 40px; min-height: 0; margin: 0; padding: 0; font: 400 10px var(--font-mono); color: inherit; }
+.fy-sw__context .fy-ch__mark > .ui-textarea { min-height: 0; margin: 0; padding: 0; resize: none; }
 .fy-ch__synopsis--locked { color: var(--muted-foreground); }
 .fy-ch__implies { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .fy-ch__implies > li { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border); }
