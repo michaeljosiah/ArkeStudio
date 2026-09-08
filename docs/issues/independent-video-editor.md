@@ -6,7 +6,7 @@ The intended experience is a lightweight video editor: start with no scenes, imp
 
 ## Specification
 
-SPEC-042: `docs/specifications/042.independent-video-editing.md` (included in the implementation PR). Amends the editor workflow in SPEC-037/038/039 while retaining world-owned immutable media, frame-based commands, shared preview/export planning and durable undo.
+SPEC-043: `docs/specifications/043.independent-video-editing.md` (included in the implementation PR). Amends the editor workflow in SPEC-037/038/039 while retaining world-owned immutable media, frame-based commands, shared preview/export planning and durable undo.
 
 ## Acceptance criteria
 
@@ -25,7 +25,7 @@ The agreed audio model is generic, renameable Audio tracks created as needed, wi
 clip roles (Unspecified, Voice, Music, Ambience) selected after placement. A track may provide a
 default role for future clips; explicit clip roles override it and changing the default does not
 change existing clips. Preserve legacy mixes, performance safeguards and master references while
-removing the requirement for dedicated Dialogue, Ambience or Music lanes (SPEC-042 R-17–R-21).
+removing the requirement for dedicated Dialogue, Ambience or Music lanes (SPEC-043 R-17–R-21).
 
 Add regressions for import success, deduplication, cancellation/failure, stale timeline protection, a zero-scene video/audio editing journey, render-plan parity, persistence and undo/redo. Run lint, typecheck, build and tests; validate native drop handling if the desktop bridge changes.
 
@@ -33,12 +33,12 @@ Add regressions for import success, deduplication, cancellation/failure, stale t
 
 The pushed branch `origin/codex/issue-117-audio-foundation` was reviewed at `4e696b5d86b5af4cd78f2dc397840ec611076d01`. That work landed through PR #856. On 2026-09-05 the editor worktree was successfully rebased onto fetched remote main at `d129c493`, incorporating its dependencies together.
 
-SPEC-042 R-13 through R-16 and T-6 through T-9 now cover the compatibility requirements:
+SPEC-043 R-13 through R-16 and T-6 through T-9 now cover the compatibility requirements:
 
 - **#115:** Preserve shot-linked reviewed `performance` sources, atomic mutually approved dialogue placement, the in-gate placement checks, saved-timeline slot authority and exact physical audio ranges in preview/export. Ordinary imported/detached artifact or take audio remains independently editable, including on Dialogue tracks. Editing referenced shot slots must surface stale/ambiguous reviewed timing and its existing recovery.
 - **#256:** Preserve `performanceSourceClipId`, `set-performance-source`, timeline hashes and undo. Master generation references map Picture timeline time into Music source time; Picture media trims do not shift them. This relationship is not an editing link. Embedded-audio detachment must not copy/mute the external soundtrack or copy the Picture-only reference onto an audio clip. New preparation/dispatch revalidates changed bindings; queued prepared audio stays frozen.
 
-Implementation is available in [PR #865](https://github.com/michaeljosiah/ArkeStudio/pull/865), including editor imports, independent audio detachment, generic Audio tracks, optional roles and backward-compatible rendering/history. SPEC-042 is the associated specification.
+Implementation is available in [PR #865](https://github.com/michaeljosiah/ArkeStudio/pull/865), including editor imports, independent audio detachment, generic Audio tracks, optional roles and backward-compatible rendering/history. SPEC-043 is the associated specification.
 
 ## Implementation branch
 

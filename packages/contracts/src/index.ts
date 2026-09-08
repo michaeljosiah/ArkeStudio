@@ -1,4 +1,5 @@
 export * from "./ids.js";
+export { ReferenceMediaBindingsSchema, referenceInputProblem, type ReferenceMediaBindings } from "./media-reference.js";
 export * from "./world.js";
 export * from "./production-shape.js";
 export * from "./scene-findings.js";
@@ -11,9 +12,11 @@ export * from "./staging.js";
 export * from "./boards.js";
 export * from "./take.js";
 export * from "./artifact.js";
+export * from "./artifact-access.js";
 export * from "./reference.js";
 export * from "./prop.js";
 export * from "./prose.js";
+export * from "./manuscript.js";
 export * from "./proposal.js";
 export * from "./job.js";
 export * from "./frame-run.js";
@@ -95,3 +98,11 @@ export * from "./shot-visual-facts.js";
 export * from "./provider-guidance.js";
 export * from "./dialogue-assessment.js";
 export * from "./take-feedback.js";
+export { referencePrompt } from "./reference-prompt.js";
+
+export * from "./stage-construction.js";
+
+export * from "./stage-camera.js";
+export * from "./world-image-references.js";
+
+export * from "./error-copy.js";

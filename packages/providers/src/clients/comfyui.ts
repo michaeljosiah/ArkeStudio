@@ -13,6 +13,7 @@ import {
   type RecipeParamValues,
 } from "../comfyui/recipes.js";
 import { scrubPaths } from "../comfyui/redact.js";
+import { multimediaInputs } from "../comfyui/reference-inputs.js";
 import { jsonRequest } from "./http.js";
 import type {
   FetchedArtifact,
@@ -75,7 +76,8 @@ function isRedirect(status: number): boolean {
  * positionally (`reference-01.png`), which two characters would collide on within a minute.
  */
 function contentAddressedName(data: Uint8Array, contentType: string): string {
-  const extension = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
+  const extension = ({ "image/png": "png", "image/webp": "webp", "image/jpeg": "jpg", "video/mp4": "mp4", "audio/wav": "wav", "audio/mpeg": "mp3" } as Record<string, string>)[contentType];
+  if (!extension) throw new ProviderRequestRejectedError("comfyui: unsupported reference media format");
   return `${createHash("sha256").update(data).digest("hex")}.${extension}`;
 }
 
@@ -90,11 +92,12 @@ function referenceInputs(recipe: ComfyUiRecipe): NonNullable<ComfyUiRecipe["refe
   return recipe.referenceImages ?? (recipe.referenceFrame === undefined ? [] : [recipe.referenceFrame]);
 }
 
-function dropUnusedReferences(recipe: ComfyUiRecipe, graph: RecipeGraph, count: number): RecipeGraph {
-  for (const attachment of referenceInputs(recipe).slice(count)) {
+function dropUnusedReferences(recipe: ComfyUiRecipe, graph: RecipeGraph, count: number, videos = 0, audio = 0): RecipeGraph {
+  for (const attachment of [...referenceInputs(recipe).slice(count), ...(recipe.referenceVideos ?? []).slice(videos), ...(recipe.referenceAudio ?? []).slice(audio)]) {
     const [nodeId, inputKey] = attachment.slot;
     const consumer = graph[nodeId];
     if (consumer) delete consumer.inputs[inputKey];
+    for (const [node, slot] of attachment.extraSlots ?? []) if (graph[node]) delete graph[node]!.inputs[slot];
     for (const carrier of attachment.nodes) delete graph[carrier];
   }
   if (count === 0 && recipe.referenceConditioning !== undefined) {
@@ -139,6 +142,9 @@ const INTERNAL_PARAMS = new Set([
   "characterCount",
   "audioFormat",
   "references",
+  "videoReferences",
+  "audioReferences",
+  "referenceMedia",
   "referenceRoles",
   "artDirection",
   "provenance",
@@ -565,7 +571,7 @@ export class ComfyUiClient implements ProviderClient {
     what: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    if (!/^[0-9a-f]{64}\.(wav|mp3|png|jpg|webp)$/.test(file.name)) {
+    if (!/^[0-9a-f]{64}\.(wav|mp3|png|jpg|webp|mp4)$/.test(file.name)) {
       throw new ProviderRequestRejectedError(`comfyui: the ${what} has no safe content-addressed name`);
     }
     const form = new FormData();
@@ -778,7 +784,11 @@ export class ComfyUiClient implements ProviderClient {
         `comfyui: ${recipe.displayName} was asked to carry a reference image that never arrived`,
       );
     }
+    const media = multimediaInputs(recipe, request, this.engineLocality());
     const values = this.valuesFor(recipe, request);
+    // Validate scalar bounds before uploading any reference bytes. Filenames are optional
+    // internal bindings and will be filled only after the engine accepts the corresponding file.
+    substituteRecipeParams(recipe, values);
     // The last check before the wire (§2.5, R-16): a checkpoint replaced since the picker
     // rendered is refused here, before any request reaches the engine.
     const verified = await this.preflight(recipe.id);
@@ -802,7 +812,15 @@ export class ComfyUiClient implements ProviderClient {
     }
     // Substitute first, then drop: the size params bind into the scaler as well as the canvas,
     // and a graph pruned before substitution would refuse its own bindings.
-    const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length);
+    for (const [index, video] of media.videos.entries()) {
+      values[recipe.referenceVideos![index]!.param] = await this.uploadInput(base,
+        { ...video, name: contentAddressedName(video.data, video.contentType) }, "reference video", request.signal);
+    }
+    for (const [index, audio] of media.audio.entries()) {
+      values[recipe.referenceAudio![index]!.param] = await this.uploadInput(base,
+        { ...audio, name: contentAddressedName(audio.data, audio.contentType) }, "reference audio", request.signal);
+    }
+    const graph = dropUnusedReferences(recipe, substituteRecipeParams(recipe, values), prepared.length, media.videos.length, media.audio.length);
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${base}/prompt`, {
       method: "POST",
       redirect: "manual",

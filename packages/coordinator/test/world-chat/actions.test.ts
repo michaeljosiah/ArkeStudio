@@ -39,6 +39,10 @@ import {
   type WorldChatActionAdapterDeps,
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
+import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
+import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -1768,7 +1772,7 @@ describe("World Chat authority adapters", () => {
 
   it("keeps an approved Stage action awaiting the renderer, then files its correlated playblast", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
-    const w = await setup(context);
+    const w = await setup(context, {mediaProbe:{durationSec:async()=>4,info:async()=>({durationSec:4,hasAudio:false,width:16,height:9,frameRate:30})}});
     const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
     const scene = production.scenes.find((candidate) => candidate.id === context.sceneId)!;
     const sceneFile = production.sceneFiles[scene.id]!;
@@ -2101,4 +2105,178 @@ describe("World Chat authority adapters", () => {
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "queued");
     assert.equal(dispatched, 1);
   });
+});
+
+/**
+ * A passage revision is held to the passage that was selected (turn 128, codex round three): the
+ * selection travels on the turn as a structured subject, and an action that comes back aimed
+ * elsewhere is refused before anything is staged.
+ */
+describe("a passage revision is held to the selected passage (turn 128)", () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const subject = { kind: "passage" as const, chapterId: "neap", paragraph: 2, text: "Maren has the 1820 volume open on the rail desk" };
+  const revision = (chapterId: string, find: string, paragraph?: number) => ({
+    kind: "production-chapter" as const,
+    productionId: "the-ledger-of-nights",
+    change: { operation: "edit" as const, chapterId, changes: { passage: { find, with: "x", ...(paragraph === undefined ? {} : { paragraph }) } } },
+    checkReceiptIds: [],
+  });
+
+  it("refuses another chapter, another paragraph, and words outside the selection, by name", async () => {
+    const w = await setup(context);
+    const held = (action: ReturnType<typeof revision>) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [action], subject }));
+    assert.throws(() => held(revision("the-same-ink", "the 1820 volume")), /This ask was about a passage in chapter neap; the revision names the-same-ink/);
+    assert.throws(() => held(revision("neap", "the 1820 volume", 3)), /This ask was about paragraph 2 of chapter neap; the revision names paragraph 3/);
+    assert.throws(() => held(revision("neap", "the rail desk under her coat", 2)), /not within the words this ask was about/);
+    // Within the selection, with whitespace folded, the subject holds; the missing read receipt
+    // is the next refusal, which is the proof the passage check came first.
+    assert.throws(() => held(revision("neap", "the  1820\nvolume", 2)), (err: unknown) => !/This ask was about|not within the words/.test(String(err)));
+  });
+
+  it("holds nothing when nothing was selected, or when the action is not a passage", async () => {
+    const w = await setup(context);
+    const bare = turn(w.conversationId, context, { actions: [revision("the-same-ink", "anything")] });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, bare), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "only the read is missing");
+    const whole = turn(w.conversationId, context, {
+      actions: [{ kind: "production-chapter", productionId: "the-ledger-of-nights", change: { operation: "edit", chapterId: "the-same-ink", changes: { body: "Whole." } }, checkReceiptIds: [] }],
+      subject,
+    });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, whole), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "a body is not held to a passage");
+  });
+
+  it("a reply-only ask stages nothing, whatever the model returned (codex, round four)", async () => {
+    const w = await setup(context);
+    const asked = turn(w.conversationId, context, { actions: [revision("neap", "the 1820 volume", 2)], subject, replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, asked), /This ask was for a reply only; nothing is staged from it/);
+    const quiet = turn(w.conversationId, context, { actions: [], replyOnly: true });
+    assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, quiet), [], "a reply with no action is the promise kept");
+    // Every channel, not only actions (codex, round five): a bible edit, a scene edit, an editor
+    // request or a candidate on a reply-only turn is refused the same way.
+    const edited = turn(w.conversationId, context, { bibleEdits: [{ op: "append", text: "The bells answer a called tide." } as never], replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, edited), /This ask was for a reply only/);
+    const grouped = turn(w.conversationId, context, { groups: [{ id: "grp_1", status: "live", members: [] } as never], replyOnly: true });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, grouped), /This ask was for a reply only/, "a group change is a change too");
+  });
+
+  it("the guard folds emphasis as the matcher does: a quote of the file's __not__ is within a selection served as **not** (codex on PR 903, round four)", async () => {
+    const w = await setup(context);
+    const held = (find: string, text: string) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [revision("neap", find, 2)], subject: { ...subject, text } }));
+    // Within, once the markers fold: the next refusal is the missing read receipt, which is the
+    // proof the guard let it through.
+    assert.throws(() => held("__not__ wrong", "She was **not** wrong."), (err: unknown) => !/This ask was about|not within the words/.test(String(err)));
+    assert.throws(() => held("not right", "She was **not** wrong."), /not within the words this ask was about/);
+  });
+
+  it("the paragraph the ask named must come back, and either spelling of the chapter is the chapter (codex, round five)", async () => {
+    const w = await setup(context);
+    const held = (action: ReturnType<typeof revision>) =>
+      prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { actions: [action], subject }));
+    assert.throws(() => held(revision("neap", "the 1820 volume")), /the revision must name that paragraph/, "an action without the paragraph would search the whole chapter");
+    // The file stem names the same chapter as its id; the guard resolves both before comparing.
+    assert.throws(() => held(revision("01-neap", "the 1820 volume", 2)), (err: unknown) => !/This ask was about|not within the words/.test(String(err)), "the stem is the chapter, so only the read is missing");
+  });
+});
+
+
+it("stages a chapter with only the brief's eligible receipts and keeps section reads scoped", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const bundle = w.store.getBundle();
+  const production = bundle.productions.find((p) => p.meta.id === context.productionId)!;
+  const chapter = production.chapters[0]!;
+  const openBefore = (await w.gate.listOpen()).length;
+  const leases = new QueryLeaseRegistry(() => w.store.worldId);
+  const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null,
+  });
+  const receipts: WorldChatCheckReceipt[] = [];
+  const read = async (tool: string, args: Record<string, unknown>) => {
+    const outcome = await retrieval.call(lease.token, tool, args);
+    receipts.push(outcome.receipt);
+    return outcome;
+  };
+  const brief = await chapterDraftingBrief(bundle, context.productionId, chapter.id, read, 60_000);
+  const eligible = [...brief.matchAll(/"proposalCheckReceiptId":"([^"]+)"/g)].map((match) => match[1]!);
+  assert.equal(eligible.length, 2, "plan and overview are complete target reads");
+  const draws = receipts.filter((r) => r.tool !== "target-read");
+  assert.equal(draws.length, 4);
+  assert.ok(draws.every((r) => !eligible.includes(r.id) && brief.includes(r.id)), "draw provenance is retained, but not offered as proposal receipts");
+  const chapters = await read("list_chapters", { productionId: context.productionId });
+  const action = {
+    kind: "production-chapter" as const, productionId: context.productionId,
+    change: { operation: "edit" as const, chapterId: chapter.id, changes: { body: "The bell stopped." } },
+    checkReceiptIds: [...eligible, chapters.receipt.id],
+  };
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  await appendTurn(w.log, oneTurn, prepared);
+  await bindAll(w.lifecycle, prepared);
+  assert.equal((await w.gate.listOpen()).length, openBefore + 1);
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
+  }), /final receipt from a complete target read/);
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
+  }), /requires the complete current story read/);
+  const overview = receipts.find((r) => r.target?.id.endsWith(":overview"))!;
+  const current = w.store.getBundle().productions.find((p) => p.meta.id === context.productionId)!;
+  current.treatment += "A later treatment edit.";
+  assert.equal((await read("get_story", { productionId: context.productionId, section: "overview" })).receipt.observedRevisionOrDigest, overview.observedRevisionOrDigest);
+  current.proseStyle = { version: 1, voice: "A changed style." };
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
+});
+
+
+it("fences chapter viewpoints and refuses invalid edits before completing the turn (#967)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const action = {
+    kind: "production-chapter" as const, productionId: context.productionId,
+    change: { operation: "edit" as const, chapterId: "neap", changes: { viewpointCharacter: "maren" } },
+    checkReceiptIds: receipts.map((receipt) => receipt.id),
+  };
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /requires the complete current sheets read/);
+  receipts.push(currentReceipt(w.store, "sheets"));
+  action.checkReceiptIds = receipts.map((receipt) => receipt.id);
+  const before = (await loaded(w.log)).seq;
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, change: { ...action.change, changes: { viewpointCharacter: "Unknown person" } } }],
+  }), /Choose a character from the cast/);
+  assert.equal((await loaded(w.log)).seq, before);
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  assert.ok(prepared[0]!.intent.baseObservations.some((observation) => observation.requirement === "sheets"));
+  w.store.getBundle().sheets.find((sheet) => sheet.id === "maren-kest")!.retired = true;
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, change: { operation: "outline", chapters: [{ title: "Opening", synopsis: "A plan.", viewpointCharacter: "maren" }] } }],
+  }), /sheets read is no longer current/);
+  await appendTurn(w.log, oneTurn, prepared);
+  await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare this action/);
+});
+
+it("shows every omitted viewpoint beyond the card title limit (#967)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId), currentReceipt(w.store, "sheets")];
+  const action = ModelWorldChatActionSchema.parse({
+    kind: "production-chapter", productionId: context.productionId, checkReceiptIds: receipts.map((receipt) => receipt.id),
+    change: { operation: "outline", chapters: Array.from({ length: 20 }, (_, index) => ({
+      title: `${index + 1} ${"Long chapter title ".repeat(10)}`, synopsis: "The chapter is retained.", viewpointCharacter: "close third",
+    })) },
+  });
+  const oneTurn = turn(w.conversationId, context, { receipts, actions: [action] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+  await appendTurn(w.log, oneTurn, prepared);
+  await bindAll(w.lifecycle, prepared);
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.body.family, "authored-diff");
+  if (card.shown.body.family !== "authored-diff") throw new Error("wrong review body");
+  const notice = card.shown.body.fields.find((field) => field.label === "Viewpoint characters")!.after!;
+  assert.ok(notice.length > 200);
+  for (let index = 1; index <= 20; index++) assert.ok(notice.includes(`chapter ${index}`));
 });

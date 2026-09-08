@@ -23,6 +23,7 @@ import {
   type ReconcileAction,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./classify.js";
 import { JobJournal } from "./journal.js";
 import { imageFormatOf, verifyArtifact } from "./verify.js";
@@ -56,6 +57,8 @@ export interface DispatchVoiceReference {
 
 /** The footage a continuation extends (SPEC-019 R-50), resolved immediately before submit. */
 export interface DispatchVideoSource {
+  durationSec?: number;
+  referenceVideo24fps?: true;
   contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }
@@ -75,6 +78,7 @@ export interface DispatchClient {
       params: Record<string, unknown>;
       imageReferences?: DispatchImageReference[];
       audioReferences?: DispatchVoiceReference[];
+      mediaAudioReferences?: Array<DispatchVoiceReference & { durationSec: number }>;
       audioInputs?: PreparedAudioInput[];
       voiceReference?: DispatchVoiceReference;
       videoSource?: DispatchVideoSource;
@@ -160,6 +164,9 @@ export interface JobQueueOptions {
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
   readAudioInputs?: (job: Job) => Promise<PreparedAudioInput[]>;
   readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
+  prepareReferences?: (job: Job, videos: DispatchVideoSource[], signal: AbortSignal) => Promise<{
+    videos: DispatchVideoSource[]; audio: Array<DispatchVoiceReference & { durationSec: number }>;
+  }>;
   readImageReferences?: (worldId: string, paths: readonly string[]) => Promise<DispatchImageReference[]>;
   /** Resolve a durable voice id into ephemeral confined bytes immediately before provider I/O. */
   readVoiceReference?: (worldId: string, provider: string, model: string, voiceId: string) => Promise<DispatchVoiceReference>;
@@ -772,6 +779,7 @@ export class JobQueue {
 
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
+    let mediaAudioReferences: Array<DispatchVoiceReference & { durationSec: number }> | undefined;
     let imageReferences: DispatchImageReference[] | undefined;
     let voiceReference: DispatchVoiceReference | undefined;
     let videoSource: DispatchVideoSource | undefined;
@@ -792,7 +800,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "image references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -821,7 +829,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "video references could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -854,7 +862,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "the voice's recording could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -880,7 +888,7 @@ export class JobQueue {
         await this.terminalize(
           job,
           "failed",
-          error instanceof Error ? error.message : "the footage being extended could not be prepared",
+          describeCoordinatorError(error),
         );
         return;
       }
@@ -892,7 +900,7 @@ export class JobQueue {
         if (!this.opts.readAudioReferences) throw new Error("Audio reference transport is not configured.");
         audioReferences = await this.opts.readAudioReferences(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Audio references are not cleared for upload.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
@@ -903,10 +911,29 @@ export class JobQueue {
         if (!this.opts.readAudioInputs) throw new Error("Performance conversion input transport is not configured.");
         audioInputs = await this.opts.readAudioInputs(job);
       } catch (error) {
-        await this.terminalize(job, "failed", error instanceof Error ? error.message : "Performance is not cleared for conversion.");
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
         return;
       }
       if (!this.stillQueued(job)) return;
+    }
+
+    // Host preparation has no provider side effect. Keep it on the queued side of the outbox
+    // boundary, and let cancellation terminate its bounded encoder before any submission.
+    if (this.opts.prepareReferences) {
+      const preparing = new AbortController();
+      this.submitAborts.set(job.id, preparing);
+      try {
+        const prepared = await this.opts.prepareReferences(job, videoReferences ?? [], preparing.signal);
+        videoReferences = prepared.videos;
+        mediaAudioReferences = prepared.audio;
+      } catch (error) {
+        if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) await this.terminalize(job, "failed", error instanceof Error ? error.message : "Reference preparation failed.");
+        return;
+      } finally { if (this.submitAborts.get(job.id) === preparing) this.submitAborts.delete(job.id); }
+      if (this.disposed || !this.stillQueued(job)) return;
+    } else if (job.params.referenceMedia !== undefined) {
+      await this.terminalize(job, "failed", "Multimedia reference preparation is unavailable.");
+      return;
     }
 
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
@@ -939,6 +966,7 @@ export class JobQueue {
           params: providerParams(job.params),
           ...(imageReferences ? { imageReferences } : {}),
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaAudioReferences ? { mediaAudioReferences } : {}),
           ...(audioInputs ? { audioInputs } : {}),
           ...(voiceReference ? { voiceReference } : {}),
           ...(videoSource ? { videoSource } : {}),
@@ -968,7 +996,7 @@ export class JobQueue {
           await this.terminalize(
             submitting,
             "failed",
-            `the provider completed, but its artifact could not be made durable: ${error instanceof Error ? error.message : String(error)}`,
+            `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
           );
           return;
         }
@@ -998,7 +1026,7 @@ export class JobQueue {
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeCoordinatorError(err);
     const klass: FailureClass = classifyError(err);
     if (isRateLimit(err)) this.noteRateLimit(job.provider);
     const local = (PROVIDERS as Record<string, { local: boolean } | undefined>)[job.provider]?.local === true;
@@ -1095,7 +1123,7 @@ export class JobQueue {
         const klass = classifyError(err);
         if (klass === "provider-fault") {
           // Keep the job running (the remote work exists); pause the lane for new work.
-          const message = err instanceof Error ? err.message : String(err);
+          const message = describeCoordinatorError(err);
           current = { ...current, failureClass: klass, error: message, updatedAt: this.clock() };
           await this.transition(current);
           this.pauseLane(job.provider, "fault", message);
@@ -1242,7 +1270,7 @@ export class JobQueue {
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
         const klass = classifyError(err);
         if (klass === "terminal") {
-          await this.terminalize(job, "failed", `artifact fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+          await this.terminalize(job, "failed", `artifact fetch failed: ${describeCoordinatorError(err)}`);
         } else {
           // Bounded backoff (R-9) rather than the poll cadence, and the job re-checked before every
           // re-fetch. A cancelled job kept re-fetching every 1.5s for as long as the app ran, its

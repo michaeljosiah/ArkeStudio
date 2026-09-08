@@ -25,6 +25,7 @@ export interface SubmitRequest {
   imageReferences?: PreparedImageReference[];
   /** Verified scene audio inputs, ordered by frozen @AudioN bindings. Never journal bytes. */
   audioReferences?: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array }>;
+  mediaAudioReferences?: Array<{ name: string; contentType: "audio/wav" | "audio/mpeg"; data: Uint8Array; durationSec: number }>;
   /**
    * The footage a continuation extends (SPEC-019 R-50), resolved immediately before submission
    * and never journalled.
@@ -77,6 +78,8 @@ export interface PreparedImageReference {
  * routes all declare a `video_url`, and a data URI needs its type spelled out to be one.
  */
 export interface PreparedVideoSource {
+  durationSec?: number;
+  referenceVideo24fps?: true;
   contentType: "video/mp4" | "video/quicktime" | "video/webm";
   data: Uint8Array;
 }

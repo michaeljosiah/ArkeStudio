@@ -5,13 +5,13 @@ import {
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
-  effectiveFraming,
   orderedShots,
   productionShape,
   promptFor,
   resolveCast,
   shotCardState,
   shotCoverage,
+  UNTITLED_SHOT,
   type ArtifactSidecar,
   type BenchSessionSummary,
   type ClientMessage,
@@ -237,7 +237,7 @@ export function StoryboardRows({
                 onCommand({
                   kind: "insert-shot",
                   at: { atStart: true },
-                  shot: { title: "Untitled shot", description: "" },
+                  shot: { title: UNTITLED_SHOT, description: "" },
                 })
               }
             >
@@ -311,7 +311,7 @@ export function StoryboardRows({
                     onCommand({
                       kind: "insert-shot",
                       at: { before: shot.id },
-                      shot: { title: "Untitled shot", description: "" },
+                      shot: { title: UNTITLED_SHOT, description: "" },
                     })
                   }
                   onSplit={() => onCommand({ kind: "set-board-override", shotId: shot.id, override: "split" })}
@@ -387,7 +387,7 @@ export function StoryboardRows({
                 kind: "insert-shot",
                 // An empty scene is a valid one; its first shot has nothing to follow.
                 at: shots.length === 0 ? { atStart: true } : { after: shots.at(-1)!.id },
-                shot: { title: "Untitled shot", description: "" },
+                shot: { title: UNTITLED_SHOT, description: "" },
               })
             }
           >
@@ -809,6 +809,8 @@ function Row({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [scriptDraft, setScriptDraft] = useState(shot.description);
+  const [titleDraft, setTitleDraft] = useState(shot.title);
+  const [durationDraft, setDurationDraft] = useState(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
   const [pendingHide, setPendingHide] = useState<{
@@ -864,7 +866,7 @@ function Row({
     .slice(0, 2);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : undefined;
+  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
   const assembledPrompt = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const currentPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
   const durablePromptOverride = shot.promptOverride?.text ?? null;
@@ -1015,6 +1017,11 @@ function Row({
     if (confirmDelete && staged) closeMenu(false);
   }, [closeMenu, confirmDelete, staged]);
 
+  useEffect(() => {
+    setTitleDraft(shot.title);
+    setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+  }, [shot.title, shot.durationSec, refusalVersion]);
+
   const commitScript = (next = scriptDraft) => {
     if (disabled || next === shot.description) return;
     if (!onCommand({ kind: "edit-shot", shotId: shot.id, change: { description: next } })) {
@@ -1033,6 +1040,7 @@ function Row({
       kind: "set-prompt-override",
       shotId: shot.id,
       text: replacement,
+      capability,
     })) {
       setPromptDraft(null);
       return false;
@@ -1065,7 +1073,7 @@ function Row({
       return;
     }
     const expected = next === "" || next === assembledPrompt.trim() ? null : next;
-    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected })) {
+    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected, capability })) {
       promptDirty.current = true;
       setPromptDraft(value);
       return;
@@ -1253,11 +1261,49 @@ function Row({
       </div>
       <div className="fy-swrow__body">
         <div className="fy-swrow__titleline">
-          <span className="fy-swrow__title">Shot {shot.number} · {effectiveFraming(scene, shot).size ?? shot.title}</span>
+          <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}>{CHIP[state]}<span aria-hidden="true" /></span>
           {shot.staging?.playblast === undefined ? null : (
             <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
           )}
+        </div>
+        <div className="fy-swrow__fields" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <label>
+            Title
+            <input
+              aria-label={`Title for shot ${shot.number}`}
+              value={titleDraft}
+              disabled={disabled}
+              onChange={(event) => setTitleDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") { event.currentTarget.value = shot.title; setTitleDraft(shot.title); event.currentTarget.blur(); }
+              }}
+              onBlur={(event) => {
+                const title = event.currentTarget.value.trim();
+                if (!title || title === shot.title || disabled || !onCommand({ kind: "edit-shot", shotId: shot.id, change: { title } })) setTitleDraft(shot.title);
+              }}
+            />
+          </label>
+          <label>
+            Duration · seconds
+            <input
+              aria-label={`Duration for shot ${shot.number}`}
+              type="number" min="0.01" step="any"
+              value={durationDraft}
+              disabled={disabled}
+              onChange={(event) => setDurationDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") { event.currentTarget.value = String(shot.durationSec ?? DEFAULT_SHOT_SEC); setDurationDraft(event.currentTarget.value); event.currentTarget.blur(); }
+              }}
+              onBlur={(event) => {
+                const durationSec = Number(event.currentTarget.value);
+                if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec === (shot.durationSec ?? DEFAULT_SHOT_SEC) || disabled ||
+                  !onCommand({ kind: "edit-shot", shotId: shot.id, change: { durationSec } })) setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+              }}
+            />
+          </label>
         </div>
         <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
         {coverage === "changed" || runScriptChanged ? (
@@ -1397,7 +1443,7 @@ function Row({
         </div>
         {promptOpen ? null : (
           <div className="fy-swrow__slot">
-            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · edited by you"}</span>
+            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · authored"}</span>
             <button type="button" disabled={disabled} onClick={() => setPromptOpen(true)}>Edit</button>
           </div>
         )}
@@ -1482,7 +1528,7 @@ function Row({
                     disabled={disabled}
                     onClick={() => {
                       closeMenu(true);
-                      onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: "Untitled shot", description: "" } });
+                      onCommand({ kind: "insert-shot", at: { after: shot.id }, shot: { title: UNTITLED_SHOT, description: "" } });
                     }}
                   >
                     Add shot after

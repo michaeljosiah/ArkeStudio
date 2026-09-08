@@ -37,6 +37,7 @@ export function ArtifactViewer({
   worldSlug,
   linkName,
   onClose,
+  onRetire,
 }: {
   /** The artifact on screen, or null for closed. */
   artifact: ArtifactSidecar | null;
@@ -46,6 +47,7 @@ export function ArtifactViewer({
   /** Names a link the way the cards do — "The Vigil", never "the-vigil". */
   linkName: (link: string) => string;
   onClose: () => void;
+  onRetire?: (artifactId: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -81,6 +83,7 @@ export function ArtifactViewer({
           worldSlug={worldSlug}
           linkName={linkName}
           titleId={titleId}
+          onRetire={onRetire}
           onClose={() => dialog.current?.close()}
         />
       )}
@@ -95,6 +98,7 @@ function ArtifactPanel({
   linkName,
   titleId,
   onClose,
+  onRetire,
 }: {
   artifact: ArtifactSidecar;
   artifacts: readonly ArtifactSidecar[];
@@ -102,6 +106,7 @@ function ArtifactPanel({
   linkName: (link: string) => string;
   titleId: string;
   onClose: () => void;
+  onRetire?: (artifactId: string) => void;
 }) {
   const name = artifact.file.split("/").pop() ?? artifact.file;
   const path = `artifacts/${artifact.file}`;
@@ -132,6 +137,7 @@ function ArtifactPanel({
         {artifactIsServable(artifact) && (
           <SaveCopy worldSlug={worldSlug} path={path} name={name} />
         )}
+        {onRetire && artifact.retiredAt === undefined && <Button variant="outline" onClick={() => onRetire(artifact.id)}>Remove from shelf</Button>}
         <button
           type="button"
           className="fy-artview__close"

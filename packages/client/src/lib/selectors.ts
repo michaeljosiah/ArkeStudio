@@ -3,6 +3,49 @@ import type { ProductionBundle, Sheet, WorldBundle } from "@arke-studio/contract
 import { openWorld, useStore, useWorld } from "./store.js";
 import type { TakeDecision } from "../domain/domain.js";
 
+export type PendingEpisode = { id: string; title: string; order: number | null };
+
+/**
+ * Episodes staged in a proposal but not yet accepted (turn 92): a wrap-up writes one of these
+ * before it is an episode on disk, so anything computing the next free order has to include it
+ * too, or two paths can hand out the same order to two different episodes (issue 947).
+ */
+export function pendingEpisodes(
+  world: WorldBundle | null,
+  prodId: string | undefined,
+  production: ProductionBundle | null,
+): PendingEpisode[] {
+  const stems = new Set(Object.values(production?.episodeFiles ?? {}));
+  const prefix = `productions/${prodId}/episodes/`;
+  return (world?.proposals ?? []).flatMap((sp) =>
+    sp.proposal.targets.flatMap((t) => {
+      // Prefix and suffix rather than a built pattern: a production id interpolated into a
+      // regular expression is a pattern the caller did not write, and `\.` inside a template
+      // literal is just a dot, so the escape that looked like it was there never was.
+      if (!t.path.startsWith(prefix) || !t.path.endsWith(".json")) return [];
+      const stem = t.path.slice(prefix.length, -".json".length);
+      if (stem.length === 0 || stem.includes("/") || stems.has(stem)) return [];
+      // The gate labels its review fields for reading — "Title", "Order" — so they are matched
+      // case-insensitively rather than by the record's own key names.
+      const fields = sp.review?.targets.flatMap((rt) => rt.fields) ?? [];
+      const field = (name: string) => fields.find((f) => f.field.toLowerCase() === name)?.proposed;
+      const title = field("title") ?? sp.proposal.summary;
+      const order = Number(field("order") ?? Number.NaN);
+      return [{ id: sp.proposal.id, title, order: Number.isFinite(order) ? order : null }];
+    }),
+  );
+}
+
+/** The next free episode order, counting both written episodes and ones staged but not yet accepted. */
+export function nextEpisodeOrder(
+  world: WorldBundle | null,
+  prodId: string | undefined,
+  production: ProductionBundle | null,
+): number {
+  const episodes = production?.episodes ?? [];
+  return Math.max(0, ...episodes.map((e) => e.order), ...pendingEpisodes(world, prodId, production).map((e) => e.order ?? 0)) + 1;
+}
+
 /** Ask the coordinator for the routed world whenever the open one differs. */
 export function useOpenWorldGuard(worldId: string | undefined): WorldBundle | null {
   const { connection } = useStore();

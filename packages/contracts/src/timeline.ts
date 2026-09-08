@@ -1,4 +1,5 @@
 import type { ArtifactSidecar } from "./artifact.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 import { FullSha256Schema } from "./audio.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
@@ -75,7 +76,7 @@ export const TimelineClipSourceSchema = z.discriminatedUnion("kind", [
       kind: z.literal("take"),
       takeId: TakeIdSchema,
       label: z.string().min(1),
-      /** A frozen selection's exact trim, before independent frame edits (SPEC-042 R-7). */
+      /** A frozen selection's exact trim, before independent frame edits (SPEC-043 R-7). */
       offsetSec: z.number().finite().nonnegative().optional(),
       /** Dialogue keeps the speaking sheet and the version its voice was assigned at (SPEC-013 R-18, SPEC-038 R-20). */
       sheetId: SlugSchema.optional(),
@@ -469,7 +470,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   /** Place a clip on a track (SPEC-039 R-10). The clip arrives whole so a ghost and the record agree. */
   z.object({ kind: z.literal("place"), trackId: TimelineTrackIdSchema, clip: TimelineClipSchema }).strict(),
   z.object({ kind: z.literal("set-clip-gain"), clipId: TimelineClipIdSchema, gainDb: z.number().min(-60).max(12) }).strict(),
-  z.object({ kind: z.literal("detach-audio"), clipId: TimelineClipIdSchema, newClipId: TimelineClipIdSchema }).strict(),
+  z.object({ kind: z.literal("detach-audio"), clipId: TimelineClipIdSchema, newClipId: TimelineClipIdSchema, newTrack: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("set-clip-audio"), clipId: TimelineClipIdSchema, audio: z.enum(["keep", "mute"]) }).strict(),
   z.object({ kind: z.literal("set-clip-role"), clipId: TimelineClipIdSchema, role: AudioRoleSchema }).strict(),
   z
@@ -1308,7 +1309,7 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       if (!working.sources) throw new TimelineOperationRefused("Detaching audio requires current production sources");
       const current = { ...working.timeline, tracks: working.tracks, mix: working.mix, library: working.library };
       const { production, artifacts } = working.sources;
-      for (const edit of detachAudioCommands(production, current, artifacts, command.clipId, command.newClipId)) applyClipCommand(working, edit);
+      for (const edit of detachAudioCommands(production, current, artifacts, command.clipId, command.newClipId, command.newTrack)) applyClipCommand(working, edit);
       return;
     }
     case "move-adjacent": {
@@ -2141,7 +2142,7 @@ export function resolvePictureTimeline(
   };
 }
 
-/** Track identity is independent of its audio role (SPEC-042). */
+/** Track identity is independent of its audio role (SPEC-043). */
 export function newAudioTrack(timeline: ProductionTimeline): Extract<TimelineClipCommand, { kind: "add-track" }> {
   let number = 1;
   while (timeline.tracks.some(track => track.id === `tr_audio-${number}` || track.name === `Audio ${number}`)) number++;
@@ -2150,7 +2151,7 @@ export function newAudioTrack(timeline: ProductionTimeline): Extract<TimelineCli
 
 /** Detachment freezes embedded sound only; external performances and master bindings stay put. */
 export function detachAudioCommands(production: ProductionBundle, timeline: ProductionTimeline,
-  artifacts: readonly ArtifactSidecar[], clipId: TimelineClipId, newClipId: TimelineClipId): TimelineClipCommand[] {
+  artifacts: readonly ArtifactSidecar[], clipId: TimelineClipId, newClipId: TimelineClipId, newTrack = false): TimelineClipCommand[] {
   const track = timeline.tracks.find(candidate => candidate.clips.some(clip => clip.id === clipId));
   const clip = track?.clips.find(candidate => candidate.id === clipId);
   if (!clip || track?.kind !== "picture") throw new TimelineOperationRefused("Select a video clip to detach its audio");
@@ -2159,8 +2160,10 @@ export function detachAudioCommands(production: ProductionBundle, timeline: Prod
   const sourceInFrames = clip.sourceInFrames;
   let measured: { hasAudio: boolean } | undefined;
   if (source.kind === "artifact") {
-    const artifact = artifacts.find(candidate => source.kind === "artifact" && candidate.id === source.artifactId);
-    if (!artifact || artifact.kind !== "video") throw new TimelineOperationRefused("This clip has no embedded video audio");
+    const resolved = resolveProductionArtifact(artifacts, source.artifactId, production.meta.id);
+    if (!resolved.ok) throw new TimelineOperationRefused(`${clip.id} cites ${resolved.reason}`);
+    const artifact = resolved.artifact;
+    if (artifact.kind !== "video") throw new TimelineOperationRefused("This clip has no embedded video audio");
     measured = artifact.mediaInfo;
   } else if (source.kind === "take" || source.kind === "shot") {
     let takeId = source.kind === "take" ? source.takeId : production.selections[source.shotId]?.acceptedTakeId;
@@ -2179,7 +2182,7 @@ export function detachAudioCommands(production: ProductionBundle, timeline: Prod
   } else throw new TimelineOperationRefused("This source is already independent performance audio");
   if (!measured) throw new TimelineOperationRefused("Measure the video before detaching its audio");
   if (!measured.hasAudio) throw new TimelineOperationRefused("This video has no audio stream");
-  const destination = timeline.tracks.find(candidate => AUDIO_TRACK_KINDS.has(candidate.kind) && !candidate.muted && candidate.solo !== true &&
+  const destination = newTrack ? undefined : timeline.tracks.find(candidate => AUDIO_TRACK_KINDS.has(candidate.kind) && !candidate.muted && candidate.solo !== true &&
     !candidate.clips.some(other => other.startFrame < clip.startFrame + clip.durationFrames && other.startFrame + other.durationFrames > clip.startFrame));
   const added = destination ? null : newAudioTrack(timeline);
   const sound: TimelineClip = {

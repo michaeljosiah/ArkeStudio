@@ -1,4 +1,5 @@
-import { planSubjectCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
+import { stageArtifactProblem } from "../productions/stage-playblast.js";
+import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -322,6 +323,8 @@ export function resolveTokenEntry(
   const source = entry.source;
   if (source.source === "artifact") {
     const artifact = bundle.artifacts.find((a) => a.id === source.artifactId);
+    const problem = artifact ? stageArtifactProblem(bundle,artifact) : null;
+    if(problem) return {refused:problem};
     return artifact ? resolveArtifactSource(artifact) : { refused: "that artifact is no longer in the world" };
   }
   if (source.source === "world-file") return resolveWorldFileSource(source);
@@ -744,6 +747,10 @@ export function planBenchDispatch(
   // be refused at dispatch as a picture that is not one.
   const referencePaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "image").map(({ resolved }) => resolved.path);
   const videoPaths = resolvedRefs.filter(({ resolved }) => resolved.kind === "video").map(({ resolved }) => resolved.path);
+  const mediaReferences = model.limits.referenceSyntax === "minimax-h3" ? resolvedRefs.filter(({ resolved }) => resolved.kind !== "image").map(({ resolved }) => ({
+    kind: resolved.kind, file: resolved.path, hash: resolved.source.hash, durationSec: resolved.durationSec,
+  })) : [];
+  const standaloneAudioCount = mediaReferences.filter(ref => ref.kind === "audio").length;
 
   const filingPlan = session.subject === undefined ? null : productionFilingFor(session, bundle, composer.mode);
   if (filingPlan !== null && !filingPlan.ok) return filingPlan;
@@ -833,7 +840,11 @@ export function planBenchDispatch(
     taskMode, disabled: params.audioReferencesDisabled })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
-  const wirePrompt = [preamble, body, audioReferences ? characterAudioInstructions(audioReferences) : null].filter(Boolean).join("\n\n");
+  const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });
+  if (referenceProblem) return { ok: false, reason: referenceProblem };
+  const wirePrompt = [preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
+    referencePrompt(body, model, videoPaths.length),
+    audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
@@ -1003,6 +1014,7 @@ export function planBenchDispatch(
         params: {
           prompt: wirePrompt,
           ...(audioReferences ? { audioReferences } : {}),
+          ...(mediaReferences.length ? { referenceMedia: mediaReferences } : {}),
           ...(choice.kind === "asked" ? { duration: choice.wire } : {}),
           // A frame mode sends the size fields its route leaves unlocked (SPEC-019 R-33);
           // plain generation sends what was chosen. The frames travel as `references` so the

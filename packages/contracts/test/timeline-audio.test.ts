@@ -149,7 +149,7 @@ function valid(timeline: ProductionTimeline): ProductionTimeline {
   return timeline;
 }
 
-describe("independent sound and roles (SPEC-042)", () => {
+describe("independent sound and roles (SPEC-043)", () => {
   it("records neutral roles on new legacy-lane placements while preserving pre-existing roles", () => {
     for (const kind of ["dialogue", "music", "ambience"] as const) {
       const timeline = applyTimelineCommands(seedStoryPictureTimeline(production()), [{ kind: "add-track", trackId: "tr_old", trackKind: kind, name: "Old" }]);
@@ -217,6 +217,24 @@ describe("independent sound and roles (SPEC-042)", () => {
     assert.throws(() => detachAudioCommands(p, before, [], id, "cl_unknown"), /Measure/);
   });
 
+  it("extracts to a new neutral track atomically even when a free track exists (#908)", () => {
+    const p = production();
+    const timeline = applyTimelineCommands(seedStoryPictureTimeline(p), [
+      { kind: "add-track", trackId: "tr_existing", trackKind: "audio", name: "Music", defaultRole: "music" },
+    ]);
+    const extracted = valid(applyTimelineCommands(timeline, [
+      { kind: "detach-audio", clipId: "cl_sh-1", newClipId: "cl_extracted", newTrack: true },
+    ], { sources: { production: p, artifacts: [] } }));
+    assert.deepEqual(extracted.tracks[1], timeline.tracks[1], "the existing free track is untouched");
+    assert.equal(extracted.tracks[0]!.clips[0]!.audio, "mute");
+    assert.equal(extracted.tracks[2]!.kind, "audio");
+    assert.equal(extracted.tracks[2]!.clips[0]!.role, "unspecified");
+    assert.equal(extracted.history.undo.length, timeline.history.undo.length + 1);
+    const undone = undoTimelineHistory(extracted);
+    assert.deepEqual(undone.tracks, timeline.tracks);
+    assert.deepEqual(redoTimelineHistory(undone).tracks, extracted.tracks);
+  });
+
   it("keeps detached sound out of muted or soloed destination tracks", () => {
     const p = production();
     for (const state of [{ muted: true }, { solo: true }]) {
@@ -266,6 +284,8 @@ function mixed(): ProductionTimeline {
   return valid(
     apply(
       seedStoryPictureTimeline(production()),
+      // This authored mix deliberately replaces the video's own sound.
+      { kind: "set-clip-audio", clipId: "cl_sh-1", audio: "mute" },
       { kind: "add-track", trackId: "tr_dialogue", trackKind: "dialogue", name: "Dialogue" },
       { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" },
       {
@@ -337,10 +357,10 @@ describe("the round-one Picture fixes", () => {
 describe("typed audio tracks and the speech-first mix (#681)", () => {
   it("places, gains, mutes, solos and mixes as durable commands with exact inverses", () => {
     const timeline = mixed();
-    assert.equal(timeline.revision, 1, "four commands in one batch are one revision");
+    assert.equal(timeline.revision, 1, "the commands in one batch are one revision");
     const entry = timeline.history.undo[0]!;
     assert.equal(entry.kind === "change" ? entry.tracks.length : -1, 2, "two tracks were added");
-    assert.equal(entry.kind === "change" ? entry.clips.length : -1, 2, "two clips were placed");
+    assert.equal(entry.kind === "change" ? entry.clips.length : -1, 3, "two clips were placed and picture sound muted");
 
     const gained = valid(apply(timeline, { kind: "set-clip-gain", clipId: "cl_song", gainDb: -12 }));
     assert.equal(gained.tracks.find((track) => track.id === "tr_music")!.clips[0]!.gainDb, -12);
@@ -501,6 +521,7 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
       ["cl_audio-1-0", "dialogue"],
       ["cl_ov-01J8G0000000000000000000B3", "ambience"],
       ["cl_ov-01J8G0000000000000000000B4", "ambience"],
+      ["cl_sh-1", "picture"],
     ]);
     assert.deepEqual(plan.speech, [{ startSec: 2.2, endSec: 4.2 }]);
   });

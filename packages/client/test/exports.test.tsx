@@ -255,6 +255,55 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+describe("export audio status (#908)", () => {
+  it("names unmeasured legacy audio-only content instead of claiming nothing was placed", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState, p = state.world!.productions[0]!;
+    p.scenes = [];
+    const artifact = { ...state.world!.artifacts[0]!, kind: "video" as const, file: "Original.mp4", mediaInfo: undefined };
+    state.world!.artifacts = [artifact];
+    p.cut = { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000B1", artifactId: artifact.id, startSec: 0, endSec: 5, lane: 0, audio: "only" }] };
+    const timeline = seedEmptyPictureTimeline(p); delete timeline.migratedCut;
+    p.timeline = { status: "ready", timeline };
+    const mounted = await mountSheet(state);
+    try {
+      assert.deepEqual(warnings(mounted), ["Video audio has not been measured. Import the source video to measure it before exporting."]);
+      assert.ok(sheet(mounted).textContent?.includes("Original.mp4"));
+      assert.equal(primary(mounted).disabled, true);
+    } finally { await unmount(mounted); }
+  });
+  for (const sound of ["audio", "silent", "unmeasured"] as const) {
+    it(`reports ${sound} video sound for the film and episode before export`, async () => {
+      const state = structuredClone(FIXTURE_STATE) as ClientState;
+      const p = state.world!.productions[0]!;
+      p.meta.kind = "series";
+      p.cut = { audio: [], overlays: [] };
+      const scene = p.scenes[0]!;
+      assert.ok("shots" in scene);
+      scene.shots = [scene.shots[0]!];
+      p.episodes = [{ id: "ep_one", version: 1, order: 1, title: "One", scenes: [p.scenes[0]!.id] }];
+      p.takeMediaInfo = sound === "unmeasured" ? {} : {
+        [CLIP]: { sourceHash: HASH, probedAt: AT, mediaInfo: { durationSec: 4, hasAudio: sound === "audio" } },
+      };
+      p.timeline = { status: "ready", timeline: seedStoryPictureTimeline(p) };
+      const mounted = await mountSheet(state);
+      try {
+        const message = sound === "audio" ? null : sound === "silent"
+          ? "No sound — no audible audio in this cut" : "No sound — video audio not measured";
+        assert.deepEqual(warnings(mounted), message ? [message] : []);
+        const chips = [...sheet(mounted).querySelectorAll<HTMLButtonElement>('[aria-label="Audio"] button')];
+        assert.equal(chips.length, 2);
+        assert.ok(chips.every(chip => chip.disabled === (sound !== "audio")));
+        const episode = sheet(mounted).querySelector(".fy-exsheet__episode")!;
+        assert.ok(episode);
+        const status = episode.querySelector('[role="status"]');
+        if (message) assert.ok(status?.textContent?.includes(message)); else assert.equal(status, null);
+        if (sound === "unmeasured") assert.ok(status?.textContent?.includes(p.timeline.timeline.tracks[0]!.clips[0]!.source.label));
+        assert.equal(primary(mounted).disabled, false, "silence remains exportable");
+      } finally { await unmount(mounted); }
+    });
+  }
+});
+
 describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
   it("refuses a story with nothing saved, then exports its timeline with the gap as a slate at every resolution", async () => {
     const empty = await mountSheet(structuredClone(FIXTURE_STATE) as ClientState);
@@ -273,7 +322,7 @@ describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
     const mounted = await mountSheet(ClientStateSchema.parse(saved));
     try {
       assert.equal(meta(mounted), "10s · 1 of 2 shots · 1 gap");
-      assert.deepEqual(warnings(mounted), ["1 shot has no accepted take. Exporting now writes a black slate where it sits."]);
+      assert.deepEqual(warnings(mounted), ["No sound — video audio not measured", "1 shot has no accepted take. Exporting now writes a black slate where it sits."]);
       for (const label of RESOLUTIONS) {
         await chooseResolution(mounted, label);
         assert.deepEqual(action(mounted), { text: "Export with gaps", disabled: false }, `${label} exports the unfinished film`);
@@ -347,6 +396,19 @@ describe("the export sheet's refusals (SPEC-039 T-5; issue 405)", () => {
 });
 
 describe("the song clock on the export sheet", () => {
+  it("refuses a master owned by another production before materializing the song (#895)", async () => {
+    const state = spineState("audio");
+    state.world!.artifacts.find(artifact => artifact.id === TRACK)!.production = "another-production";
+    const cut = renderCut(state);
+    assert.match(cut.textContent!, /Preview and export unavailable.*belongs to another production/);
+    assert.equal(cut.querySelector("audio"), null, "the foreign master is not offered for playback");
+    const mounted = await mountSheet(state);
+    try {
+      assert.match(warnings(mounted).join(" "), /Master track cites artifact .*belongs to another production.*Import the file/);
+      assert.equal(action(mounted).disabled, true);
+      assert.equal(openOnTimeline(mounted), undefined);
+    } finally { await unmount(mounted); }
+  });
   it("refuses a song that is not on the timeline yet, and offers the way there only for a master it can cut against", async () => {
     for (const trackState of ["missing", "unmeasured", "silent", "audio"] as const) {
       const mounted = await mountSheet(spineState(trackState));

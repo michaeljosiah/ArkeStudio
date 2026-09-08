@@ -89,6 +89,9 @@ export const ModelAcceptsSchema = z
     referenceImages: z.number().int().min(0),
     /** True only when the provider has separate style and identity image inputs. */
     referenceRoles: z.boolean().optional(),
+    /** Transport-independent reference support; cloud field names remain wire mappings. */
+    referenceVideos: z.number().int().min(0).optional(),
+    referenceAudio: z.number().int().min(0).optional(),
     startFrame: z.boolean(),
     endFrame: z.boolean(),
   })
@@ -180,6 +183,12 @@ export const ModelLimitsSchema = z
     maxReferenceVideoSec: z.number().min(0).optional(),
     /** Aggregate seconds of audio reference this model accepts across all clips (R-40, R-41). */
     maxReferenceAudioSec: z.number().min(0).optional(),
+    minReferenceVideoFileSec: z.number().positive().optional(),
+    maxReferenceVideoFileSec: z.number().positive().optional(),
+    maxReferenceAudioFileSec: z.number().positive().optional(),
+    maxCombinedReferences: z.number().int().positive().optional(),
+    /** Native prompt vocabulary, rendered before review as well as before submission. */
+    referenceSyntax: z.literal("minimax-h3").optional(),
     /**
      * The longest output the *reference* route will make, where it is shorter than the text
      * route's (probed 2026-08-16).
@@ -941,6 +950,8 @@ export function modelCapabilityCopy(model: ManifestModel): string {
   const parts: string[] = [];
   if (model.accepts.referenceImages > 0) parts.push(`refs ×${model.accepts.referenceImages}`);
   else parts.push("no refs");
+  if ((model.accepts.referenceVideos ?? 0) > 0) parts.push(`video refs ×${model.accepts.referenceVideos}`);
+  if ((model.accepts.referenceAudio ?? 0) > 0) parts.push(`audio refs ×${model.accepts.referenceAudio}`);
   // Frames read from the same authority the dispatch uses (issue 154): a task-mode route that
   // takes them, or the legacy accepts flags where a row still claims them without one. The old
   // flags-only read printed nothing for every fal video row that genuinely dispatches a first

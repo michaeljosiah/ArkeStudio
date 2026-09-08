@@ -29,6 +29,7 @@ import {
   ModelEditorRequestSchema,
   ModelSceneEditSchema,
   SCENE_EDIT_BOUNDS,
+  WorldChatSubjectSchema,
   type ModelEditorRequest,
   type ModelSceneEdit,
 } from "./editor-request.js";
@@ -235,6 +236,22 @@ export const WorldChatMessageSchema = z
   })
   .strict();
 export type WorldChatMessage = z.infer<typeof WorldChatMessageSchema>;
+
+/**
+ * What a line was said under (turn 128): the passage selected while it was said, and whether it
+ * asked for a reply only. Its own event beside `turn.started` rather than fields on the message,
+ * because the message is strict and durable: a build older than the constraints skips a line it
+ * cannot read, and skipping this one loses the guard while keeping the words, where fields on the
+ * message would have lost the words themselves (codex on PR 903).
+ */
+export const WorldChatTurnConstraintsSchema = z
+  .object({
+    turnId: TurnIdSchema,
+    subject: WorldChatSubjectSchema.optional(),
+    replyOnly: z.boolean().optional(),
+  })
+  .strict();
+export type WorldChatTurnConstraints = z.infer<typeof WorldChatTurnConstraintsSchema>;
 
 export const WorldChatRunStatusSchema = z.enum([
   "running",
@@ -831,8 +848,8 @@ const DevelopmentSceneScriptPayload = {
  * how long it runs, how it should feel. What is deliberately absent is everything that is not a
  * creative decision — `id` and `number` are identity and position, minted once and moved only by
  * the storyboard's drag; `covers` is a digest computed at citation time; and `promptOverride` is
- * production output whose whole meaning is that a person typed it in the sheet, so a proposition
- * writing one would forge that provenance.
+ * saved separately through set-prompt-override so a shot amendment never silently replaces
+ * the approved image/video prompt.
  */
 const ShotDraftSchema = z
   .object({
@@ -1098,6 +1115,8 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z.object({ type: z.literal("run.retry-started"), run: WorldChatRunSchema }).strict(),
+  /** Appended right after `turn.started` when the line was said under a passage or a reply-only promise (turn 128). */
+  z.object({ type: z.literal("turn.constraints"), constraints: WorldChatTurnConstraintsSchema }).strict(),
   z
     .object({
       type: z.literal("run.session-created"),
@@ -2213,6 +2232,7 @@ const exampleWorldActions = {
       audio: { music: "environmental-only", subtitles: "never" },
       failureModes: ["Hands stay whole and countable."],
       keyArtIntent: {
+        prompt: "Maren Kest stands beneath the slack-water bells of The Vigil, salt-stained coat lit by a low amber lamp. Close framing, dark sea beyond, painterly salt-air naturalism.",
         subject: "Maren beneath the slack-water bells",
         characters: ["Maren Kest"],
         location: "The Vigil",
@@ -2406,6 +2426,12 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-prose-style": {
+    kind: "production-prose-style",
+    productionId: "saltlight",
+    changes: { pov: "close third", tense: "past", voice: "Short declaratives. Weather and stone before feeling." },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-season": {
     kind: "production-season",
     productionId: "bell-watch-season-1",
@@ -2486,7 +2512,7 @@ const exampleWorldActions = {
     kind: "production-scene-command",
     productionId: "saltlight",
     sceneId: "sc_04",
-    command: { kind: "set-prompt-override", shotId: "sh_001", text: "Salt-lit close-up of the missing page." },
+    command: { kind: "set-prompt-override", shotId: "sh_001", capability: "video", text: "Close on the missing page under a salt-stained amber lamp. Over six seconds the camera pushes slowly toward the torn edge; the loose paper trembles in a draught. A distant bell sounds once, then only the soft rustle of paper." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-board-compile": {
@@ -2533,6 +2559,7 @@ const exampleWorldActions = {
     trimInSec: 0.5,
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-stage-construct": { kind: "production-stage-construct", productionId: "saltlight", sceneId: "sc_04", shotId: "sh_001", instruction: "Construct this shot from its script and inspect the camera views.", preserve: "blocking", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-stage-playblast": {
     kind: "production-stage-playblast",
     productionId: "saltlight",

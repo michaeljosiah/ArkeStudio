@@ -48,6 +48,12 @@ export function worldChatSubjectExists(
       : state.timeline.tracks.some((track) => track.clips.some((clip) => clip.id === subject.clipId));
   }
   if (subject.kind === "take") return production.takes.some((take) => take.id === subject.takeId);
+  // A passage names its chapter (turn 128); the words and the paragraph are held against the
+  // action when one comes back, not here, because the chapter can move while the turn runs.
+  if (subject.kind === "chapter" || subject.kind === "passage") {
+    if (context.kind !== "production" || production.meta.format !== "story") return false;
+    return production.chapters.some((chapter) => !chapter.retired && (chapter.id === subject.chapterId || chapter.file === subject.chapterId));
+  }
   const scene = production.scenes.find((candidate) => candidate.id === subject.sceneId);
   if (scene === undefined || (context.kind === "scene" && context.sceneId !== scene.id)) return false;
   if (subject.kind === "scene") return true;

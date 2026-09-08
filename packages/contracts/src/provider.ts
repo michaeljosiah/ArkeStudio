@@ -120,6 +120,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
    * in the same picker, queue and ledger as every cloud model.
    */
   comfyui: {
+    mapsReferenceKinds: ["image", "video", "audio"],
     displayName: "ComfyUI",
     // voice-tts from SPEC-022: a cloned voice runs as a recipe here rather than in a runtime of our
     // own. Deliberately NOT voice-clone — cloning is something the app does to a recording (minting

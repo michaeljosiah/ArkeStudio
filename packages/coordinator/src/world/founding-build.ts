@@ -31,12 +31,14 @@ import {
   type Sheet,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { describeCoordinatorError } from "../errors/user-message.js";
 import { acceptDecided, type ProposalManager } from "../gate/proposals.js";
 import type { WorldStore } from "./store.js";
 import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { openThread } from "../canon/authoring.js";
+import { MarkdownFile } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
@@ -290,6 +292,9 @@ export class FoundingBuildService {
       return;
     }
     const { route, notes } = await this.resolveImageRoute();
+    for (const character of blueprint.characters) {
+      if (character.neverDepicted === true) notes.push(`${character.name} — never depicted`);
+    }
     if (!this.ports.harnessReady()) {
       notes.push("OpenCode is not running — sheets will hold their one-line summaries until authored later.");
     }
@@ -305,6 +310,9 @@ export class FoundingBuildService {
       );
     }
     const items = compileBuildItems(blueprint, route === null ? null : { model: route.model, referenceImages: route.referenceImages });
+    if (keyArtBriefSettled(blueprint.keyArt) && !items.some((item) => item.kind === "key-art")) {
+      notes.push("Key art names a character who is never depicted — key art will not be made.");
+    }
     const generations = items.filter((item) => item.authorized && item.idempotencyKey !== undefined).length;
     const estimateMicroUsd = items.filter((item) => item.authorized).reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
     const plan: BuildReview = BuildReviewSchema.parse({
@@ -810,12 +818,22 @@ export class FoundingBuildService {
         at: this.ports.nowIso(),
       });
     } catch (err) {
-      // The item fails alone; the run continues to the end (R-23).
+      // The item fails alone; the run continues to the end (R-23). This catch always resolves
+      // normally, so `runItemsWork`'s own `.catch(... this.ports.log(...))` around the call never
+      // fires for a local item — the journal's `detail` used to carry the raw message anyway, but
+      // now that it carries the translated sentence instead, the diagnostic has to be logged here
+      // or it is gone everywhere, not just off the screen.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
     }
@@ -925,6 +943,7 @@ export class FoundingBuildService {
     if (bundle.sheets.some((sheet) => sheet.type === item.sheetType && sheet.name === entity.name)) {
       return undefined;
     }
+    const neverDepicted = item.sheetType === "character" && "neverDepicted" in entity && entity.neverDepicted === true;
     const seed = entity.line ?? entity.description ?? entity.name;
     const draft = await createSheetFromSentence(store, gate, {
       sheetType: item.sheetType,
@@ -957,13 +976,30 @@ export class FoundingBuildService {
           scope: draft.scope,
           sheetType: item.sheetType,
           name: entity.name,
-          seed: `${seed}${description}${facts}`,
+          seed: `${seed}${description}${facts}${neverDepicted ? "\nThis character is never depicted. Preserve this rule; do not invent a visible appearance." : ""}`,
         })
         .then(
           () => undefined,
           (err: unknown) =>
-            `authored from its one-line seed — the drafting agent failed (${err instanceof Error ? err.message : String(err)})`,
+            `authored from its one-line seed — the drafting agent failed (${describeCoordinatorError(err)})`,
         );
+    }
+    // The conversation's rule survives even a drafting agent that omits or contradicts it.
+    // Use the gate's recoverable draft edit before acceptance, so no unflagged sheet lands.
+    if (neverDepicted) {
+      const current = await gate.readManifest(draft.proposal.id);
+      const changed = await gate.mergeFormEdit({
+        proposalId: draft.proposal.id,
+        requestId: `never-depicted:${draft.proposal.id}`,
+        path: draft.path,
+        expectedDraftRevision: current.draftRevision,
+        edit(content) {
+          const doc = MarkdownFile.parse(content);
+          doc.setData({ neverDepicted: true });
+          return { content: doc.serialize() };
+        },
+      });
+      if (changed.status !== "updated") throw new Error("the character's depiction rule could not be saved");
     }
     // The gate is pre-authorized, not bypassed (§2.4): the proposal is accepted under the
     // press's authorization. A refusal discards it — nothing may rest in Needs you (R-25).
@@ -1061,12 +1097,20 @@ export class FoundingBuildService {
     try {
       input = await this.compileDispatch(active, item, store, model);
     } catch (err) {
+      // Same as runOne's catch: this resolves normally, so the journal's translated `detail` is
+      // the failure's only trace unless the raw diagnostic is logged here too.
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, { kind: "intent", key: item.key, at: this.ports.nowIso() });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: item.kind === "sheet-image" && err instanceof AnchorMissing ? "skipped" : "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1089,7 +1133,11 @@ export class FoundingBuildService {
     } else {
       const retried = active.entries.some((entry) => entry.kind === "terminal" && entry.key === item.key);
       idempotencyKey = retried ? ulid() : (item.idempotencyKey ?? ulid());
-      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, at: this.ports.nowIso() });
+      const dropped = input.params["droppedReferences"] as Array<{ name: string; reason: string }> | undefined;
+      const detail = dropped?.length
+        ? `Key art will be made without references for: ${dropped.map(({ name, reason }) => `${name} (${reason})`).join("; ")}.`
+        : undefined;
+      await this.append(active, { kind: "intent", key: item.key, idempotencyKey, ...(detail ? { detail } : {}), at: this.ports.nowIso() });
     }
     this.publish(active);
     try {
@@ -1101,11 +1149,17 @@ export class FoundingBuildService {
       this.publish(active);
       return job.id;
     } catch (err) {
+      this.ports.log({
+        kind: "build.item-failed",
+        worldId: active.record.worldId,
+        key: item.key,
+        message: err instanceof Error ? err.message : String(err),
+      });
       await this.append(active, {
         kind: "terminal",
         key: item.key,
         outcome: "failed",
-        detail: err instanceof Error ? err.message : String(err),
+        detail: describeCoordinatorError(err),
         at: this.ports.nowIso(),
       });
       return null;
@@ -1225,11 +1279,17 @@ export class FoundingBuildService {
         await this.landItem(active, item, jobId);
         await this.append(active, { kind: "terminal", key: item.key, outcome: "landed", at: this.ports.nowIso() });
       } catch (err) {
+        this.ports.log({
+          kind: "build.item-failed",
+          worldId: active.record.worldId,
+          key: item.key,
+          message: err instanceof Error ? err.message : String(err),
+        });
         await this.append(active, {
           kind: "terminal",
           key: item.key,
           outcome: "failed",
-          detail: err instanceof Error ? err.message : String(err),
+          detail: describeCoordinatorError(err),
           at: this.ports.nowIso(),
         });
       }

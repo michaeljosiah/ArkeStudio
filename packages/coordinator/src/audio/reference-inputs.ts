@@ -11,7 +11,7 @@ import type { WorldStore } from "../world/store.js";
 import { audioWorldPath } from "./storage.js";
 import { readAudioBytes } from "./media-tools.js";
 import { appendAudioRights, readAudioRights } from "./rights.js";
-import { clearAudioDispatch } from "./dispatch-gate.js";
+import { clearAudioDispatch, checkAudioDispatchEvidence } from "./dispatch-gate.js";
 
 /** Read frozen samples, never the character's possibly replaced current designation. */
 export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job, "model" | "provider" | "params">, requireCurrent = false) {
@@ -26,7 +26,8 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
   const route = characterAudioRoute({ id: job.model, provider: job.provider }, typeof job.params.taskMode === "string" ? job.params.taskMode : "generate");
   if (!route || route.endpoint !== plan.route || (job.params.route !== undefined && job.params.route !== route.endpoint)) throw new Error("The selected route cannot carry these audio references.");
   const images = Array.isArray(job.params.references) ? job.params.references.length : 0;
-  if (!images || images > route.maxImages || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
+  if ((route.requiresImages && !images) || images > route.maxImages || images + plan.references.length > route.maxCombinedReferences) throw new Error("The complete reference set exceeds the route budget or lacks imagery.");
+  if (!route.supportsPerformanceSync && plan.references.some(ref => ref.intent === "performance-sync")) throw new Error("This route does not support performance synchronization.");
   const rights = await readAudioRights(store);
   let seconds = 0;
   const result = [];
@@ -50,8 +51,9 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
       : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${sample.file}`;
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, file), store.closingSignal, route.maxBytesPerFile);
     seconds += sample.provenance.outputTechnical.durationSec ?? Infinity;
+    if ((sample.provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) throw new Error("Audio reference exceeds the per-file duration limit.");
     if (seconds > route.maxTotalDurationSec) throw new Error("Audio references exceed the combined duration limit.");
-    clearAudioDispatch({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
+    (route.local ? checkAudioDispatchEvidence : clearAudioDispatch)({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
       rights, scope: "cloud-reference-upload", warningCodes: sample.warningCodes, attestations: sample.attestations,
       requiredAttestations: "master" in ref ? [] : ["single-speaker", "no-music"], statementVersion: 1, acknowledgementId: sample.acknowledgementId });
     const mp3 = sample.file.endsWith(".mp3");
