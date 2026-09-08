@@ -3,6 +3,9 @@ import { orderedShots, type WorldBundle, type WorldChatContext, type WorldChatSu
 /** Resolve a conversation's semantic entry point against the world it claims to describe. */
 export function worldChatContextExists(bundle: WorldBundle, context: WorldChatContext): boolean {
   switch (context.kind) {
+    case "production-setup":
+      // Setup lifecycle validates the private draft; no live production is required.
+      return false;
     case "world":
       return true;
     case "canon-question":

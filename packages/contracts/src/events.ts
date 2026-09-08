@@ -59,6 +59,7 @@ import {
 import { NarratorSettingsSchema } from "./settings.js";
 import { UpdateStateSchema } from "./update.js";
 import { MediaOpportunityMediumSchema } from "./world-chat.js";
+import { ProductionSetupStateSchema } from "./production-setup.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { ConversationActionDecisionResultSchema } from "./arke-actions.js";
 
@@ -115,6 +116,11 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 // (SPEC-031 §1.3); the domain event below is what still ties them to this file.
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
+  z.object({ ...base, type: z.literal("production-narrative.saved"), worldId: UlidSchema,
+    productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ ...base, type: z.literal("production-setup.result"), worldId: UlidSchema,
+    setupId: ConversationIdSchema, requestId: UlidSchema, state: ProductionSetupStateSchema.optional(),
+    detail: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("reference.images"), requestId: UlidSchema,
     slug: SlugSchema, images: z.array(z.string()), error: z.string().optional() }).strict(),
   /** Unexpected command failures are transient notices, never evidence of rollback (#926). */

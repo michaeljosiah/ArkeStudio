@@ -22,6 +22,8 @@ import {
   type ProposalSkill,
   EpisodeSchema,
   ProductionSchema,
+  ProductionCreationPlanSchema,
+  validateInitialContent,
   SceneRecordSchema,
   SeasonSchema,
   SeriesSchema,
@@ -160,6 +162,11 @@ export async function createProductionFromPlan(
   plan: ProductionCreationPlan,
   options: { source: string; requestId: string; precondition: WorldStatePrecondition },
 ): Promise<CommitResult> {
+  plan = ProductionCreationPlanSchema.parse(plan);
+  validateInitialContent(plan);
+  if (plan.initialContent && plan.initialContent.worldId !== store.worldId) {
+    throw new Error("This production setup belongs to another world.");
+  }
   if (store.getBundle().productions.some((production) => production.meta.id === plan.production.id)) {
     throw new CommitStaleError([{
       path: `productions/${plan.production.id}/production.json`,
@@ -179,6 +186,22 @@ export async function createProductionFromPlan(
       baseHash: null,
     },
   ];
+  const content = plan.initialContent;
+  if (content) {
+    const add = (path: string, record: unknown) => files.push({
+      path, action: "create", content: `${JSON.stringify(record, null, 2)}\n`, baseHash: null,
+    });
+    const root = `productions/${plan.production.id}`;
+    if (content.narrative) add(`${root}/narrative.json`, content.narrative);
+    for (const episode of content.episodes) add(`${root}/episodes/${episode.stem}.json`, episode.record);
+    for (const scene of content.scenes) add(`${root}/scenes/${scene.stem}.json`, scene.record);
+    // The link lands with the files. A crash before transcript attachment can then reconcile
+    // the original result without rerunning a model turn or picking another production slug.
+    add(`${root}/setup-origin.json`, {
+      worldId: content.worldId, setupId: content.setupId, revision: content.revision,
+      productionId: plan.production.id, requestId: options.requestId,
+    });
+  }
   if (plan.initialSeason) {
     files.push({
       path: `productions/${plan.production.id}/season.json`,
@@ -227,7 +250,7 @@ export async function createProductionFromPlan(
       source: options.source,
       files,
       requestId: options.requestId,
-      ...(plan.production.frameRate !== undefined
+      ...(content ? { raiseSchemaVersion: 19 } : plan.production.frameRate !== undefined
         ? { raiseSchemaVersion: 5 }
         : shape.isEpisodic || plan.production.medium !== undefined || plan.production.kind !== undefined
           ? { raiseSchemaVersion: 2 }

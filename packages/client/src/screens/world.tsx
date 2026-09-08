@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
+  newId,
   deriveCut,
   designatedCompilation,
   formatMicroUsd,
@@ -198,7 +199,7 @@ export function WorldLayout() {
         }
         divided={onArtDirection}
       />
-      <div className={cx("fy-content", onCast && "fy-content--cast")}>
+      <div className={cx("fy-content", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             <NavLink
@@ -4806,6 +4807,16 @@ export function ProductionsScreen() {
           Change a character once and it lands in all of them.
         </p>
       </div>
+      {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
+        <section aria-label="Production setups" style={{ padding: "0 40px 28px" }}>
+          <h2 style={{ fontSize: 18 }}>In development</h2>
+          {world.conversations.filter(conversation => conversation.entryContext?.kind === "production-setup").map(conversation => (
+            <Button key={conversation.id} variant="ghost" onClick={() => navigate(`/w/${worldId}/productions/setup/${conversation.id}`)}>
+              Resume {conversation.title}{conversation.setupStatus === "creating" ? " · resolving creation" : ""}
+            </Button>
+          ))}
+        </section>
+      )}
       <div className="fy-prodcards">
         {productions.map((p, i) => {
           const tilt = PRODUCTION_TILT[i % PRODUCTION_TILT.length]!;
@@ -5341,6 +5352,10 @@ export function NewProductionScreen() {
               // Staggered so the row arrives as a row rather than three things appearing at once.
               style={{ animationDelay: `${i * 0.06}s` }}
               onClick={() => {
+                if (d.id === "watch") {
+                  navigate(`/w/${worldId}/productions/setup/${newId("cv")}`);
+                  return;
+                }
                 setDoor(d.id);
                 // A card that carries no kind still delivers in a frame, and the kind row it is
                 // about to see (or not see) is what would otherwise have seeded this.

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   ArtifactIdSchema,
   CandidateGroupIdSchema,
@@ -106,6 +107,7 @@ export type WorldChatDeletionBlock = z.infer<typeof WorldChatDeletionBlockSchema
 
 /** What the conversation was opened about. Focus can change without losing what came before. */
 export const WorldChatContextSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("production-setup"), setupId: ConversationIdSchema }).strict(),
   z.object({ kind: z.literal("world") }).strict(),
   z
     .object({
@@ -1081,6 +1083,7 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("production-setup.updated"), state: ProductionSetupStateSchema }).strict(),
   z
     .object({
       type: z.literal("conversation.created"),
@@ -1128,6 +1131,7 @@ export const WorldChatStoredEventSchema = z.discriminatedUnion("type", [
   z
     .object({
       type: z.literal("turn.completed"),
+      productionSetup: ProductionSetupStateSchema.optional(),
       message: WorldChatMessageSchema,
       run: WorldChatRunSchema,
       receipts: z.array(WorldChatCheckReceiptSchema),
@@ -1375,6 +1379,7 @@ export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema
  */
 export const WorldChatSummarySchema = z
   .object({
+    setupStatus: ProductionSetupStateSchema.shape.status.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
@@ -1419,6 +1424,7 @@ export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 /** The whole workspace for one conversation, folded from its events. */
 export const WorldChatLoadedSchema = z
   .object({
+    productionSetup: ProductionSetupStateSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
@@ -1670,6 +1676,7 @@ export const TURN_RESULT_BOUNDS = {
 
 export const WorldChatTurnResultSchema = z
   .object({
+    setupUpdate: ProductionSetupUpdateSchema.optional(),
     reply: z.string().max(TURN_RESULT_BOUNDS.reply),
     candidateOperations: z.array(ModelCandidateOperationSchema).max(TURN_RESULT_BOUNDS.candidateOperations),
     groupOperations: z.array(ModelGroupOperationSchema).max(TURN_RESULT_BOUNDS.groupOperations),
@@ -1799,6 +1806,7 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
     initiative: WorldChatInitiativeSchema.default("collaborate"),

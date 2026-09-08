@@ -193,6 +193,7 @@ type Classified =
   | { track: "prose-style"; production: string }
   | { track: "routing"; production: string }
   | { track: "season"; production: string }
+  | { track: "narrative"; production: string }
   | { track: "episode"; production: string; file: string }
   | { track: "series"; id: string }
   | { track: "production-meta"; production: string }
@@ -201,6 +202,8 @@ type Classified =
   | { track: "unversioned" };
 
 export function classify(path: string): Classified {
+  const narrative = /^productions\/([a-z0-9-]+)\/narrative\.json$/.exec(path);
+  if (narrative) return { track: "narrative", production: narrative[1]! };
   if (path === BIBLE_PATH) return { track: "bible" };
   let m = /^canon\/(CANON-\d+)\.md$/.exec(path);
   if (m) return { track: "canon", id: m[1]! };
@@ -356,6 +359,7 @@ export function changesAnything(path: string, live: string, proposed: string): b
       track === "prose-style" ||
       track === "routing" ||
       track === "season" ||
+      track === "narrative" ||
       track === "episode" ||
       track === "series"
     ) {
@@ -529,6 +533,7 @@ export class Committer {
         kind.track === "prose-style" ||
         kind.track === "routing" ||
         kind.track === "season" ||
+        kind.track === "narrative" ||
         kind.track === "episode" ||
         kind.track === "series"
       ) {
@@ -706,6 +711,7 @@ export class Committer {
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "narrative" && f.newContent != null) ? 19 : 0,
       // Any presence of this strict field needs the retirement-aware scanner, including
       // retired: false adopted from a portable chapter (issue 888).
       files.some((f) => classify(f.path).track === "chapter" && f.newContent != null &&

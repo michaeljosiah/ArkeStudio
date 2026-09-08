@@ -1,6 +1,11 @@
 import { referenceInputProblem } from "@arke-studio/contracts";
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
+import { handleProductionSetupCommand } from "./productions/setup-command.js";
+import { recoverProductionSetups } from "./productions/setup.js";
+import { productionSetupBrief } from "./productions/setup-brief.js";
+import { saveProductionNarrative } from "./productions/narrative.js";
+import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
 import { recordDialogueFeedback } from "./takes/feedback.js";
@@ -1747,7 +1752,7 @@ export class Coordinator {
     requestedId?: string,
   ): Promise<{ modelId?: string; sessionModel?: string; reason?: string }> {
     const productionId = context && "productionId" in context ? context.productionId : undefined;
-    if (productionId === undefined) {
+    if (productionId === undefined && context?.kind !== "production-setup") {
       return requestedId === undefined
         ? {}
         : { modelId: requestedId, reason: "A language model can only be chosen inside a production." };
@@ -3025,6 +3030,7 @@ export class Coordinator {
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
+      await this.repairOnOpen(worldId, "production-setup", () => recoverProductionSetups(store));
     }
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
@@ -4313,7 +4319,39 @@ export class Coordinator {
       return this.serialiseBenchDispatch(key, () => this.handleClientMessage(msg, false, true));
     }
     if (this.stopping) return;
+    await guardProductionSetupAuthority(this.opts.provider.openStore?.(), msg);
     switch (msg.kind) {
+      case "save-production-narrative": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) throw new Error("Open this production's world before editing its narrative.");
+        await saveProductionNarrative(store, msg.productionId, msg.expectedVersion, msg.narrative);
+        await this.refreshWorldSnapshot(msg.worldId);
+        this.emit({ type: "production-narrative.saved", at: this.nowIso(), worldId: msg.worldId,
+          productionId: msg.productionId, requestId: msg.requestId });
+        return;
+      }
+      case "production-setup": {
+        const store = this.opts.provider.openStore?.();
+        try {
+          if (!store || store.worldId !== msg.worldId) throw new Error("Open the world this production setup belongs to.");
+          const state = await handleProductionSetupCommand(store, msg,
+            () => this.worldChatRunner(store, msg.setupId),
+            async id => { await this.refreshConversations(store); await this.openWorldChat(store, id); });
+          if (!this.stillOpen(store)) return;
+          await this.refreshWorldSnapshot(msg.worldId);
+          await this.refreshConversations(store);
+          if (state.status === "discarded") this.readModel.setWorldChat(null);
+          else await this.openWorldChat(store, msg.setupId);
+          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
+            setupId: msg.setupId, requestId: msg.requestId, state });
+          this.transport.broadcastSnapshot();
+        } catch (error) {
+          this.emit({ type: "production-setup.result", at: this.nowIso(), worldId: msg.worldId,
+            setupId: msg.setupId, requestId: msg.requestId,
+            detail: error instanceof Error ? error.message : "This production setup could not be updated." });
+        }
+        return;
+      }
       case "hello":
         return; // handled inside the transport
       case "open-world":
@@ -15167,6 +15205,14 @@ export class Coordinator {
           return outcome;
         }, budgetChars,
       ),
+      setupBrief: ({ leaseToken, draft, budgetChars }) => productionSetupBrief(
+        store.getBundle(), draft, async (tool, args) => {
+          const outcome = await retrieval.call(leaseToken, tool, args);
+          const seen = receipts.get(outcome.receipt.runId) ?? [];
+          receipts.set(outcome.receipt.runId, [...seen, outcome.receipt]);
+          return outcome;
+        }, budgetChars,
+      ),
       receiptsFor: (runId) => receipts.get(runId) ?? [],
       resolveLanguageModel: (input) => this.languageModelFor(input.entryContext, input.modelId),
       createSession: ({ cwd, runId, model }) => {
@@ -15279,7 +15325,7 @@ export class Coordinator {
    * none of them would otherwise be noticed.
    */
   private async refreshConversations(store: WorldStore): Promise<void> {
-    const { summaries, activeActions } = await discoverConversations(store.dir);
+    const { summaries, activeActions } = await store.ownedWrite(() => discoverConversations(store.dir));
     if (!this.stillOpen(store)) return;
     this.readModel.setConversations(summaries);
     const constructions = await Promise.all(activeActions.filter(action => action.actionKind === "world-chat-production-stage-construct" && action.status === "awaiting-host").map(async action => {
@@ -15372,7 +15418,7 @@ export class Coordinator {
     onlyIfStillSelected?: ConversationId,
   ): Promise<void> {
     const service = new WorldChatService(store.dir);
-    const loaded = await service.load(conversationId);
+    const loaded = await store.ownedWrite(() => service.load(conversationId));
     if (
       !this.stillOpen(store) ||
       (onlyIfStillSelected !== undefined && this.readModel.getState().worldChat?.conversationId !== onlyIfStillSelected)

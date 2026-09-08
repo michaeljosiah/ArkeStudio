@@ -26,6 +26,7 @@ interface Connection {
   helloed: boolean;
   initialising: boolean;
   refused: boolean;
+  pending: ClientMessage[];
 }
 
 export interface TransportAuth {
@@ -179,7 +180,7 @@ export class Transport {
   }
 
   private accept(socket: WebSocket, origin: string | undefined): void {
-    const conn: Connection = { socket, seq: 0, helloed: false, initialising: false, refused: false };
+    const conn: Connection = { socket, seq: 0, helloed: false, initialising: false, refused: false, pending: [] };
     const refuse = () => {
       conn.refused = true;
       conn.helloed = false;
@@ -228,7 +229,7 @@ export class Transport {
       if (msg.kind === "hello") {
         if (conn.initialising) return;
         const sendInitialState = () => {
-          if (!this.connections.has(conn)) return;
+          if (!this.connections.has(conn) || conn.refused || socket.readyState !== 1) return;
           // Whatever lastSeq the client saw, the answer is a fresh snapshot (D4).
           conn.helloed = true;
           conn.initialising = false;
@@ -236,6 +237,7 @@ export class Transport {
           for (const event of this.opts.getInitialEvents?.() ?? []) {
             this.sendFrame(conn, { kind: "event", seq: ++conn.seq, event });
           }
+          for (const pending of conn.pending.splice(0)) this.opts.onMessage?.(pending);
         };
         if (this.opts.beforeInitialSnapshot && !conn.helloed) {
           conn.helloed = false;
@@ -251,6 +253,17 @@ export class Transport {
         } else {
           sendInitialState();
         }
+        return;
+      }
+      if (conn.initialising) {
+        // A routed renderer can send open-world immediately after its authenticated hello.
+        // Reconciliation is asynchronous; retain those commands until the first snapshot,
+        // rather than closing and making every reconnect repeat the same race (issue #976).
+        if (conn.pending.length >= 32) {
+          conn.refused = true;
+          conn.pending = [];
+          socket.close(1008, "too many commands before initial state");
+        } else conn.pending.push(msg);
         return;
       }
       if (!conn.helloed) {

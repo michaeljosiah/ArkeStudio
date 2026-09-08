@@ -1,5 +1,8 @@
 import {
   newId,
+  applyProductionSetupUpdate,
+  type ProductionSetupDraft,
+  type ProductionSetupState,
   REFUSED_TOOLS_MAX,
   type BibleEdit,
   type CandidateChecks,
@@ -62,6 +65,7 @@ import { describeCoordinatorError } from "../errors/user-message.js";
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
+  setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -497,8 +501,9 @@ export class WorldChatRunner {
     const budgetChars = budgetFor(modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined);
     const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
     const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
+    const setupBudget = view.entryContext?.kind === "production-setup" ? Math.floor(budgetChars * 0.65) : 0;
     const assembled = assembleContext({
-      budgetChars: budgetChars - briefBudget,
+      budgetChars: budgetChars - briefBudget - setupBudget,
       ...(view.entryContext && this.deps.describeEntry
         ? {
             entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
@@ -582,9 +587,13 @@ export class WorldChatRunner {
         attachmentIds: linked,
       });
       prepared = true;
-      const brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
+      let brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
         ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget })
         : "";
+      if (view.entryContext?.kind === "production-setup") {
+        if (!view.productionSetup || !this.deps.setupBrief) throw new Error("Production setup is unavailable. Reopen the draft.");
+        brief = await this.deps.setupBrief({ leaseToken, draft: view.productionSetup.draft, budgetChars: setupBudget });
+      }
       if (controller.signal.aborted) {
         await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
         return { status: "cancelled" };
@@ -633,6 +642,7 @@ export class WorldChatRunner {
         refusedTools,
         subject,
         replyOnly,
+        view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -675,6 +685,7 @@ export class WorldChatRunner {
           refusedTools,
           subject,
           replyOnly,
+          view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
         );
       }
 
@@ -813,6 +824,7 @@ export class WorldChatRunner {
     subject?: WorldChatSubject,
     /** The line asked for a reply and nothing else (turn 128); any action is refused. */
     replyOnly = false,
+    setupRevision?: number,
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -828,6 +840,7 @@ export class WorldChatRunner {
     const attachmentText = this.quotableAttachmentText(readable, inlined, runId);
 
     const outcome = validateTurnResult({
+      draftOnly: folded.entryContext?.kind === "production-setup",
       raw,
       conversationId,
       messages,
@@ -845,6 +858,21 @@ export class WorldChatRunner {
     });
 
     if (!outcome.ok) return { ok: false, problems: outcome.problems };
+    let productionSetup: ProductionSetupState | undefined;
+    if (folded.entryContext?.kind === "production-setup") {
+      const state = folded.productionSetup;
+      if (!state || !["draft", "reviewed"].includes(state.status) || state.draft.revision !== setupRevision) {
+        return { ok: false, problems: [{ code: "setup-stale", safeMessage: "Production so far changed while this reply was being written. Read the latest draft and try again." }] };
+      }
+      try {
+        const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
+        productionSetup = { draft, status: "draft", review: null };
+      } catch (error) {
+        return { ok: false, problems: [{ code: "setup-update", safeMessage: error instanceof Error ? error.message.slice(0, 500) : "The outline update could not be read." }] };
+      }
+    } else if (outcome.turn.setupUpdate) {
+      return { ok: false, problems: [{ code: "setup-context", safeMessage: "setupUpdate belongs only to a production setup conversation." }] };
+    }
 
     // Checks are run after the shape is known to be valid: there is no point searching the world
     // on behalf of a result that is about to be rejected for a bad quotation.
@@ -1014,6 +1042,7 @@ export class WorldChatRunner {
     await store.append(
       {
         type: "turn.completed",
+        ...(productionSetup ? { productionSetup } : {}),
         message: {
           id: newId("msg") as MessageId,
           turnId: completedRun.turnId,
@@ -1033,7 +1062,7 @@ export class WorldChatRunner {
         tombstones: outcome.turn.tombstones,
         ...(actions.length > 0 ? { actionPrepareIntents: actions.map((action) => action.intent) } : {}),
       },
-      { at },
+      { at, ...(productionSetup ? { expectedSeq: folded.seq } : {}) },
     );
     if (actions.length > 0) await this.deps.bindActions?.(actions);
     if (this.deps.summarise) {

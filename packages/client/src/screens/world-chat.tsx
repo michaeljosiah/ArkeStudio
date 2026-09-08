@@ -467,6 +467,11 @@ export function WorldChatScreen() {
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
+  useEffect(() => {
+    if (row?.entryContext?.kind === "production-setup") {
+      void navigate(`/w/${worldId}/productions/setup/${row.id}`, { replace: true });
+    }
+  }, [row?.entryContext?.kind, row?.id, worldId, navigate]);
 
   // Ask for the workspace on arrival and release it on the way out, so a session that visits
   // twenty conversations still holds one. A new conversation has none to ask for.
