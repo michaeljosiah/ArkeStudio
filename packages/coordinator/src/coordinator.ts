@@ -12168,7 +12168,7 @@ export class Coordinator {
         if (msg.image) {
           const sourceWorld = (await this.opts.provider.listWorlds()).find(world => world.slug === msg.image!.slug);
           const offered = sourceWorld && await this.opts.provider.listReferenceImages?.(sourceWorld.slug);
-          const media = offered?.includes(msg.image.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
+          const media = offered?.some(image => image.file === msg.image!.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
           if (!sourceWorld || !media || !media.contentType.startsWith("image/")) {
             this.rejectEnqueue(msg.requestId, msg.kind, "That image is no longer available.");
             return;

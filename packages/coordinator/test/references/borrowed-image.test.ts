@@ -18,6 +18,10 @@ it("borrows only image bytes without opening the source, and freezes their origi
   const image = "references/face/main-photo.png";
   await mkdir(join(sourceDir, "references/face"), { recursive: true });
   await writeFile(join(sourceDir, image), pngBytes());
+  await writeFile(join(sourceDir, "references/face/kit.json"), JSON.stringify({
+    sheetId: "face", anchor: "main-photo.png", tiles: [], compilations: [],
+  }));
+
   await writeFile(join(sourceDir, "references/face/private.json"), '{"canon":"never imported"}');
   await provider.loadWorld(WORLD_ID);
   const store = provider.openStore()!;
@@ -31,7 +35,7 @@ it("borrows only image bytes without opening the source, and freezes their origi
   const send = (message: ClientMessage) => internals.handleClientMessage(message);
   try {
     await send({ kind: "browse-reference-images", slug: source.slug, requestId: ulid() });
-    assert.deepEqual(events.find(event => event.type === "reference.images")?.images, [image]);
+    assert.deepEqual(events.find(event => event.type === "reference.images")?.images, [{ file: image, name: "face · Main photo", role: "identity", group: "Cast" }]);
     assert.equal(provider.openStore(), store);
     assert.equal(await stat(join(sourceDir, "world.lock")).then(() => true, () => false), false);
     await send({ kind: "pick-staged-reference", worldId: WORLD_ID, key: "main-photo--maren-kest",
@@ -87,6 +91,6 @@ it("does not browse or serve image paths escaping the source world", async () =>
   try {
     assert.equal(await provider.serveMedia("the-undersong", "../outside/private.png"), null);
     assert.equal(await provider.serveMedia("the-undersong", "references/escape/private.png"), null);
-    assert.ok(!(await provider.listReferenceImages("the-undersong")).some(path => path.includes("escape")));
+    assert.ok(!(await provider.listReferenceImages("the-undersong")).some(image => image.file.includes("escape")));
   } finally { await unlink(join(worldDir, "references/escape")); await provider.close(); }
 });

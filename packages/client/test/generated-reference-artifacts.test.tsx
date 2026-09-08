@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import type { ArtifactSidecar, ClientState } from "@arke-studio/contracts";
+import { worldImageReferences, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -179,4 +179,15 @@ describe("one identity for one generated picture", () => {
     assert.equal(row.existingToken, "Image 1");
     assert.equal(row.active, true, "so it reads as already riding rather than as addable");
   });
+});
+
+it("offers a generated image once through its owning entity (#972)", () => {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const file = "references/maren-kest/head-front.png";
+  const artifact = generatedReference();
+  artifact.generation = { ...artifact.generation!, sourceFile: file } as typeof artifact.generation;
+  world.artifacts.push(artifact);
+  const rows = worldImageReferences(world);
+  assert.ok(rows.some(row => row.file === file && row.name.includes("Maren") && row.group === "Cast"));
+  assert.equal(rows.some(row => row.file === `artifacts/${artifact.file}`), false);
 });

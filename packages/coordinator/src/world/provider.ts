@@ -6,6 +6,8 @@ import {
   ulid,
   unattendedProposalsOf,
   worldSheets,
+  worldImageReferences,
+  type WorldImageReference,
   type ArtDirectionRecord,
   type WorldBundle,
   type WorldSummary,
@@ -606,23 +608,14 @@ export class FsWorldProvider implements WorldProvider {
     await rm(toExtendedLength(join(this.appRoot, ".genesis", genesisId)), { recursive: true, force: true });
   }
 
-  async listReferenceImages(slug: string): Promise<string[]> {
+  async listReferenceImages(slug: string): Promise<WorldImageReference[]> {
     if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) return [];
-    const images: string[] = [];
-    const walk = async (folder: string, depth: number): Promise<void> => {
-      if (depth > 8) return;
-      const entries = await readdir(toExtendedLength(join(this.worldsDir(), slug, folder)), { withFileTypes: true }).catch(() => []);
-      for (const entry of entries) {
-        const path = folder ? folder + "/" + entry.name : entry.name;
-        if (entry.isDirectory() && (folder !== "" || ["references", "art-direction", "artifacts"].includes(entry.name))) {
-          await walk(path, depth + 1);
-        } else if (entry.isFile() && /\.(png|jpe?g|webp)$/i.test(entry.name) && await this.serveMedia(slug, path)) {
-          images.push(path);
-        }
-      }
-    };
-    await walk("", 0);
-    return images.sort();
+    const { bundle } = await scanWorld(join(this.worldsDir(), slug));
+    const images: WorldImageReference[] = [];
+    for (const image of worldImageReferences(bundle)) {
+      if (await this.serveMedia(slug, image.file)) images.push(image);
+    }
+    return images;
   }
 
   async serveMedia(slug: string, relPath: string): Promise<{ path: string; contentType: string } | null> {
