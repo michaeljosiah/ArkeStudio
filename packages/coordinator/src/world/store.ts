@@ -163,7 +163,8 @@ export class WorldStore {
           })),
         ];
       }
-      let scanState = opts.readOnly ? null : await readScanState(dir);
+      let scanState = await readScanState(dir);
+      const seedMissingHistory = scanState === null;
       if (!opts.readOnly && scanState === null) scanState = await reconstructScanState(dir, scan);
       else if (scanState !== null) scanState = await advanceCommittedScanState(dir, scanState);
       if (scanState) for (const path of recoveredPerformances) {
@@ -171,7 +172,7 @@ export class WorldStore {
         if (hash === undefined) delete scanState.manifest[path];
         else scanState.manifest[path] = hash;
       }
-      const externalEdits = scanState === null ? [] : detectExternalEdits(scan, scanState);
+      const externalEdits = opts.readOnly || scanState === null ? [] : detectExternalEdits(scan, scanState);
       store = new WorldStore(
         dir,
         lock,
@@ -183,9 +184,9 @@ export class WorldStore {
         opts.clock ?? (() => new Date().toISOString()),
       );
       if (!opts.readOnly) {
+        await store.checkCurrentHistorySnapshots(true, seedMissingHistory);
         await store.adoptBibleIfMoved();
         await store.adoptProseStyleBoundary();
-        await store.checkCurrentHistorySnapshots(true);
         await store.saveScanState();
         store.startWatcher();
         try {
@@ -597,6 +598,7 @@ export class WorldStore {
       await this.verifyOwnership();
       this.scan = await scanWorld(this.dir);
       this.externalEdits = detectExternalEdits(this.scan, this.scanState);
+      await this.checkCurrentHistorySnapshots();
       await this.saveScanState();
       await this.afterExternalEditsCleared();
     });
@@ -755,6 +757,7 @@ export class WorldStore {
   private async saveScanState(): Promise<void> {
     await this.verifyOwnership();
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
+    if (this.scan.bundle.problems.some((problem) => problem.path.startsWith(".history/bible/"))) unresolved.add(BIBLE_PATH);
     const manifest = { ...this.scanState.manifest };
 
     for (const [path, hash] of Object.entries(this.scan.manifest)) {
@@ -775,29 +778,43 @@ export class WorldStore {
   }
 
   /** History damage costs a snapshot, not access to the world's committed work (issue 979). */
-  private async checkCurrentHistorySnapshots(seed = false): Promise<void> {
+  private async checkCurrentHistorySnapshots(repair = false, seedMissing = false): Promise<void> {
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
+    const changes = seedMissing || this.scan.manifest[BIBLE_PATH] !== undefined
+      ? await readChanges(join(this.dir, "changes.jsonl")) : [];
+    const bibleCommit = changes.findLast((change) => change["path"] === BIBLE_PATH && typeof change["contentHashAfter"] === "string");
+    const bibleVersion = typeof bibleCommit?.["toVersion"] === "number" ? bibleCommit["toVersion"] : this.scan.bundle.bible.version;
     const seeds = Object.entries(this.scan.manifest)
       .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
       .map(async ([portablePath, hash]) => {
         const content = await this.readEntity(portablePath);
-        if (content === null || sha256(content) !== hash) return;
-        const snapshot = historySnapshot(portablePath, content);
+        if (content === null || (portablePath !== BIBLE_PATH && sha256(content) !== hash)) return;
+        const snapshot = portablePath === BIBLE_PATH
+          ? { version: bibleVersion, path: `.history/bible/v${bibleVersion}.md` }
+          : historySnapshot(portablePath, content);
         if (snapshot === null) return;
         this.scan.bundle.problems = this.scan.bundle.problems.filter((problem) => problem.path !== snapshot.path);
         const report = () => this.scan.bundle.problems.push({ path: snapshot.path,
-          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath}, version ${snapshot.version}, is unavailable. The current record is usable; restore this snapshot from a backup to use its history.` });
+          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}, version ${snapshot.version}, is unavailable. The current record is usable; restore this snapshot from a backup to use its history.` });
         let existing: string | null;
         try { existing = await this.readEntity(snapshot.path); }
         catch { report(); return; }
         // Old founding builds added only the approved image after the initial snapshot.
         // Require the committed baseline to match and every existing field to be unchanged.
-        const repair = existing !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
-        if (seed && (existing === null || repair)) {
+        const canRepair = existing !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
+        const canSeed = existing === null && seedMissing && !changes.some((change) =>
+          change["path"] === portablePath && typeof change["contentHashAfter"] === "string");
+        if (repair && (canSeed || canRepair)) {
           await this.verifyOwnership();
-          await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
+          try { await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content); }
+          catch { await this.verifyOwnership(); report(); }
         }
-        else if (existing !== content) report();
+        else if (portablePath === BIBLE_PATH) {
+          // A hand-edit changes the live Bible by design. Validate its snapshot against the
+          // last app-owned hash, not against those new words, before adopting it as a base.
+          const expected = bibleCommit?.["contentHashAfter"] ?? this.scanState.manifest[BIBLE_PATH] ?? hash;
+          if (existing === null || sha256(existing) !== expected) report();
+        } else if (existing !== content) report();
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);
@@ -847,8 +864,8 @@ export class WorldStore {
    * Hot-reload the Bible instead of accusing anybody of editing it (R-BIBLE-6).
    *
    * `bible.md` is the one authored file the product invites the user to open in a text editor, so
-   * a hand-edit to it is the feature working, not an anomaly. It is absent from the manifests for
-   * that reason — R-23's staleness and R-28's reconciliation both exist to protect *gated* files,
+   * a hand-edit to it is the feature working, not an anomaly. It is excluded from reconciliation
+   * for that reason — R-23's staleness and R-28's reconciliation both exist to protect *gated* files,
    * and applying either here would answer an edit the app asked for with "this world changed
    * outside Arke Studio", or with a reconciliation prompt for prose nobody needs to approve.
    *
@@ -856,6 +873,8 @@ export class WorldStore {
    */
   private async adoptBibleIfMoved(): Promise<void> {
     if (this.closed || this.externalEdits.length > 0) return;
+    await this.checkCurrentHistorySnapshots();
+    if (this.scan.bundle.problems.some((problem) => problem.path.startsWith(".history/bible/"))) return;
     const live = await this.readEntity(BIBLE_PATH);
     if (live === null) return;
     const committed = await latestHistoryContent(this.dir, BIBLE_PATH);
@@ -987,10 +1006,13 @@ function historySnapshot(portablePath: string, content: string): { path: string;
 async function reconstructScanState(dir: string, scan: ScanResult): Promise<ScanState> {
   const manifest = { ...scan.manifest };
   for (const portablePath of Object.keys(manifest)) {
-    if (historyDirectory(portablePath) === null) continue;
+    if (portablePath === BIBLE_PATH || historyDirectory(portablePath) === null) continue;
     const committed = await latestHistoryContent(dir, portablePath);
     if (committed !== null) manifest[portablePath] = sha256(committed);
   }
+  const bibleCommit = (await readChanges(join(dir, "changes.jsonl")))
+    .findLast((change) => change["path"] === BIBLE_PATH && typeof change["contentHashAfter"] === "string");
+  if (bibleCommit) manifest[BIBLE_PATH] = bibleCommit["contentHashAfter"] as string;
   return { manifest, changeCount: scan.changeCount };
 }
 
@@ -1065,7 +1087,7 @@ function detectExternalEdits(scan: ScanResult, previous: ScanState): ExternalEdi
   }
   // world.json changing outside the app is real, but reporting it as an entity edit would be
   // noise — schema migration and clone detection own that file's lifecycle.
-  return edits.filter((e) => e.path !== "world.json");
+  return edits.filter((e) => e.path !== "world.json" && e.path !== BIBLE_PATH);
 }
 
 /** Remove the derived scan-state (used by tests proving `.index/` is safe to delete). */

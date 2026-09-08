@@ -91,6 +91,9 @@ World and production layouts wait for the routed world before mounting their out
 the art-direction page shows its own history warning. Writable open repairs only the known
 founding-v1 master-look addition against the committed baseline. New founding previews use
 `commitUnserialised` to complete the record and snapshot in one recoverable transaction (issue 979).
+Bible hashes join the existing scan manifest for history validation, while outside-edit
+reconciliation still excludes this ungated document. Its change-log receipt or scan baseline
+validates the snapshot before `adoptBibleIfMoved` may use it as the previous version.
 
 The client sends `open-world`; Coordinator uses the world provider. `world/provider.ts` opens the filesystem-backed store, while `world/store.ts` owns recovery, ownership, scanning/indexing and watcher lifecycle. Follow the provider's failure events and client `components/world-open-refusal.tsx` for refusal presentation. Disk changes feed reconciliation and refreshed state rather than becoming invisible mutations of client state.
 

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { cp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { tempDir } from "../tmp.js";
@@ -464,6 +466,33 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await second.close();
   });
 
+  it("preserves a damaged Bible snapshot and live prose instead of inventing an outside edit", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    const original = initialBible("Original author notes.", CLOCK());
+    await first.commit({ kind: "bible-create", source: "test",
+      files: [{ path: "bible.md", action: "create", content: original, baseHash: null }] });
+    await first.close();
+    const snapshot = join(dir, ".history/bible/v1.md");
+    const damaged = original.replace("Original", "Damaged");
+    await writeFile(snapshot, damaged);
+    const changes = await readFile(join(dir, "changes.jsonl"), "utf8");
+    for (const readOnly of [true, false]) {
+      const store = await WorldStore.open(dir, { readOnly, clock: CLOCK });
+      try {
+        assert.ok(store.getBundle().problems.some((p) => p.path === ".history/bible/v1.md"));
+        assert.equal(store.getBundle().bible.version, 1);
+        assert.equal(await readFile(join(dir, "bible.md"), "utf8"), original);
+        assert.equal(await readFile(snapshot, "utf8"), damaged);
+        assert.equal(await readFile(join(dir, "changes.jsonl"), "utf8"), changes);
+      } finally { await store.close(); }
+    }
+    await deleteScanState(dir);
+    const rebuilt = await WorldStore.open(dir, { clock: CLOCK });
+    try { assert.ok(rebuilt.getBundle().problems.some((p) => p.path === ".history/bible/v1.md")); }
+    finally { await rebuilt.close(); }
+  });
+
   it("does not re-offer an adopted edit recovered after the point of no return", async () => {
     const dir = await makeTempWorld();
     const path = "characters/bray-half-hitch.md";
@@ -587,6 +616,37 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     const readOnly = await WorldStore.open(dir, { readOnly: true });
     try { assert.ok(readOnly.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md")); }
     finally { await readOnly.close(); }
+    const writable = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok(writable.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md"));
+      await assert.rejects(readFile(snapshot), { code: "ENOENT" }, "writable reopen does not conceal a lost snapshot");
+    } finally { await writable.close(); }
+  });
+
+  it("keeps the world open when optional founding-history repair cannot replace its snapshot", async (t) => {
+    const dir = await makeTempWorld();
+    const path = join(dir, "art-direction/art-direction.json");
+    const before = JSON.stringify({ version: 1, description: "Painted sunlight", acceptedAt: CLOCK(), history: [] }, null, 2) + "\n";
+    const completed = JSON.stringify({ ...JSON.parse(before), masterLook: "art-direction/look-v1.png" }, null, 2) + "\n";
+    await writeFile(path, before);
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.gateOp(() => writeFile(path, completed));
+    await first.close();
+    const originalRename = fs.rename;
+    t.mock.method(fs, "rename", async (...args: Parameters<typeof fs.rename>) => {
+      if (String(args[1]).replace(/\\/g, "/").endsWith("/.history/art-direction/v1.json")) {
+        throw Object.assign(new Error("snapshot is read-only"), { code: "EACCES" });
+      }
+      return originalRename(...args);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok(store.getBundle().problems.some((p) => p.path === ".history/art-direction/v1.json"));
+      assert.equal(await readFile(join(dir, ".history/art-direction/v1.json"), "utf8"), before);
+      assert.equal(await readFile(path, "utf8"), completed);
+    } finally { await store.close(); }
   });
 
   it("repairs only the committed founding preview addition, never other changes or outside edits", async () => {

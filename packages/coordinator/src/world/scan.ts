@@ -11,6 +11,7 @@ import { join, sep } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import { discoverBenchSessions } from "../bench/service.js";
 import {
+  BIBLE_PATH,
   CLONED_VOICES_PATH,
   parseVoiceLibrary,
   type ClonedVoice,
@@ -368,10 +369,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
 
-  // Deliberately outside `tryParse`, so it never joins `manifest`. The manifest is the
-  // reconciliation surface for gated files (R-28); the bible is ungated and invites hand-edits,
-  // which the store adopts silently rather than reporting (see `adoptBibleIfMoved`).
+  // Bible bytes participate in history integrity checks. Outside-edit reconciliation still
+  // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir);
+  if (bible.present) manifest[BIBLE_PATH] = sha256(await read(join(dir, BIBLE_PATH)));
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
