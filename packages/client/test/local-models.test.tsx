@@ -183,6 +183,17 @@ const renderPane = (state: ClientState, engine: EngineId): string =>
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+it("shows processor residency as a warning while the local model remains installed", () => {
+  const state = stateWith({ residency: [{ provider: "ollama", model: GEMMA.id, state: "cpu", vramBytes: 0 }] });
+  state.app.setup!.components.find((item) => item.id === "ollama-gemma4-12b")!.state = "ready";
+  const html = plain(renderEngine(state, "ollama"));
+  assert.match(html, /Running on the processor; this will be slow/);
+  assert.match(html, /installed/);
+  assert.doesNotMatch(html, /needs attention/);
+  state.app.residency = [];
+  assert.doesNotMatch(plain(renderEngine(state, "ollama")), /Running on the processor/);
+});
+
 /**
  * One model's row, from the `fy-set__row` that opens it to the one that opens the next.
  *

@@ -272,6 +272,9 @@ export interface ProviderClient {
   cancel(key: string, remoteId: string, context?: ProviderCallContext): Promise<void>;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
+  /** Coordinator-owned local GPU handover; remote engines must leave their models alone. */
+  unload?(signal?: AbortSignal): Promise<void>;
+  residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void;
   /**

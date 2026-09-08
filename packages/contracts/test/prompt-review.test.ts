@@ -1,6 +1,29 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { reviewPrompt, promptHash } from "../src/prompt-review.js";
+import { reviewPrompt, promptHash, promptCapabilityWarnings, type PromptCapabilityModel } from "../src/prompt-review.js";
+
+it("warns on model input claims even in unchanged text, without changing source evidence", async () => {
+  const model: PromptCapabilityModel = {displayName:"Reference model",accepts:{referenceImages:9,startFrame:false,endFrame:false},limits:{}};
+  const text="The first frame holds the locked door. Use the tenth reference for the final frame. At 0:03 the reference takes over.";
+  const review=await reviewPrompt(text,text,[],"shot-prompt",model);
+  assert.deepEqual(review.hunks,[]);
+  assert.equal(review.capabilityWarnings!.length,4);
+  assert.match(review.capabilityWarnings!.join(" "),/accepts 9 image references/);
+  assert.deepEqual(promptCapabilityWarnings("Use the first frame, last frame and <Picture 10>.",{...model,accepts:{referenceImages:10,startFrame:true,endFrame:true}}),[]);
+  assert.deepEqual(promptCapabilityWarnings("Then cut to a quiet room.",model),[]);
+  for(const claim of ["ten references", "reference 10", "<Picture 10>", "image reference #10"])
+    assert.match(promptCapabilityWarnings(claim,model).join(" "),/accepts 9 image references/);
+});
+
+it("uses the reference budget's verified support, per-kind and combined ceilings", () => {
+  const model: PromptCapabilityModel = {displayName:"Mixed model",accepts:{referenceImages:4,referenceVideos:1,referenceAudio:1,startFrame:false,endFrame:false},limits:{maxReferenceVideoSec:10,maxReferenceAudioSec:10,maxCombinedReferences:4}};
+  const warnings=promptCapabilityWarnings("Use 4 image references, 2 video references and 2 audio references.",model);
+  assert.equal(warnings.length,3);
+  assert.match(warnings.join(" "),/1 video references/);
+  assert.match(warnings.join(" "),/1 audio references/);
+  assert.match(warnings.join(" "),/4 combined references/);
+  assert.match(promptCapabilityWarnings("reference 1",{...model,unverified:true}).join(" "),/accepts 0 image references/);
+});
 it("normalizes only line endings, counts Unicode characters and retains exact offsets",async()=>{
   const review=await reviewPrompt("A pier.\r\n","A neon pier.\n🙂",[{kind:"accepted-world",ref:"tone",text:"Quiet water"}]);
   assert.equal(review.base.text,"A pier.\n");assert.equal(review.candidate.characters,Array.from(review.candidate.text).length);

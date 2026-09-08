@@ -136,6 +136,8 @@ export const JobSchema = z
     /** Opaque engine instance explicitly approved for a biometric voice upload. */
     voiceUploadConfirmedFor: z.string().min(1).optional(),
     status: JobStatusSchema,
+    /** Transient local engine contention, never a failed attempt. */
+    waitingFor: z.string().optional(),
     /**
      * What the engine is counting right now (SPEC-021 D16), or null when it counts nothing.
      *

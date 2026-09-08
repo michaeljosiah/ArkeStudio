@@ -38,6 +38,12 @@ import { ProviderBusyError, type FetchLike } from "../src/types.js";
 
 const OK_PREFLIGHT = async () => ({ ok: true }) as const;
 const BASE = () => "http://127.0.0.1:8188";
+it("ComfyUI residency does not mistake an empty GPU reservation for processor inference", async () => {
+  for (const [type, expected] of [["cuda", "unknown"], ["cpu", "cpu"]] as const) {
+    const client = new ComfyUiClient(async () => Response.json({ devices: [{ type, torch_vram_total: 0 }] }), BASE, OK_PREFLIGHT);
+    assert.equal((await client.residency())[0]?.state, expected);
+  }
+});
 const VOICE_REFERENCE = {
   name: `${"a".repeat(64)}.wav`,
   contentType: "audio/wav" as const,
@@ -1142,6 +1148,17 @@ describe("cancellation targets only the requested prompt (R-17)", () => {
     ]);
     await new ComfyUiClient(fetch, BASE, OK_PREFLIGHT).cancel("", "mine");
     assert.ok(calls.some((c) => c.url.endsWith("/interrupt")));
+  });
+
+  it("rejects failed cancellation POSTs and an unreadable queue instead of acknowledging them", async () => {
+    for (const pending of [false, true]) {
+      const fetch: FetchLike = async (_url, init) => new Response(JSON.stringify(
+        init?.method === "POST" ? {} : queue(pending ? "someone-elses" : "mine", pending ? ["mine"] : []),
+      ), {status:init?.method === "POST" ? 503 : 200});
+      await assert.rejects(new ComfyUiClient(fetch,BASE,OK_PREFLIGHT).cancel("","mine"), /HTTP 503/);
+    }
+    const {fetch}=engineFake([{match:/\/queue$/,status:200,body:{}}]);
+    await assert.rejects(new ComfyUiClient(fetch,BASE,OK_PREFLIGHT).cancel("","mine"), /invalid queue/);
   });
 
   it("a stranger's running prompt on a shared engine is left exactly alone", async () => {

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } fr
 import type { CharacterImageWorkflow, SizeTier } from "@arke-studio/contracts";
 import { Button, Textarea } from "./ui.js";
 import { DispatchBar } from "./dispatch-bar.js";
+import { ResolvedPromptCapabilityNotices } from "./prompt-review.js";
 import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
@@ -366,6 +367,7 @@ export function GenerationDialog({
           )}
         </div>
         {promptHint && <p className="fy-gendialog__hint">{promptHint}</p>}
+        <ResolvedPromptCapabilityNotices text={prompt} capability={capability} modelId={choice.modelId} />
         {extra}
 
         {/*

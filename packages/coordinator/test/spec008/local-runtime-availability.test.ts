@@ -16,6 +16,32 @@ import { Coordinator } from "../../src/coordinator.js";
 import { ProviderService } from "../../src/providers/service.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot } from "../world/helpers.js";
+import { FakeProvider } from "../queue/fake-provider.js";
+import { until } from "../wait.js";
+import type { JobQueue, DispatchClient } from "../../src/queue/dispatcher.js";
+import type { Job } from "@arke-studio/contracts";
+
+it("samples a newly running ComfyUI job after a coalesced Ollama residency probe", async () => {
+  const { root } = await makeTempRoot();
+  const provider = new FsWorldProvider(root);
+  let release!: () => void, ollamaReads=0, comfyReads=0, running=false;
+  const delayed = new Promise<void>(resolve => {release=resolve;});
+  const ollama: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{if(++ollamaReads===1)await delayed;return [];}});
+  const comfyui: DispatchClient = Object.assign(new FakeProvider(), {residency:async()=>{comfyReads++;return [{provider:"comfyui" as const,model:"*",state:"cpu" as const,vramBytes:0}];}});
+  const coordinator = new Coordinator({provider,adapter:null,changeLogPath:join(root,"changes.jsonl"),appVersion:"test",dispatchClients:{ollama,comfyui}});
+  const seam=coordinator as unknown as {jobQueue:Pick<JobQueue,"listJobs">|null;refreshLocalResidency():Promise<void>};
+  seam.jobQueue={listJobs:()=>running?[{provider:"comfyui",status:"running",model:"comfy-model"} as Job]:[]};
+  try {
+    const first=seam.refreshLocalResidency();
+    running=true;
+    assert.equal(seam.refreshLocalResidency(),first);
+    assert.equal(seam.refreshLocalResidency(),first);
+    release();await first;
+    await until(()=>coordinator.getState().app.residency?.some(row=>row.model==="comfy-model"&&row.state==="cpu")===true,"trailing residency sample");
+    assert.equal(ollamaReads,2,"coalesced changes need one trailing pass");
+    assert.equal(comfyReads,1);
+  } finally {release();seam.jobQueue=null;await coordinator.stop();await provider.close();}
+});
 
 /**
  * Local runtimes are asked, not assumed (issue 462).

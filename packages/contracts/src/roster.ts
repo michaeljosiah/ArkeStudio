@@ -101,7 +101,9 @@ export function agentPromptFor(agent: {
   const head = blocks.join("\n\n");
   const skilled = agent.skill ? `${head}
 
-${agent.skill.body}` : head;
+<AUTHORING_SKILL id="${agent.skill.id}" version="${agent.skill.version}">
+${agent.skill.body}
+</AUTHORING_SKILL>` : head;
   return agent.postscript ? `${skilled}
 
 ${agent.postscript}` : skilled;

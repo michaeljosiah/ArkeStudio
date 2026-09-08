@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 export function keyArtCreativeBody(composed:string):string {
   return normalizePrompt(composed).replace(/ No text, no logos(?:, no character portraits)?\.$/,"");
 }
-export type KeyArtPromptContext={worldId:string;model:Pick<ManifestModel,"id"|"provider">;base:string;fixed:string;sources:PromptSourceSnapshot[];references:unknown};
+export type KeyArtPromptContext={worldId:string;model:Pick<ManifestModel,"id"|"provider"|"displayName"|"accepts"|"limits"|"unverified">;base:string;fixed:string;sources:PromptSourceSnapshot[];references:unknown};
 type Session=KeyArtPromptContext&{id:string;createdAt:number;candidate?:string;contextHash:string};
 /** Unapproved creative work lives only in this coordinator session and never becomes world canon. */
 export class KeyArtPromptReviews {
@@ -29,7 +29,7 @@ export class KeyArtPromptReviews {
     if(reviewId&&(!session||session.id!==reviewId||Date.now()-session.createdAt>3600000||session.contextHash!==await this.fingerprint(context)))throw new Error("The key-art prompt, sources, references or model changed. Prepare and review the current plan again.");
     const approved=normalizePrompt(body??context.base);
     if(!approved.trim())throw new Error("Write a nonempty creative prompt before generation.");
-    const review=await reviewPrompt(context.base,approved,context.sources);
+    const review=await reviewPrompt(context.base,approved,context.sources,"world-key-art",context.model);
     const approvedFrom=approved===context.base?"assembled":session?.candidate===approved?"candidate":"edited";
     const finalPrompt=`${approved}${context.fixed}`;
     const provenance=PromptDispatchProvenanceSchema.parse({schemaVersion:1,workflow:"world-key-art",assembledHash:review.base.hash,

@@ -286,7 +286,7 @@ export function ProposalPanel({
               {t.fields.map((f) => (
                 <div key={f.field} className="dom-review__field">
                   <div className="dom-review__name">{f.field}</div>
-                  {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} />}
+                  {f.field.endsWith("· Prompt override") && <ShotPromptProposalDiff before={f.before} after={f.proposed} targetPath={t.path} />}
                   {f.before !== null && (
                     <div className="dom-review__was">
                       <span className="dom-review__tag mono">was</span>
@@ -492,6 +492,7 @@ export function JobRow({ job }: { job: Job }) {
         {job.status}
       </Badge>
       {job.error && <div className="dom-jobrow__error">{job.error}</div>}
+      {job.status === "queued" && job.waitingFor && <div role="status">{job.waitingFor}</div>}
     </div>
   );
 }

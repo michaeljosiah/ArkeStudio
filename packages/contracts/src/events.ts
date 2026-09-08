@@ -7,6 +7,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { z } from "zod";
+import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
@@ -1323,6 +1324,7 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     .strict(),
   /** Local runtime detection completed (SPEC-008 R-22, D12). */
   z.object({ ...base, type: z.literal("runtime.status"), runtime: LocalRuntimeStatusSchema }).strict(),
+  z.object({ ...base, type: z.literal("local-ai.residency"), residency: z.array(ModelResidencySchema) }).strict(),
   /**
    * What harnesses exist here and which one is chosen, together in one message. Sending them
    * separately would let a screen hold a choice the availability no longer supports — exactly

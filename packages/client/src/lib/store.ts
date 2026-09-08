@@ -826,6 +826,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
       return { ...state, app: { ...state.app, narrator: event.voice } };
     case "runtime.status":
       return { ...state, app: { ...state.app, runtime: event.runtime } };
+    case "local-ai.residency":
+      return { ...state, app: { ...state.app, residency: event.residency } };
     case "comfyui.status":
       return { ...state, app: { ...state.app, comfyui: event.comfyui } };
     case "harness.status":
