@@ -56,7 +56,7 @@ export function Note({ note, onAct, onDismiss }: { note: QueueNote; onAct: () =>
       )}
       <div className="fy-note__body">
         <div className="fy-note__title">{note.title}</div>
-        <div className="fy-note__meta">{note.meta}</div>
+        {note.meta && <div className="fy-note__meta">{note.meta}</div>}
         {note.reason && <div className="fy-note__reason">{note.reason}</div>}
       </div>
       <div className="fy-note__end">
@@ -109,16 +109,15 @@ export function noteNow(
 const StableNote = memo(Note);
 
 /** Receipts expire even if Sonner's hover/drag state stays paused (issue 1001). */
-function ToastNote(props: Parameters<typeof Note>[0]) {
-  const { note, onDismiss } = props;
+function ToastNote({ note, onAct, onDismiss, receipt = note }: Parameters<typeof Note>[0] & { receipt?: QueueNote }) {
   const dismiss = useRef(onDismiss);
   dismiss.current = onDismiss;
   useEffect(() => {
     // A new outcome gets its own reading time. Store frames and navigation do not renew it.
     const timer = setTimeout(() => dismiss.current(), note.tone === "refused" ? 12000 : 6000);
     return () => clearTimeout(timer);
-  }, [note.id, note.tone]);
-  return <StableNote {...props} />;
+  }, [receipt, note.tone]);
+  return <StableNote note={note} onAct={onAct} onDismiss={onDismiss} />;
 }
 
 /** Re-derives from the store, so the row follows the job it is about. */
@@ -137,13 +136,19 @@ function LiveNote({
   const derived = noteNow(result, state?.app.jobs ?? [], state?.app.manifest ?? null) ?? seed;
   const key = JSON.stringify([derived.tone, derived.title, derived.meta, derived.reason, derived.live, derived.action?.label]);
   const note = useMemo(() => derived, [key]);
-  return <ToastNote note={note} onAct={() => onAct(note)} onDismiss={onDismiss} />;
+  return <ToastNote note={note} receipt={seed} onAct={() => onAct(note)} onDismiss={onDismiss} />;
 }
 
 export function QueueToaster() {
   const navigate = useNavigate();
   useEffect(() => subscribeCommandFailures((event) => {
-    toast.error(event.reason, { id: event.requestId ?? undefined, duration: 12000 });
+    toast.custom((id) => (
+      <ToastNote
+        note={{ id: String(id), tone: "refused", title: "That action could not be completed", meta: "", reason: event.reason }}
+        onAct={() => toast.dismiss(id)}
+        onDismiss={() => toast.dismiss(id)}
+      />
+    ), { id: event.requestId ?? undefined, duration: Infinity });
   }), []);
   const update = useUpdateStatus();
   const { state } = useStore();
@@ -153,7 +158,7 @@ export function QueueToaster() {
   const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null }>({ jobs: [], manifest: null });
   store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null };
 
-  /** jobId → the notification already on screen for it, so its outcome updates that row. */
+  /** jobId → receipt for work announced by this window, retained until its outcome arrives. */
   const noteFor = useRef(new Map<string, string>());
 
   useEffect(() => {
@@ -247,7 +252,9 @@ export function QueueToaster() {
     return subscribeQueueResults((result) => {
       const seed = enqueueNote(result, store.current.jobs, store.current.manifest);
       if (!seed) return;
-      if (result.acceptedJobIds.length === 1) noteFor.current.set(result.acceptedJobIds[0]!, seed.id);
+      for (const jobId of result.acceptedJobIds) {
+        noteFor.current.set(jobId, result.acceptedJobIds.length === 1 ? seed.id : `job:${jobId}`);
+      }
       toast.custom(
         (id) => (
           <LiveNote
@@ -261,6 +268,27 @@ export function QueueToaster() {
       );
     });
   }, [navigate]);
+
+  useEffect(() => {
+    // The enqueue receipt can expire before a job fails. Keep following the jobs it announced
+    // here, so a late failure still gets a fresh refusal without replaying historical failures.
+    for (const job of state?.app.jobs ?? []) {
+      const existing = noteFor.current.get(job.id);
+      if (!existing) continue;
+      if (job.status === "cancelled" || job.deletedAt) {
+        noteFor.current.delete(job.id);
+      } else if (job.status === "failed" || job.status === "needs-reconciliation") {
+        noteFor.current.delete(job.id);
+        const note = failedNote(job, store.current.manifest, existing);
+        toast.custom((id) => (
+          <ToastNote note={note} onAct={() => {
+            if (note.action) navigate(note.action.to);
+            toast.dismiss(id);
+          }} onDismiss={() => toast.dismiss(id)} />
+        ), { id: note.id, duration: Infinity });
+      }
+    }
+  }, [state?.app.jobs, navigate]);
 
   useEffect(
     () =>
