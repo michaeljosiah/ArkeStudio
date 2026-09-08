@@ -35,6 +35,8 @@ const EPISODE_RUN = 8;
  */
 export function describeEntryContext(context: WorldChatContext, bundle: WorldBundle): string {
   switch (context.kind) {
+    case "production-setup":
+      return "This is production setup in the selected existing world. Discuss and update only the private outline. Do not propose world changes or media actions.";
     case "world":
       return "";
     case "canon-question": {
@@ -77,6 +79,12 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
         lines.push(
           `The season is v${production.season.version}${production.season.question ? ` — question: "${clip(production.season.question)}"` : ""}${production.season.ending ? `; ending: "${clip(production.season.ending)}"` : ""}.`,
         );
+      }
+      if (production && productionShape(production.meta).medium === "video" && !productionShape(production.meta).isEpisodic) {
+        lines.push("Film arc writing belongs to the optional narrative record, edited by the author in Overview. Do not propose a prose story overview for a film.");
+      }
+      if (production?.narrative) {
+        lines.push(`Film narrative v${production.narrative.version}: ${JSON.stringify(production.narrative)}. This authored record is available whole through get_production. The author edits it in Overview; do not write a film arc into the prose story overview.`);
       }
       if (production && production.episodes.length > 0) {
         lines.push(

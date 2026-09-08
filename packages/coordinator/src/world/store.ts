@@ -1035,7 +1035,7 @@ function historyDirectory(portablePath: string): string | null {
   if (kind.track === "canon") return `.history/canon/${kind.id}`;
   if (kind.track === "chapter") return `.history/productions/${kind.production}/chapters/${kind.file}`;
   if (kind.track === "scene") return `.history/productions/${kind.production}/scenes/${kind.file}`;
-  if (kind.track === "story" || kind.track === "prose-style" || kind.track === "routing" || kind.track === "season") {
+  if (kind.track === "story" || kind.track === "prose-style" || kind.track === "routing" || kind.track === "season" || kind.track === "narrative") {
     return `.history/productions/${kind.production}/${kind.track}`;
   }
   if (kind.track === "episode") return `.history/productions/${kind.production}/episodes/${kind.file}`;

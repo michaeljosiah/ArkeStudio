@@ -1,3 +1,4 @@
+import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, type NavigateFunction } from "react-router";
 import type {
@@ -1296,6 +1297,12 @@ export function ProductionConversation({
           <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
           <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "nothing yet"}</span>
         </div>
+        {loaded?.productionSetup?.status === "created" && <details>
+          <summary>From production setup</summary>
+          <p>The outline and open questions at creation. Current production records are in Overview and Scenes.</p>
+          <ProductionSetupOutline draft={loaded.productionSetup.draft}
+            sheetName={id => state?.world?.sheets.find(sheet => sheet.id === id)?.name ?? id} />
+        </details>}
         <ConversationPoints
           points={points}
           empty={pointsEmpty}

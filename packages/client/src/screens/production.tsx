@@ -708,6 +708,7 @@ export function ProductionLayout() {
     cast: Users,
     story: Message,
     overview: Scroll,
+    narrative: Scroll,
     season: Film,
     "story/chapters": Book,
     "story-structure": Folder,
@@ -1029,7 +1030,7 @@ export function ProductionLayout() {
               ) : (
                 <>
                   {item("story", "Develop", "chat", true)}
-                  {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
+                  {item("narrative", "Overview", production?.narrative ? `v${production.narrative.version}` : "—")}
                   {item("scenes", "Scenes", String(production?.scenes.length ?? 0), false, inScene)}
                   {orderedScenes.length > 0 && (
                     <div className="fy-prodrail__scenes fy-prodrail__scenes--production">
@@ -1971,7 +1972,7 @@ export function ProductionChatScreen() {
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const details = shape?.isEpisodic ? "Season" : "Overview";
-  const detailsPath = `/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`;
+  const detailsPath = `/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : shape?.medium === "video" ? "narrative" : "overview"}`;
   /*
    * What this conversation has already staged (turn 92). The season's own file for an episodic
    * production, the overview's for one without a season — a production has one of the two, never
@@ -2001,7 +2002,9 @@ export function ProductionChatScreen() {
         emptyLine={
           shape?.isEpisodic
             ? "Nothing decided yet. Say what this season answers, how it ends, and what its episodes are — everything you settle here lands in Season."
-            : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
+            : shape?.medium === "video"
+              ? "Develop this film here. Its dramatic question, through-line and ending are edited in Overview."
+              : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
         }
         footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -2014,7 +2017,7 @@ export function ProductionChatScreen() {
             <span style={{ flex: 1 }} />
             {/* Where what is being said ends up, named and reachable from where it is said. */}
             <NavLink
-              to={`/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : "overview"}`}
+              to={detailsPath}
               className="fy-linkbtn"
             >
               {details} &rarr;

@@ -67,6 +67,20 @@ After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` 
 
 For an actual encode/decode of the zero-scene import, detach and edit journey, set `ARKE_TEST_FFMPEG` to the installed ffmpeg executable and run coordinator `test/productions/editor-import.test.ts` from `packages/coordinator`. Without that variable, only the native encode case skips; persistence, stale revision, cancellation and role regressions still run. The native case creates its own short test footage and removes the original source files before exporting.
 
+## Conversational video production setup
+
+After `npm run build`, run `node --import tsx apps/desktop/scripts/smoke-production-setup.mjs`
+from the repository root. It uses a real coordinator, the built client and sandboxed preload,
+a disposable fixture world, and a scripted writing harness. It checks keyboard tabs at a narrow
+width, composer reachability, reviewed creation, retained conversation/questions, and narrative
+and scene reopen. No paid model or media call is made. A desktop display is required; screenshots
+are retained at the printed temporary path for visual inspection.
+
+The focused domain suites are contracts `test/production-setup.test.ts`, coordinator
+`test/productions/setup.test.ts`, `setup-plan.test.ts`, `setup-run.test.ts`, and client
+`test/production-setup.test.tsx`. The lifecycle suite injects actual commit journal failures;
+its recovery assertions must pass without dismissing external-edit warnings.
+
 ## CI
 
 [ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.

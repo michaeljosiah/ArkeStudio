@@ -39,6 +39,8 @@ import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
 import { CHARACTER_ROLE_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
+import { ProductionSetupCommandSchema } from "./production-setup.js";
+import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema } from "./arke-actions.js";
 
@@ -59,6 +61,9 @@ export type Frame = z.infer<typeof FrameSchema>;
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  ProductionSetupCommandSchema,
+  z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
+    requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
   z.object({ kind: z.literal("stage-construct"), conversationId: z.string().optional(), actionId: z.string().optional(), worldId: z.string(), productionId: z.string(), sceneId: z.string(), shotId: z.string(), requestId: z.string().uuid(), instruction: z.string().max(4000), preserve: z.enum(["blocking", "camera", "none"]), baseVersion: z.number().int().positive() }).strict(),
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),

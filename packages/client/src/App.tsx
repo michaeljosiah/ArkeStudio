@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useEffect, useRef } from "react";
+import { ProductionSetupScreen } from "./screens/production-setup.js";
+import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import { SettingsModelsScreen } from "./screens/settings-models.js";
@@ -257,6 +259,7 @@ export function App() {
           <Route path="artifacts/bench/:sessionId" element={<BenchScreen />} />
           <Route path="productions" element={<ProductionsScreen />} />
           <Route path="productions/new" element={<NewProductionScreen />} />
+          <Route path="productions/setup/:setupId" element={<ProductionSetupScreen />} />
         </Route>
 
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>
@@ -268,6 +271,7 @@ export function App() {
           <Route path="story" element={<ProductionChatScreen />} />
           <Route path="season" element={<StoryScreen />} />
           <Route path="overview" element={<StoryScreen />} />
+          <Route path="narrative" element={<ProductionNarrativeScreen />} />
           {/* The same pair one level down (turn 91): the episode's chat lives under `story`
               beside the production's own, and the page it lands on sits at production level. */}
           <Route path="story/episodes/:episodeId" element={<EpisodeChatScreen />} />

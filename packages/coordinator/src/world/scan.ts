@@ -1,3 +1,4 @@
+import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
 import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
@@ -22,6 +23,7 @@ import {
   ChapterFrontmatterSchema,
   type ChapterFrontmatter,
   EpisodeSchema,
+  ProductionNarrativeSchema,
   type Episode,
   ProductionSchema,
   ProposalSchema,
@@ -107,7 +109,7 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixteen adds the dramatic question and ending to the strict story overview (issue 889).
 // Seventeen persists chapter subjects on retriable conversation turns (issue 890).
 // Eighteen adds artifact retirement to strict sidecars (issue 957).
-export const SUPPORTED_SCHEMA_VERSION = 18;
+export const SUPPORTED_SCHEMA_VERSION = 19;
 
 export class WorldOpenError extends Error {
   constructor(
@@ -793,12 +795,20 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       return raw.split("\n").filter(Boolean).map(line => PerformanceReviewDecisionSchema.parse(JSON.parse(line)));
     }) : [];
     const performanceSelections = (await exists(join(pdir, "performance-selections.json"))) ? await tryParse(performanceSelectionPath, raw => PerformanceSelectionsSchema.parse(JSON.parse(raw))) : {};
+    // The journal's change hashes include this operational file. Scan it too, or recovery
+    // mistakes a landed association for an external deletion before it can attach the chat.
+    if (await exists(join(pdir, "setup-origin.json"))) {
+      await tryParse(`productions/${id}/setup-origin.json`, raw => ProductionSetupOriginSchema.parse(JSON.parse(raw)));
+    }
     productions.push({
       rehearsals, rehearsalHashes, feedback,
       performanceReview: { reviews: performanceReviews ?? [], selections: performanceSelections ?? {},
         reviewHash: manifest[performanceReviewPath] ?? null, selectionHash: manifest[performanceSelectionPath] ?? null },
       performances,
       meta: metaDoc,
+      narrative: await exists(join(pdir, "narrative.json"))
+        ? await tryParse(`productions/${id}/narrative.json`, raw => ProductionNarrativeSchema.parse(JSON.parse(raw)))
+        : null,
       story,
       proseStyle,
       ...((await exists(join(pdir, "progress.json"))) ? {

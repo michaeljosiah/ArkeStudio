@@ -1,4 +1,6 @@
 import { z } from "zod";
+export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
+import { ProductionCreationPlanSchema } from "./production-creation.js";
 import { ConversationActionSemanticIdSchema } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
@@ -30,9 +32,6 @@ import {
   CHARACTER_ROLE_MAX,
   FrameRateSchema,
   ProductionMediumSchema,
-  ProductionSchema,
-  SeasonSchema,
-  SeriesSchema,
   SheetKindSchema,
   SheetStatusSchema,
   WorldAuthoredFieldChangesSchema,
@@ -1223,19 +1222,6 @@ export const WorldChatVoiceCloneActionSchema = preparedAction("world-chat-voice-
 export const WorldChatVoiceClipReviewActionSchema = preparedAction("world-chat-voice-clip-review", VoiceClipReviewActionSchema);
 export const WorldChatWorldArchiveActionSchema = preparedAction("world-chat-world-archive", ModelWorldChatActionSchema.options[31]);
 export const WorldChatWorldExportActionSchema = preparedAction("world-chat-world-export", ModelWorldChatActionSchema.options[32]);
-export const ProductionCreationPlanSchema = z
-  .object({
-    production: ProductionSchema,
-    initialSeason: SeasonSchema.nullable(),
-    series: z.discriminatedUnion("operation", [
-      z.object({ operation: z.literal("none") }).strict(),
-      z.object({ operation: z.literal("create"), record: SeriesSchema }).strict(),
-      z.object({ operation: z.literal("join"), record: SeriesSchema }).strict(),
-    ]),
-  })
-  .strict();
-export type ProductionCreationPlan = z.infer<typeof ProductionCreationPlanSchema>;
-
 export const WorldChatProductionCreateActionSchema = z
   .object({
     kind: z.literal("world-chat-production-create"),

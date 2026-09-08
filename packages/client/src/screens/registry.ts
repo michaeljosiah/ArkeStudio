@@ -36,6 +36,8 @@ export const SCREENS: ScreenEntry[] = [
 
   // World
   { id: "world-overview", samplePath: W },
+  { id: "production-setup", samplePath: `${W}/productions/setup/cv_01J8F3K2QW9VZX4N7M0RTYB6HC` },
+  { id: "production-narrative", samplePath: `${P}/narrative` },
   { id: "proposals", samplePath: `${W}/proposals` },
   { id: "world-art-direction", samplePath: `${W}/art-direction` },
   { id: "art-direction-proposal", samplePath: `${W}/art-direction/propose` },

@@ -116,6 +116,48 @@ class TestClient {
 }
 
 describe("Transport", () => {
+  it("bounds pending initialization commands and never executes a refused connection's queue", async (t) => {
+    let finish!: () => void;
+    const ready = new Promise<void>(resolve => { finish = resolve; });
+    const seen: unknown[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE,
+      beforeInitialSnapshot: () => ready, onMessage: message => seen.push(message) });
+    const port = await transport.start();
+    t.after(() => transport.stop());
+    const client = new TestClient(port);
+    await client.open();
+    const closed = client.closed();
+    client.send({ kind: "hello", token: TOKEN });
+    for (let i = 0; i < 33; i++) client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
+    assert.equal(await closed, 1008);
+    finish();
+    assert.deepEqual(seen, []);
+    assert.deepEqual(client.frames, []);
+  });
+
+  it("retains authenticated routed commands during reconnect reconciliation and sends the snapshot first", async (t) => {
+    let finish!: () => void;
+    const ready = new Promise<void>(resolve => { finish = resolve; });
+    const seen: string[] = [];
+    const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE,
+      beforeInitialSnapshot: () => ready,
+      onMessage: message => { seen.push(message.kind); transport.broadcast(EVENT); },
+    });
+    const port = await transport.start();
+    t.after(() => transport.stop());
+    const client = new TestClient(port);
+    t.after(() => client.close());
+    await client.open();
+    client.send({ kind: "hello", token: TOKEN });
+    client.send({ kind: "open-world", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.deepEqual(seen, []);
+    finish();
+    await client.nextFrame(2);
+    assert.deepEqual(client.frames.map(frame => frame.kind), ["snapshot", "event"]);
+    assert.deepEqual(seen, ["open-world"]);
+  });
+
   it("refuses missing, wrong and malformed capabilities before snapshots or pipelined commands, and logs no secrets", async (t) => {
     const logs: string[] = [], seen: unknown[] = [];
     const transport = new Transport({ auth: AUTH, getSnapshot: () => STATE, onMessage: msg => seen.push(msg), log: line => logs.push(line) });

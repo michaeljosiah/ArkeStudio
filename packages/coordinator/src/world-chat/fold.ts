@@ -92,6 +92,7 @@ export function foldConversation(
   const limit = options.messageLimit ?? MAX_MESSAGES;
 
   let title = "Untitled conversation";
+  let productionSetup: WorldChatLoaded["productionSetup"];
   let status: WorldChatStatus = "open";
   let notCarried: WorldChatLoaded["notCarried"] = [];
   let entryContext: WorldChatLoaded["entryContext"];
@@ -205,6 +206,9 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "production-setup.updated":
+        productionSetup = e.state;
+        break;
       case "conversation.created":
         title = e.title;
         entryContext = e.entryContext;
@@ -263,6 +267,7 @@ export function foldConversation(
         runs.set(e.run.id, e.run);
         break;
       case "turn.completed":
+        if (e.productionSetup) productionSetup = e.productionSetup;
         addMessage(e.message, envelope.seq);
         runs.set(e.run.id, e.run);
         // Keyed by the reply that made it, so the card renders beside the sentence describing it.
@@ -566,6 +571,7 @@ export function foldConversation(
   );
 
   const view: WorldChatLoaded = {
+    ...(productionSetup ? { productionSetup } : {}),
     id,
     title,
     status,
@@ -700,8 +706,9 @@ function lastRunIfFailed(runs: WorldChatRun[], messages: WorldChatMessage[]): Wo
 /** The row the world snapshot carries: enough to choose a conversation, and no history. */
 export function summarise(view: WorldChatLoaded): WorldChatSummary {
   return {
+    ...(view.productionSetup ? { setupStatus: view.productionSetup.status } : {}),
     id: view.id,
-    title: view.title,
+    title: view.productionSetup?.draft.title || view.title,
     status: view.status,
     updatedAt: view.updatedAt,
     ...(view.entryContext ? { entryContext: view.entryContext } : {}),

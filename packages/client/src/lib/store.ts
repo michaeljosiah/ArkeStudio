@@ -566,6 +566,17 @@ export function subscribeTimelineRefusals(listener: (event: TimelineCommandRefus
 }
 
 const productionCreateListeners = new Set<(result: ProductionCreateResult) => void>();
+export type ProductionSetupResult = Extract<DomainEvent, { type: "production-setup.result" }>;
+const productionSetupListeners = new Set<(result: ProductionSetupResult) => void>();
+const narrativeSavedListeners = new Set<(result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void>();
+export function subscribeNarrativeSaved(listener: (result: Extract<DomainEvent, { type: "production-narrative.saved" }>) => void): () => void {
+  narrativeSavedListeners.add(listener);
+  return () => { narrativeSavedListeners.delete(listener); };
+}
+export function subscribeProductionSetupResults(listener: (result: ProductionSetupResult) => void): () => void {
+  productionSetupListeners.add(listener);
+  return () => { productionSetupListeners.delete(listener); };
+}
 export function subscribeProductionCreateResults(
   listener: (result: ProductionCreateResult) => void,
 ): () => void {
@@ -1065,6 +1076,12 @@ function handleFrame(json: string): void {
     }
     if (event.type === "production.create-result") {
       for (const listener of productionCreateListeners) listener(event);
+    }
+    if (event.type === "production-setup.result") {
+      for (const listener of productionSetupListeners) listener(event);
+    }
+    if (event.type === "production-narrative.saved") {
+      for (const listener of narrativeSavedListeners) listener(event);
     }
     if (event.type === "chapter.create-result") {
       for (const listener of chapterCreateListeners) listener(event);

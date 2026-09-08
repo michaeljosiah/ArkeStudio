@@ -4,6 +4,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
@@ -144,6 +145,7 @@ export const ProductionBundleSchema = z
     performanceReview: PerformanceReviewStateSchema.default(emptyPerformanceReviewState),
     meta: ProductionSchema,
     story: StoryOverviewSchema.nullable(),
+    narrative: ProductionNarrativeSchema.nullable().optional(),
     /**
      * prose-style.json — the style the book is written in, or null when none (turn 128).
      * Optional rather than defaulted so a bundle from before it existed still types as one.
