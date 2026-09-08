@@ -240,6 +240,7 @@ import {
   fileGeneratedArtifact,
   importFolder,
   retireArtifact,
+  restoreArtifact,
 } from "./artifacts/filing.js";
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
@@ -4955,13 +4956,7 @@ export class Coordinator {
         const result = await this.conversationActionLifecycle(store).decide(msg);
         if (!this.stillOpen(store)) return;
         this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
-        await this.refreshConversations(store);
-        if (!this.stillOpen(store)) return;
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
+        await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
       case "world-chat-send": {
@@ -10482,10 +10477,11 @@ export class Coordinator {
         });
         return;
       }
+      case "restore-artifact":
       case "retire-artifact": {
         const store = this.opts.provider.openStore?.();
         if (!store || store.worldId !== msg.worldId) throw new Error("The owning world is not open.");
-        await retireArtifact(store, msg.artifactId);
+        await (msg.kind === "restore-artifact" ? restoreArtifact : retireArtifact)(store, msg.artifactId);
         this.refreshIfStillOpen(store);
         return;
       }
@@ -12166,7 +12162,7 @@ export class Coordinator {
         if (msg.image) {
           const sourceWorld = (await this.opts.provider.listWorlds()).find(world => world.slug === msg.image!.slug);
           const offered = sourceWorld && await this.opts.provider.listReferenceImages?.(sourceWorld.slug);
-          const media = offered?.includes(msg.image.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
+          const media = offered?.some(image => image.file === msg.image!.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
           if (!sourceWorld || !media || !media.contentType.startsWith("image/")) {
             this.rejectEnqueue(msg.requestId, msg.kind, "That image is no longer available.");
             return;
@@ -15299,6 +15295,10 @@ export class Coordinator {
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
+    if (!this.stillOpen(store)) return;
+    // Card acceptance commits through the store just like the proposal panel. Publish that
+    // bundle before the completed card, or its chapters and overview stay at their old values.
+    this.readModel.setWorld(store.getBundle());
     await this.refreshConversations(store);
     if (!this.stillOpen(store)) return;
     if (this.getState().worldChat?.conversationId === conversationId) {
@@ -15530,8 +15530,12 @@ export class Coordinator {
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
     try {
       this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
-    } catch {
-      /* the previous snapshot stands */
+    } catch (error) {
+      void this.appLog?.append({ kind: "world-refresh.failed", worldId,
+        message: error instanceof Error ? error.message : String(error) });
+      this.emit({ at: this.nowIso(), type: "command.failed", command: "refresh-world", requestId: null,
+        reason: "The world display could not refresh. Reopen the world to see its current state." });
+      return;
     }
     this.transport.broadcastSnapshot();
   }

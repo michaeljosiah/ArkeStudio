@@ -7,6 +7,7 @@ import { PerformanceRecordSchema } from "./performance.js";
 import { VoiceSampleReviewSchema } from "./voice-sample.js";
 import { ChapterContinuitySchema, ChapterVoicesSchema } from "./world.js";
 import { z } from "zod";
+import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
@@ -116,7 +117,7 @@ export type QueueCommand = z.infer<typeof QueueCommandSchema>;
 
 export const DomainEventSchema = z.discriminatedUnion("type", [
   z.object({ ...base, type: z.literal("reference.images"), requestId: UlidSchema,
-    slug: SlugSchema, images: z.array(z.string()), error: z.string().optional() }).strict(),
+    slug: SlugSchema, images: z.array(WorldImageReferenceSchema), error: z.string().optional() }).strict(),
   /** Unexpected command failures are transient notices, never evidence of rollback (#926). */
   z.object({ ...base, type: z.literal("command.failed"), command: z.string(),
     requestId: z.string().nullable(), reason: z.string() }).strict(),

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computeNeedsYou, newId, type ClientState } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { candidateHash, resolveCandidate, storeBatch, verifyCandidates } from "../../src/artifacts/extraction.js";
-import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable, retireArtifact } from "../../src/artifacts/filing.js";
+import { addLinks, ATTACHABLE_EXTENSIONS, backfillMediaInfo, fileArtifact, importFolder, kindForFile, pickable, retireArtifact, restoreArtifact } from "../../src/artifacts/filing.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
@@ -63,6 +63,54 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
       assert.equal(restored.artifact.retiredAt, undefined);
       assert.deepEqual(restored.artifact.links, ["the-vigil", "CANON-001"]);
     } finally { await reopened.close(); }
+  });
+
+  it("restores without the original file and preserves the current sidecar (#971)", async () => {
+    const { store, dir } = await open();
+    try {
+      const sourcePath = await sourceFile("restore.txt", "retained bytes");
+      const filed = await fileArtifact(store, { sourcePath, links: ["CANON-001"] });
+      assert.equal(filed.outcome, "filed");
+      if (filed.outcome !== "filed") return;
+      await retireArtifact(store, filed.artifact.id);
+      await rm(sourcePath);
+      await addLinks(store, filed.artifact, ["the-vigil"]);
+      const before = store.getBundle().artifacts.find(a => a.id === filed.artifact.id)!;
+      await restoreArtifact(store, filed.artifact.id);
+      const restored = store.getBundle().artifacts.find(a => a.id === filed.artifact.id)!;
+      const { retiredAt: _retired, ...expected } = before;
+      assert.deepEqual(restored, expected);
+      assert.equal(await readFile(join(dir, "artifacts", restored.file), "utf8"), "retained bytes");
+      const path = join(dir, "artifacts", `${restored.file}.json`);
+      const raw = await readFile(path, "utf8");
+      await restoreArtifact(store, restored.id);
+      assert.equal(await readFile(path, "utf8"), raw);
+      await writeFile(path, '{"links":[]}');
+      await assert.rejects(restoreArtifact(store, restored.id));
+      assert.equal(await readFile(path, "utf8"), '{"links":[]}');
+    } finally { await store.close(); }
+  });
+
+  it("keeps an artifact retired when its retained bytes are changed or missing (#971)", async () => {
+    const { store, dir } = await open();
+    try {
+      const filed = await fileArtifact(store, { sourcePath: await sourceFile("damaged.txt", "original bytes") });
+      assert.equal(filed.outcome, "filed");
+      if (filed.outcome !== "filed") return;
+      await retireArtifact(store, filed.artifact.id);
+      const media = join(dir, "artifacts", filed.artifact.file);
+      const sidecar = `${media}.json`, raw = await readFile(sidecar, "utf8");
+      await writeFile(media, "outside edit");
+      await assert.rejects(restoreArtifact(store, filed.artifact.id), /missing or changed/);
+      assert.equal(await readFile(sidecar, "utf8"), raw);
+      await rm(media);
+      await assert.rejects(restoreArtifact(store, filed.artifact.id), /missing or changed/);
+      assert.equal(await readFile(sidecar, "utf8"), raw);
+      assert.ok(store.getBundle().artifacts.find(a => a.id === filed.artifact.id)?.retiredAt);
+      await writeFile(media, "original bytes");
+      await restoreArtifact(store, filed.artifact.id);
+      assert.equal(store.getBundle().artifacts.find(a => a.id === filed.artifact.id)?.retiredAt, undefined);
+    } finally { await store.close(); }
   });
 
   it("refuses retirement when the on-disk sidecar changed identity or became unreadable (#957)", async () => {

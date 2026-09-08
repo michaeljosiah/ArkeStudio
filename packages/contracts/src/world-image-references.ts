@@ -1,14 +1,16 @@
+import { z } from "zod";
 import type { WorldBundle } from "./client-state.js";
 import { pickableArtifacts } from "./artifact.js";
 
-export interface WorldImageReference {
-  file: string;
-  name: string;
-  group: "Cast" | "Places" | "This world" | "Takes and stills" | "Uploads";
-  role: "identity" | "environment" | "style";
-  sheetId?: string;
-  sheetVersion?: number;
-}
+export const WorldImageReferenceSchema = z.object({
+  file: z.string(),
+  name: z.string(),
+  group: z.enum(["Cast", "Places", "This world", "Takes and stills", "Uploads"]),
+  role: z.enum(["identity", "environment", "style"]),
+  sheetId: z.string().optional(),
+  sheetVersion: z.number().int().optional(),
+}).strict();
+export type WorldImageReference = z.infer<typeof WorldImageReferenceSchema>;
 
 /** Portable image addresses only; neither an OS path nor a traversal is a world image. */
 export function isWorldImagePath(file: string): boolean {

@@ -94,6 +94,18 @@ it("names current uses, confirms retirement from the card and viewer, and waits 
     world.artifacts[0] = { ...world.artifacts[0]!, retiredAt: "2026-09-07T12:00:00Z" };
     await act(async () => __setStateForTest(structuredClone(state)));
     assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+    const retiredFilter = [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === "Retired 1")!;
+    assert.ok(retiredFilter);
+    await act(async () => retiredFilter.click());
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"));
+    assert.match(mounted.container.textContent!, /retired/);
+    await click("Restore");
+    assert.deepEqual(sent.at(-1), { kind: "restore-artifact", worldId: FIXTURE_WORLD_ID, artifactId: PICTURE.id });
+    assert.ok(mounted.container.querySelector(".fy-gridcard__open"), "restore waits for authoritative state");
+    delete world.artifacts[0]!.retiredAt;
+    await act(async () => __setStateForTest(structuredClone(state)));
+    assert.equal(mounted.container.querySelector(".fy-gridcard__open"), null);
+
   } finally { await unmount(mounted); __setBridgeForTest(null); }
 });
 

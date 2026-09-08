@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import type { ArtifactSidecar, ClientState } from "@arke-studio/contracts";
+import { worldImageReferences, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -179,4 +179,35 @@ describe("one identity for one generated picture", () => {
     assert.equal(row.existingToken, "Image 1");
     assert.equal(row.active, true, "so it reads as already riding rather than as addable");
   });
+});
+
+it("retains a generated copy until the filesystem owner verifies its alias (#972)", () => {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const file = "references/maren-kest/head-front.png";
+  const artifact = generatedReference();
+  artifact.generation = { ...artifact.generation!, sourceFile: file } as typeof artifact.generation;
+  world.artifacts.push(artifact);
+  const rows = worldImageReferences(world);
+  assert.ok(rows.some(row => row.file === file && row.name.includes("Maren") && row.group === "Cast"));
+  assert.equal(rows.some(row => row.file === `artifacts/${artifact.file}`), true);
+});
+
+it("keeps older generations of a reused reference path in the catalogue", () => {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const file = "references/maren-kest/head-front.png";
+  const old = generatedReference({ created: "2026-08-01T00:00:00Z" });
+  old.generation = { ...old.generation!, sourceFile: file } as typeof old.generation;
+  const current = { ...old, id: "ar_01J8G0000000000000000000R8", file: "newer.png", hash: "sha256:aaaaaaaaaaaaaaaa", created: "2026-08-02T00:00:00Z" };
+  for (const pair of [[current, old], [old, current]]) {
+    world.artifacts = pair;
+    const rows = worldImageReferences(world);
+    assert.ok(rows.some(row => row.file === file));
+    const historical = rows.find(row => row.file === `artifacts/${old.file}`)!;
+    assert.ok(historical);
+    assert.equal(historical.group, "Cast");
+    assert.equal(historical.role, "identity");
+    assert.equal(rows.some(row => row.file === `artifacts/${current.file}`), true);
+  }
+  world.artifacts = [old, { ...current, retiredAt: "2026-08-03T00:00:00Z" }];
+  assert.ok(worldImageReferences(world).some(row => row.file === `artifacts/${old.file}`), "retiring the newest copy does not hide its predecessor");
 });

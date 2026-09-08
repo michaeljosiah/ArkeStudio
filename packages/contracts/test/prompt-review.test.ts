@@ -17,10 +17,10 @@ it("exact-source is case-sensitive contiguous quotation, never semantic confiden
   const changed=await reviewPrompt("rain","Silver moonlight rain",[source]);assert.equal(changed.hunks.find(h=>h.op==="add")!.support,"unverified");
   assert.deepEqual((await reviewPrompt("same","same",[])).hunks,[]);
 });
-it("replacement is deletion plus addition and shared tokens remain outside changed hunks",async()=>{
+it("replacement is a readable deletion and addition across short shared runs",async()=>{
   const review=await reviewPrompt("a blue boat rests","a red boat moves",[]);
-  assert.deepEqual(review.hunks.map(h=>[h.op,h.text]),[["delete","blue"],["add","red"],["delete","rests"],["add","moves"]]);
-  assert.deepEqual((await reviewPrompt("x x x","x y x",[])).hunks.map(h=>[h.op,h.text]),[["delete","x"],["add","y"]]);
+  assert.deepEqual(review.hunks.map(h=>[h.op,h.text]),[["delete","blue boat rests"],["add","red boat moves"]]);
+  assert.deepEqual((await reviewPrompt("x x x","x y x",[])).hunks.map(h=>[h.op,h.text]),[["delete","x x x"],["add","x y x"]]);
 });
 
 it("does not certify punctuation, short quotes or partial words",async()=>{
@@ -28,4 +28,48 @@ it("does not certify punctuation, short quotes or partial words",async()=>{
     const changed=await reviewPrompt("original",quote!,[{kind:"accepted-world",ref:"sheet/test",text:text!}]);
     assert.ok(changed.hunks.filter(h=>h.op==="add").every(h=>h.sources.length===0));
   }
+});
+
+it("certifies a verbatim span threaded through unchanged words (#973)",async()=>{
+  const source={kind:"accepted-world" as const,ref:"sheet/room",text:"the room behind her falls away into flat grey nothing"};
+  const review=await reviewPrompt("The room falls into grey.","The room behind her falls away into flat grey nothing.",[source]);
+  const additions=review.hunks.filter(h=>h.op==="add");
+  assert.equal(additions.length,1);
+  assert.equal(additions[0]!.support,"exact-source");
+  assert.equal(additions[0]!.sources[0]!.quote,"behind her falls away into flat grey nothing");
+  assert.equal(review.candidate.text.slice(additions[0]!.afterStart,additions[0]!.afterEnd),additions[0]!.text);
+  const invented=await reviewPrompt("The room falls into grey.","The room behind her falls away into bright grey nothing.",[source]);
+  assert.ok(invented.hunks.filter(h=>h.op==="add").every(h=>h.support==="unverified"));
+});
+it("gives lone words context without merging sentences or warning on unchanged style terms",async()=>{
+  const review=await reviewPrompt("In neon light. A boat waits.","In the neon light. A red boat waits.",[]);
+  const additions=review.hunks.filter(h=>h.op==="add");
+  assert.equal(additions.length,2);
+  assert.ok(additions.every(h=>h.text.trim().split(/\s+/).length>1));
+  assert.ok(additions.every(h=>h.warnings.length===0));
+});
+
+it("keeps warnings for inserted style words separated by unchanged context",async()=>{
+  const review=await reviewPrompt("quiet harbour, small boat","neon harbour, epic boat",[]);
+  assert.deepEqual(review.hunks.filter(h=>h.op==="add").flatMap(h=>h.warnings),['Added style term: "neon"','Added style term: "epic"']);
+});
+
+it("keeps changed sentence punctuation from joining adjacent sentences",async()=>{
+  for(const candidate of ["One green! Two gold.","One green\nTwo gold."]){
+    const review=await reviewPrompt("One red. Two blue.",candidate,[]);
+    assert.ok(review.hunks.filter(h=>h.op==="add").length>=2);
+    for(const h of review.hunks)assert.doesNotMatch(h.text,/[.!?;\n]\s*\p{L}/u);
+  }
+});
+it("bounds unbroken tokens and their context without losing text or splitting Unicode",async()=>{
+  const review=await reviewPrompt("Before "+"x".repeat(1300)+" after.","Before "+"𐐀".repeat(1300)+" after.",[]);
+  for(const h of review.hunks){
+    assert.ok(h.text.length<=240);
+    assert.doesNotMatch(h.text,/\p{Surrogate}/u);
+    const text=h.op==="add"?review.candidate.text:review.base.text;
+    const start=h.op==="add"?h.afterStart:h.beforeStart,end=h.op==="add"?h.afterEnd:h.beforeEnd;
+    assert.equal(text.slice(start,end),h.text);
+  }
+  assert.equal(review.hunks.filter(h=>h.op==="add").map(h=>h.text).join("").match(/𐐀/gu)?.length,1300);
+  assert.equal(review.hunks.filter(h=>h.op==="delete").map(h=>h.text).join("").match(/x/g)?.length,1300);
 });
