@@ -3582,6 +3582,20 @@ function ClosestList({
   );
 }
 
+/** Generated thread titles are often the question, shortened for storage (issue 1003). */
+function threadQuestion(entry: CanonEntry): { text: string; context: string } | null {
+  if (entry.status !== "open") return null;
+  const title = entry.title.trim().replace(/\s+/g, " ");
+  // Refused asks append candidate context; it is not part of the generated title.
+  const body = entry.body.replace(/\n+Considered when this was asked: [^\n]* — none of them decides it\.\s*$/, "").trim();
+  const question = body.replace(/\s+/g, " ");
+  // Only the known 77-character truncation is generated; an authored ellipsis is a title.
+  const generated = body.length > 80 && entry.title.trim() === `${body.slice(0, 77)}…`;
+  return question && (title === question || generated)
+    ? { text: body, context: entry.body.trim().slice(body.length).trim() }
+    : null;
+}
+
 export function CanonScreen() {
   const { worldId } = useParams();
   const world = useOpenWorldGuard(worldId);
@@ -3667,9 +3681,6 @@ export function CanonScreen() {
             Ask
           </Button>
         </div>
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          answers come only from entries, with verified quotes · when canon has not decided, it says so
-        </div>
         <div className="fy-filterrow">
           <button
             type="button"
@@ -3705,17 +3716,19 @@ export function CanonScreen() {
         </div>
       )}
       <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        {shown.map((entry) =>
-          entry.status === "open" ? (
+        {shown.map((entry) => {
+          const question = threadQuestion(entry);
+          const body = question?.context ?? entry.body;
+          return entry.status === "open" ? (
             <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
               <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
                 {entry.id} · open thread
               </div>
-              <div className="fy-gridcard__title">{entry.title}</div>
-              <div className="fy-gridcard__body">
-                {entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}
-              </div>
+              <div className="fy-gridcard__title">{question?.text ?? entry.title}</div>
+              {body && <div className="fy-gridcard__body">
+                {body.length > 150 ? `${body.slice(0, 147)}…` : body}
+              </div>}
               <div style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
                   Draft in context
@@ -3743,8 +3756,8 @@ export function CanonScreen() {
                 {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
               </div>
             </button>
-          ),
-        )}
+          );
+        })}
         {shown.length === 0 && (
           <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />
         )}
@@ -3803,6 +3816,17 @@ export function CanonEntryScreen() {
   // fills that tail and the panel would then say an entry has no history while its records sit
   // intact on disk. Undefined until the detail arrives, so the empty line waits for an answer.
   const history = detail?.history;
+  const citedBy = detail && detail.canonRevision === canonRevision ? detail.citedBy : undefined;
+  const question = threadQuestion(entry);
+  const referenceLink = (id: string, kind: "canon" | "sheet" | "production" | null) => {
+    // Slugs are unique within a kind, not across sheets and productions.
+    const canon = kind === "canon" ? world?.canon.find((candidate) => candidate.id === id) : undefined;
+    const sheet = kind === "sheet" ? world?.sheets.find((candidate) => candidate.id === id) : undefined;
+    const production = kind === "production" ? world?.productions.find((candidate) => candidate.meta.id === id) : undefined;
+    const to = canon ? `canon/${id}` : sheet ? `${sheet.type === "character" ? "cast" : `${sheet.type}s`}/${id}` : production ? `p/${id}` : null;
+    const label = canon ? `${id} · ${canon.title}` : sheet?.name ?? production?.meta.title ?? id;
+    return to ? <Link key={id} to={`/w/${worldId}/${to}`}>{label}</Link> : <span key={id}>{label}</span>;
+  };
   return (
     <div className="fy-entry" data-screen="canon-entry">
       <div className="fy-entry__main">
@@ -3820,10 +3844,15 @@ export function CanonEntryScreen() {
             </span>
             {entry.retired && <Badge tone="danger">retired</Badge>}
           </div>
-          <h1 className="fy-entry__title">{entry.title}</h1>
+          {!question && <h1 className="fy-entry__title">{entry.title}</h1>}
           {/* The statement is the one thing on this screen somebody reads rather than scans. */}
           <div className="fy-texthost">
-            <div className="fy-entry__body">{entry.body}</div>
+            {question
+              ? <>
+                  <h1 className="fy-entry__title">{question.text}</h1>
+                  {question.context && <div className="fy-entry__body">{question.context}</div>}
+                </>
+              : <div className="fy-entry__body">{entry.body}</div>}
             <ReadAloud
               source={{ of: "canon", canonId: entry.id }}
               title={`${entry.id} · ${entry.title}`}
@@ -3835,9 +3864,9 @@ export function CanonEntryScreen() {
             {entry.settledAt !== undefined && ` · settled v${entry.settledAt}`}
             {entry.amendedAt !== undefined && ` · last amended v${entry.amendedAt}`}
           </div>
-          {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
+          {citedBy && (citedBy.sheets.length > 0 || citedBy.entries.length > 0) && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 16 }}>
-              {detail.citedBy.sheets.map((s) => (
+              {citedBy.sheets.map((s) => (
                 <span key={s.id} className="fy-pill">
                   <span className="fy-pill__avatar">
                     <Portrait
@@ -3847,50 +3876,55 @@ export function CanonEntryScreen() {
                       radius={99}
                     />
                   </span>
-                  {s.id}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? ` · v${s.atVersion}` : ""}
                 </span>
               ))}
-              {detail.citedBy.entries.map((id) => (
+              {citedBy.entries.map((id) => (
                 <span
                   key={id}
                   className="fy-pill"
-                  style={{ cursor: "pointer" }}
-                  onClick={() => navigate(`/w/${worldId}/canon/${id}`)}
                 >
-                  {id}
+                  {referenceLink(id, "canon")}
                 </span>
               ))}
             </div>
           )}
         </div>
-        {detail && (detail.citedBy.sheets.length > 0 || detail.citedBy.entries.length > 0) && (
-          <div style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
+          <section aria-label="Cited by" style={{ marginTop: 30, animation: "fy-fade-up 0.7s var(--ease-out) 0.15s both" }}>
             <div style={{ font: "600 13px var(--font-sans)", marginBottom: 4 }}>Cited by</div>
-            {detail.citedBy.sheets.map((s) => (
+            {!citedBy && <div className="fy-mono">Loading citations…</div>}
+            {citedBy && citedBy.sheets.length + citedBy.entries.length + citedBy.productions.length === 0 && (
+              <div className="fy-mono">No citations yet.</div>
+            )}
+            {citedBy?.sheets.map((s) => (
               <div key={s.id} className="fy-citerow">
                 <span style={{ flex: 1 }}>
-                  {s.id}
+                  {referenceLink(s.id, "sheet")}
                   {s.atVersion !== null ? `, sheet v${s.atVersion}` : ""}
                 </span>
-                <span className="fy-mono">from the index, at the version cited</span>
+                <span className="fy-mono">canon reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-            {detail.citedBy.entries.map((id) => (
+            {citedBy?.entries.map((id) => (
               <div
                 key={id}
                 className="fy-citerow"
-                style={{ cursor: "pointer" }}
-                onClick={() => navigate(`/w/${worldId}/canon/${id}`)}
               >
-                <span style={{ flex: 1 }}>{id}</span>
+                <span style={{ flex: 1 }}>{referenceLink(id, "canon")}</span>
                 <span className="fy-mono">canon cross-reference</span>
                 <ChevronRight size={13} />
               </div>
             ))}
-          </div>
-        )}
+            {citedBy?.productions.map((id) => (
+              <div key={id} className="fy-citerow">
+                <span style={{ flex: 1 }}>{referenceLink(id, "production")}</span>
+                <span className="fy-mono">production reference</span>
+                <ChevronRight size={13} />
+              </div>
+            ))}
+          </section>
       </div>
       <div className="fy-entry__side">
         <div style={{ font: "600 13px var(--font-sans)" }}>History</div>
@@ -3926,16 +3960,22 @@ export function CanonEntryScreen() {
             <div style={{ font: "600 13px var(--font-sans)" }}>Changing this ripples</div>
             <div style={{ display: "grid", gap: 6, marginTop: 10 }}>
               {detail.ripples.map((r, i) => (
-                <span key={i} className="fy-ripplerow">
+                <div key={i} className="fy-ripplerow">
                   <span className="fy-dot fy-dot--warn" />
-                  {r.kind} · {r.summary}
-                </span>
+                  <div>
+                    {r.summary}
+                    {r.targets.length > 0 && <div className="fy-mono" style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 4 }}>
+                      {r.targets.map((id) => referenceLink(id, r.kind === "productions-see-new-revision" ? "production" :
+                        r.kind === "contradiction-candidates" || r.kind === "gains-cross-reference" ? "canon" : null))}
+                    </div>}
+                  </div>
+                </div>
               ))}
             </div>
             {/* Said as it now happens (issue 747): the amendment is ripple-checked and versioned
                 on the press, so describing a proposal step set up the same wait the button did. */}
             <div className="fy-mono" style={{ marginTop: 10 }}>
-              an amendment is ripple-checked, then versioned · the previous version is one undo away
+              ripple-checked, then versioned
             </div>
           </div>
         )}
@@ -4007,6 +4047,8 @@ const SETTLE_TYPES = ["rule", "lore", "location", "faction", "timeline", "tone"]
 
 export function CanonThreadScreen() {
   const { entry, worldId } = useCanonEntry();
+  const question = entry ? threadQuestion(entry) : null;
+  const context = question?.context ?? entry?.body;
   const world = useWorld();
   const navigate = useNavigate();
   const { state } = useStore();
@@ -4083,11 +4125,11 @@ export function CanonThreadScreen() {
                 OPEN THREAD{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
               </span>
             </div>
-            <h1 className="fy-story__h1">{entry ? entry.title : "Thread"}</h1>
+            <h1 className="fy-story__h1">{question?.text ?? entry?.title ?? "Thread"}</h1>
           </div>
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
-          {entry && <div className="fy-bubble--gate">{entry.body}</div>}
+          {context && <div className="fy-bubble--gate">{context}</div>}
           {transcript.length === 0 && (
             <div className="fy-bubble--gate">
               Talk it through — the studio drafts the answer on a proposal over this entry, checked against
@@ -4195,9 +4237,9 @@ export function CanonThreadScreen() {
           <div className="fy-gridcard__id">
             {entry?.id ?? "CANON-…"} · {resolvedType}
           </div>
-          <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
-            {entry?.title}
-          </div>
+          {entry && !question && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
+            {entry.title}
+          </div>}
           <div
             style={{
               font: "400 12.5px/1.65 var(--font-sans)",

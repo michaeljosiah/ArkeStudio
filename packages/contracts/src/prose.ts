@@ -236,14 +236,28 @@ export function storyProgressDay(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-export function targetWords(targetLength: string | undefined): number | null {
+export function targetWords(targetLength: string | undefined, chapterCount?: number): number | null {
   if (!targetLength) return null;
-  const match = /(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/i.exec(targetLength);
-  if (!match) return null;
-  const figure = Number(match[1]!.replace(/,/g, ""));
-  if (!Number.isFinite(figure) || figure <= 0) return null;
-  const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
-  return words >= 100 ? Math.round(words) : null;
+  let perChapter: number | null = null;
+  for (const match of targetLength.matchAll(/(\d[\d,]*(?:\.\d+)?)\s*(k\b|words?\b)/gi)) {
+    const figure = Number(match[1]!.replace(/,/g, ""));
+    const words = match[2]!.toLowerCase() === "k" ? figure * 1000 : figure;
+    if (!Number.isFinite(words) || words < 100) continue;
+    const before = targetLength.slice(0, match.index);
+    const after = targetLength.slice(match.index + match[0].length);
+    if (/\b(?:per\s+chapter|each\s+(?:of\s+(?:the\s+)?\d+\s+)?chapters?|chapters?\s*[,;:]?\s*each)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
+        /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b|in\s+each\s+chapter\b)/i.test(after)) {
+      perChapter = words;
+    } else {
+      return Math.round(words);
+    }
+  }
+  // A chapter-sized target is not the book's (issue 1002). An explicit planned count wins;
+  // otherwise the caller supplies the active chapter count. An explicit total above wins both.
+  const planned = /\b(\d+)\s+chapters?\b/i.exec(targetLength);
+  const count = planned ? Number(planned[1]) : chapterCount;
+  const total = perChapter === null || count === undefined ? 0 : perChapter * count;
+  return Number.isFinite(total) && total >= 100 ? Math.round(total) : null;
 }
 
 /**

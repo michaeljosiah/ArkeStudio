@@ -1562,7 +1562,7 @@ export function ProductionDashboardScreen() {
     const drafted = chapters.filter((c) => (c.words ?? 0) > 0);
     const totalWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
     const inHand = chapters.find((c) => !c.words) ?? chapters.at(-1) ?? null;
-    const target = targetWords(production.story?.targetLength);
+    const target = targetWords(production.story?.targetLength, chapters.length);
     const progress = production.progress;
     const wordsToday = progress && "unreadable" in progress ? null : progress?.days[today] ?? 0;
     const inHandIdx = inHand ? chapters.indexOf(inHand) : -1;
@@ -1572,7 +1572,7 @@ export function ProductionDashboardScreen() {
       inHandIdx >= 0
         ? Math.max(0, Math.min(inHandIdx - 1, chapters.length - 4))
         : Math.max(0, chapters.length - 4);
-    const nearby = chapters.slice(windowStart, windowStart + 4);
+    const nearby = chapters.slice(windowStart, windowStart + 4).filter((chapter) => chapter !== inHand);
     return (
       <div className="fy-prodmain" data-screen="production-dashboard">
         <div className="fy-h1row">
@@ -1615,7 +1615,7 @@ export function ProductionDashboardScreen() {
             </Button>
           </div>
         </div>
-        {chapters.length > 0 && (
+        {nearby.length > 0 && (
           <div>
             <div className="fy-listhead">
               Chapters
@@ -1960,6 +1960,10 @@ export function ProductionChatScreen() {
   const navigate = useNavigate();
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
+  const contextCount = shape?.hasChapters
+    ? production?.chapters.filter((chapter) => !chapter.retired).length ?? 0
+    : production?.scenes.length ?? 0;
+  const contextUnit = shape?.hasChapters ? "chapter" : "scene";
   const details = shape?.isEpisodic ? "Season" : "Overview";
   const detailsPath = `/w/${worldId}/p/${prodId}/${shape?.isEpisodic ? "season" : shape?.medium === "video" ? "narrative" : "overview"}`;
   /*
@@ -1990,16 +1994,16 @@ export function ProductionChatScreen() {
         placeholder="Say what this is — what happens, who it costs, how it ends…"
         emptyLine={
           shape?.isEpisodic
-            ? "Nothing decided yet. Say what this season answers, how it ends, and what its episodes are — everything you settle here lands in Season."
+            ? "Develop this season here. Shape what it answers, how it ends, and what its episodes are."
             : shape?.medium === "video"
               ? "Develop this film here. Its dramatic question, through-line and ending are edited in Overview."
-              : "Nothing decided yet. Say what this is — the spine, the acts, what it costs — and what you settle here lands in Overview."
+              : "Develop this story here. Shape the spine, the acts, and what it costs."
         }
         footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
             <span className="fy-pill">
-              all {production?.scenes.length ?? 0} scene{(production?.scenes.length ?? 0) === 1 ? "" : "s"}
+              all {contextCount} {contextUnit}{contextCount === 1 ? "" : "s"}
             </span>
             <span className="fy-pill">{cast} cast sheets</span>
             {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
@@ -2013,7 +2017,11 @@ export function ProductionChatScreen() {
             </NavLink>
           </div>
         }
-        pointsEmpty="Nothing understood yet. As you talk, what the studio takes from it appears here — the season question, each episode, each arc — so you can see it thinking rather than wait for the end."
+        pointsEmpty={shape?.hasChapters
+          ? "New conversation notes appear here. Accepted work is in Overview and Chapters."
+          : shape?.isEpisodic
+            ? "New conversation notes appear here. Accepted work is in Season and Episodes."
+            : "New conversation notes appear here. Accepted work is in Overview and Scenes."}
         {...(opening ? { openWith: opening } : {})}
         {...(staged
           ? {
@@ -2404,7 +2412,7 @@ export function ChapterTreeScreen() {
   };
   const drafted = chapters.filter((c) => (c.words ?? 0) > 0).length;
   const bookWords = chapters.reduce((sum, c) => sum + (c.words ?? 0), 0);
-  const target = targetWords(production?.story?.targetLength);
+  const target = targetWords(production?.story?.targetLength, chapters.length);
   // The outline marks the first chapter with no words yet.
   const inHand = chapters.find((c) => !c.words) ?? null;
   /*

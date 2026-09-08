@@ -1166,7 +1166,7 @@ export function ProductionConversation({
                   onToggle={(event) => setPointsOpen(event.currentTarget.open)}
                 >
                   <summary>
-                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "nothing yet"}</span>
+                    What it understood <span className="fy-mono">{points.length > 0 ? points.length : "no new notes"}</span>
                   </summary>
                   <ConversationPoints
                     points={points}
@@ -1296,7 +1296,7 @@ export function ProductionConversation({
       <div className="fy-story__side">
         <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
           <div style={{ font: "600 15px var(--font-sans)" }}>What it understood</div>
-          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "nothing yet"}</span>
+          <span className="fy-mono">{points.length > 0 ? `${points.length} so far` : "no new notes"}</span>
         </div>
         {loaded?.productionSetup?.status === "created" && <details>
           <summary>From production setup</summary>

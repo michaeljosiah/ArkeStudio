@@ -386,7 +386,7 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
       entry={{ kind: "episode", productionId: prodId ?? "", episodeId: episode.id }}
       dock={{ title: `Arke · Episode ${pad(episode.order)}`, subject: `${episode.title} · v${episode.version}`, onPutAway }}
       openingNote="opening…"
-      emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+      emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
       placeholder="Ask about the episode"
       {...(staged
         ? {
@@ -638,7 +638,7 @@ export function EpisodeChatScreen() {
         openingNote={`Episode Chat · ${pad(episode.order)} · opening…`}
         eyebrow={`EPISODE CHAT · ${pad(episode.order)}`}
         heading="What happens in this one?"
-        emptyLine={`Nothing written for ${episode.title} yet. Say how it opens, where it turns and how it closes — the scenes it needs come with it.`}
+        emptyLine={`Develop ${episode.title} here — how it opens, where it turns, how it closes, and the scenes it needs.`}
         placeholder="Keep shaping the episode…"
         {...(staged
           ? {
