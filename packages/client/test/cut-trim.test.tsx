@@ -292,9 +292,10 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     const html = renderCut(structuredClone(FIXTURE_STATE) as ClientState);
     assert.match(html, /fy-prodrail--folded/, "the rail folds on the cut");
     assert.match(html, /fy-prodrail__mark/, "and carries marks instead of words");
-    for (const place of ["Dashboard", "Cast", "Scenes", "Exports"]) {
+    for (const place of ["Dashboard", "Cast", "Scenes", "Cut"]) {
       assert.ok(html.includes(`title="${place}"`), `${place} is still reachable, by name on its tooltip`);
     }
+    assert.doesNotMatch(html, /class="fy-prodrail__item[^>]*href="[^"]*\/(?:audio|exports)"/);
   });
 
   it("opens the world's artifacts beside the cut", () => {
