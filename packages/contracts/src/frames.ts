@@ -2643,11 +2643,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
   z
     .object({
-      kind: z.enum(["retire-artifact", "restore-artifact"]),
+      kind: z.literal("retire-artifact"),
       worldId: UlidSchema,
       artifactId: ArtifactIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("restore-artifact"), worldId: UlidSchema, artifactId: ArtifactIdSchema }).strict(),
   /** SPEC-015 R-1/R-6: file one artifact; large files come back needing stated-size consent. */
   z
     .object({
