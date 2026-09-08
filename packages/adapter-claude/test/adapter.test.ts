@@ -1,3 +1,4 @@
+import { shippedSkillBodies } from "../../contracts/test/skill-fixture.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
@@ -452,7 +453,7 @@ describe("the skill a Claude session drafts under", () => {
     const fake = fakeQuery([result()]);
     // v2-launch builds the adapter with neither value; prepareSession is how the session is told.
     const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run });
-    adapter.prepareSession?.({ preparationId: "prep_skill", skillFamily: "seedance", skillModelId: "seedance-2.5" });
+    adapter.prepareSession?.({ preparationId: "prep_skill", skillBodies: shippedSkillBodies, skillFamily: "seedance", skillModelId: "seedance-2.5" });
     const { sessionId } = await adapter.createSession({
       purpose: "authoring",
       cwd: CWD,
@@ -467,7 +468,7 @@ describe("the skill a Claude session drafts under", () => {
 
   it("still honours the constructor options when a caller passes them", async () => {
     const fake = fakeQuery([result()]);
-    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillFamily: "seedance" });
+    const adapter = new ClaudeAdapter({ command: "claude", runQuery: fake.run, skillBodies: shippedSkillBodies, skillFamily: "seedance" });
     const { sessionId } = await adapter.createSession({ purpose: "authoring", cwd: CWD, agent: "scene-writer" });
     await adapter.sendMessage({ sessionId, parts: [{ type: "text", text: "go" }] });
     const prompt = String(fake.options()["systemPrompt"]);

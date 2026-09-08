@@ -3,7 +3,7 @@ import {
   agentPromptFor,
   confinementFor,
   ROSTER,
-  skillForAgent,
+  sessionSkillForAgent,
   type AgentConfinement,
   type CreateSessionInput,
   type HarnessAdapter,
@@ -49,6 +49,7 @@ export interface ClaudeAdapterOptions {
   /** Selects the authoring skill for the session (SPEC-019 R-16). */
   skillFamily?: string;
   skillModelId?: string;
+  skillBodies?: SessionConfigInput["skillBodies"];
   /** Per-agent Settings overrides — a brief may be rewritten, the confinement may not. */
   agents?: Record<string, { model?: string; brief?: string }>;
   onTrace?: (line: Record<string, unknown>) => void;
@@ -235,11 +236,11 @@ export class ClaudeAdapter implements HarnessAdapter {
      * skill at all — while the proposal recorded the document it was supposed to have used. The
      * constructor options stay as a fallback, because a caller that does pass them means it.
      */
-    const skill = skillForAgent(
-      agentName,
-      prepared.skillFamily ?? this.opts.skillFamily,
-      prepared.skillModelId ?? this.opts.skillModelId,
-    );
+    const skill = sessionSkillForAgent(agentName, {
+      skillFamily: prepared.skillFamily ?? this.opts.skillFamily,
+      skillModelId: prepared.skillModelId ?? this.opts.skillModelId,
+      skillBodies: prepared.skillBodies ?? this.opts.skillBodies,
+    });
     /*
      * No default for `cwd`, though the contract makes it optional.
      *
