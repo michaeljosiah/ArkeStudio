@@ -11,7 +11,7 @@ import type {
 } from "@arke-studio/contracts";
 import { stagedReferenceKey, worldImagePrompt } from "@arke-studio/contracts";
 import { ArtStyleGrid } from "../components/art-style-picker.js";
-import { resolveModel, resolveOutputChoice, usableModels } from "../components/dispatch-bar.js";
+import { resolveModel, resolveOutputChoice, strandReason, usableModels } from "../components/dispatch-bar.js";
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { ReferencePickerBody, worldPickerSources } from "../components/reference-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
@@ -289,7 +289,7 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
     model !== null
       ? undefined
       : offered.length > 0
-        ? "The default image model is switched off — pick another one here, or upload an image instead."
+        ? `${resolved.stranded ? `${resolved.stranded.displayName}: ${strandReason(state, resolved.stranded)}.` : "The selected image model is unavailable."} Pick another model here, or upload an image instead.`
         : undefined;
 
   const mine = (state?.app.jobs ?? []).filter(
@@ -523,13 +523,13 @@ export function ArtDirectionScreen() {
     : {};
   // What the bar in the dialog does not already say. With nothing in the manifest at all the bar
   // states it itself, and repeating it put the same sentence on screen twice; a routed default
-  // that is merely switched off is the case the bar shows a model row for and cannot explain.
+  // that cannot run also needs an alternative action beside the model row.
   const offered = usableModels(state, "image");
   const why =
     model !== null
       ? undefined
       : offered.length > 0
-        ? "The default image model is switched off — pick another one here, or upload an image instead."
+        ? `${resolved.stranded ? `${resolved.stranded.displayName}: ${strandReason(state, resolved.stranded)}.` : "The selected image model is unavailable."} Pick another model here, or upload an image instead.`
         : undefined;
   const mine = (state?.app.jobs ?? []).filter(
     (job) => job.worldId === world.meta.worldId && job.target.kind === "master-look",

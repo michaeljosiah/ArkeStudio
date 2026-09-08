@@ -8,6 +8,7 @@ import {
   deriveCapabilityAvailability,
   engineOfProvider,
   modelPriceCopy,
+  modelEligible,
   type Capability,
   type EngineId,
   type ManifestModel,
@@ -28,6 +29,7 @@ import {
   useStore,
   verifyComfyUiRecipe,
 } from "../lib/store.js";
+import { eligibilityInputs } from "../components/dispatch-bar.js";
 import { recipeFacts } from "./engine-panes.js";
 import { LocalModelRow, entryStatusLine, localEntries, type Entry } from "./local-models.js";
 import { KEYED_PROVIDERS, ProviderKeyLine, ProviderToolLine } from "./settings-providers.js";
@@ -326,6 +328,7 @@ function recipeTileFacts(
   gated: { fit?: "runs-well" | "runs-slowly" | "insufficient" | "unsupported" | "unknown"; reason?: string } | undefined,
   recommended: boolean,
   disabled: boolean,
+  eligible: boolean,
 ): LocalFacts {
   const facts = recipeFacts(recipe, weights, gated);
   const controls = (
@@ -359,7 +362,7 @@ function recipeTileFacts(
     tone: facts.tone,
     bar: facts.moving || facts.paused ? facts.pct : undefined,
     reason: facts.reason,
-    note: disabled ? "turned off in AI models" : undefined,
+    note: disabled ? "turned off in AI models" : recipe.state === "unknown" && eligible ? "Generation is allowed." : undefined,
     recommended,
     dim: facts.dim,
     ready: recipe.state === "ready",
@@ -475,6 +478,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
           gated,
           state?.app.runtime?.recommended[model.capability] === model.id,
           disabled.has(model.id),
+          modelEligible(model, eligibilityInputs(state)),
         ),
       };
     }
@@ -482,8 +486,9 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
     return { model, entry, facts: entry !== undefined ? entryFacts(entry, onOpenDownloads) : undefined };
   });
   const ready = items.filter((i) => i.facts?.ready === true).length;
+  const unchecked = items.filter((i) => recipes.get(i.model.id)?.state === "unknown").length;
   const right = (
-    <span className="fy-by__state">{remote ? "elsewhere" : `${ready} of ${ids.size} ready`}</span>
+    <span className="fy-by__state">{remote ? "elsewhere" : unchecked > 0 ? `${ready} ready · ${unchecked} unchecked` : `${ready} of ${ids.size} ready`}</span>
   );
   return (
     <Section id={engine} name={ENGINE_LABEL[engine]} right={right}>

@@ -218,6 +218,10 @@ export function resolveModel(
  */
 export function strandReason(state: ReturnType<typeof useStore>["state"], model: ManifestModel): string {
   if ((state?.app.models.disabled ?? []).includes(model.id)) return "turned off in AI models";
+  const fit = state?.app.runtime?.models.find((row) => row.modelId === model.id);
+  if (fit?.fit === "insufficient" || fit?.fit === "unsupported") {
+    return fit.reason ?? "this machine does not meet the model requirements";
+  }
   // A stranded local recipe carries its readiness reason — the measured one, never key advice
   // for a provider that takes no key (SPEC-021 R-10).
   if (model.provider === "comfyui") {
@@ -648,6 +652,9 @@ export function DispatchBar({
         {stranded
           ? `${model.displayName} · unavailable, ${strandReason(state, stranded)}`
           : modelDetail(model, tier, isDefault, chosenAspect)}
+        {!stranded && recipeReadinessFor(state, model.id)?.state === "unknown" && (
+          <span> · {recipeReadinessFor(state, model.id)?.reason ?? "Hardware not checked."} Generation is allowed.</span>
+        )}
       </div>
     </div>
   );
