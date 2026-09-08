@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { legacySceneView } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -93,8 +94,11 @@ describe("a designed screen draws its own controls (U2)", () => {
 
   it("wears it on the full shot's camera fields too", () => {
     const production = WORLD.productions[0]!;
-    const scene = production.scenes?.[0];
-    assert.ok(scene && scene.shots.length > 0, "the fixture has a shot to open");
+    const record = production.scenes?.[0];
+    assert.ok(record, "the fixture has a scene");
+    // A scene record is either shape (SPEC-029); the projection is how a screen reads its shots.
+    const scene = legacySceneView(record);
+    assert.ok(scene.shots.length > 0, "and a shot to open");
     const html = renderRoute(
       `/w/${WORLD_ID}/p/${production.meta.id}/scenes/${scene.id}/shots/${scene.shots[0]!.id}`,
     );
