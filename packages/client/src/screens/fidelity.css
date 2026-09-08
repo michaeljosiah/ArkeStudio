@@ -1026,13 +1026,13 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* ---- sheet detail (3a): design card, turnaround strip, identity column ---- */
 
-/* The overview tabs belong to this sheet, below any world-condition notices (issue 993). */
-.fy-sheet { position: relative; display: flex; gap: 64px; padding: 34px 100px 48px; align-items: flex-start; }
+.fy-sheet { display: flex; gap: 64px; padding: 34px 100px 48px; align-items: flex-start; }
 .fy-sheet__side { flex: none; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
 .fy-sheet__main {
   flex: 1;
   min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--stack-loose);
   align-content: start;
   animation: fy-fade-up 0.7s var(--ease-out) 0.18s both;
@@ -1132,7 +1132,10 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 .fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
-.fy-character-overview-tabs { position: absolute; top: 68px; right: 90px; z-index: 10; }
+/* The tabs flow beside the name, wrapping below it when needed, and below world notices. */
+.fy-sheet__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 10px; }
+.fy-sheet__heading > .fy-sheet__name { margin-bottom: 0; margin-right: auto; }
+.fy-character-overview-tabs { flex-wrap: wrap; max-width: 100%; }
 .fy-overview-sheet { width: 322px; margin-top: 22px; padding: 0 0 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); box-shadow: var(--shadow-sm); text-align: left; cursor: pointer; overflow: hidden; }
 .fy-overview-sheet > span { display: block; width: 320px; height: 168px; overflow: hidden; }
 .fy-overview-sheet strong { display: inline-block; margin: 9px 0 0 12px; font: 600 12px var(--font-sans); }

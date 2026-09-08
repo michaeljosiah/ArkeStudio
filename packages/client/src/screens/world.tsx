@@ -1826,6 +1826,28 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
       </button>
     </div>
   ) : null;
+  const characterTabs = isCharacter && (
+    <nav className="fy-seg fy-character-overview-tabs">
+      <span className="fy-seg__item fy-seg__item--active">Overview</span>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}>
+        Reference
+      </button>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}>
+        More looks
+      </button>
+      <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}>
+        Voice
+      </button>
+    </nav>
+  );
+  const sheetHeading = (
+    <h1
+      className={isCharacter ? "fy-sheet__name" : "fy-locdetail__name"}
+      style={isCharacter ? undefined : { marginTop: 10 }}
+    >
+      {sheet.name}
+    </h1>
+  );
   const main = (
     <div
       className={isCharacter ? "fy-sheet__main" : undefined}
@@ -1836,12 +1858,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           {sheet.type}
           {sheet.role ? ` · ${sheet.role}` : ""}
         </div>
-        <h1
-          className={isCharacter ? "fy-sheet__name" : "fy-locdetail__name"}
-          style={isCharacter ? undefined : { marginTop: 10 }}
-        >
-          {sheet.name}
-        </h1>
+        {isCharacter ? <div className="fy-sheet__heading">{sheetHeading}{characterTabs}</div> : sheetHeading}
         <div className="fy-sheet__badges">
           <Badge tone={sheet.status === "sketch" ? "outline" : "neutral"}>
             {sheet.status === "sketch" ? `sketch · v${sheet.version}` : `v${sheet.version} · locked`}
@@ -2104,30 +2121,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   if (isCharacter) {
     return (
       <div className="fy-sheet" data-screen={screenId}>
-        <nav className="fy-seg fy-character-overview-tabs">
-          <span className="fy-seg__item fy-seg__item--active">Overview</span>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/kit`)}
-          >
-            Reference
-          </button>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/looks`)}
-          >
-            More looks
-          </button>
-          <button
-            type="button"
-            className="fy-seg__item"
-            onClick={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}
-          >
-            Voice
-          </button>
-        </nav>
         {side}
         {main}
       </div>
