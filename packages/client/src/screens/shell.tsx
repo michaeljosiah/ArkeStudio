@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
+import { Archive, ChevronDown, ChevronRight, FileText, Plus, Sparkle, Trash } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
   CAPABILITY_LABEL,
@@ -1826,10 +1826,9 @@ function VendorSignInRow({
           <div className="fy-set__field">
             {visibleFields(openMethod).map((field) =>
               field.options !== null ? (
-                <select
+                <Select
                   key={field.key}
-                  className="fy-set__select"
-                  aria-label={field.title}
+                  label={field.title}
                   value={answers[field.key] ?? ""}
                   onChange={(e) => setAnswers({ ...answers, [field.key]: e.target.value })}
                 >
@@ -1839,7 +1838,7 @@ function VendorSignInRow({
                       {option.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <Input
                   key={field.key}
@@ -1888,9 +1887,9 @@ export function SettingsNotificationsScreen() {
           <div className="fy-set__title">When Arke Studio is in the background</div>
           <div className="fy-set__caps">Windows notifications open Activity when clicked</div>
         </div>
-        <select
-          className="fy-set__select"
-          aria-label="Background notifications"
+        {/* The house control, not the platform's (issue 1010, U2). */}
+        <Select
+          label="Background notifications"
           value={preference}
           onChange={(event) =>
             setBackgroundNotifications(event.target.value as typeof preference)
@@ -1899,7 +1898,7 @@ export function SettingsNotificationsScreen() {
           <option value="background-results-and-issues">Results and issues</option>
           <option value="issues-only">Issues only</option>
           <option value="off">Off</option>
-        </select>
+        </Select>
       </div>
       <div className="fy-set__note">
         issues include failed or uncertain generations, result preparation, and paused providers ·
@@ -2305,9 +2304,9 @@ export function SettingsGeneralScreen() {
         return (
           <div key={capability} className="fy-set__row fy-set__row--routing">
             <span className="fy-set__routelabel">{CAPABILITY_LABEL[capability]}</span>
-            <select
+            <Select
               className="fy-set__pill"
-              aria-label={`Model for ${CAPABILITY_LABEL[capability]}`}
+              label={`Model for ${CAPABILITY_LABEL[capability]}`}
               disabled={options.length === 0}
               value={selected ?? ""}
               onChange={(e) => setRoutingDefault(capability, e.target.value)}
@@ -2324,7 +2323,7 @@ export function SettingsGeneralScreen() {
                     {usable(m) || m.id === selected ? "" : ` — ${strandReason(state, m)}`}
                   </option>
                 ))}
-            </select>
+            </Select>
             {/* The capability copy is the manifest speaking (R-10): refs, frames, caps. */}
             {/* A model names its provider and where that provider's work runs — the connection
                 state SPEC-028 R-33 requires for a keyed one, the resolved engine's locality for a
@@ -2757,7 +2756,11 @@ export function ActivityScreen() {
                       Cancel
                     </Button>
                   )}
-                  {r.kind === "job" && <Button variant="ghost" onClick={() => setInspectedJobId(r.ref)}>Calls</Button>}
+                  {r.kind === "job" && (
+                    <IconButton label="Provider calls" onClick={() => setInspectedJobId(r.ref)}>
+                      <FileText />
+                    </IconButton>
+                  )}
                   {r.cancellable && r.kind === "export" && activeWorldId && (
                     <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
                       Cancel
@@ -2780,7 +2783,11 @@ export function ActivityScreen() {
                     </div>
                     <div className="fy-activityrow__sub">{entry.detail}</div>
                     <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
-                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <Button variant="ghost" onClick={() => setInspectedJobId(entry.ref!)}>Provider calls</Button>}
+                      {entry.ref && jobs.some((job) => job.id === entry.ref) && (
+                        <IconButton label="Provider calls" onClick={() => setInspectedJobId(entry.ref!)}>
+                          <FileText />
+                        </IconButton>
+                      )}
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
                           <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
@@ -2892,11 +2899,17 @@ export function ActivityScreen() {
                     <span className="scr-field__hint">failed — run it again from wherever you started it</span>
                   );
                 })()}
-              <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
+              {/* Both of these repeat on every row of the history, which is what made them a band
+                  of words rather than a row of work (issue 1010, U1). The glyph carries the verb
+                  and the tooltip carries the word. */}
+              <IconButton label="Provider calls" onClick={() => setInspectedJobId(job.id)}>
+                <FileText />
+              </IconButton>
               {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
-                  and the words say what survives it. Offered only where the state permits it
-                  (R-13) — work still finishing, or a finalization the user can still retry, is
-                  not history yet. */}
+                  and the words say what survives it — so the consent stays a text button even
+                  though the offer is a glyph. Offered only where the state permits it (R-13) —
+                  work still finishing, or a finalization the user can still retry, is not history
+                  yet. */}
               {jobActions(job).includes("delete") &&
                 (confirmingDelete === job.id ? (
                   <>
@@ -2917,9 +2930,9 @@ export function ActivityScreen() {
                     </Button>
                   </>
                 ) : (
-                  <Button variant="ghost" onClick={() => setConfirmingDelete(job.id)}>
-                    Delete
-                  </Button>
+                  <IconButton label="Delete" onClick={() => setConfirmingDelete(job.id)}>
+                    <Trash />
+                  </IconButton>
                 ))}
             </div>
           ))}

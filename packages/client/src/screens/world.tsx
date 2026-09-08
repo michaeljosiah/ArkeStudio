@@ -30,8 +30,8 @@ import {
   sortScenes,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
-import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { ChevronRight, Plus, Search } from "../components/icons.js";
+import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
+import { Archive, ChevronRight, Copy, Pencil, Plus, Search, Users } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -1220,17 +1220,18 @@ function SheetGrid({
                     />
                   </div>
                   <div style={{ minWidth: 0 }}>
-                    <div className="fy-row__name">
-                      {sheet.name}
-                      <span
-                        className={cx("fy-dot", sheet.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
-                        style={{ width: 6, height: 6 }}
-                        aria-hidden="true"
-                      />
-                    </div>
+                    <div className="fy-row__name">{sheet.name}</div>
                     <div className="fy-row__sub">{roleOf(sheet)}</div>
                   </div>
-                  <span className="fy-row__meta">{reachOf(sheet)}</span>
+                  {/*
+                    The status is a word, not a tint (issue 1010, U3). A dot after every name on a
+                    list of names is the same colour on most of them and carries no key, so it
+                    reads as decoration; the head above already counts the two states, and the
+                    row's own strip is where the rest of its facts are.
+                  */}
+                  <span className="fy-row__meta">
+                    {sheet.status === "locked" ? "locked" : "sketch"} · {reachOf(sheet)}
+                  </span>
                   <span className="fy-row__chev">
                     <ChevronRight />
                   </span>
@@ -1332,12 +1333,9 @@ export function LocationsScreen() {
               />
             </div>
             <div className="fy-gridcard__pad">
+              {/* No dot: the foot two lines below already says locked or sketch (issue 1010). */}
               <div className="fy-gridcard__title">
                 <span className="fy-gridcard__name">{s.name}</span>
-                <span
-                  className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                  style={{ width: 6, height: 6 }}
-                />
               </div>
               <div className="fy-gridcard__body">{sheetLede(s)}</div>
               <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
@@ -1405,12 +1403,9 @@ export function FactionsScreen() {
                 />
               </div>
               <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
+                {/* No dot: the foot says locked or sketch in words (issue 1010). */}
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{s.name}</span>
-                  <span
-                    className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 6, height: 6 }}
-                  />
                 </div>
                 <div className="fy-gridcard__body">{sheetLede(s)}</div>
                 {/*
@@ -1921,36 +1916,42 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           onChange={() => navigate(`/w/${worldId}/cast/${sheet.id}/voice`)}
         />
       )}
+      {/* A second row of words under three primary buttons read as six things to do rather than
+          three and a housekeeping drawer (issue 1010, U1). The verbs are their own glyphs now,
+          with the word — and, where it earns one, the consequence — in the tip. */}
       <div className="fy-sheet__quiet">
-        <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
-          Rename
-        </Button>
-        <Button
-          variant="ghost"
+        <IconButton
+          label="Rename"
+          aria-pressed={renaming !== null}
+          onClick={() => setRenaming(renaming === null ? sheet.name : null)}
+        >
+          <Pencil />
+        </IconButton>
+        <IconButton
+          label="Duplicate"
+          aria-pressed={duplicating !== null}
           onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}
         >
-          Duplicate
-        </Button>
+          <Copy />
+        </IconButton>
         {/* One way only (SPEC-020 R-15, D7): a sheet promoted by mistake is retired, because
               demotion would either break the citations outside the production or need an
               exception for widely-cited guests. */}
         {sheet.production !== undefined && (
-          <Button
-            variant="ghost"
+          <IconButton
+            label="Promote to the world"
             onClick={() => worldId && lifecycle.track(promoteGuest(worldId, sheetPath))}
-            title={`Moves ${sheet.name} out of ${sheet.production} and into the world's cast — the id, every citation and the reference kit stay`}
           >
-            Promote to the world
-          </Button>
+            <Users />
+          </IconButton>
         )}
-        <Button
-          variant="ghost"
+        <IconButton
+          label="Retire"
           disabled={sheet.retired === true}
           onClick={() => worldId && retireEntity(worldId, sheetPath)}
-          title="Stays resolvable for existing citations; leaves pickers for new work"
         >
-          Retire
-        </Button>
+          <Archive />
+        </IconButton>
       </div>
       {renaming !== null && (
         <Card className="scr-form">
@@ -2019,15 +2020,10 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           const body = <div className="fy-sheet__secbody">{s.body}</div>;
           return (
             <div key={s.heading}>
-              <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {s.heading}
-                {!isCharacter && (
-                  <span
-                    className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 5, height: 5 }}
-                  />
-                )}
-              </div>
+              {/* Every heading on a location record used to carry the sheet's status as a dot —
+                  the same colour on all of them, saying once per section what the badge under the
+                  name says once for the record (issue 1010, U3). */}
+              <div className="fy-sheet__sechead">{s.heading}</div>
               {readable ? readableProse(s.heading, s.body, body) : body}
             </div>
           );

@@ -341,7 +341,10 @@ describe("conversation permission cards", () => {
 
   it("renders playable take evidence, destination, history, and rejection citation", () => {
     const html = renderActionConversation("take-review");
-    assert.match(html, /<video[^>]*controls=""/);
+    // The house player, not the browser's chrome (issue 1010, U2): a poster and one drawn button.
+    assert.match(html, /<video[^>]*poster="/);
+    assert.doesNotMatch(html, /<video[^>]*controls=""/);
+    assert.match(html, /aria-label="Play Take tk_/);
     assert.match(html, /clip\.mp4/);
     assert.match(html, /Maren at the rail, listening/);
     assert.match(html, /tk_01J8A0000000000000000000A1/);

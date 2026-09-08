@@ -42,6 +42,7 @@ import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Pin } from "./icons.js";
+import { PosterVideo } from "./player.js";
 import { ReadAloud } from "./read-aloud.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
 import { mediaUrl } from "../lib/media.js";
@@ -378,7 +379,12 @@ export function ConversationPermissionCard({
                         <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
                       </a>
                     ) : result.medium === "video" ? (
-                      <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
+                      <PosterVideo
+                        className="fy-actioncard__media"
+                        src={mediaUrl(state.world!.meta.slug, result.mediaPath)}
+                        label={result.description}
+                        {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})}
+                      />
                     ) : result.medium === "audio" ? (
                       <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
                     ) : (
@@ -466,11 +472,10 @@ function ConversationActionBody({ action, supported }: { action: ConversationAct
       return <div className="fy-actioncard__body">
         {body.mediaPath && state?.world ? (
           body.mediaKind === "video" ? (
-            <video
+            <PosterVideo
               className="fy-actioncard__media"
-              controls
-              preload="metadata"
               src={mediaUrl(state.world.meta.slug, body.mediaPath)}
+              label={`Take ${body.mediaId}`}
               {...(body.posterPath ? { poster: mediaUrl(state.world.meta.slug, body.posterPath) } : {})}
             />
           ) : body.mediaKind === "audio" ? (

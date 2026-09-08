@@ -1,4 +1,5 @@
-import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type TextareaHTMLAttributes } from "react";
+import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import { Check as CheckMark, ChevronDown } from "./icons.js";
 
 /**
  * The SpecOne component layer, reimplemented as React against the token contract
@@ -32,6 +33,14 @@ export function Button({
   );
 }
 
+/**
+ * A verb drawn as its glyph, with the house tooltip carrying the word (issue 1010).
+ *
+ * The tip is `.fy-tip`'s styled bubble rather than the browser's `title`, for the same reason
+ * the selects below stopped being native ones: a designed screen that borrows the platform's
+ * chrome for half its controls reads as two screens. `aria-label` still carries the word for
+ * anything that is not a pointer, so the glyph is never the only statement of what this does.
+ */
 export function IconButton({
   label,
   className,
@@ -39,7 +48,7 @@ export function IconButton({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button className={cx("ui-iconbtn", className)} aria-label={label} title={label} {...rest}>
+    <button className={cx("ui-iconbtn", "fy-tip", className)} aria-label={label} data-tip={label} {...rest}>
       {children}
     </button>
   );
@@ -51,6 +60,52 @@ export function Input({ className, ...rest }: InputHTMLAttributes<HTMLInputEleme
 
 export function Textarea({ className, ...rest }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return <textarea className={cx("ui-input", "ui-textarea", className)} {...rest} />;
+}
+
+/**
+ * A `<select>` wearing the house control rather than the platform's (issue 1010, U2).
+ *
+ * The element stays a real `<select>` — the operating system's list is the one part of it worth
+ * keeping, and a hand-built menu would lose keyboard type-ahead and the native touch sheet. What
+ * is replaced is the closed state: `appearance: none` strips the platform button, and the
+ * chevron beside it is the same one every other disclosure in the app draws.
+ *
+ * `label` is the accessible name, because these sit beside a caption rather than a `<label for>`.
+ */
+export function Select({
+  label,
+  className,
+  wrapClassName,
+  children,
+  ...rest
+}: SelectHTMLAttributes<HTMLSelectElement> & { label: string; wrapClassName?: string }) {
+  return (
+    <span className={cx("ui-select", wrapClassName)}>
+      <select className={cx("ui-select__control", className)} aria-label={label} {...rest}>
+        {children}
+      </select>
+      <ChevronDown size={12} />
+    </span>
+  );
+}
+
+/**
+ * The same trade for a checkbox: a real input, drawn by us and never by the platform.
+ */
+export function Checkbox({
+  label,
+  className,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { label: ReactNode }) {
+  return (
+    <label className={cx("ui-check", rest.disabled === true && "ui-check--off", className)}>
+      <span className="ui-check__box">
+        <input type="checkbox" {...rest} />
+        <CheckMark size={11} />
+      </span>
+      <span className="ui-check__label">{label}</span>
+    </label>
+  );
 }
 
 export function Switch({

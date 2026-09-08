@@ -224,7 +224,8 @@ function exportsSent(mounted: Mounted): Extract<ClientMessage, { kind: "export-c
 
 /** The song clock's one way onto the timeline (SPEC-037 R-13); the Cut offers it only for a master it can cut against. */
 function openOnTimeline(mounted: Mounted): HTMLButtonElement | undefined {
-  return [...mounted.container.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === "Open on the timeline");
+  // One register in the toolbar (issue 1010): the control is a glyph, named by its label.
+  return mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Open on the timeline"]') ?? undefined;
 }
 
 function renderCut(state: ClientState): HTMLElement {
