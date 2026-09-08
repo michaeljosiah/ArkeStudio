@@ -627,6 +627,16 @@ describe("a recipe is ComfyUI's model, listed once (SPEC-034 R-7, SPEC-033 R-6)"
       },
     });
 
+  it("counts unchecked recipes separately and states when they can run (#975)", () => {
+    const state = answered({ state: "unknown", reason: "VRAM could not be measured." });
+    state.app.runtime = runtime({ models: runtime().models.map((m) =>
+      m.provider === "comfyui" ? { ...m, fit: "unknown" as const } : m) });
+    const text = plain(renderEngine(state, "comfyui"));
+    assert.match(text, /0 ready \u00b7 1 unchecked/);
+    assert.match(text, /Generation is allowed/);
+    assert.doesNotMatch(text, /0 of .* ready/);
+  });
+
   it("draws it from the recipe's own facts once the engine has answered, and only once", () => {
     // The two projections partition rather than overlap. Drawn from both, one fetch would carry
     // two Downloads on one screen — the duplication `statedElsewhere` existed to hide.

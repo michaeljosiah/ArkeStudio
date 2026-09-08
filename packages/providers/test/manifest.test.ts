@@ -387,45 +387,17 @@ describe("estimation per pricing shape (R-11, R-15, §3.2)", () => {
    * offers only what the row declares, and a ratio the row never declared is ignored rather than
    * sent and refused.
    */
-  /*
-   * Three properties held over every shipped row at once, so no future row can reintroduce any
-   * of them by being added.
-   *
-   * The middle one is the reason the other two exist. `limits.aspects` is a *curated offer list*
-   * — the fal catalogue's own header says what a model accepts is curated because the API does
-   * not say, and nano-banana's entry deliberately omits ratios its route does have — so a shape
-   * outside that list is not an invalid request. What is invalid is having two different defaults
-   * for one model: the picker took the curated list's first entry, which made nano-banana default
-   * to a 21:9 crop on a screen with a shape control and 16:9 on every screen without one.
-   */
-  it("never derives a shape it would not also offer", () => {
+  it("offers only curated shapes and keeps output-builder validation separate (#975)", () => {
     for (const m of SHIPPED_MANIFEST.models.filter((x) => x.capability === "image")) {
       for (const landscape of [true, false]) {
+        const curated = offeredAspects(m);
         const offered = offeredAspects(m, { landscape });
-        if (offered.length === 0) continue;
+        assert.deepEqual(new Set(offered), new Set(curated), m.id);
         const derived = imageOutputFor(m, { landscape }).aspect;
-        assert.ok(
-          offered.includes(derived),
-          `${m.id} ${landscape ? "landscape" : "portrait"} derives ${derived}, offers ${offered.join(",")}`,
-        );
         assert.ok(aspectOffered(m, derived), `${m.id} would reject its own default`);
-      }
-    }
-  });
-
-  it("defaults a picker to the shape that surface already produced", () => {
-    // Opening a dialog and changing nothing must generate what pressing Generate generated before
-    // the dialog had controls. The default is therefore first in the offered list, not whichever
-    // preset the catalogue happened to list first.
-    for (const m of SHIPPED_MANIFEST.models.filter((x) => x.capability === "image")) {
-      for (const landscape of [true, false]) {
-        const offered = offeredAspects(m, { landscape });
-        if (offered.length === 0) continue;
-        assert.equal(
-          offered[0],
-          imageOutputFor(m, { landscape }).aspect,
-          `${m.id} ${landscape ? "landscape" : "portrait"} would open on a different shape`,
-        );
+        if (curated.length > 0) {
+          assert.equal(offered[0], curated.includes(derived) ? derived : curated[0], m.id);
+        }
       }
     }
   });

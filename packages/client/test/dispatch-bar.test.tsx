@@ -186,6 +186,18 @@ describe("local recipes read the same readiness the coordinator enforces (SPEC-0
     assert.equal(disabledRecipes(withRecipe("ready"), "image").length, 0);
   });
 
+  it("shows an unchecked recipe as runnable, but preserves actual refusals (#975)", () => {
+    const state = withRecipe("unknown", "VRAM could not be measured. The 10 GB floor was not checked.");
+    state.app.routing.defaults.image = RECIPE.id;
+    __setStateForTest(state);
+    assert.match(bar(), /Generation is allowed/);
+    assert.doesNotMatch(bar(), /unavailable|switched off/);
+    state.app.models.disabled = [RECIPE.id];
+    __setStateForTest(state);
+    assert.match(bar(), /turned off in AI models/);
+    assert.doesNotMatch(bar(), /Generation is allowed/);
+  });
+
   it("does not offer a local recipe before its readiness snapshot arrives", () => {
     assert.equal(usableModels(withRecipe(null), "image").some((model) => model.id === RECIPE.id), false);
   });
@@ -367,26 +379,16 @@ describe("choosing the shape", () => {
     assert.deepEqual(resolveOutputChoice(MUTE, { aspect: "16:9" }, { aspect: true }), { tier: "1K" });
   });
 
-  /*
-   * The default a picker opens on is the shape that surface already produced.
-   *
-   * These two rows share a curated list and differ only in orientation, which is exactly the
-   * case that was broken: the picker took the curated list's first entry regardless, so opening
-   * a dialog and changing nothing generated a different shape than pressing Generate had.
-   */
-  it("opens on the shape the surface would have used anyway", () => {
+  it("defaults to an offered shape when the orientation default is absent (#975)", () => {
     __setStateForTest(shapedState(SHAPED.id));
-    // fal + per-image derives 16:9 landscape and 9:16 portrait; the curated list leads with 16:9.
-    assert.equal(resolveOutputChoice(SHAPED, {}, { aspect: true, landscape: true }).aspect, "16:9");
-    assert.equal(
-      resolveOutputChoice(SHAPED, {}, { aspect: true, landscape: false }).aspect,
-      "9:16",
-      "a portrait surface opens on the portrait default, not the list's first entry",
-    );
-    // And the offered list leads with it, so the highlighted segment agrees.
-    const portraitHtml = bar({ aspect: true, landscape: false });
-    const at = (value: string) => portraitHtml.indexOf(`>${value}<`);
-    assert.ok(at("9:16") > 0 && at("9:16") < at("16:9"), "the default is offered first");
+    assert.equal(resolveOutputChoice(SHAPED, {}, { aspect: true, landscape: false }).aspect, "16:9");
+    assert.ok(!bar({ aspect: true, landscape: false }).includes(">9:16<"));
+    const krea: ManifestModel = {
+      ...SHAPED, provider: "comfyui", id: "comfyui-krea2",
+      limits: { tiers: { "2K": "2048" }, aspects: ["1:1", "16:9", "9:16", "4:3", "3:4"] },
+    };
+    assert.deepEqual(resolveOutputChoice(krea, { aspect: "3:2" }, { aspect: true, landscape: true }),
+      { tier: "2K", aspect: "1:1" });
   });
 });
 
