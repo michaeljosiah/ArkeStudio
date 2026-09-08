@@ -2619,7 +2619,7 @@ function BenchWorkspace({
                 onKeyDown={(e) => {
                   if (e.key === "Escape") setLyricsOpen(false);
                 }}
-                placeholder="A farewell sung on the harbour wall the night the tide-clock stopped."
+                placeholder="What the song is about, and how it should feel"
               />
               {lyricsDraft !== null && (
                 <>

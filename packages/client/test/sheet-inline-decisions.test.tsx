@@ -239,7 +239,7 @@ describe("the initiating sheet form owns its result", () => {
   it("keeps typed input and shows the coordinator's exact refusal", async () => {
     const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest/edit`, stateWith([]));
     try {
-      const role = mounted.container.querySelector<HTMLInputElement>('input[placeholder="Tide-caller"]');
+      const role = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Role"]');
       assert.ok(role);
       await typeInto(role, "Harbor witness");
       await act(async () => button(mounted.container, "Save edit · the sheet becomes v5").click());
@@ -277,7 +277,7 @@ describe("the initiating sheet form owns its result", () => {
   it("shows authoritative ripple news and a reachable undo after success", async () => {
     const mounted = await mount(`/w/${WORLD_ID}/cast/maren-kest/edit`, stateWith([]));
     try {
-      const role = mounted.container.querySelector<HTMLInputElement>('input[placeholder="Tide-caller"]');
+      const role = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Role"]');
       assert.ok(role);
       await typeInto(role, "Harbor witness");
       await act(async () => button(mounted.container, "Save edit · the sheet becomes v5").click());
@@ -391,8 +391,8 @@ describe("remaining single-act controls own their result", () => {
   it("shows canon contradiction candidates before a non-blocking submit and preserves refused input", async () => {
     const mounted = await mount(`/w/${WORLD_ID}/canon/new`, stateWith([]));
     try {
-      const title = mounted.container.querySelector<HTMLInputElement>('input[placeholder="Tide-calling"]');
-      const statement = mounted.container.querySelector<HTMLTextAreaElement>('textarea[placeholder^="A caller cannot"]');
+      const title = mounted.container.querySelector<HTMLInputElement>('input[aria-label="Title"]');
+      const statement = mounted.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Statement"]');
       assert.ok(title);
       assert.ok(statement);
       await typeInto(title, "The answering bell");

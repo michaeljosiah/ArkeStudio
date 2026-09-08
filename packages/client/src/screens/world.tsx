@@ -2357,7 +2357,8 @@ export function CharacterEditScreen() {
                   <Input
                     value={role}
                     maxLength={CHARACTER_ROLE_MAX}
-                    placeholder="Tide-caller"
+                    aria-label="Role"
+                    placeholder="Their part in this world"
                     onChange={(e) => setEditedRole(e.target.value)}
                   />
                   <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
@@ -2574,6 +2575,19 @@ export function CharacterEditScreen() {
 
 // ---- New sheet screens -----------------------------------------------------
 
+/**
+ * What one sentence is being asked for, per kind of sheet (issue 1006).
+ *
+ * This was a sentence about a ferryman: a character, from the design's sample world, offered to
+ * every world and to locations and factions as well. A placeholder names the shape of an answer;
+ * an invented example names a subject, and reads as the app proposing one.
+ */
+export const SENTENCE_HINT: Record<"character" | "location" | "faction", string> = {
+  character: "One sentence — who they are, and what they want",
+  location: "One sentence — what the place is, and what it is like to be there",
+  faction: "One sentence — what the group wants, and what it cannot afford",
+};
+
 function NewSheetScreen({
   screenId,
   title,
@@ -2670,7 +2684,8 @@ function NewSheetScreen({
                 <>
                   <Input placeholder="Their name" value={name} onChange={(e) => setName(e.target.value)} />
                   <Textarea
-                    placeholder="A ferryman who refuses payment in coin, only in secrets."
+                    aria-label="One sentence"
+                    placeholder={SENTENCE_HINT[sheetType]}
                     value={sentence}
                     onChange={(e) => setSentence(e.target.value)}
                     style={{ minHeight: 96, font: "400 15px/1.6 var(--font-sans)" }}
@@ -2721,7 +2736,8 @@ function NewSheetScreen({
                   </div>
                   <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                     <Input
-                      placeholder="Name the copy · e.g. Bray's brother"
+                      aria-label="Name the copy"
+                      placeholder="Name the copy"
                       value={copyName}
                       onChange={(e) => setCopyName(e.target.value)}
                     />
@@ -3674,7 +3690,8 @@ export function CanonThreadScreen() {
               The settled statement
             </div>
             <Textarea
-              placeholder="The Chorister was taught by the god itself, in the winter it walked in…"
+              aria-label="The settled statement"
+              placeholder="What is settled, in one sentence"
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
             />
@@ -3774,12 +3791,13 @@ export function NewCanonScreen() {
           </div>
           <div>
             <div className="fy-fieldlabel">Title</div>
-            <Input placeholder="Tide-calling" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Input aria-label="Title" placeholder={`Name this ${entryType}`} value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div>
             <div className="fy-fieldlabel">Statement</div>
             <Textarea
-              placeholder="A caller cannot move a tide she has not stood in…"
+              aria-label="Statement"
+              placeholder="What it says, in one sentence"
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
             />
