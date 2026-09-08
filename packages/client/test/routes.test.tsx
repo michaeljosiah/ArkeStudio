@@ -338,6 +338,21 @@ describe("screen inventory", () => {
     }
   });
 
+  it("keeps Props under Cast with the shared entity navigation and a bounded creation form", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const world = FIXTURE_STATE.world!;
+    const { document } = parseHTML(renderAt(`/w/${world.meta.worldId}/props`));
+    const page = document.querySelector('[data-screen="props"]')!;
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.textContent, "Cast");
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.getAttribute("aria-current"), "page");
+    assert.equal(page.querySelector('.fy-sheetkinds [aria-current="page"]')?.textContent, "Props · 0");
+    for (const slug of ["cast", "locations", "factions"]) {
+      assert.ok(page.querySelector(`.fy-sheetkinds a[href="/w/${world.meta.worldId}/${slug}"]`));
+    }
+    assert.ok(page.querySelector('.scr-form input.ui-input[aria-label="Prop name"]'));
+    assert.ok(page.querySelector('.scr-form')?.textContent?.includes("No props yet."));
+  });
+
   it("renders the canonical Cast ledger copy, reach, actions, and direct rows", () => {
     const world = FIXTURE_STATE.world!;
     __setStateForTest(FIXTURE_STATE);

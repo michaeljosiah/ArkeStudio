@@ -1,7 +1,7 @@
 import { PerformanceBiblePanel } from "../components/performance-bible-panel.js";
 import { CharacterVoiceSamplePanel } from "../components/character-voice-sample.js";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
+import { Link, NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
   MICRODRAMA_DEFAULTS,
@@ -165,7 +165,7 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
-  const onSheets = /\/(cast|locations|factions)(\/|$)/.test(location.pathname);
+  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(location.pathname);
   if (
     location.pathname.endsWith("/art-direction/propose") ||
     location.pathname.endsWith("/main-photo") ||
@@ -207,19 +207,26 @@ export function WorldLayout() {
       <div className={cx("fy-content", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
-            <NavLink
-              key={slug}
-              to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
-              end={slug === ""}
-              className={({ isActive }) =>
-                cx(
-                  "fy-pillnav__item",
-                  (isActive || (slug === "cast" && onSheets)) && "fy-pillnav__item--active",
-                )
-              }
-            >
-              {label}
-            </NavLink>
+            slug === "cast" && onSheets ? (
+              <Link key={slug} to={`/w/${worldId}/cast`} aria-current="page"
+                className="fy-pillnav__item fy-pillnav__item--active">
+                {label}
+              </Link>
+            ) : (
+              <NavLink
+                key={slug}
+                to={`/w/${worldId}${slug ? `/${slug}` : ""}`}
+                end={slug === ""}
+                className={({ isActive }) =>
+                  cx(
+                    "fy-pillnav__item",
+                    isActive && "fy-pillnav__item--active",
+                  )
+                }
+              >
+                {label}
+              </NavLink>
+            )
           ))}
         </nav>
         <WorldConditionBanners />
@@ -812,7 +819,7 @@ function NeedsYou({ worldId, world }: { worldId: string; world: WorldBundle }) {
  * Each ledger keeps its own address and presentation; this row is how you move between them,
  * with the counts carried so an empty kind says so before you visit it.
  */
-function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
+export function SheetKindNav({ active }: { active: Sheet["type"] | "prop" }) {
   const { worldId } = useParams();
   const world = useWorld();
   // Props sit beside the sheets they are deliberately not one of (design turn 105; issue 537).
