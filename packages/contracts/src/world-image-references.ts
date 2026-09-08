@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { WorldBundle } from "./client-state.js";
-import { pickableArtifacts } from "./artifact.js";
+import { newerArtifact, pickableArtifacts, type ArtifactSidecar } from "./artifact.js";
 
 export const WorldImageReferenceSchema = z.object({
   file: z.string(),
@@ -59,12 +59,19 @@ export function worldImageReferences(world: WorldBundle): WorldImageReference[] 
       add(take.startFrame, `${production.meta.title} · Boundary frame`, "Takes and stills");
     }
   }
+  // Legacy tiles reuse their source filename. Only the latest filing aliases that path;
+  // earlier artifacts keep their immutable bytes and remain available as separate pictures.
+  const latest = new Map<string, ArtifactSidecar>();
+  for (const artifact of world.artifacts) {
+    if (artifact.generation?.source !== "character-reference") continue;
+    const path = artifact.generation.sourceFile, previous = latest.get(path);
+    if (!previous || newerArtifact(artifact, previous)) latest.set(path, artifact);
+  }
   for (const artifact of pickableArtifacts(world.artifacts)) {
     if (artifact.kind !== "image" && artifact.kind !== "board") continue;
     const source = artifact.generation?.source === "character-reference" ? rows.get(artifact.generation.sourceFile) : undefined;
-    // Generated artifacts retain a second copy of an image already offered by its owner.
-    if (source) continue;
-    add(`artifacts/${artifact.file}`, artifact.file, artifact.generation || artifact.boundaryExtraction ? "Takes and stills" : "Uploads");
+    if (source && artifact.generation?.source === "character-reference" && latest.get(artifact.generation.sourceFile)?.id === artifact.id) continue;
+    add(`artifacts/${artifact.file}`, source?.name ?? artifact.file, source?.group ?? (artifact.generation || artifact.boundaryExtraction ? "Takes and stills" : "Uploads"), source?.role ?? "style", source?.sheetId);
   }
   return [...rows.values()];
 }

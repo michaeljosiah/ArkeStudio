@@ -91,6 +91,28 @@ describe("filing (R-1, R-4, D8, D9, §3.2)", () => {
     } finally { await store.close(); }
   });
 
+  it("keeps an artifact retired when its retained bytes are changed or missing (#971)", async () => {
+    const { store, dir } = await open();
+    try {
+      const filed = await fileArtifact(store, { sourcePath: await sourceFile("damaged.txt", "original bytes") });
+      assert.equal(filed.outcome, "filed");
+      if (filed.outcome !== "filed") return;
+      await retireArtifact(store, filed.artifact.id);
+      const media = join(dir, "artifacts", filed.artifact.file);
+      const sidecar = `${media}.json`, raw = await readFile(sidecar, "utf8");
+      await writeFile(media, "outside edit");
+      await assert.rejects(restoreArtifact(store, filed.artifact.id), /missing or changed/);
+      assert.equal(await readFile(sidecar, "utf8"), raw);
+      await rm(media);
+      await assert.rejects(restoreArtifact(store, filed.artifact.id), /missing or changed/);
+      assert.equal(await readFile(sidecar, "utf8"), raw);
+      assert.ok(store.getBundle().artifacts.find(a => a.id === filed.artifact.id)?.retiredAt);
+      await writeFile(media, "original bytes");
+      await restoreArtifact(store, filed.artifact.id);
+      assert.equal(store.getBundle().artifacts.find(a => a.id === filed.artifact.id)?.retiredAt, undefined);
+    } finally { await store.close(); }
+  });
+
   it("refuses retirement when the on-disk sidecar changed identity or became unreadable (#957)", async () => {
     const { store, dir } = await open();
     try {

@@ -188,6 +188,9 @@ async function setArtifactRetired(store: WorldStore, artifactId: string, retired
       throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
     }
     if ((current.sidecar.retiredAt !== undefined) === retired) return;
+    if (!retired && !(await artifactMediaMatches(store, current.sidecar, current.sidecar.hash))) {
+      throw new Error("The retained artifact file is missing or changed. Restore the original bytes before restoring it to the shelf.");
+    }
     const next = { ...current.sidecar };
     if (retired) next.retiredAt = new Date().toISOString();
     else delete next.retiredAt;

@@ -479,10 +479,10 @@ export function FirstRunScreen() {
           </span>
           <span
             style={{ font: "500 13px var(--font-sans)", textDecoration: "underline", textUnderlineOffset: 3, cursor: "pointer" }}
-            title="Create the world first; then Artifacts → Import folder files everything and offers to lift facts — gated, grounded, optional."
+            title="Create the world first; then use Artifacts → Add files to file documents and lift facts."
             onClick={() => navigate("/worlds/new")}
           >
-            Import a folder
+            Add documents
           </span>
           <span style={{ font: "400 13px var(--font-sans)", color: "var(--muted-foreground)" }}>
             . It files into artifacts, ready to link.
