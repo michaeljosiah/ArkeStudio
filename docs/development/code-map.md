@@ -21,6 +21,7 @@ Client, coordinator and integrations ──> shared contracts
 | Change | Implementation to follow | Relevant tests to start with |
 |---|---|---|
 | Route or screen | client `src/App.tsx` → `screens/registry.ts` → `screens/`, `components/`, `domain/connected.tsx` | client `test/routes.test.tsx`, matching screen test |
+| World entity navigation / Props | client `src/screens/world.tsx` (`WorldLayout`, shared `SheetKindNav`) → `screens/props.tsx` (bounded form and prop list). Props sits under the Cast world tab alongside Characters, Locations and Factions (issue 999); its minimal name/states model follows [design turn 105f](../../design-system/Arke%20Studio.dc.html#105f) | client `test/routes.test.tsx` |
 | Command/event | client `src/lib/store.ts` → contracts `src/frames.ts`, `events.ts` → coordinator `src/coordinator.ts` → owning domain | coordinator `test/transport.test.ts`, affected domain test; matching client test |
 | World open or outside edits | coordinator `src/world-provider.ts` (interface), `world/provider.ts` (implementation), `world/store.ts`, `scan.ts`, `watcher.ts` | coordinator `test/world-provider.test.ts`, `test/world/watcher.test.ts`; client `test/world-open-failure.test.tsx` |
 | Artifact retirement/restore | client `screens/world.tsx` Retired filter → `retire-artifact` / `restore-artifact` → coordinator `artifacts/filing.ts`; guarded sidecar commit preserves media and metadata | coordinator `test/artifacts/artifacts.test.ts`; client `test/artifact-viewers.test.tsx` |

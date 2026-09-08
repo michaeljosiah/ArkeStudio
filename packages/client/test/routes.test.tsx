@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
@@ -256,7 +257,7 @@ describe("screen inventory", () => {
     __setStateForTest(FIXTURE_STATE);
   });
 
-  it("uses the accepted immutable main photo on World overview and Cast", () => {
+  it("uses the accepted immutable main photo on World overview and both Cast surfaces", () => {
     const world = FIXTURE_STATE.world!;
     const nested = "takes/tk_01J8A0000000000000000000P9/new-main.webp";
     const referenceKits = world.referenceKits.map((kit) =>
@@ -275,6 +276,7 @@ describe("screen inventory", () => {
         `/w/${world.meta.worldId}`,
         `/w/${world.meta.worldId}/cast`,
         `/w/${world.meta.worldId}/cast/maren-kest`,
+        `/w/${world.meta.worldId}/p/${world.productions[0]!.meta.id}/cast`,
       ]) {
         const html = renderAt(path);
         assert.ok(html.includes(expected), `${path} uses the accepted identity`);
@@ -283,6 +285,72 @@ describe("screen inventory", () => {
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
+  });
+
+  it("shows guest identities and location views, with New guest inside the cast page", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const productionId = world.productions[0]!.meta.id;
+    world.sheets.find((sheet) => sheet.id === "maren-kest")!.production = productionId;
+    world.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.mainPhoto!.file = "main-photo.png";
+    world.referenceKits.push({ sheetId: "the-vigil", tiles: [], looks: [], compilations: [], establishingViewId: "lv_01", locationViews: [
+      { id: "lv_01", name: "Establishing", file: "views/establishing.webp", status: "active",
+        sourceTakeId: "tk_01J8F0000000000000000000B2",
+        sheetVersion: 2, artDirectionVersion: 3, acceptedAt: "2026-08-02T10:00:00Z" },
+    ] });
+    __setStateForTest(state);
+    try {
+      const { document } = parseHTML(renderAt(`/w/${world.meta.worldId}/p/${productionId}/cast`));
+      const page = document.querySelector('[data-screen="production-cast"]')!;
+      assert.ok(page.querySelector('img[src*="references/maren-kest/main-photo.png"]'));
+      assert.ok(page.querySelector('img[src*="references/the-vigil/views/establishing.webp"]'));
+      assert.equal(page.querySelector(".fy-hero button")?.textContent, "New guest");
+      assert.equal(page.querySelector(".fy-corner"), null);
+      assert.ok(!page.textContent?.includes("chandlery"));
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("draws production tiles from accepted video posters and keeps media fallbacks usable", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const production = world.productions[0]!;
+    // A board and an earlier unselected still must not hide the accepted clip's hook frame.
+    production.takes.reverse();
+    const image = () => {
+      __setStateForTest(state);
+      return parseHTML(renderAt(`/w/${world.meta.worldId}/productions`)).document
+        .querySelector(".fy-prodcard__frame img")?.getAttribute("src");
+    };
+    try {
+      assert.ok(image()?.includes("takes/tk_01J8F0000000000000000000B2/frame.png"));
+      production.selections = {};
+      production.reviews = [];
+      assert.ok(image()?.endsWith("productions/saltlight/board-v2.png"));
+      delete production.scenes[0]!.board;
+      production.takes.reverse();
+      assert.ok(image()?.includes("takes/tk_01J8F0000000000000000000B2/frame.png"), "unselected video also uses its poster");
+      production.takes = [];
+      assert.ok(image()?.endsWith(world.keyArt!), "the world art remains the last fallback");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  it("keeps Props under Cast with the shared entity navigation and a bounded creation form", () => {
+    __setStateForTest(FIXTURE_STATE);
+    const world = FIXTURE_STATE.world!;
+    const { document } = parseHTML(renderAt(`/w/${world.meta.worldId}/props`));
+    const page = document.querySelector('[data-screen="props"]')!;
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.textContent, "Cast");
+    assert.equal(document.querySelector('.fy-pillnav__item--active')?.getAttribute("aria-current"), "page");
+    assert.equal(page.querySelector('.fy-sheetkinds [aria-current="page"]')?.textContent, "Props · 0");
+    for (const slug of ["cast", "locations", "factions"]) {
+      assert.ok(page.querySelector(`.fy-sheetkinds a[href="/w/${world.meta.worldId}/${slug}"]`));
+    }
+    assert.ok(page.querySelector('.scr-form input.ui-input[aria-label="Prop name"]'));
+    assert.ok(page.querySelector('.scr-form')?.textContent?.includes("No props yet."));
   });
 
   it("renders the canonical Cast ledger copy, reach, actions, and direct rows", () => {

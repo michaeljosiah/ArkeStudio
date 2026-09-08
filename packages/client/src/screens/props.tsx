@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { orderedShots, propSlug, parseMentions, type Prop, type PropState, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
-import { Button, Callout } from "../components/ui.js";
+import { Button, Callout, Input } from "../components/ui.js";
+import { SheetKindNav } from "./world.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { acceptPropState, addPropState, createProp, importPropStateCandidate } from "../lib/store.js";
 
@@ -42,6 +43,7 @@ export function PropsScreen() {
   const props = world?.props ?? [];
   return (
     <div data-screen="props">
+      <SheetKindNav active="prop" />
       <div className="fy-hero">
         <div className="fy-hero__eyebrow">
           {world?.meta.name} · {props.length} prop{props.length === 1 ? "" : "s"}
@@ -53,47 +55,51 @@ export function PropsScreen() {
           A name and its states. Each shot says which state it is in; nothing carries over.
         </p>
       </div>
-      <div className="fy-sheetsec">
-        <div className="fy-sheetlabel">New prop</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <input
-            aria-label="Prop name"
-            placeholder="Polaroid"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <Button
-            variant="primary"
-            disabled={name.trim() === "" || !worldId}
-            onClick={() => {
-              if (worldId) createProp(worldId, name.trim());
-              setName("");
-            }}
-          >
-            Create prop
-          </Button>
+      {/* The form and ledger share the page's bounded column (issue 999, design turn 105f). */}
+      <div className="scr-form" style={{ margin: "32px auto", padding: "0 var(--gutter)" }}>
+        <div className="fy-sheetsec">
+          <div className="fy-sheetlabel">New prop</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Input
+              aria-label="Prop name"
+              style={{ flex: 1, minWidth: 0 }}
+              placeholder="Polaroid"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <Button
+              variant="primary"
+              disabled={name.trim() === "" || !worldId}
+              onClick={() => {
+                if (worldId) createProp(worldId, name.trim());
+                setName("");
+              }}
+            >
+              Create prop
+            </Button>
+          </div>
         </div>
-      </div>
-      <div className="fy-sheetsec">
-        <div className="fy-sheetrefs">
-          {props.map((prop) => {
-            const cited = citations(world!, prop);
-            return (
-              <button
-                key={prop.id}
-                type="button"
-                className="fy-sheetref"
-                onClick={() => navigate(`/w/${worldId}/props/${prop.id}`)}
-              >
-                <span style={{ flex: 1, minWidth: 0, font: "500 11.5px var(--font-sans)" }}>{prop.name}</span>
-                <span className="fy-mono">
-                  {prop.states.length} state{prop.states.length === 1 ? "" : "s"} · cited in {cited.length} shot
-                  {cited.length === 1 ? "" : "s"}
-                </span>
-              </button>
-            );
-          })}
-          {props.length === 0 ? <p className="fy-mono">No props yet.</p> : null}
+        <div className="fy-sheetsec">
+          <div className="fy-sheetrefs">
+            {props.map((prop) => {
+              const cited = citations(world!, prop);
+              return (
+                <button
+                  key={prop.id}
+                  type="button"
+                  className="fy-sheetref"
+                  onClick={() => navigate(`/w/${worldId}/props/${prop.id}`)}
+                >
+                  <span style={{ flex: 1, minWidth: 0, font: "500 11.5px var(--font-sans)" }}>{prop.name}</span>
+                  <span className="fy-mono">
+                    {prop.states.length} state{prop.states.length === 1 ? "" : "s"} · cited in {cited.length} shot
+                    {cited.length === 1 ? "" : "s"}
+                  </span>
+                </button>
+              );
+            })}
+            {props.length === 0 ? <p className="fy-mono">No props yet.</p> : null}
+          </div>
         </div>
       </div>
     </div>
