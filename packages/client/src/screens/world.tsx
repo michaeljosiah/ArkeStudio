@@ -4437,10 +4437,22 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
-  // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
-  // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
-  const linkName = (link: string): string =>
-    world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title ?? link;
+  // Resolve names from this world's existing records; unknown links retain their spelling.
+  const linkName = (link: string): string => {
+    const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
+    if (name) return name;
+    for (const production of world?.productions ?? []) {
+      if (production.meta.id === link) return production.meta.title;
+      const episode = production.episodes.find((candidate) => candidate.id === link);
+      if (episode) return episode.title;
+      for (const scene of production.scenes) {
+        if (scene.id === link) return scene.title;
+        const shot = orderedShots(scene).find((candidate) => candidate.id === link);
+        if (shot) return `Shot ${shot.number} · ${shot.title}`;
+      }
+    }
+    return link;
+  };
   const kindLabel: Record<string, string> = {
     image: "Images",
     board: "Boards",

@@ -2739,7 +2739,7 @@ export function ActivityScreen() {
                 <div key={r.ref} className="fy-activityrow">
                   <span className="fy-dot fy-dot--live" />
                   <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title">{r.title}</div>
+                    <div className="fy-activityrow__title" title={r.diagnostic}>{r.title}</div>
                     <div className="fy-activityrow__sub">
                       {r.kind} · {r.detail}
                     </div>

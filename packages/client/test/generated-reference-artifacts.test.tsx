@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import { worldImageReferences, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
+import { orderedShots, worldImageReferences, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -69,6 +69,19 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the Artifacts shelf holds what a character generated", () => {
+  it("names production, scene and shot links from the current world", () => {
+    const production = FIXTURE_STATE.world!.productions[0]!;
+    const scene = production.scenes[0]!;
+    const shot = orderedShots(scene)[0]!;
+    for (const [link, name] of [[production.meta.id, production.meta.title], [scene.id, scene.title], [shot.id, `Shot ${shot.number} · ${shot.title}`]]) {
+      const artifact = generatedReference({ links: [link!] });
+      const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, withArtifact(artifact));
+      const card = Array.from(parseHTML(html).document.querySelectorAll(".fy-gridcard--openable"))
+        .find((element) => element.querySelector('[title="maren-kest-main-photo-candidate.png"]'))!;
+      assert.equal(card.querySelector(".fy-gridcard__open")!.getAttribute("aria-label"), `Open ${name} — image`);
+      assert.ok(card.textContent!.includes(name!));
+    }
+  });
   it("shows the card, counts it, and says where it came from", () => {
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, withArtifact(generatedReference()));
     assert.match(html, /maren-kest-main-photo-candidate\.png/, "the image is on the shelf");

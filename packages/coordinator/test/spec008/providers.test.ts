@@ -69,16 +69,44 @@ describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
     const validating = service.validate("fal");
     await inFlight;
     await credentials.set("fal", "replacement-secret-key");
-    await service.setConfigured("fal", true);
+    const replacementFingerprint = await credentials.fingerprint("fal");
+    let finishFingerprint!: (fingerprint: string | undefined) => void;
+    credentials.fingerprint = () => new Promise((resolve) => { finishFingerprint = resolve; });
+    const configuring = service.setConfigured("fal", true);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.validation, "untested", "invalidation precedes the optional read");
     finish([{ capability: "image", available: true }]);
     const current = await validating;
     assert.equal(current.validation, "untested");
     assert.equal(current.lastValidated, undefined);
     assert.deepEqual(current.probes, []);
-    assert.notEqual(current.credentialFingerprint, first);
+    finishFingerprint(replacementFingerprint);
+    await configuring;
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.credentialFingerprint, replacementFingerprint);
+    assert.notEqual(replacementFingerprint, first);
     await credentials.clear("fal");
     await service.setConfigured("fal", false);
     assert.equal(service.list().find((provider) => provider.id === "fal")!.credentialFingerprint, undefined);
+  });
+  it("keeps a saved credential configured when optional metadata fails and ignores a stale fingerprint", async () => {
+    const dir = await tempDir("arke-provider-metadata-");
+    const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+    await credentials.set("fal", "saved-secret");
+    credentials.fingerprint = async () => { throw new Error("temporary read failure"); };
+    const service = new ProviderService(credentials, {}, null);
+    await service.init();
+    await service.setConfigured("fal", true);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.configured, true);
+    assert.equal(await credentials.get("fal"), "saved-secret");
+    let finish!: (fingerprint: string) => void;
+    credentials.fingerprint = () => new Promise((resolve) => { finish = resolve; });
+    const pending = service.setConfigured("fal", true);
+    await credentials.clear("fal");
+    await service.setConfigured("fal", false);
+    finish("1234ABCD");
+    await pending;
+    const status = service.list().find((provider) => provider.id === "fal")!;
+    assert.equal(status.configured, false);
+    assert.equal(status.credentialFingerprint, undefined);
   });
   it("a key that authenticates but lacks video reports image available, video not (R-3)", async () => {
     const service = await makeService([

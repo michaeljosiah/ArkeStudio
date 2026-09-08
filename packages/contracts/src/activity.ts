@@ -19,8 +19,9 @@ export function activityJobLabels(state: ClientState | null | undefined, job: Jo
   const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
   const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
   const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
-  const subject = sheet?.name ?? bench?.title ?? (shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title);
-  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title ?? worldName, scene && shot ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
+  const subject = sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title);
+  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && shot ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
   const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
   return { target, model };
 }
@@ -264,6 +265,8 @@ export interface RunningEntry {
   kind: "job" | "model-download" | "export";
   title: string;
   detail: string;
+  /** Exact identities for a diagnostic tooltip, separate from the human title. */
+  diagnostic?: string;
   /** 0..100 where known; null where the work reports none. */
   percent: number | null;
   ref: string;
@@ -285,10 +288,12 @@ export function computeRunning(
   for (const job of state.app.jobs) {
     const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
+    const labels = activityJobLabels(state, job);
     entries.push({
       kind: "job",
-      title: activityJobLabels(state, job).target,
-      detail: `${activityJobLabels(state, job).model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      title: labels.target,
+      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,
       worldId: job.worldId,

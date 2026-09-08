@@ -42,7 +42,7 @@ export class ProviderService {
       this.statuses.set(id, {
         id,
         configured: credential === "none" || (credential === "in-app" && configured.has(id)),
-        credentialFingerprint: credential === "in-app" && configured.has(id) ? await this.credentials?.fingerprint(id) : undefined,
+        credentialFingerprint: credential === "in-app" && configured.has(id) ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined,
         validation: "untested",
         probes: [],
         fault: null,
@@ -69,8 +69,10 @@ export class ProviderService {
 
   /** A credential landed or was cleared; validation resets to untested. */
   async setConfigured(id: ProviderId, configured: boolean): Promise<void> {
-    const credentialFingerprint = configured ? await this.credentials?.fingerprint(id) : undefined;
-    this.patch(id, { configured, credentialFingerprint, validation: "untested", probes: [], lastValidated: undefined, fault: null });
+    const reset = this.patch(id, { configured, credentialFingerprint: undefined, validation: "untested", probes: [], lastValidated: undefined, fault: null });
+    // Optional display metadata cannot delay invalidation or make a durable save look failed.
+    const credentialFingerprint = configured ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined;
+    if (this.statuses.get(id) === reset) this.patch(id, { credentialFingerprint });
   }
 
   /**

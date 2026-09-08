@@ -71,6 +71,9 @@ describe("a failed job's recovery route on the Activity row (issue 226)", () => 
     state.app.jobs = [bench];
     assert.match(computeRunning(state)[0]!.title, /A storm over the harbour/);
     assert.match(computeRunning(state)[0]!.detail, new RegExp(model.displayName));
+    const runningTitle = parseHTML(render([bench])).document.querySelector(".fy-activityrow__title")!;
+    assert.ok(runningTitle.getAttribute("title")!.includes(bench.target.id!));
+    assert.ok(runningTitle.getAttribute("title")!.includes(`${model.provider}/${model.id}`));
     const master = failed({ target: { kind: "master-look", id: FIXTURE_WORLD_ID }, provider: model.provider, model: model.id });
     const text = parseHTML(render([master])).document.querySelector(".dom-jobrow")!.textContent!;
     assert.match(text, /Master look · The Undersong/);
@@ -78,6 +81,13 @@ describe("a failed job's recovery route on the Activity row (issue 226)", () => 
     assert.ok(!text.includes(FIXTURE_WORLD_ID));
     const shot = failed({ productionId: production.meta.id, target: { kind: "shot", id: orderedShots(production.scenes[0]!)[0]!.id } });
     assert.ok(activityJobLabels(state, shot).target.includes(production.meta.title));
+    assert.ok(activityJobLabels(state, shot).target.includes(state.world!.meta.name));
+    for (const kind of ["scene-pass", "storyboard"] as const) {
+      const scene = production.scenes[0]!;
+      const label = activityJobLabels(state, { ...shot, target: { kind, id: scene.id, coversShots: orderedShots(scene).map((candidate) => candidate.id) } }).target;
+      assert.ok(label.startsWith(scene.title));
+      assert.ok(!label.includes(orderedShots(scene)[0]!.title));
+    }
     const other = { ...shot, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" };
     assert.ok(!activityJobLabels(state, other).target.includes(production.meta.title));
   });
