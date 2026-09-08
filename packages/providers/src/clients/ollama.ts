@@ -44,7 +44,8 @@ export class OllamaClient implements ProviderClient {
     const { status, body } = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: request.model, stream: false, ...request.params }),
+      body: JSON.stringify({ model: request.model, stream: false, keep_alive: "5m", ...request.params }),
+      signal: request.signal,
     });
     if (status >= 400) throw new Error(`ollama: generate failed (HTTP ${status})`);
     const text = (body as { response?: string } | null)?.response ?? "";
@@ -68,5 +69,29 @@ export class OllamaClient implements ProviderClient {
 
   async cancel(): Promise<void> {
     /* synchronous API */
+  }
+
+  /** Query the runtime, including models loaded by the writing harness, before a GPU handover. */
+  async unload(signal?: AbortSignal): Promise<void> {
+    const bounded = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]);
+    let response: Awaited<ReturnType<typeof jsonRequest>>;
+    try {
+      response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/ps`, { signal: bounded });
+    } catch (error) {
+      // An absent local server holds no models. An unresponsive or malformed server is not absent.
+      if ((error as { cause?: { code?: string } }).cause?.code === "ECONNREFUSED") return;
+      throw new Error("Ollama could not release its models. Check the Ollama engine and try again.", { cause: error });
+    }
+    const models = (response.body as { models?: Array<{ name?: string }> } | null)?.models;
+    if (response.status >= 400 || !Array.isArray(models) || models.some((model) => typeof model.name !== "string")) {
+      throw new Error("Ollama could not report its loaded models. Check the Ollama engine and try again.");
+    }
+    for (const model of models) {
+      const result = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/generate`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, signal: bounded,
+        body: JSON.stringify({ model: model.name, keep_alive: 0, stream: false }),
+      });
+      if (result.status >= 400) throw new Error("Ollama could not release its models. Check the Ollama engine and try again.");
+    }
   }
 }

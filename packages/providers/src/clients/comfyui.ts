@@ -606,6 +606,18 @@ export class ComfyUiClient implements ProviderClient {
   }
 
   /** The engine's own reclaim: unload every model it holds and hand the memory back. */
+  async unload(signal?: AbortSignal): Promise<void> {
+    if (this.engineLocality() === "remote") return;
+    const base = this.baseUrl();
+    if (base === null) return;
+    const response = await this.fetchImpl(`${base}/free`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, redirect: "manual",
+      body: JSON.stringify({ unload_models: true, free_memory: true }),
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(15_000)]),
+    });
+    if (!response.ok) throw new Error("ComfyUI could not release its models. Check the ComfyUI engine and try again.");
+  }
+
   private async askToUnload(base: string): Promise<void> {
     await this.fetchImpl(`${base}/free`, {
       method: "POST",

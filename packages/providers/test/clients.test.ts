@@ -25,6 +25,22 @@ function fakeFetch(routes: Array<{ match: RegExp; status: number; body?: unknown
   };
 }
 
+it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const client = new OllamaClient(async (url, init) => {
+    assert.ok(init?.signal, "handover requests are bounded");
+    if (url.endsWith("/api/ps")) return Response.json({ models: [{ name: "writing-a" }, { name: "writing-b" }] });
+    requests.push(JSON.parse(String(init?.body)));
+    return Response.json({ done: true });
+  });
+  await client.unload();
+  assert.deepEqual(requests, [
+    { model: "writing-a", keep_alive: 0, stream: false },
+    { model: "writing-b", keep_alive: 0, stream: false },
+  ]);
+  await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";

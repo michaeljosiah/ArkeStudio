@@ -187,6 +187,7 @@ function ahead(job: Job, jobs: readonly Job[], batch: ReadonlySet<string>): numb
  */
 function pace(job: Job, jobs: readonly Job[], batch: ReadonlySet<string>): string | null {
   if (job.status === "running" || job.status === "submitting") return null;
+  if (job.status === "queued" && job.waitingFor) return job.waitingFor;
   const n = ahead(job, jobs, batch);
   return n > 0 ? `${n} ahead` : null;
 }

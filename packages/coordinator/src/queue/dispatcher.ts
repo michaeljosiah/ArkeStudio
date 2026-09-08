@@ -67,6 +67,7 @@ export interface DispatchClient {
   readonly declarations: ClientDeclarations;
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
+  unload?(signal?: AbortSignal): Promise<void>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void;
   submit(
@@ -223,6 +224,8 @@ export interface JobQueueOptions {
   baseConcurrency?: number;
   /** Provider-specific safe caps. A local GPU runtime normally supplies one here. */
   providerConcurrency?: Readonly<Record<string, number>>;
+  /** Held across local inference; waiting stays on the queued side of the outbox. */
+  acquireLocalGpu?: (job: Job, signal: AbortSignal, waiting: (reason: string | null) => void) => Promise<() => void>;
   /** Recovered work for this provider is not pumped until the runtime has settled. */
   awaitRecoveryReady?: (provider: string) => Promise<boolean>;
   baseIntervalMs?: number;
@@ -408,6 +411,7 @@ export class JobQueue {
   /** Durable transition: journal first, then memory, then the event (D1). */
   private async transition(job: Job): Promise<boolean> {
     if (this.disposed) return false;
+    job = { ...job, waitingFor: undefined };
     await this.journal.append(job);
     if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
@@ -597,6 +601,8 @@ export class JobQueue {
    */
   private releaseLane(lane: Lane, last: Job): void {
     if (this.disposed) return;
+    // The shared owner unloads before a handover. A late courtesy /free could race the next job.
+    if (this.opts.acquireLocalGpu && (lane.provider === "comfyui" || lane.provider === "ollama")) return;
     const client = this.opts.clients[lane.provider];
     if (!client?.release) return;
     void client.release(last.model, { jobId: last.id, attempt: last.attempt, model: last.model }).catch(() => undefined);
@@ -761,6 +767,33 @@ export class JobQueue {
   // ---- the outbox protocol (§2.3) ------------------------------------------
 
   private async runJob(job: Job): Promise<void> {
+    if (!this.opts.acquireLocalGpu) return this.runQueuedJob(job);
+    const waiting = new AbortController();
+    this.submitAborts.set(job.id, waiting);
+    let release: (() => void) | undefined;
+    try {
+      release = await this.opts.acquireLocalGpu(job, waiting.signal, (reason) => {
+        const current = this.jobs.get(job.id);
+        if (!this.disposed && current?.status === "queued") {
+          const updated = { ...current, waitingFor: reason ?? undefined };
+          this.jobs.set(job.id, updated);
+          this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+        }
+      });
+      if (waiting.signal.aborted || this.disposed || !this.stillQueued(job)) return;
+      this.submitAborts.delete(job.id);
+      await this.runQueuedJob(job);
+    } catch (error) {
+      if (!waiting.signal.aborted && !this.disposed && this.stillQueued(job)) {
+        await this.terminalize(job, "failed", describeCoordinatorError(error));
+      }
+    } finally {
+      if (this.submitAborts.get(job.id) === waiting) this.submitAborts.delete(job.id);
+      release?.();
+    }
+  }
+
+  private async runQueuedJob(job: Job): Promise<void> {
     if (this.disposed) return;
     const client = this.opts.clients[job.provider];
     if (!client) {
@@ -1012,7 +1045,7 @@ export class JobQueue {
       const running: Job = { ...submitting, status: "running", providerJobId: accepted.remoteId, updatedAt: this.clock() };
       await this.transition(running);
       this.noteSuccess(job.provider);
-      await this.pollToTerminal(running, client, key);
+      await this.pollToTerminal(running, client, key, true);
     } catch (err) {
       if (this.disposed) return;
       // Cancelled by the user, or being cancelled right now: the abort IS the error, and `cancel()`
@@ -1110,7 +1143,20 @@ export class JobQueue {
     }
   }
 
-  private async pollToTerminal(job: Job, client: DispatchClient, key: string): Promise<void> {
+  private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
+    if (!reserved && this.opts.acquireLocalGpu) {
+      const abort = new AbortController();
+      this.submitAborts.set(job.id, abort);
+      let release: (() => void) | undefined;
+      try {
+        release = await this.opts.acquireLocalGpu(job, abort.signal, () => {});
+        if (!abort.signal.aborted && !this.disposed) await this.pollToTerminal(job, client, key, true);
+      } finally {
+        if (this.submitAborts.get(job.id) === abort) this.submitAborts.delete(job.id);
+        release?.();
+      }
+      return;
+    }
     let current = job;
     for (;;) {
       if (this.disposed) return;

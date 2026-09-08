@@ -492,6 +492,7 @@ export function JobRow({ job }: { job: Job }) {
         {job.status}
       </Badge>
       {job.error && <div className="dom-jobrow__error">{job.error}</div>}
+      {job.status === "queued" && job.waitingFor && <div role="status">{job.waitingFor}</div>}
     </div>
   );
 }

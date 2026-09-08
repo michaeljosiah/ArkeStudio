@@ -1,4 +1,6 @@
 import { referenceInputProblem } from "@arke-studio/contracts";
+import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
+import { withLocalGpu } from "./harness/local-gpu.js";
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
@@ -1058,7 +1060,7 @@ export class Coordinator {
     const local = status.engine.locality === "local";
     const recipe = status.recipes.find((candidate) => candidate.recipeId === CLONED_VOICE_MODEL);
     if (!recipe) return { local, unavailableReason: "The cloned voice recipe is not shipped in this build." };
-    if (recipe.state === "disabled") {
+    if (recipe.state === "disabled" && !(local && memoryWait(recipe))) {
       return { local, unavailableReason: recipe.reason ?? "The cloned voice recipe is not ready." };
     }
     if (recipe.state === "unknown" && status.engine.locality === "local") {
@@ -1897,7 +1899,14 @@ export class Coordinator {
   /** The store whose backfill is running, so reopening the same world joins it rather than racing it. */
   private backfillStore: WorldStore | null = null;
 
+  private readonly localGpu: LocalGpu;
+
   constructor(private readonly opts: CoordinatorOptions) {
+    this.localGpu = new LocalGpu(async (engine, signal) => {
+      if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
+      await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
+    });
+    if (opts.adapter) opts.adapter = withLocalGpu(opts.adapter, this.localGpu);
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
@@ -2146,7 +2155,7 @@ export class Coordinator {
               const status = await service.status(this.readModel.getState().app.runtime?.probes ?? null);
               const recipe = status.recipes.find((r) => r.recipeId === input.model);
               if (!recipe) return { ok: false, reason: `"${input.model}" is not a shipped recipe` };
-              if (recipe.state === "disabled") {
+              if (recipe.state === "disabled" && !(status.engine.locality === "local" && memoryWait(recipe))) {
                 return { ok: false, reason: recipe.reason ?? "the recipe is not ready on this machine" };
               }
               const model = this.opts.manifest?.models.find(row => row.id === input.model && row.provider === input.provider);
@@ -2195,7 +2204,14 @@ export class Coordinator {
               return { ok: true, artifact: { ...artifact, data: result.data } };
             },
             // One GPU process, one execution lane unless measured evidence supports more.
-            providerConcurrency: { comfyui: 1, kokoro: 1 },
+            providerConcurrency: { comfyui: 1, ollama: 1, kokoro: 1 },
+            acquireLocalGpu: (job, signal, waiting) => {
+              if (job.provider === "ollama") return this.localGpu.acquire("Ollama", signal, waiting);
+              if (job.provider === "comfyui" && this.opts.comfyui?.service.engineIdentity()?.locality === "local") {
+                return this.localGpu.acquire("ComfyUI", signal, waiting);
+              }
+              return Promise.resolve(() => {});
+            },
             // Recovery folds immediately, but recovered local work cannot reach a child that is
             // still importing its runtime. URL engines resolve synchronously and return at once.
             awaitRecoveryReady: async (provider) =>
@@ -3902,7 +3918,7 @@ export class Coordinator {
     const service = this.opts.comfyui?.service;
     if (!service || this.stopping) return;
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
-    const status = await service.status(probes);
+    const status = queueableLocalMemory(await service.status(probes));
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
     // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move
     // together (R-13). Nothing is re-probed — a machine that was never measured has no verdict
@@ -15626,6 +15642,7 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
+    this.localGpu.stop();
     for (const controller of this.performanceGenerations.values()) controller.abort();
     for (const controller of this.keyArtPromptDrafts.values()) controller.abort();
     this.keyArtPromptReviews.clear();
