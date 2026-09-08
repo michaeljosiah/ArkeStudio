@@ -797,7 +797,7 @@ export class WorldStore {
           await this.verifyOwnership();
           await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
         }
-        else if (existing !== null && existing !== content) report();
+        else if (existing !== content) report();
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);

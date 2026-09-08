@@ -563,7 +563,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await second.close();
   });
 
-  it("opens with conflicting history, preserves it and keeps the problem after a rescan", async () => {
+  it("opens with conflicting history and reports snapshots removed during a rescan or read-only open", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });
     await first.close();
@@ -580,6 +580,9 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
       assert.ok(reopened.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md"));
       assert.equal(await readFile(snapshot, "utf8"), "conflicting history");
       assert.equal(await readFile(join(dir, "characters/bray-half-hitch.md"), "utf8"), live);
+      await reopened.gateOp(() => rm(snapshot));
+      assert.ok(reopened.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md"),
+        "a missing snapshot remains unavailable after a rescan");
     } finally { await reopened.close(); }
     const readOnly = await WorldStore.open(dir, { readOnly: true });
     try { assert.ok(readOnly.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md")); }
