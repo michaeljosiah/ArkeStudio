@@ -1905,8 +1905,9 @@ export class Coordinator {
     this.localGpu = new LocalGpu(async (engine, signal) => {
       if (engine === "ComfyUI" && opts.comfyui?.service.engineIdentity()?.locality !== "local") return;
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
+      this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     });
-    if (opts.adapter) opts.adapter = withLocalGpu(opts.adapter, this.localGpu);
+    if (opts.adapter) opts.adapter = withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); });
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
@@ -1971,6 +1972,10 @@ export class Coordinator {
               this.credentials ? this.credentials.get(provider as ProviderId) : null,
             emit: (event) => {
               this.emit(event);
+              if (event.type === "job.updated" && (event.job.provider === "ollama" || event.job.provider === "comfyui")) {
+                if (event.job.provider === "comfyui" && ["succeeded", "failed", "cancelled"].includes(event.job.status)) this.clearLocalResidency("comfyui");
+                void this.refreshLocalResidency();
+              }
               // A plan job settling is what unblocks its dependents (SPEC-024 R-18): advance is
               // a fold plus one durable act, so firing it here costs nothing when nothing moved.
               if (
@@ -3289,6 +3294,44 @@ export class Coordinator {
    * Only a *changed* answer is emitted. A status frame every tick would re-render Settings
    * forever over four probes that almost always say the same thing.
    */
+  private residencyRefresh: Promise<void> | null = null;
+  private residencyEpoch = 0;
+
+  private clearLocalResidency(provider: "ollama" | "comfyui"): void {
+    this.residencyEpoch += 1;
+    if (this.stopping) return;
+    const previous = this.readModel.getState().app.residency ?? [];
+    const residency = previous.filter((row) => row.provider !== provider);
+    if (residency.length !== previous.length) this.emit({ at: this.nowIso(), type: "local-ai.residency", residency });
+  }
+
+  private refreshLocalResidency(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
+    if (this.residencyRefresh) return this.residencyRefresh;
+    const epoch = this.residencyEpoch;
+    const activeComfy = this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running") ?? [];
+    const work = Promise.all((["ollama", "comfyui"] as const).map(async (provider) => {
+      if (provider === "comfyui" && activeComfy.length === 0) return [];
+      const readings = await this.opts.dispatchClients?.[provider]?.residency?.().catch(() => []) ?? [];
+      return readings.flatMap((reading) => {
+        if (provider === "comfyui") return [...new Set(this.jobQueue?.listJobs().filter((job) => job.provider === "comfyui" && job.status === "running").map((job) => job.model))].map((model) => ({ ...reading, model }));
+        const model = this.opts.manifest?.models.find((row) => row.provider === provider &&
+          (row.providerModelId ?? row.id).replace(/:latest$/, "") === reading.model.replace(/:latest$/, ""));
+        return [{ ...reading, model: model?.id ?? reading.model }];
+      });
+    })).then((groups) => {
+      if (this.stopping || epoch !== this.residencyEpoch) return;
+      const residency = groups.flat();
+      if (JSON.stringify(residency) !== JSON.stringify(this.readModel.getState().app.residency ?? [])) {
+        this.emit({ at: this.nowIso(), type: "local-ai.residency", residency });
+      }
+    });
+    this.residencyRefresh = work;
+    this.backgroundWork.add(work);
+    void work.finally(() => { this.residencyRefresh = null; this.backgroundWork.delete(work); });
+    return work;
+  }
+
   private async revalidateLocalRuntimes(): Promise<void> {
     // A port that is open but never answers would otherwise stack a new pass on the old one
     // every tick, forever. Skipping is the right answer: the next tick asks again.
@@ -3296,7 +3339,7 @@ export class Coordinator {
     this.localRuntimeProbeInFlight = true;
     const local = (Object.keys(PROVIDERS) as ProviderId[]).filter((id) => PROVIDERS[id].credential === "none");
     try {
-      await Promise.all(local.map((id) => this.providerService.validate(id).catch(() => {})));
+      await Promise.all([...local.map((id) => this.providerService.validate(id).catch(() => {})), this.refreshLocalResidency()]);
     } finally {
       this.localRuntimeProbeInFlight = false;
     }

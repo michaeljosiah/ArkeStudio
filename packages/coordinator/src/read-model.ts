@@ -334,6 +334,10 @@ export class ReadModel {
         this.state = { ...this.state, app: { ...this.state.app, runtime: event.runtime } };
         return;
       }
+      case "local-ai.residency": {
+        this.state = { ...this.state, app: { ...this.state.app, residency: event.residency } };
+        return;
+      }
       case "harness.status": {
         this.state = { ...this.state, app: { ...this.state.app, harness: event.harness } };
         return;

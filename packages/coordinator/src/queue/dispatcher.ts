@@ -68,6 +68,7 @@ export interface DispatchClient {
   /** Drop source-bound optional transports while keeping the client reusable. */
   resetTransport?(): void;
   unload?(signal?: AbortSignal): Promise<void>;
+  residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void;
   submit(

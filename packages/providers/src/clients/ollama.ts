@@ -1,4 +1,5 @@
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import type { CapabilityProbe, ClientDeclarations, ModelResidency } from "@arke-studio/contracts";
+import { setTimeout as pause } from "node:timers/promises";
 import { jsonRequest, tryProbe } from "./http.js";
 import type { FetchedArtifact, FetchLike, PollResult, ProviderClient, SubmitRequest, SubmitResult } from "../types.js";
 
@@ -22,6 +23,7 @@ export class OllamaClient implements ProviderClient {
   constructor(
     private readonly fetchImpl: FetchLike,
     private readonly baseUrl = "http://127.0.0.1:11434",
+    private readonly residencyPause: (signal?: AbortSignal) => Promise<void> = async (signal) => { await pause(1_000, undefined, { signal }); },
   ) {}
 
   async validateKey(): Promise<CapabilityProbe[]> {
@@ -69,6 +71,29 @@ export class OllamaClient implements ProviderClient {
 
   async cancel(): Promise<void> {
     /* synchronous API */
+  }
+
+  /** Loaded weights, measured again when Ollama's first answer may lag behind a load. */
+  async residency(signal?: AbortSignal): Promise<ModelResidency[]> {
+    const read = async (): Promise<ModelResidency[]> => {
+      const response = await jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/api/ps`, {
+        signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]),
+      });
+      if (response.status >= 400) throw new Error("Ollama residency could not be read.");
+      const models = (response.body as { models?: Array<{ name?: unknown; size_vram?: unknown; size?: unknown }> } | null)?.models;
+      if (!Array.isArray(models)) throw new Error("Ollama residency could not be read.");
+      return models.flatMap((model): ModelResidency[] => {
+        if (typeof model.name !== "string" || !model.name) return [];
+        const vram = typeof model.size_vram === "number" && Number.isFinite(model.size_vram) && model.size_vram >= 0 ? model.size_vram : undefined;
+        const state = vram === undefined ? "unknown" : vram === 0 ? "cpu" :
+          typeof model.size === "number" && model.size > vram ? "mixed" : "gpu";
+        return [{ provider: "ollama", model: model.name, state, ...(vram !== undefined ? { vramBytes: vram } : {}) }];
+      });
+    };
+    const first = await read();
+    if (first.length > 0 && first.every((model) => model.state === "gpu" || model.state === "mixed")) return first;
+    await this.residencyPause(signal);
+    return read();
   }
 
   /** Query the runtime, including models loaded by the writing harness, before a GPU handover. */

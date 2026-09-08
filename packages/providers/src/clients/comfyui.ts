@@ -618,6 +618,21 @@ export class ComfyUiClient implements ProviderClient {
     if (!response.ok) throw new Error("ComfyUI could not release its models. Check the ComfyUI engine and try again.");
   }
 
+  async residency(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]> {
+    const base = this.baseUrl();
+    if (base === null || this.engineLocality() === "remote") return [];
+    const response = await jsonRequest(this.fetchImpl, this.id, `${base}/system_stats`, {
+      signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]), redirect: "manual",
+    });
+    if (response.status !== 200) return [];
+    const device = (response.body as { devices?: Array<{ type?: string; torch_vram_total?: number }> } | null)?.devices?.[0];
+    const vram = device?.torch_vram_total;
+    const measured = typeof vram === "number" && Number.isFinite(vram) && vram >= 0;
+    // A zero CUDA reservation can mean unloaded or offloading, not processor-only inference.
+    return [{ provider: "comfyui", model: "*", state: device?.type === "cpu" ? "cpu" : measured && vram > 0 ? "gpu" : "unknown",
+      ...(measured ? { vramBytes: vram } : {}) }];
+  }
+
   private async askToUnload(base: string): Promise<void> {
     await this.fetchImpl(`${base}/free`, {
       method: "POST",

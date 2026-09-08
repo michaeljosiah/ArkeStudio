@@ -38,6 +38,12 @@ import { ProviderBusyError, type FetchLike } from "../src/types.js";
 
 const OK_PREFLIGHT = async () => ({ ok: true }) as const;
 const BASE = () => "http://127.0.0.1:8188";
+it("ComfyUI residency does not mistake an empty GPU reservation for processor inference", async () => {
+  for (const [type, expected] of [["cuda", "unknown"], ["cpu", "cpu"]] as const) {
+    const client = new ComfyUiClient(async () => Response.json({ devices: [{ type, torch_vram_total: 0 }] }), BASE, OK_PREFLIGHT);
+    assert.equal((await client.residency())[0]?.state, expected);
+  }
+});
 const VOICE_REFERENCE = {
   name: `${"a".repeat(64)}.wav`,
   contentType: "audio/wav" as const,

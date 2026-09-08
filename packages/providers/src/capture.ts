@@ -482,6 +482,7 @@ export function captureProviderClient(
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
     ...(client.unload ? { unload: (signal?: AbortSignal) => client.unload!(signal) } : {}),
+    ...(client.residency ? { residency: (signal?: AbortSignal) => client.residency!(signal) } : {}),
     ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
     ...(client.release
       ? {

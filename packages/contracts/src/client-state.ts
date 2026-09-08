@@ -4,6 +4,7 @@ import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
 import { z } from "zod";
+import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { HarnessStatusSchema } from "./harness.js";
 import { ProductionSpineSchema } from "./spine.js";
@@ -485,6 +486,7 @@ export const ClientStateSchema = z
         /** Who reads the app's prose aloud. Null is the shipped local voice, and free. */
         narrator: NarratorSettingsSchema.default(null),
         runtime: LocalRuntimeStatusSchema.nullable().default(null),
+        residency: z.array(ModelResidencySchema).optional(),
         /**
          * Which engines this machine has, and which is chosen (SPEC-005 R-1). Null until the
          * screen asks — detection costs a subprocess, so it is not done on every boot for a

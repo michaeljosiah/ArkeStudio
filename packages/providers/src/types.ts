@@ -274,6 +274,7 @@ export interface ProviderClient {
   resetTransport?(): void;
   /** Coordinator-owned local GPU handover; remote engines must leave their models alone. */
   unload?(signal?: AbortSignal): Promise<void>;
+  residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
   /** Release optional long-lived transports. No provider call may occur after this. */
   dispose?(): void;
   /**

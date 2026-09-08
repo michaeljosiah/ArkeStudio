@@ -10,6 +10,7 @@ import {
   modelPriceCopy,
   modelEligible,
   modelCapabilityCopy,
+  residencyNote,
   type Capability,
   type EngineId,
   type ManifestModel,
@@ -308,7 +309,7 @@ function entryFacts(entry: Entry, onOpenDownloads: () => void): LocalFacts {
       entry.reason && (entry.state === "unsupported" || entry.state === "needs-attention")
         ? { text: entry.reason, warn: !elsewhere && entry.state === "unsupported" }
         : undefined,
-    note: entry.ineligible,
+    note: [entry.ineligible, entry.residency].filter(Boolean).join(" ") || undefined,
     recommended: entry.recommended,
     dim: !elsewhere && entry.declined,
     ready: entry.state === "installed",
@@ -330,6 +331,7 @@ function recipeTileFacts(
   recommended: boolean,
   disabled: boolean,
   eligible: boolean,
+  residency?: string,
 ): LocalFacts {
   const facts = recipeFacts(recipe, weights, gated);
   const controls = (
@@ -363,7 +365,7 @@ function recipeTileFacts(
     tone: facts.tone,
     bar: facts.moving || facts.paused ? facts.pct : undefined,
     reason: facts.reason,
-    note: disabled ? "turned off in AI models" : recipe.state === "unknown" && eligible ? "Generation is allowed." : undefined,
+    note: [disabled ? "turned off in AI models" : recipe.state === "unknown" && eligible ? "Generation is allowed." : undefined, residency].filter(Boolean).join(" ") || undefined,
     recommended,
     dim: facts.dim,
     ready: recipe.state === "ready",
@@ -483,6 +485,7 @@ function LocalSection({ engine, models, visual }: { engine: EngineId; models: Ma
           state?.app.runtime?.recommended[model.capability] === model.id,
           disabled.has(model.id),
           modelEligible(model, eligibilityInputs(state)),
+          residencyNote(state?.app.residency?.find((reading) => reading.provider === model.provider && reading.model === model.id)),
         ),
       };
     }

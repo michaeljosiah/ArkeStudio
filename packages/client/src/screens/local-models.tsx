@@ -6,6 +6,7 @@ import {
   comfyUiWeightsComponentId,
   formatGb,
   localModelRowState,
+  residencyNote,
   setupClosure,
   transferProgress,
   PROVIDERS as PROVIDER_TABLE,
@@ -58,6 +59,7 @@ const STATE_TONE: Partial<Record<LocalModelRowState, RuntimeTone>> = {
 export interface Entry {
   model: ManifestModel;
   state: LocalModelRowState;
+  residency?: string;
   /**
    * Which machine actually runs it (R-9). No longer folded into the row state, and this screen
    * has no engine pane to state it in yet, so the row states it here until issue 623 lands one.
@@ -131,6 +133,7 @@ export function localEntries(
     return {
       model,
       state: rowState,
+      residency: residencyNote(state?.app.residency?.find((reading) => reading.provider === model.provider && reading.model === model.id)),
       locality,
       declined,
       reason: gated?.reason,
@@ -433,6 +436,7 @@ export function LocalModelRow({
           <span>{entry.ineligible}</span>
         </div>
       )}
+      {entry.residency && <div className="fy-set__why" role="status"><span className="fy-set__dot fy-set__dot--warn" /><span>{entry.residency}</span></div>}
       {open && (
         <div className="fy-set__why">
           <span className="fy-set__dot" />

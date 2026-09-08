@@ -41,6 +41,23 @@ it("Ollama unload queries actual loaded models and awaits keep_alive=0 for each"
   await assert.rejects(new OllamaClient(async () => Response.json({})).unload(), /loaded models/);
 });
 
+it("Ollama residency retries late reports and distinguishes processor fallback from missing data", async () => {
+  for (const [first, second, expected] of [
+    [0, 100, "gpu"], [0, 0, "cpu"], [undefined, undefined, "unknown"],
+  ] as const) {
+    let reads = 0;
+    let pauses = 0;
+    const client = new OllamaClient(async () => Response.json({ models: [
+      { name: "gemma4:12b", size: 100, size_vram: reads++ === 0 ? first : second },
+    ] }), "http://127.0.0.1:11434", async () => { pauses += 1; });
+    assert.equal((await client.residency())[0]?.state, expected);
+    assert.equal(reads, 2);
+    assert.equal(pauses, 1);
+  }
+  const client = new OllamaClient(async () => Response.json({ models: [{ name: "gemma4:12b", size: 100, size_vram: 40 }] }));
+  assert.equal((await client.residency())[0]?.state, "mixed");
+});
+
 describe("provider HTTP failures preserve the provider's reason", () => {
   it("reads a 403 JSON detail before raising the provider fault", async () => {
     const detail = "User is locked. Reason: Exhausted balance. Top up at fal.ai/dashboard/billing.";

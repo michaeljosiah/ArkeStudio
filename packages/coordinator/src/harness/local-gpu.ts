@@ -4,7 +4,7 @@ import type { HarnessAdapter, HarnessEvent, SendMessageInput, SessionConfigInput
 import type { LocalGpu } from "../local-ai/gpu.js";
 
 /** Cover every harness caller, including fire-and-watch turns outside the provider queue. */
-export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu): HarnessAdapter {
+export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: () => void = () => {}): HarnessAdapter {
   const prepared = new Map<string, SessionConfigInput>();
   const models = new Map<string, string | undefined>();
   const turns = new Map<string, { abort: AbortController; started: boolean }>();
@@ -41,7 +41,7 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu): HarnessAda
       signal.throwIfAborted();
       turn.started = true;
       return await adapter.sendMessage(input);
-    } finally { release?.(); turns.delete(input.sessionId); }
+    } finally { release?.(); turns.delete(input.sessionId); settled(); }
   };
   const overrides: Partial<HarnessAdapter> = {
     prepareSession(input) {
