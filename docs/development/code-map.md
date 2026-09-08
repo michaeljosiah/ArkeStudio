@@ -94,6 +94,8 @@ founding-v1 master-look addition against the committed baseline. New founding pr
 Bible hashes join the existing scan manifest for history validation, while outside-edit
 reconciliation still excludes this ungated document. Its change-log receipt or scan baseline
 validates the snapshot before `adoptBibleIfMoved` may use it as the previous version.
+`scanWorld` carries each file's latest hashed change receipt into these checks, reusing its one
+change-log read; pending live edits are checked against their committed hashes and version stamps.
 
 The client sends `open-world`; Coordinator uses the world provider. `world/provider.ts` opens the filesystem-backed store, while `world/store.ts` owns recovery, ownership, scanning/indexing and watcher lifecycle. Follow the provider's failure events and client `components/world-open-refusal.tsx` for refusal presentation. Disk changes feed reconciliation and refreshed state rather than becoming invisible mutations of client state.
 

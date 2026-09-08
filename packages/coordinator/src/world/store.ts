@@ -779,42 +779,49 @@ export class WorldStore {
 
   /** History damage costs a snapshot, not access to the world's committed work (issue 979). */
   private async checkCurrentHistorySnapshots(repair = false, seedMissing = false): Promise<void> {
-    const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
-    const changes = seedMissing || this.scan.manifest[BIBLE_PATH] !== undefined
-      ? await readChanges(join(this.dir, "changes.jsonl")) : [];
-    const bibleCommit = changes.findLast((change) => change["path"] === BIBLE_PATH && typeof change["contentHashAfter"] === "string");
-    const bibleVersion = typeof bibleCommit?.["toVersion"] === "number" ? bibleCommit["toVersion"] : this.scan.bundle.bible.version;
-    const seeds = Object.entries(this.scan.manifest)
-      .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
-      .map(async ([portablePath, hash]) => {
+    const hasBaseline = Object.keys(this.scanState.manifest).length > 0;
+    const paths = new Set([...Object.keys(this.scan.manifest), ...Object.keys(this.scanState.manifest)]);
+    const seeds = [...paths]
+      .filter((path) => historyDirectory(path) !== null)
+      .map(async (portablePath) => {
+        const directory = historyDirectory(portablePath)!;
+        this.scan.bundle.problems = this.scan.bundle.problems.filter((problem) => !problem.path.startsWith(`${directory}/`));
+        const receipt = this.scan.historyCommits[portablePath];
+        const baseline = this.scanState.manifest[portablePath];
+        const expected = receipt && (baseline === undefined || receipt.changeCount > (this.scanState.changeCount ?? 0))
+          ? receipt.hash : baseline ?? (hasBaseline ? undefined : this.scan.manifest[portablePath]);
+        // An outside create has no committed version yet; a committed deletion has no current one.
+        if (expected === undefined || expected === null) return;
         const content = await this.readEntity(portablePath);
-        if (content === null || (portablePath !== BIBLE_PATH && sha256(content) !== hash)) return;
-        const snapshot = portablePath === BIBLE_PATH
-          ? { version: bibleVersion, path: `.history/bible/v${bibleVersion}.md` }
-          : historySnapshot(portablePath, content);
-        if (snapshot === null) return;
-        this.scan.bundle.problems = this.scan.bundle.problems.filter((problem) => problem.path !== snapshot.path);
-        const report = () => this.scan.bundle.problems.push({ path: snapshot.path,
-          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}, version ${snapshot.version}, is unavailable. The current record is usable; restore this snapshot from a backup to use its history.` });
+        const liveMatches = content !== null && sha256(content) === expected;
+        let snapshot = receipt?.hash === expected && receipt.version !== undefined
+          ? { version: receipt.version, path: historyPathForVersion(portablePath, receipt.version)! }
+          : null;
+        if (snapshot === null) {
+          // Pending edits may change or remove even the live version stamp. Find the committed
+          // bytes by their saved hash instead of treating those edits as damaged history.
+          const committed = liveMatches ? content : await this.readLastCommittedEntity(portablePath, expected).catch(() => null);
+          if (committed !== null) snapshot = historySnapshot(portablePath, committed) ??
+            (portablePath === BIBLE_PATH ? { version: 1, path: ".history/bible/v1.md" } : null);
+        }
+        // The scanner already reports malformed records that have no history version to check.
+        if (snapshot === null && liveMatches) return;
+        const report = () => this.scan.bundle.problems.push({ path: snapshot?.path ?? `${directory}/`,
+          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath === BIBLE_PATH ? "the Bible" : portablePath}${snapshot ? `, version ${snapshot.version},` : ""} is unavailable. Restore its snapshot from a backup to use its history.` });
+        if (snapshot === null) { report(); return; }
         let existing: string | null;
         try { existing = await this.readEntity(snapshot.path); }
         catch { report(); return; }
         // Old founding builds added only the approved image after the initial snapshot.
         // Require the committed baseline to match and every existing field to be unchanged.
-        const canRepair = existing !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
-        const canSeed = existing === null && seedMissing && !changes.some((change) =>
-          change["path"] === portablePath && typeof change["contentHashAfter"] === "string");
-        if (repair && (canSeed || canRepair)) {
+        const canRepair = existing !== null && content !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
+        const canSeed = existing === null && seedMissing && receipt === undefined;
+        if (repair && liveMatches && content !== null && (canSeed || canRepair)) {
           await this.verifyOwnership();
           try { await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content); }
           catch { await this.verifyOwnership(); report(); }
         }
-        else if (portablePath === BIBLE_PATH) {
-          // A hand-edit changes the live Bible by design. Validate its snapshot against the
-          // last app-owned hash, not against those new words, before adopting it as a base.
-          const expected = bibleCommit?.["contentHashAfter"] ?? this.scanState.manifest[BIBLE_PATH] ?? hash;
-          if (existing === null || sha256(existing) !== expected) report();
-        } else if (existing !== content) report();
+        else if (existing === null || sha256(existing) !== expected) report();
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);
@@ -824,8 +831,7 @@ export class WorldStore {
     }
   }
 
-  private async readLastCommittedEntity(portablePath: string): Promise<string> {
-    const expected = this.scanState.manifest[portablePath];
+  private async readLastCommittedEntity(portablePath: string, expected = this.scanState.manifest[portablePath]): Promise<string> {
     if (expected === undefined) {
       throw new CommitPlanError(`${portablePath}: last committed version is unavailable`);
     }
@@ -1010,9 +1016,8 @@ async function reconstructScanState(dir: string, scan: ScanResult): Promise<Scan
     const committed = await latestHistoryContent(dir, portablePath);
     if (committed !== null) manifest[portablePath] = sha256(committed);
   }
-  const bibleCommit = (await readChanges(join(dir, "changes.jsonl")))
-    .findLast((change) => change["path"] === BIBLE_PATH && typeof change["contentHashAfter"] === "string");
-  if (bibleCommit) manifest[BIBLE_PATH] = bibleCommit["contentHashAfter"] as string;
+  const bibleHash = scan.historyCommits[BIBLE_PATH]?.hash;
+  if (typeof bibleHash === "string") manifest[BIBLE_PATH] = bibleHash;
   return { manifest, changeCount: scan.changeCount };
 }
 

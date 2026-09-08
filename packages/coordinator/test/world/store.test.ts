@@ -649,6 +649,35 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     } finally { await store.close(); }
   });
 
+  it("validates committed history while a closed-world edit changes the live version stamp", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await first.close();
+    const path = "characters/bray-half-hitch.md";
+    const live = await readFile(join(dir, path), "utf8");
+    const edited = MarkdownFile.parse(live);
+    edited.setData({ version: 99 });
+    edited.setBody(edited.body.replace("three belts", "four belts"));
+    await writeFile(join(dir, path), edited.serialize());
+    const historyPrefix = ".history/characters/bray-half-hitch/";
+    for (const readOnly of [true, false]) {
+      const store = await WorldStore.open(dir, { readOnly, clock: CLOCK });
+      try {
+        assert.ok(!store.getBundle().problems.some((p) => p.path.startsWith(historyPrefix)), "the committed v6 snapshot is intact");
+        if (!readOnly) assert.ok(store.getBundle().externalEdits.some((e) => e.path === path));
+      } finally { await store.close(); }
+    }
+    await rm(join(dir, historyPrefix, "v6.md"));
+    for (const readOnly of [false, true]) {
+      const store = await WorldStore.open(dir, { readOnly, clock: CLOCK });
+      try {
+        assert.ok(store.getBundle().problems.some((p) => p.path.startsWith(historyPrefix)), "loss is reported independently of the live edit");
+        assert.equal(await readFile(join(dir, path), "utf8"), edited.serialize());
+        if (!readOnly) assert.ok(store.getBundle().externalEdits.some((e) => e.path === path));
+      } finally { await store.close(); }
+    }
+  });
+
   it("repairs only the committed founding preview addition, never other changes or outside edits", async () => {
     const dir = await makeTempWorld();
     const path = join(dir, "art-direction/art-direction.json");
