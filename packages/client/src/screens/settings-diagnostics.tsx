@@ -117,7 +117,7 @@ function FindingRow({ finding, snapshot, now }: { finding: Finding; snapshot: Di
       </div>
       <div className="fy-set__why">
         <span className={cx("fy-set__dot", dotClass(finding.severity))} style={{ width: 5, height: 5 }} />
-        <span>{finding.cause.statement}</span>
+        <span className="fy-diag__cause">{finding.cause.statement}</span>
         {finding.note !== undefined && <span className="fy-diag__meta"> · {finding.note}</span>}
         {finding.cause.redacted === true && <span className="fy-diag__chip">redacted</span>}
       </div>

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { IsoDateTimeSchema } from "./ids.js";
 import { comfyUiWeightsComponentId, comfyUiWeightsRecipeId } from "./comfyui.js";
 import { PROVIDERS, type ProviderId } from "./provider.js";
+import { formatMicroUsd } from "./money.js";
 import type { ClientState } from "./client-state.js";
 
 /**
@@ -1167,7 +1168,7 @@ const spendAbovePrevious: Rule = {
           { name: "largest-share", value: winners.join(", "), source: "app.ledger", measuredAt: ctx.now },
         ],
         cause: {
-          statement: `spend rose ${rise} microUSD over the seven days before; ${winners.join(", ")} accounts for the largest share`,
+          statement: `spend rose ${formatMicroUsd(rise)} over the seven days before; ${winners.join(", ")} accounts for the largest share`,
         },
         remedy: null,
         consequences: [],
