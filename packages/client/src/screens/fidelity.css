@@ -1026,7 +1026,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 /* ---- sheet detail (3a): design card, turnaround strip, identity column ---- */
 
-.fy-sheet { display: flex; gap: 64px; padding: 34px 100px 48px; align-items: flex-start; }
+/* The overview tabs belong to this sheet, below any world-condition notices (issue 993). */
+.fy-sheet { position: relative; display: flex; gap: 64px; padding: 34px 100px 48px; align-items: flex-start; }
 .fy-sheet__side { flex: none; animation: fy-fade-up 0.7s var(--ease-out) 0.1s both; }
 .fy-sheet__main {
   flex: 1;

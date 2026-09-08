@@ -2103,7 +2103,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   );
   if (isCharacter) {
     return (
-      <>
+      <div className="fy-sheet" data-screen={screenId}>
         <nav className="fy-seg fy-character-overview-tabs">
           <span className="fy-seg__item fy-seg__item--active">Overview</span>
           <button
@@ -2128,11 +2128,9 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             Voice
           </button>
         </nav>
-        <div className="fy-sheet" data-screen={screenId}>
-          {side}
-          {main}
-        </div>
-      </>
+        {side}
+        {main}
+      </div>
     );
   }
   // Locations and factions (prototype 23b): full-height establishing view, facts to the right.
