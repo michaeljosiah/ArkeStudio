@@ -319,9 +319,9 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
   useEffect(()=>{if(plan?.requestId===pendingReview)setPendingReview(null);},[plan?.requestId,pendingReview]);
   useEffect(()=>{
     let live=true;setPromptReview(null);
-    if(plan?.sources&&prompt.trim())void reviewPrompt(plan.prompt,prompt,plan.sources).then(review=>{if(live){setPromptReview(review);setReviewError("");}},()=>{if(live)setReviewError("This prompt cannot be reviewed. Shorten it and try again.");});
+    if(plan?.sources&&prompt.trim())void reviewPrompt(plan.prompt,prompt,plan.sources,"world-key-art",model??undefined).then(review=>{if(live){setPromptReview(review);setReviewError("");}},()=>{if(live)setReviewError("This prompt cannot be reviewed. Shorten it and try again.");});
     return ()=>{live=false;};
-  },[plan?.promptReviewId,prompt]);
+  },[plan?.promptReviewId,prompt,model]);
 
   const carriedLine =
     plan !== undefined && plan.carried.length > 0

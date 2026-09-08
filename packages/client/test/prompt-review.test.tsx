@@ -3,6 +3,12 @@ import {it} from "node:test";
 import {renderToString} from "react-dom/server";
 import {reviewPrompt} from "@arke-studio/contracts";
 import {PromptReviewDetails} from "../src/components/prompt-review.js";
+it("shows model capability notices even when the prompt diff is empty and collapsed", async()=>{
+  const review=await reviewPrompt("First frame", "First frame", [], "shot-prompt", {displayName:"Selected model",accepts:{referenceImages:0,startFrame:false,endFrame:false},limits:{}});
+  const html=renderToString(<PromptReviewDetails review={review}/>);
+  assert.match(html,/role="status">Selected model has no first-frame input/);
+  assert.match(html,/No textual changes/);
+});
 it("names exact quotations and unverified additions without semantic claims",async()=>{
   const review=await reviewPrompt("A harbour","A neon harbour",[]);
   const html=renderToString(<PromptReviewDetails review={review}/>);

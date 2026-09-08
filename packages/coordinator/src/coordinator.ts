@@ -11935,7 +11935,7 @@ export class Coordinator {
         if(controller.signal.aborted||!current)return;
         candidate=current.candidate??null;
         this.keyArtPromptDrafts.delete(msg.worldId);
-        const review=candidate?await reviewPrompt(context.base,candidate,context.sources):undefined;
+        const review=candidate?await reviewPrompt(context.base,candidate,context.sources,"world-key-art",context.model):undefined;
         this.emit({
           at: new Date().toISOString(),
           type: "world-image.plan",

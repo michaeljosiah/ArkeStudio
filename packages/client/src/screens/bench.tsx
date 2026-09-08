@@ -96,6 +96,7 @@ import {
 import { Portrait } from "../components/portrait.js";
 import { ImageDownload } from "../components/image-actions.js";
 import { BenchBrief } from "../components/bench-brief.js";
+import { PromptCapabilityNotices } from "../components/prompt-review.js";
 import { droppedMentions, mentionOptions } from "../lib/bench-mention.js";
 import { mediaUrl } from "../lib/media.js";
 import { durationTrack, durationPillLabel } from "../lib/duration.js";
@@ -1521,6 +1522,7 @@ function BenchWorkspace({
                   : "Say what to make. Type @ to cite a reference."
               }
             />
+            <PromptCapabilityNotices text={draft.brief} model={model} />
             <div className="fy-bench__brieffoot">
               <button
                 type="button"
@@ -2693,6 +2695,7 @@ function BenchWorkspace({
                 label="Brief"
                 onEscape={() => setBriefExpanded(false)}
               />
+              <PromptCapabilityNotices text={draft.brief} model={model} />
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 {promptCap !== undefined && (
                   <span

@@ -1,6 +1,18 @@
 import type { PromptReview } from "@arke-studio/contracts";
-import { reviewPrompt } from "@arke-studio/contracts";
+import { reviewPrompt, promptCapabilityWarnings, type PromptCapabilityModel } from "@arke-studio/contracts";
 import { useEffect, useState } from "react";
+import { useStore } from "../lib/store.js";
+import { useResolvedModel } from "./dispatch-bar.js";
+
+export function ResolvedPromptCapabilityNotices({text, capability, modelId}: {text: string; capability: "image" | "video"; modelId?: string}) {
+  const { state } = useStore();
+  const { model } = useResolvedModel(state, capability, modelId);
+  return <PromptCapabilityNotices text={text} model={model} />;
+}
+
+export function PromptCapabilityNotices({text, model}: {text: string; model: PromptCapabilityModel | null | undefined}) {
+  return <>{model && promptCapabilityWarnings(text, model).map(warning => <p role="status" key={warning}>{warning}</p>)}</>;
+}
 
 export function ShotPromptProposalDiff({ before, after }: { before: string | null; after: string | null }) {
   const [result, setResult] = useState<{ before: string; after: string; review: PromptReview } | null>(null);
@@ -23,6 +35,7 @@ export function PromptReviewDetails({ review, showMetrics=true }: {review:Prompt
   const ordered=[...unverified,...review.hunks.filter(h=>!unverified.some(u=>u===h))];
   const removed=review.hunks.filter(h=>h.op==="delete").length;
   return <div className="fy-prompt-review" aria-label="Creative prompt diff" style={{overflowWrap:"anywhere"}}>
+    {review.capabilityWarnings?.map(warning => <p role="status" key={warning}>{warning}</p>)}
     {showMetrics&&<p>{review.candidate.characters} Unicode characters · {review.candidate.utf8Bytes} UTF-8 bytes. Change: {review.characterDelta>=0?"+":""}{review.characterDelta} characters.</p>}
     {review.hunks.length===0?<p>No textual changes.</p>:<>
       <p>Changed passages: {additions.length} added; {removed} removed.{unverified.length>0&&<> {unverified.length} {unverified.length===1?"addition is":"additions are"} <abbr tabIndex={0} title="Unverified means the application found no exact quotation in the supplied sources. It does not mean false.">unverified</abbr>.</>}</p>

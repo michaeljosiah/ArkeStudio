@@ -216,7 +216,7 @@ export interface MultimediaCapacity {
   videoUsedSec: number;
 }
 
-export function multimediaCapacity(carried: readonly MultimediaReference[], model: ManifestModel): MultimediaCapacity {
+export function multimediaCapacity(carried: readonly MultimediaReference[], model: Pick<ManifestModel, "accepts" | "limits" | "unverified">): MultimediaCapacity {
   let images = 0;
   let audio = 0;
   let video = 0;
