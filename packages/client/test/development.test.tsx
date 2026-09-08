@@ -115,6 +115,22 @@ function renderApp(state: ClientState, path: string): string {
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
 
+it("distinguishes an episode wait from missing episode and production ids (issue 1000)", () => {
+  const state = withMicrodrama([ONE]);
+  const base = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`;
+  const path = `${base}/episodes/the-missing-night`;
+  const opening = render({ ...state, world: null }, path, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
+  assert.match(opening, /Opening episode/);
+  assert.doesNotMatch(opening, /not found/);
+  const missing = renderApp(state, path);
+  assert.match(missing, /Episode not found/);
+  assert.match(missing, new RegExp(`href="${base}/season"`));
+  assert.doesNotMatch(missing, /Opening episode/);
+  const missingProduction = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/missing/episodes/${ONE.id}`);
+  assert.match(missingProduction, /Production not found/);
+  assert.match(missingProduction, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/productions"`));
+});
+
 describe("Development single-act reachability", () => {
   const screens = ["development.tsx", "production.tsx"].map((file) =>
     readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/screens", file), "utf8"),

@@ -145,10 +145,12 @@ function modelName(job: Job, manifest: ModelManifest | null): string {
  * its total, because that is the figure the surface quoted — four shots at $1.37 dispatched from
  * a button reading $5.46 must not come back saying $1.37.
  */
-function money(jobs: readonly Job[], spent: boolean): string {
+function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spent: boolean): string {
   const total = jobs.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
-  if (total === 0) return "local";
-  return spent ? usd(total) : `~${usd(total)}`;
+  const name = modelName(jobs[0]!, manifest);
+  // Local recipes already prefix their picker label; the receipt says it once, in the cost slot.
+  if (total === 0) return `${name.replace(/^Local · /i, "")} · local`;
+  return `${name} · ${spent ? usd(total) : `~${usd(total)}`}`;
 }
 
 /**
@@ -274,7 +276,7 @@ export function enqueueNote(
       ? `${partial || count > 1 ? `${count}${partial ? ` of ${result.requestedCount}` : ""} ` : ""}${noun(first.target.kind, count)}`
       : `${count} ${commandNoun(result.command, count)}`;
     const meta = first
-      ? [modelName(first, manifest), money(accepted, false), pace(first, jobs, new Set(result.acceptedJobIds))]
+      ? [modelAndCost(accepted, manifest, false), pace(first, jobs, new Set(result.acceptedJobIds))]
           .filter((part): part is string => part !== null)
           .join(" · ")
       : "nothing to price yet";
@@ -330,7 +332,7 @@ export function readyNote(
     id: noteId ?? `job:${job.id}`,
     tone: "back",
     title: title(subject, noun(job.target.kind, 1), "ready"),
-    meta: [modelName(job, manifest), money([job], true)].join(" · "),
+    meta: modelAndCost([job], manifest, true),
     action: { label: to === "/activity" ? "Activity" : "View", to },
     ...(landed ? { thumb: { worldId: job.worldId, path: landed } } : {}),
   };
