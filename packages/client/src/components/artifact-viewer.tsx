@@ -4,7 +4,7 @@ import { formatSeconds, type ArtifactSidecar } from "@arke-studio/contracts";
 import { Button } from "./ui.js";
 import { Copy, Download, X } from "./icons.js";
 import { RichMarkdownEditor } from "./editor/rich-markdown-editor.js";
-import { artifactIsServable, artifactViewer } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactIsServable, artifactViewer } from "../lib/artifact-view.js";
 import { useArtifactText } from "../lib/artifact-text.js";
 import { downloadMedia, downloadNameFor } from "../lib/download.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
@@ -108,7 +108,8 @@ function ArtifactPanel({
   onClose: () => void;
   onRetire?: (artifactId: string) => void;
 }) {
-  const name = artifact.file.split("/").pop() ?? artifact.file;
+  const filename = artifact.file.split("/").pop() ?? artifact.file;
+  const name = artifactDisplayName(artifact, linkName);
   const path = `artifacts/${artifact.file}`;
   const viewer = artifactViewer(artifact);
   /*
@@ -120,7 +121,7 @@ function ArtifactPanel({
   const src = worldSlug ? mediaUrl(worldSlug, path, { attempt: String(attempt) }) : "";
   const retry = () => setAttempt((n) => n + 1);
 
-  const extension = name.includes(".") ? name.split(".").pop() : null;
+  const extension = filename.includes(".") ? filename.split(".").pop() : null;
   const sub = [
     artifact.kind,
     ...(extension !== null && extension !== undefined ? [extension.toLowerCase()] : []),
@@ -131,11 +132,11 @@ function ArtifactPanel({
     <div className="fy-artview__panel">
       <div className="fy-artview__head">
         <div className="fy-artview__titles">
-          <h2 id={titleId}>{name}</h2>
+          <h2 id={titleId} title={filename}>{name}</h2>
           <div className="fy-artview__sub">{sub}</div>
         </div>
         {artifactIsServable(artifact) && (
-          <SaveCopy worldSlug={worldSlug} path={path} name={name} />
+          <SaveCopy worldSlug={worldSlug} path={path} name={filename} />
         )}
         {onRetire && artifact.retiredAt === undefined && <Button variant="outline" onClick={() => onRetire(artifact.id)}>Remove from shelf</Button>}
         <button

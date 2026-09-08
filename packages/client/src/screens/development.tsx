@@ -814,8 +814,8 @@ function EpisodeSceneCard({
           {scene.title}
         </button>
       </div>
-      <div className="fy-mono" style={{ marginTop: 8 }}>
-        {scene.id} · {complete ? "done" : "in progress"}
+      <div className="fy-mono" style={{ marginTop: 8 }} title={scene.id}>
+        Scene {scene.number} · {complete ? "done" : "in progress"}
       </div>
     </div>
   );

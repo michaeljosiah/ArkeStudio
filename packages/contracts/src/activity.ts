@@ -5,6 +5,25 @@ import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
+import { orderedShots } from "./scene-flow.js";
+
+/** The same names for running and completed work, resolved only inside its owning world (#1005). */
+export function activityJobLabels(state: ClientState | null | undefined, job: Job): { target: string; model: string } {
+  const world = state?.world?.meta.worldId === job.worldId ? state.world : null;
+  const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
+  const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId);
+  const targetId = job.target.id?.split("/")[0];
+  const shotId = job.target.coversShots?.[0] ?? targetId;
+  const scene = production?.scenes.find((candidate) => candidate.id === targetId || orderedShots(candidate).some((shot) => shot.id === shotId));
+  const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
+  const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
+  const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
+  const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
+  const subject = sheet?.name ?? bench?.title ?? (shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title);
+  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title ?? worldName, scene && shot ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
+  return { target, model };
+}
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
@@ -268,8 +287,8 @@ export function computeRunning(
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     entries.push({
       kind: "job",
-      title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
+      title: activityJobLabels(state, job).target,
+      detail: `${activityJobLabels(state, job).model} · ${finalizing ? "generated · preparing result" : job.status}`,
       percent: null,
       ref: job.id,
       worldId: job.worldId,

@@ -2854,7 +2854,7 @@ export function ActivityScreen() {
           {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <JobRow job={job} />
+              <JobRow job={job} state={state} />
               {/* Where this one is re-run from, which is not one place (issue 226). The row used
                   to name the production's dispatch dialog under every failure, including the
                   reference work that belongs to no production and has no such dialog. */}

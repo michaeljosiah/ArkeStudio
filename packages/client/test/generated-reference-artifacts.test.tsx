@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { worldImageReferences, type ArtifactSidecar, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -75,6 +76,11 @@ describe("the Artifacts shelf holds what a character generated", () => {
     // "which of these came from a character?".
     assert.match(html, /character reference/);
     assert.match(html, /Made here 1/, "and it counts as something this application made");
+    const card = Array.from(parseHTML(html).document.querySelectorAll(".fy-gridcard--openable"))
+      .find((element) => element.querySelector('[title="maren-kest-main-photo-candidate.png"]'))!;
+    assert.match(card.textContent!, /Maren Kest/);
+    assert.doesNotMatch(card.textContent!, /maren-kest-main-photo-candidate\.png/);
+    assert.match(card.querySelector(".fy-gridcard__open")!.getAttribute("aria-label")!, /Open Maren Kest/);
   });
 
   it("keeps a rejected result on the shelf — no Keep press was ever required", () => {

@@ -115,6 +115,16 @@ function renderApp(state: ClientState, path: string): string {
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
 
+it("uses a scene number instead of its file id on the episode card (#1005)", () => {
+  const state = withMicrodramaScenes([structuredClone(ONE)], [FIXTURE_STATE.world!.productions[0]!.scenes[0]!]);
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "bell-watch-season-1")!;
+  const scene = production.scenes[0]!;
+  production.episodes[0]!.scenes = [scene.id];
+  const html = render(state, `/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/episodes/${ONE.id}`, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
+  assert.ok(html.includes(`Scene ${scene.number} ·`));
+  assert.ok(!html.includes(`${scene.id} ·`));
+});
+
 it("distinguishes an episode wait from missing episode and production ids (issue 1000)", () => {
   const state = withMicrodrama([ONE]);
   const base = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`;

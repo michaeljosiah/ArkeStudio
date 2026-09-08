@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import type { ClientState, Job } from "@arke-studio/contracts";
+import { activityJobLabels, computeRunning, orderedShots, type ClientState, type Job } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
 import { ActivityScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -60,6 +61,26 @@ function render(jobs: Job[]): string {
 }
 
 describe("a failed job's recovery route on the Activity row (issue 226)", () => {
+  it("names work and models consistently without borrowing another world's entities (#1005)", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const production = state.world!.productions[0]!;
+    const model = state.app.manifest!.models[0]!;
+    const sessionId = "sess_01J8F3K2QW9VZX4N7M0RTYB6HZ";
+    state.world!.benchSessions.push({ id: sessionId, title: "A storm over the harbour", mode: "image", updatedAt: TODAY, takeCount: 1, runningCount: 1, failedCount: 0, waitingCount: 0 });
+    const bench = failed({ target: { kind: "bench-take", id: `${sessionId}/tk_opaque` }, provider: model.provider, model: model.id, status: "running" });
+    state.app.jobs = [bench];
+    assert.match(computeRunning(state)[0]!.title, /A storm over the harbour/);
+    assert.match(computeRunning(state)[0]!.detail, new RegExp(model.displayName));
+    const master = failed({ target: { kind: "master-look", id: FIXTURE_WORLD_ID }, provider: model.provider, model: model.id });
+    const text = parseHTML(render([master])).document.querySelector(".dom-jobrow")!.textContent!;
+    assert.match(text, /Master look · The Undersong/);
+    assert.ok(text.includes(model.displayName));
+    assert.ok(!text.includes(FIXTURE_WORLD_ID));
+    const shot = failed({ productionId: production.meta.id, target: { kind: "shot", id: orderedShots(production.scenes[0]!)[0]!.id } });
+    assert.ok(activityJobLabels(state, shot).target.includes(production.meta.title));
+    const other = { ...shot, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" };
+    assert.ok(!activityJobLabels(state, other).target.includes(production.meta.title));
+  });
   it("sends a failed character look to the looks screen, not to a production it does not have", () => {
     const html = render([failed({})]);
     assert.ok(html.includes("run it again from the looks screen"), "the row names where this one came from");

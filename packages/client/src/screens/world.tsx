@@ -55,7 +55,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { episodeThumbnailPath, takeMediaPath, Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -4635,12 +4635,13 @@ export function ArtifactsScreen() {
         }}
       >
         {visible.map((a) => {
-          const name = a.file.split("/").pop() ?? a.file;
+          const filename = a.file.split("/").pop() ?? a.file;
+          const name = artifactDisplayName(a, linkName);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
-            name.includes(".") ? name.split(".").pop() : a.kind,
+            filename.includes(".") ? filename.split(".").pop() : a.kind,
             ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
             ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
@@ -4661,8 +4662,8 @@ export function ArtifactsScreen() {
               <button
                 type="button"
                 className="fy-gridcard__open"
-                aria-label={artifactOpenLabel(a)}
-                title={artifactOpenLabel(a)}
+                aria-label={artifactOpenLabel(a, name)}
+                title={filename}
                 onClick={(event) => {
                   openTrigger.current = event.currentTarget;
                   setOpenArtifactId(a.id);
@@ -4682,7 +4683,7 @@ export function ArtifactsScreen() {
                     path={`artifacts/${a.file}`}
                     label={name}
                     download
-                    downloadName={name}
+                    downloadName={filename}
                   />
                 </div>
               ) : a.kind === "audio" ? (

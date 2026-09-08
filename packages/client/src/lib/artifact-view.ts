@@ -112,8 +112,13 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
   details: "details",
 };
 
-/** "Open key-art.png — image". Filename and viewer, which is what the name has to carry. */
-export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">): string {
-  const name = artifact.file.split("/").pop() ?? artifact.file;
+/** Linked names title the shelf and its viewer; the file remains the download identity (#1005). */
+export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string) => string): string {
+  const names = artifact.links.map(linkName).filter((name, index) => name !== artifact.links[index]);
+  return [...new Set(names)].slice(0, 2).join(" · ") || artifact.file.split("/").pop() || artifact.file;
+}
+
+/** The visible name and viewer are also the open button's accessible name. */
+export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {
   return `Open ${name} — ${VIEWER_LABEL[artifactViewer(artifact)]}`;
 }

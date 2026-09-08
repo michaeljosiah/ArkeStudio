@@ -4365,10 +4365,13 @@ function ArtifactPanel({
   const shotItems: LibraryItem[] = shots.map(({ scene, shot, take, path }) => {
     const used = usedShotIds.has(shot.id);
     const line = shot.audio?.line ?? "";
+    const takeNumber = take && production ? takesForShot(production, shot.id)
+      .filter((candidate) => mediaTakeFor(production, candidate) !== null || candidate.completedAt === undefined)
+      .findIndex((candidate) => candidate.id === take.id) + 1 : 0;
     return {
       key: `shot:${shot.id}`,
       name: `Shot ${shot.number} · ${shot.title}`,
-      sub: take === null ? "no accepted take" : `SC ${scene.number} · ${take.id}`,
+      sub: take === null ? "no accepted take" : `Scene ${scene.number}${takeNumber > 0 ? ` · Take ${takeNumber}` : " · accepted take"}`,
       subTone: take === null ? "destructive" : "muted",
       thumb: take && path ? <Portrait worldSlug={slug} path={path} label="" radius={4} /> : <Film size={12} />,
       lane: "Picture",

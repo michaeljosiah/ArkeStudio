@@ -339,6 +339,21 @@ describe("the export sheet (R-24, T-5)", () => {
 });
 
 describe("spoken lines in the Library (R-1, R-8)", () => {
+  it("names the accepted take by its review number in the Library (#1005)", async () => {
+    const state = savedState();
+    const production = state.world!.productions[0]!;
+    const [shotId, selection] = Object.entries(production.selections).find(([, selected]) => selected.acceptedTakeId)!;
+    const first = production.takes.find((take) => take.id === selection.acceptedTakeId)!;
+    const second = { ...first, id: "tk_01J8G0000000000000000000V2" as typeof first.id };
+    production.takes = [first, second];
+    production.selections[shotId] = { ...selection, acceptedTakeId: second.id };
+    const screen = await mount(state, "?library=all");
+    try {
+      const row = screen.container.querySelector(`[data-library-item="shot:${shotId}"]`)!;
+      assert.match(row.textContent!, /Take 2/);
+      assert.doesNotMatch(row.textContent!, /tk_/);
+    } finally { await close(screen); }
+  });
   it("lists read lines with the Voice role and reuses the generic track for later placements", async () => {
     const state = savedState();
     const production = state.world!.productions[0]!;

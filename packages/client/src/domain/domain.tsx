@@ -1,6 +1,7 @@
 import { ShotPromptProposalDiff } from "../components/prompt-review.js";
 import type {
   CanonEntry,
+  ClientState,
   Job,
   ReferenceTile as ReferenceTileModel,
   RipplePreview,
@@ -9,6 +10,7 @@ import type {
   StagedProposal,
   Take,
 } from "@arke-studio/contracts";
+import { activityJobLabels } from "@arke-studio/contracts";
 import { humanNumber, seconds, shortDateTime, usd } from "../lib/format.js";
 import { Avatar, Badge, Button, Card, StatusDot, cx, type StatusDotTone } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
@@ -467,16 +469,16 @@ const JOB_TONE: Record<Job["status"], StatusDotTone> = {
   "needs-reconciliation": "warn",
 };
 
-export function JobRow({ job }: { job: Job }) {
+export function JobRow({ job, state }: { job: Job; state?: ClientState | null }) {
+  const labels = activityJobLabels(state, job);
   return (
     <div className="dom-jobrow">
       <StatusDot tone={JOB_TONE[job.status]} />
-      <span className="dom-jobrow__target">
-        {job.target.kind}
-        {job.target.id ? ` · ${job.target.id}` : ""}
+      <span className="dom-jobrow__target" title={job.target.id}>
+        {labels.target}
       </span>
-      <span className="dom-jobrow__model mono">
-        {job.provider}/{job.model}
+      <span className="dom-jobrow__model" title={`${job.provider}/${job.model}`}>
+        {labels.model}
       </span>
       <span className="dom-jobrow__cost">{usd(job.estimatedMicroUsd)} est.</span>
       <span className="dom-jobrow__when">{shortDateTime(job.updatedAt)}</span>
