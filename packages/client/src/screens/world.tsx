@@ -99,7 +99,6 @@ import {
   restoreSheetVersion,
   extractArtifact,
   fileArtifactMsg,
-  importFolder,
   uploadArtifacts,
   retireArtifact,
   providerIdOf,
@@ -4352,14 +4351,11 @@ export function ArtifactsScreen() {
   const artifacts = shelfArtifacts.filter(a => a.retiredAt === undefined);
   const report = useImportReport();
   const notices = useArtifactNotices();
-  const [importPath, setImportPath] = useState("");
   const [dropActive, setDropActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const upload = (files?: readonly File[]) => {
     if (worldId) setUploadError(uploadArtifacts(worldId, files).reason ?? null);
   };
-  // The path row appears on request (design 68a puts only the button pair in the header row).
-  const [importing, setImporting] = useState(false);
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   // "Made here" combines with the kind filter rather than replacing it (issue 305 §2).
   const [madeHereOnly, setMadeHereOnly] = useState(false);
@@ -4415,9 +4411,6 @@ export function ArtifactsScreen() {
           shots to answer to, so it never grows one. */}
       <div className="fy-artifacts-door">
         <Button variant="outline" onClick={() => upload()}>Add files</Button>
-        <Button variant="outline" onClick={() => setImporting((v) => !v)}>
-          Import folder
-        </Button>
         <Button
           variant="primary"
           data-testid="artifacts-generate"
@@ -4467,27 +4460,7 @@ export function ArtifactsScreen() {
             </button>
           )}
         </div>
-        {importing && (
-          <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
-            <Input
-              // A JSX attribute string is literal — no escapes — so backslashes doubled for a JS
-              // string rendered on screen as they were written. The braces make it a JS string.
-              placeholder={"C:\\path\\to\\your\\notes"}
-              value={importPath}
-              onChange={(e) => setImportPath(e.target.value)}
-              style={{ minWidth: 280 }}
-            />
-            <Button
-              variant="primary"
-              disabled={importPath.trim().length === 0}
-              onClick={() => {
-                if (worldId) importFolder(worldId, importPath.trim());
-              }}
-            >
-              Import
-            </Button>
-          </div>
-        )}
+
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
         {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}

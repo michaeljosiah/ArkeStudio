@@ -3940,10 +3940,6 @@ export function fileArtifactMsg(
   send({ kind: "file-artifact", worldId, sourcePath, ...opts });
 }
 
-export function importFolder(worldId: string, sourcePath: string): void {
-  send({ kind: "import-folder", worldId, sourcePath });
-}
-
 /** Derive continuity for one chapter (turn 129): a press, never a save. */
 export function deriveContinuity(worldId: string, productionId: string, chapterFile: string): void {
   send({ kind: "derive-continuity", worldId, productionId, chapterFile });
