@@ -326,7 +326,7 @@ describe("a character's voice", () => {
   it("says who reads her lines while nothing is assigned, and offers no Change", () => {
     const html = render(page, withoutVoice(), { voiceCandidates: candidates });
     assert.match(html, /No voice yet/);
-    assert.match(html, /the narrator reads her lines/);
+    assert.match(html, /the narrator reads their lines/);
     // A press that says Change when there is nothing to change is the empty state lying.
     assert.match(html, />Set</);
     assert.doesNotMatch(html, />Change</);
@@ -350,6 +350,37 @@ describe("a character's voice", () => {
       /data-testid="voice-catalogue"/,
     );
     assert.match(render(`${page}?sample=1`, FIXTURE_STATE, { voiceCandidates: candidates }), /data-testid="voice-sample"/);
+  });
+
+  it("offers the assigned clip back, and says what was attested of it", () => {
+    // The clip's path comes from the shared resolver, because both sample shapes store a
+    // basename beneath references/<sheetId>/ and reading `file` straight asks the world root for
+    // a path that does not exist — a playback failure with nothing on screen to explain it.
+    const state: ClientState = {
+      ...FIXTURE_STATE,
+      world: {
+        ...FIXTURE_STATE.world!,
+        referenceKits: FIXTURE_STATE.world!.referenceKits.map((kit) =>
+          kit.sheetId === sheetId
+            ? {
+                ...kit,
+                designatedVoiceSample: {
+                  file: "voice/sha256-" + "a".repeat(64) + ".wav",
+                  schemaVersion: 1,
+                  operationId: "00000000-0000-4000-8000-000000000000",
+                  designatedAt: "2026-09-08T00:00:00Z",
+                  warningCodes: [],
+                  attestations: [],
+                  provenance: { outputTechnical: { durationSec: 7.4 } },
+                } as never,
+              }
+            : kit,
+        ),
+      },
+    };
+    const html = render(page, state, { voiceCandidates: candidates });
+    assert.match(html, /7\.4 s/);
+    assert.match(html, /Play .* · voice sample/);
   });
 
   it("sorts the catalogue by where a voice lives, and counts each", () => {

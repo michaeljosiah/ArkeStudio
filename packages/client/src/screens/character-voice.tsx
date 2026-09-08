@@ -1,10 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import {
+  CLONED_VOICE_MODEL,
+  CLONED_VOICE_PROVIDER,
+  designatedVoiceSample,
   formatMicroUsd,
   isClonedVoice,
   legacyVoiceModel,
   mainPhotoFor,
+  orderedShots,
   voiceTargetKey,
   type ReferenceKit,
   type Sheet,
@@ -15,6 +19,7 @@ import { CharacterHeader } from "./character-reference.js";
 import { CloneVoiceDialog } from "../components/clone-voice-dialog.js";
 import { VoiceSampleFlow } from "../components/character-voice-sample.js";
 import { DegradedBanner } from "../components/layout.js";
+import { PerformanceBiblePanel } from "../components/performance-bible-panel.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { ClipPlayButton } from "../components/player.js";
 import { Button, Callout, cx } from "../components/ui.js";
@@ -240,22 +245,43 @@ export function CharacterVoiceScreen() {
   const written = writtenVoice(sheet);
   const reads = readsSource(sheet, world, candidates);
   const screen = screenSource(kit);
-  const sample = kit?.designatedVoiceSample;
+  // Both sample shapes store a basename beneath `references/<sheetId>/`, and only the resolver
+  // knows it. Reading `sample.file` straight asks the world root for a file that is not there.
+  const sampleFile = designatedVoiceSample(kit ?? null)?.file ?? null;
   const sheetPath = `characters/${sheet.id}.md`;
-  // How much of this world already speaks with the assignment — what a change is about to reach.
+  // What a change is about to reach: the dialogue authored for this character, not the
+  // recordings that happen to exist. A scene with lines and no performance yet still speaks with
+  // the assignment, and a frozen performance keeps the one it was made with.
   const speaking = world.productions.filter((production) =>
-    production.performances.some((performance) => performance.target.speakerSheetId === sheetId),
+    production.scenes.some(
+      (scene) =>
+        scene.script?.blocks.some((block) => block.kind === "dialogue" && block.speaker === sheetId) ||
+        orderedShots(scene).some((shot) => shot.audio?.speaker === sheetId),
+    ),
   ).length;
   // Zero productions is not worth a clause: what a change reaches is only interesting once a
   // change would reach something.
   // Which engines the catalogue actually reaches, named on the tile: "58 voices" says nothing
   // about whether any of them can run here without a key.
   const engines = [...new Set((candidates?.ranked ?? []).map(({ candidate }) => candidate.provider))].slice(0, 3);
+  // Delivery examples live beside the performance they were taken from (design 132). The one
+  // case that surface cannot reach is a slot whose production or scene has since gone: nothing
+  // resolves this character as a speaker any more, so the panel appears here to be cleared.
+  const orphanedExamples =
+    (world.performanceBibles ?? []).some((bible) => bible.sheetId === sheetId && bible.events.length > 0) &&
+    !world.productions.some((production) =>
+      production.performances.some(
+        (performance) =>
+          performance.target.speakerSheetId === sheetId &&
+          production.performanceReview.reviews.filter((review) => review.performanceId === performance.id).at(-1)
+            ?.decision === "accept",
+      ),
+    );
   const usage =
     speaking === 0
       ? reads
         ? "used by nothing yet"
-        : "the narrator reads her lines"
+        : "the narrator reads their lines"
       : `${speaking} production${speaking === 1 ? "" : "s"}${reads ? " · replanned on change" : " · read by the narrator"}`;
   return (
     <div data-screen="character-voice">
@@ -303,9 +329,11 @@ export function CharacterVoiceScreen() {
             <div className="fy-voicehero__uses">
               <UseRow
                 name="Reads lines"
-                glyph={reads?.local === false ? <Cloud size={12} /> : <Monitor size={12} />}
+                glyph={
+                  reads?.local === null || reads === null ? null : reads.local ? <Monitor size={12} /> : <Cloud size={12} />
+                }
                 source={reads ? `${reads.label} · ${reads.detail}` : null}
-                empty="not set · the narrator reads her lines"
+                empty="not set · the narrator reads their lines"
                 meta={reads ? usage : null}
                 onSet={() => open("choose")}
               />
@@ -316,15 +344,12 @@ export function CharacterVoiceScreen() {
                 empty="not set"
                 meta={null}
                 play={
-                  sample && world ? (
+                  sampleFile !== null ? (
                     <ClipPlayButton
                       small
                       clip={{
-                        id: `${world.meta.worldId}/${sample.file}`,
-                        url: mediaUrl(
-                          world.meta.slug,
-                          "schemaVersion" in sample ? sample.file : `references/${sheetId}/${sample.file}`,
-                        ),
+                        id: `${world.meta.worldId}/${sampleFile}`,
+                        url: mediaUrl(world.meta.slug, sampleFile),
                         title: `${sheet.name} · voice sample`,
                         sub: "on screen",
                       }}
@@ -364,7 +389,7 @@ export function CharacterVoiceScreen() {
             title="Clone a voice"
             what="record · 3 seconds or more"
             where="wav · mp3"
-            sets={["reads", "on screen"]}
+            sets={["reads"]}
             onOpen={() => open("record")}
           />
           <EntranceTile
@@ -372,7 +397,7 @@ export function CharacterVoiceScreen() {
             title="Upload a recording"
             what="a file on this machine"
             where="wav · mp3"
-            sets={["reads", "on screen"]}
+            sets={["reads"]}
             onOpen={() => open("record")}
           />
           <EntranceTile
@@ -399,11 +424,26 @@ export function CharacterVoiceScreen() {
           worldId={world.meta.worldId}
           sheetId={sheetId}
           onClose={() => close()}
-          onCloned={() => close()}
+          onCloned={(voiceId) => {
+            // A clone that leaves the character it was made for still unvoiced is the flow
+            // stopping one press short: the voice exists in the world and nothing reads with it.
+            clearingRequest.current = assignVoice(world.meta.worldId, sheetPath, {
+              provider: CLONED_VOICE_PROVIDER,
+              model: CLONED_VOICE_MODEL,
+              voiceId,
+            });
+            if (clearingRequest.current === null) setRefusal("The studio is disconnected — the voice was not assigned.");
+            close();
+          }}
         />
       )}
       {overlay === "sample" && (
         <VoiceSampleFlow world={world} sheet={sheet} onClose={() => close()} />
+      )}
+      {orphanedExamples && (
+        <div className="fy-voicepage__orphans">
+          <PerformanceBiblePanel world={world} sheet={sheet} />
+        </div>
       )}
     </div>
   );
@@ -530,7 +570,7 @@ function ChooseVoiceDialog({
           </span>
           <div>
             <strong>{`Choose ${sheet.name.split(" ")[0]}'s voice`}</strong>
-            <span className="fy-mono">ranked against her written voice</span>
+            <span className="fy-mono">ranked against their written voice</span>
           </div>
         </header>
         <div className="fy-voicesheet__filters">
@@ -553,7 +593,7 @@ function ChooseVoiceDialog({
             {candidates
               ? `previews read ${
                   candidates.previewLine.source === "own-line"
-                    ? "her own line"
+                    ? "their own line"
                     : candidates.previewLine.source === "drafted"
                       ? "a drafted line"
                       : "a stock line"
@@ -565,7 +605,17 @@ function ChooseVoiceDialog({
         {uploadConfirmation && (
           <RemoteVoiceUploadConfirmation
             destinationLabel={uploadConfirmation.destinationLabel}
-            onCancel={() => setUploadConfirmation(null)}
+            onCancel={() => {
+              setRequests((current) => {
+                const next = { ...current };
+                delete next[uploadConfirmation.key];
+                return next;
+              });
+              for (const [requestId, key] of requestKeys.current) {
+                if (key === uploadConfirmation.key) requestKeys.current.delete(requestId);
+              }
+              setUploadConfirmation(null);
+            }}
             onConfirm={() => {
               const candidate = rows.find(({ candidate }) => voiceTargetKey(candidate) === uploadConfirmation.key)
                 ?.candidate;

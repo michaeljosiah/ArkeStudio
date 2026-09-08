@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { useEffect, useRef, useState } from "react";
-import { characterSpeakingVideoRoutes, estimateMicroUsd, pickableArtifacts, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
+import { characterSpeakingVideoRoutes, designatedVoiceSample, estimateMicroUsd, pickableArtifacts, ulid, type ClientMessage, type ManifestModel, type Sheet, type VoiceSampleReview, type WorldBundle } from "@arke-studio/contracts";
 import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscribeQueueResults,
   subscribeVoiceSampleResults, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
@@ -160,7 +160,8 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
       <div className="fy-vsbody">
         {sample && <div className="fy-vsassigned">
           <span className="fy-vsassigned__what">{"schemaVersion" in sample ? "Assigned clip" : "Legacy clip · review before cloud reuse"}</span>
-          <Button variant="ghost" onClick={() => hear("schemaVersion" in sample ? sample.file : `references/${sheet.id}/${sample.file}`, `${sheet.name} · assigned clip`)}>Hear</Button>
+          {/* Both sample shapes name a file beneath `references/<sheetId>/`; only the resolver knows it. */}
+          <Button variant="ghost" onClick={() => { const at = designatedVoiceSample(kit ?? null); if (at) hear(at.file, `${sheet.name} · assigned clip`); }}>Hear</Button>
           {!("schemaVersion" in sample) && <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "prepare-character-voice-sample", requestId: ulid(), worldId: world.meta.worldId, sheetId: sheet.id, source: { kind: "legacy-character-sample", sheetId: sheet.id } })}>Revalidate</Button>}
           {"schemaVersion" in sample && sample.acknowledgementId && <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "withdraw-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(), expectedHash: sample.provenance.outputHash })}>Withdraw cloud reuse</Button>}
           <Button variant="ghost" disabled={busy} onClick={() => act({ kind: "clear-character-voice-sample", worldId: world.meta.worldId, sheetId: sheet.id, requestId: ulid(),

@@ -8068,6 +8068,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    flow behind an entrance is a sheet over the page rather than another band of
    the page: the panels this replaced competed for what the screen was for. */
 .fy-voicepage { padding: 22px 90px 40px; display: flex; flex-direction: column; gap: 18px; animation: fy-fade-up .7s var(--ease-out) .16s both; }
+.fy-voicepage__orphans { padding: 0 90px 40px; }
 .fy-voicehero { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 264px; border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: var(--card); box-shadow: var(--shadow-sm); }
 .fy-voicehero__art { position: relative; overflow: hidden; background: var(--neutral-950); }
 .fy-voicehero__art img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 18%; }
