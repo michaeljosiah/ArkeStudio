@@ -27,4 +27,3 @@ export function ProductionSetupOutline({ draft, sheetName }: { draft: Production
     {!!draft.openQuestions.length && <section><h3>Open questions</h3><ul>{draft.openQuestions.map((question, i) => <li key={i}>{question}</li>)}</ul></section>}
   </>;
 }
-
