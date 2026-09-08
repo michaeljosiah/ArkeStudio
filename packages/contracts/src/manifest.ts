@@ -640,20 +640,9 @@ function curatedAspects(model: ManifestModel): readonly string[] {
  * The shapes to offer for this model, in the order to offer them — and an empty list where it has
  * no opinion, which is the signal to draw no control rather than a control over a guess.
  *
- * `limits.aspects` is a *curated offer list*, not a statement of what the route will accept: the
- * fal catalogue's own comment says so, and nano-banana's entry deliberately leaves out ratios the
- * route does have. So a derived default outside that list is not an invalid request — flux takes
- * a 3:2 `image_size` perfectly well — it is simply a shape we had not thought to offer.
- *
- * Which is why the default is folded in rather than corrected away. Given an orientation, the
- * shape that orientation would otherwise have produced comes **first**, so opening a dialog and
- * changing nothing generates exactly what the surface generated before it had a picker. Without
- * one, the curated list stands alone — there is no orientation to have a default for.
- *
- * Snapping the ladder into the curated list instead would have been worse than the inconsistency:
- * flux's nearest offered shape to a 4:5 portrait is 1:1, so every character main photo would have
- * become a square, and an identity anchor cropped to a square is a worse photograph than an
- * unlisted ratio is a bookkeeping error.
+ * Prefer the orientation's default only when the model offers it. Recipe bucket lists are
+ * exhaustive: adding a generic ratio made Krea 2 promise 3:2 while producing 4:3 (#975).
+ * Validation still accepts the output builder's derived shapes through aspectOffered.
  */
 export function offeredAspects(
   model: ManifestModel,
@@ -662,7 +651,9 @@ export function offeredAspects(
   const curated = curatedAspects(model);
   if (curated.length === 0 || options.landscape === undefined) return curated;
   const fallback = derivedAspect(model, options.landscape);
-  return [fallback, ...curated.filter((aspect) => aspect !== fallback)];
+  return curated.includes(fallback)
+    ? [fallback, ...curated.filter((aspect) => aspect !== fallback)]
+    : curated;
 }
 
 /**
