@@ -32,8 +32,12 @@ export async function handleProductionSetupCommand(
       const running = action.operation === "send"
         ? runner().send(log, id, action.text, [], undefined, action.modelId)
         : runner().retry(log, id, action.turnId as TurnId);
-      // Observe both promises immediately: a failed snapshot must not leave an unobserved turn.
-      const [result] = await Promise.all([running, publish(id)]);
+      // A progress refresh can fail independently. Always drain the turn and publish its
+      // terminal transcript before answering, including the durable failure and Retry action.
+      const [outcome] = await Promise.allSettled([running, publish(id)]);
+      await publish(id);
+      if (outcome.status === "rejected") throw outcome.reason;
+      const result = outcome.value;
       if (result.status === "unavailable" || result.status === "failed") throw new Error(result.reason);
       return service.resume(id);
     }

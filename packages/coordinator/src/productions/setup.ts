@@ -15,6 +15,13 @@ import { WorldChatService } from "../world-chat/service.js";
 import { CommitStaleError } from "../world/commit.js";
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 
+function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
+  return { status: "draft", review: null, draft: ProductionSetupDraftSchema.parse({
+    schemaVersion: 1, setupId, worldId, revision: 1, title: "", kind: "film", aspect: "16:9", frameRate: 24,
+    narrative: {}, arcs: [], references: [], openQuestions: [], episodes: [], scenes: [],
+  }) };
+}
+
 /** One lifecycle authority per open WorldStore, never an application-global draft sandbox. */
 export class ProductionSetupService {
   private readonly queues = new Map<string, WriteQueue>();
@@ -35,7 +42,20 @@ export class ProductionSetupService {
     if (problems.some(problem => problem.kind === "interior-corruption" || problem.kind === "foreign-write")) {
       throw new Error("This setup has an unreadable conversation record. Reopen it before making changes.");
     }
+    if (events.length === 0) {
+      // A saved setup route can also resume a crash immediately after the empty header landed.
+      await log.append({ type: "conversation.created", title: "New production",
+        entryContext: { kind: "production-setup", setupId: id } }, { at: this.world.now(), expectedSeq: 0 });
+      return this.read(id);
+    }
     const view = foldConversation(id, meta.createdAt, events).view;
+    // Both appends are durable individually. If startup stopped after the context, complete
+    // only that recognizable empty setup; never replace a malformed or unrelated conversation.
+    if (!view.productionSetup && events.length === 1 && events[0]!.event.type === "conversation.created" &&
+        view.entryContext?.kind === "production-setup" && view.entryContext.setupId === id) {
+      await this.append(id, view, initialState(this.world.worldId, id));
+      return this.read(id);
+    }
     if (!view.productionSetup || view.productionSetup.draft.worldId !== this.world.worldId ||
         view.productionSetup.draft.setupId !== id) throw new Error("This setup belongs to another world.");
     return view;
@@ -71,14 +91,7 @@ export class ProductionSetupService {
         if (!current.events.length) await log.append({
           type: "conversation.created", title: "New production", entryContext: { kind: "production-setup", setupId: id },
         }, { at: this.world.now() });
-        const state: ProductionSetupState = {
-          status: "draft", review: null,
-          draft: ProductionSetupDraftSchema.parse({
-            schemaVersion: 1, setupId: id, worldId: this.world.worldId, revision: 1,
-            title: "", kind: "film", aspect: "16:9", frameRate: 24,
-            narrative: {}, arcs: [], references: [], openQuestions: [], episodes: [], scenes: [],
-          }),
-        };
+        const state = initialState(this.world.worldId, id);
         await log.append({ type: "production-setup.updated", state }, { at: this.world.now() });
         return state;
       });
@@ -224,7 +237,10 @@ export function productionSetups(world: WorldStore): ProductionSetupService {
 export async function recoverProductionSetups(world: WorldStore): Promise<void> {
   const service = productionSetups(world);
   const found = await world.ownedWrite(() => discoverConversations(world.dir));
+  const errors: unknown[] = [];
   for (const summary of found.summaries) {
-    if (summary.entryContext?.kind === "production-setup" || summary.setupStatus === "creating") await service.recover(summary.id);
+    if (summary.entryContext?.kind !== "production-setup" && summary.setupStatus !== "creating") continue;
+    try { await service.recover(summary.id); } catch (error) { errors.push(error); }
   }
+  if (errors.length) throw new AggregateError(errors, "Some production setups could not be recovered; other setups remain available.");
 }

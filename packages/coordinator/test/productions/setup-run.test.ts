@@ -7,6 +7,7 @@ import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { guardProductionSetupAuthority } from "../../src/productions/setup-authority.js";
+import { handleProductionSetupCommand } from "../../src/productions/setup-command.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -43,6 +44,28 @@ const reply = (setupUpdate?: unknown) => JSON.stringify({
 });
 
 describe("setup turns share conversation durability but no world-mutation authority", () => {
+  it("refuses a retry record that races with completed production creation", async () => {
+    const h = await setup(() => reply({ expectedRevision: 1, fields: { title: "The crossing" } }));
+    await h.runner.send(h.log, h.id, "Name this film.");
+    const started = (await h.log.read()).events.find(envelope => envelope.event.type === "turn.started")!.event;
+    assert.equal(started.type, "turn.started");
+    if (started.type !== "turn.started") throw new Error("Expected a started turn");
+    const review = await h.service.review(h.id, 2);
+    await h.service.create(h.id, 2, review.review!.id);
+    await assert.rejects(h.log.append({ type: "run.retry-started", run: started.run }, { at: AT }), /creation/);
+  });
+
+  it("publishes the terminal transcript and retryable failure before returning a failed setup command", async () => {
+    const h = await setup(() => "malformed model output");
+    const snapshots: Awaited<ReturnType<typeof h.view>>[] = [];
+    await assert.rejects(handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "send", text: "Develop the crossing." } },
+    () => h.runner, async () => { snapshots.push(await h.view()); }), /answer could not be used/);
+    assert.equal(snapshots.at(-1)!.messages.filter(message => message.role === "user").length, 1);
+    assert.equal(snapshots.at(-1)!.lastFailedRun!.status, "failed");
+    assert.equal(snapshots.at(-1)!.productionSetup!.draft.revision, 1);
+  });
+
   it("keeps a draft when the configured harness is unavailable without dispatching a turn", async () => {
     const h = await setup(() => { throw new Error("Unavailable harness must not run"); });
     h.adapter.readiness = () => ({ ready: false, reason: "Sign in to the writing harness." });

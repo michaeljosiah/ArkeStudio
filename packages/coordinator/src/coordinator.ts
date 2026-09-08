@@ -3031,7 +3031,10 @@ export class Coordinator {
     if (store) await this.recoverFrameRuns(store, bundle).catch(() => {});
     if (store && !wasAlreadyOpen) {
       await this.repairOnOpen(worldId, "world-chat", () => this.recoverWorldChat(store));
-      await this.repairOnOpen(worldId, "production-setup", () => recoverProductionSetups(store));
+      await this.repairOnOpen(worldId, "production-setup", async () => {
+        try { await recoverProductionSetups(store); }
+        finally { await this.refreshConversations(store); }
+      });
     }
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).

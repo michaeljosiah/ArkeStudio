@@ -25,6 +25,16 @@ describe("conversational production setup (SPEC-012 §4)", () => {
       episodes: [{ key: "one", promise: { turn: "Departure" } }], scenes: [{ key: "arrival", inherits: { timeOfDay: "Dawn" } }] });
     assert.deepEqual(after.episodes[0]!.promise, { opens: "Return", turn: "Departure" });
     assert.deepEqual(after.scenes[0]!.inherits, { location: "dock", timeOfDay: "Dawn" });
+    const unbound = applyProductionSetupUpdate(after, { expectedRevision: 2,
+      fields: { openQuestions: ["Where is the crossing?"] }, scenes: [{ key: "arrival", inherits: { location: null } }] });
+    assert.deepEqual(unbound.scenes[0]!.inherits, { timeOfDay: "Dawn" });
+    assert.equal(unbound.scenes[0]!.key, "arrival");
+    assert.deepEqual(unbound.openQuestions, ["Where is the crossing?"]);
+    assert.match(productionSetupProblems({ ...draft(), scenes: before.scenes }, []).join(" "), /location/);
+    assert.deepEqual(productionSetupProblems({ ...draft(), scenes: unbound.scenes }, []), []);
+    const cleared = applyProductionSetupUpdate(unbound, { expectedRevision: 3, scenes: [{ key: "arrival", inherits: null }] });
+    assert.equal(cleared.scenes[0]!.inherits, undefined);
+    assert.equal(cleared.scenes[0]!.title, "Arrival");
   });
 
   it("retains unrelated work and stable keys when a scene is revised or renamed", () => {

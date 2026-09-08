@@ -73,7 +73,12 @@ export const ProductionSetupUpdateSchema = z.object({
     defaults: SetupFieldsSchema.shape.defaults.nullable(),
   }).strict().optional(),
   episodes: z.array(SetupEpisodeSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
-  scenes: z.array(SetupSceneSchema.partial().extend({ key: Key }).strict()).max(PRODUCTION_SETUP_BOUNDS.scenes).optional(),
+  scenes: z.array(SetupSceneSchema.partial().extend({
+    key: Key,
+    inherits: z.object({
+      location: SlugSchema.nullable().optional(), timeOfDay: Prose.nullable().optional(), tone: Prose.nullable().optional(),
+    }).strict().nullable().optional(),
+  }).strict()).max(PRODUCTION_SETUP_BOUNDS.scenes).optional(),
   removeEpisodes: z.array(Key).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   removeScenes: Keys.optional(),
   episodeOrder: z.array(Key).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
@@ -108,9 +113,14 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     episodes: items(draft.episodes, update.episodes?.map(episode => ({ ...episode,
       ...(episode.promise ? { promise: { ...draft.episodes.find(item => item.key === episode.key)?.promise, ...episode.promise } } : {}),
     })), update.removeEpisodes, update.episodeOrder),
-    scenes: items(draft.scenes, update.scenes?.map(scene => ({ ...scene,
-      ...(scene.inherits ? { inherits: { ...draft.scenes.find(item => item.key === scene.key)?.inherits, ...scene.inherits } } : {}),
-    })), update.removeScenes, update.sceneOrder),
+    scenes: items(draft.scenes, update.scenes?.map(scene => {
+      const { inherits, ...fields } = scene;
+      return { ...fields, ...(inherits === undefined ? {} : {
+        inherits: inherits === null ? undefined : Object.fromEntries(Object.entries({
+          ...draft.scenes.find(item => item.key === scene.key)?.inherits, ...inherits,
+        }).filter(([, value]) => value !== null)),
+      }) };
+    }), update.removeScenes, update.sceneOrder),
   });
 }
 

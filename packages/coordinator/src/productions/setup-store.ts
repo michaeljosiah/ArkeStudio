@@ -24,7 +24,7 @@ export class ProductionSetupConversationStore extends WorldChatStore {
       const { events } = await super.read();
       const state = foldConversation(this.id, meta.createdAt, events).view.productionSetup;
       if (!state || state.draft.worldId !== this.world.worldId) throw new Error("This setup belongs to another world.");
-      if (event.type === "turn.started" && !["draft", "reviewed"].includes(state.status)) {
+      if ((event.type === "turn.started" || event.type === "run.retry-started") && !["draft", "reviewed"].includes(state.status)) {
         throw new Error("Finish resolving this production's creation before continuing the conversation.");
       }
       if (event.type === "turn.completed") {

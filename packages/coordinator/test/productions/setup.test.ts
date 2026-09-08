@@ -9,6 +9,7 @@ import { createProductionFromPlan } from "../../src/productions/ops.js";
 import { saveProductionNarrative } from "../../src/productions/narrative.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
+import { discoverConversations } from "../../src/world-chat/discover.js";
 import { WorldStore } from "../../src/world/store.js";
 import { CrashSignal } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -28,6 +29,57 @@ async function open() {
 }
 
 describe("durable production setup lifecycle (issue #976)", () => {
+  it("resumes an empty setup header without duplicating initialization", async () => {
+    const { store, service } = await open();
+    const id = `cv_${ulid()}` as ConversationId;
+    await store.ownedWrite(() => new WorldChatStore(conversationDir(store.dir, id)).create(id, CLOCK));
+    assert.equal((await service.resume(id)).draft.revision, 1);
+    assert.equal((await service.resume(id)).draft.revision, 1);
+    await service.discard(id);
+  });
+
+  it("recovers other setups even when one private record cannot be repaired", async () => {
+    const { store, service, id } = await open();
+    const badId = `cv_${ulid()}` as ConversationId;
+    const reviewed = await service.review(id, 2);
+    await store.ownedWrite(async () => {
+      const log = new WorldChatStore(conversationDir(store.dir, badId));
+      await log.create(badId, CLOCK);
+      await log.append({ type: "conversation.created", title: "Invalid setup", entryContext: { kind: "production-setup", setupId: id } }, { at: "2026-09-08T10:00:00.000Z" });
+      await new WorldChatStore(conversationDir(store.dir, id)).append({
+        type: "production-setup.updated", state: { ...reviewed, status: "creating" },
+      }, { at: CLOCK });
+    });
+    await store.close();
+    const reopened = await WorldStore.open(store.dir, { clock: () => CLOCK });
+    closeOnCleanup(() => reopened.close());
+    const found = await reopened.ownedWrite(() => discoverConversations(reopened.dir));
+    assert.ok(found.summaries.findIndex(row => row.id === badId) < found.summaries.findIndex(row => row.id === id));
+    await assert.rejects(recoverProductionSetups(reopened), AggregateError);
+    assert.equal((await new ProductionSetupService(reopened).resume(id)).status, "draft");
+  });
+
+  it("completes a setup interrupted between its context and initial draft, then permits resume and discard", async () => {
+    const { store } = await open();
+    const id = `cv_${ulid()}` as ConversationId;
+    const log = new WorldChatStore(conversationDir(store.dir, id));
+    await store.ownedWrite(async () => {
+      await log.create(id, CLOCK);
+      await log.append({ type: "conversation.created", title: "New production", entryContext: { kind: "production-setup", setupId: id } }, { at: CLOCK });
+    });
+    await store.close();
+    const reopened = await WorldStore.open(store.dir, { clock: () => CLOCK });
+    closeOnCleanup(() => reopened.close());
+    await recoverProductionSetups(reopened);
+    const service = new ProductionSetupService(reopened);
+    const state = await service.resume(id);
+    assert.equal(state.draft.revision, 1);
+    assert.equal(state.status, "draft");
+    assert.deepEqual(await service.resume(id), state, "recovery initializes only once");
+    await service.discard(id);
+    await assert.rejects(access(conversationDir(reopened.dir, id)));
+  });
+
   for (const stage of ["prepared-written", "staged-written", "committing-marked", "renamed:0", "changes-appended"] as const) {
     it(`recovers setup creation at ${stage} without duplicating or losing the outline`, async () => {
       const { store, service, id } = await open();
