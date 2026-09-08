@@ -99,6 +99,7 @@ async function electronMain() {
   app.setPath("userData", join(config.dir, "profile"));
   const timer = setTimeout(() => { console.error("Production setup smoke timed out"); app.exit(1); }, 120_000);
   await app.whenReady();
+  ipcMain.on("arke:get-theme", event => { event.returnValue = { preference: "system", resolved: "light" }; });
   ipcMain.on("arke:startup-state-ready", event => {
     event.sender.send("arke:startup-state", { status: "ready", port: config.port, token: config.token });
   });

@@ -61,6 +61,13 @@ Local Krea 2 image generation has an opt-in GPU check and offline custom-node in
 see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
 success alone does not establish usable image quality.
 
+## Desktop appearance
+
+For appearance bootstrap or reload changes, run `node apps/desktop/scripts/smoke-theme.mjs`.
+It bundles only the preload and theme entry point, then checks first-paint system/explicit
+choices across reloads of a sandboxed Electron file page. It uses a disposable profile and
+process-local theme overrides; a desktop display is required.
+
 ## Independent editor media
 
 After building desktop, run `node apps/desktop/scripts/smoke-editor-import.mjs` from the repository root. It opens a hidden sandboxed Electron file page with the built preload, supplies real file-backed selections, and verifies ordered path resolution and private authentication. It uses a temporary profile and requires a desktop display (it is separate from headless CI).
