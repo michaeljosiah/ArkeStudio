@@ -23,10 +23,10 @@ it("browses another world, labels its thumbnail, ignores stale results and copie
   const root = createRoot(container);
   let closed = false;
   try {
-    await act(async () => root.render(<StagedReferencePicker worldId={current.worldId} referenceKey="world-image"
+    await act(async () => root.render(<StagedReferencePicker worldId={current.worldId} referenceKey="world-image" model={{ id: "test", provider: "fal", capability: "image", displayName: "Test image", accepts: { referenceImages: 16, referenceRoles: false, startFrame: false, endFrame: false }, limits: { maxPromptChars: 500 }, pricing: { kind: "perImage", microUsdPerImage: 1 } }}
       onClose={() => { closed = true; }} onUpload={() => {}} />));
-    assert.equal(sent.length, 0, "local images use the current world projection");
-    const first = { kind: "browse-reference-images", requestId: "01J8F3K2QW9VZX4N7M0RTYB61B" } as const;
+    const first = sent.at(-1)!;
+    assert.equal(first.kind, "browse-reference-images", "local aliases also require filesystem verification");
     const select = container.querySelector("select")!;
     assert.match(select.textContent!, /This world/);
     assert.equal(select.querySelector("optgroup")?.getAttribute("label"), "Other worlds");
@@ -39,15 +39,18 @@ it("browses another world, labels its thumbnail, ignores stale results and copie
     if (first.kind !== "browse-reference-images" || request.kind !== "browse-reference-images") throw Error("Missing request");
     await act(async () => {
       __applyEventForTest({ type: "reference.images", at: new Date().toISOString(), requestId: first.requestId,
-        slug: current.slug, images: ["stale.png"] });
+        slug: current.slug, images: [{ file: "stale.png", name: "stale.png", role: "style", group: "Uploads" }] });
       __applyEventForTest({ type: "reference.images", at: new Date().toISOString(), requestId: request.requestId,
-        slug: other.slug, images: ["references/ade/main-photo.png"] });
+        slug: other.slug, images: [{ file: "references/ade/main-photo.png", name: "Ade · Main photo", role: "identity", group: "Cast" }] });
     });
     assert.ok(!container.textContent?.includes("stale.png"));
     const tile = container.querySelector<HTMLButtonElement>('[data-testid="picker-tile"]')!;
     assert.ok(tile);
     assert.equal(tile.disabled, false);
-    assert.match(tile.textContent!, /from Another world/);
+    assert.match(tile.textContent!, /Ade · Main photo/);
+    assert.match(tile.textContent!, /identity · from Another world/);
+    assert.match(container.querySelector('[aria-label="Image category"]')!.textContent!, /Cast/);
+    assert.match(container.querySelector(".fy-refpicker__capacity")!.textContent!, /16/);
     assert.match(tile.querySelector("img")!.getAttribute("src")!, /another-world/);
     await act(async () => tile.click());
     const pick = sent.at(-1)!;

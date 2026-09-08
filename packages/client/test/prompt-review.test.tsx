@@ -14,6 +14,12 @@ it("keeps a large rewrite collapsed without rendering token rows",async()=>{
   const review=await reviewPrompt("a ".repeat(200),"a extra ".repeat(200),[]);
   const html=renderToString(<PromptReviewDetails review={review}/>);
   assert.match(html,/<details><summary>Review changes/);
-  assert.match(html.replaceAll("<!-- -->","").replace(/<[^>]*>/g,""),/200 additions are unverified/);
+  assert.match(html.replaceAll("<!-- -->","").replace(/<[^>]*>/g,""),new RegExp(`${review.hunks.filter(h=>h.op==="add"&&h.support==="unverified").length} additions are unverified`));
   assert.doesNotMatch(html,/<ins>|<del>|Exact source:/);
+});
+
+it("counts every rendered unverified addition, including punctuation",async()=>{
+  const review=await reviewPrompt("original",",",[]);
+  const html=renderToString(<PromptReviewDetails review={review}/>).replaceAll("<!-- -->","").replace(/<[^>]*>/g,"");
+  assert.match(html,/1 addition is unverified/);
 });

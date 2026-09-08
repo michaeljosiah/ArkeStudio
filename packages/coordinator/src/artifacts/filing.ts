@@ -17,6 +17,7 @@ import { atomicWriteFile } from "../world/atomic.js";
 import type { CommitInput } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import { slugify } from "../world/slug.js";
+import { hashMedia } from "../world/scan.js";
 import { sha256 } from "../world/text-files.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
 
@@ -171,6 +172,14 @@ async function currentSidecar(
 
 /** Retirement changes only shelf membership; every reference still resolves to the same bytes. */
 export async function retireArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, true);
+}
+
+export async function restoreArtifact(store: WorldStore, artifactId: string): Promise<void> {
+  await setArtifactRetired(store, artifactId, false);
+}
+
+async function setArtifactRetired(store: WorldStore, artifactId: string, retired: boolean): Promise<void> {
   await store.gateOp(async () => {
     const artifact = store.getBundle().artifacts.find(a => a.id === artifactId);
     if (!artifact) throw new Error("This artifact is no longer in the world.");
@@ -179,8 +188,14 @@ export async function retireArtifact(store: WorldStore, artifactId: string): Pro
     if (!current?.raw || current.sidecar.id !== artifactId || current.sidecar.file !== artifact.file) {
       throw new Error("The artifact record changed or is unreadable. Reopen the world before trying again.");
     }
-    if (current.sidecar.retiredAt !== undefined) return;
-    await writeSidecar(store, { ...current.sidecar, retiredAt: new Date().toISOString() }, current.raw);
+    if ((current.sidecar.retiredAt !== undefined) === retired) return;
+    if (!retired && !(await artifactMediaMatches(store, current.sidecar, current.sidecar.hash))) {
+      throw new Error("The retained artifact file is missing or changed. Restore the original bytes before restoring it to the shelf.");
+    }
+    const next = { ...current.sidecar };
+    if (retired) next.retiredAt = new Date().toISOString();
+    else delete next.retiredAt;
+    await writeSidecar(store, next, current.raw);
   });
 }
 
@@ -194,11 +209,9 @@ async function artifactMediaMatches(
   const path = join(store.dir, "artifacts", artifact.file);
   const info = await lstat(toExtendedLength(path)).catch(() => null);
   if (!info?.isFile() || info.isSymbolicLink()) return false;
-  const bytes = await readFile(toExtendedLength(path)).catch(() => null);
-  return (
-    bytes !== null &&
-    `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}` === expectedHash
-  );
+  // Retained audio and video can be gigabytes; reuse the scanner's bounded streaming hash.
+  const hash = await hashMedia(path);
+  return hash !== null && hash.slice(0, "sha256:".length + 16) === expectedHash;
 }
 
 /** Merge links into an existing artifact — dedupe keeps one copy, many uses (R-4, D9). */

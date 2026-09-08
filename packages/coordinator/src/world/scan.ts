@@ -239,7 +239,7 @@ const SHEET_DIRS: ReadonlyArray<{ dir: string; type: SheetKind }> = [
  */
 const mediaHashCache = new Map<string, { size: number; mtimeMs: number; ctimeMs: number; hash: string }>();
 
-async function hashMedia(absolutePath: string): Promise<string | null> {
+export async function hashMedia(absolutePath: string): Promise<string | null> {
   const path = toExtendedLength(absolutePath);
   let identity;
   try {

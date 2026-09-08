@@ -2653,6 +2653,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       artifactId: ArtifactIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("restore-artifact"), worldId: UlidSchema, artifactId: ArtifactIdSchema }).strict(),
   /** SPEC-015 R-1/R-6: file one artifact; large files come back needing stated-size consent. */
   z
     .object({

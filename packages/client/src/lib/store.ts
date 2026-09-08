@@ -3776,6 +3776,10 @@ export function uploadArtifacts(worldId: string, files?: readonly File[]): { req
   return importEditorMedia(worldId, undefined, files);
 }
 
+export function restoreArtifact(worldId: string, artifactId: string): void {
+  send({ kind: "restore-artifact", worldId, artifactId });
+}
+
 export function retireArtifact(worldId: string, artifactId: string): void {
   send({ kind: "retire-artifact", worldId, artifactId });
 }
@@ -3955,10 +3959,6 @@ export function fileArtifactMsg(
   opts: { links?: string[]; allowLarge?: boolean; supersedes?: string; production?: string | null } = {},
 ): void {
   send({ kind: "file-artifact", worldId, sourcePath, ...opts });
-}
-
-export function importFolder(worldId: string, sourcePath: string): void {
-  send({ kind: "import-folder", worldId, sourcePath });
 }
 
 /** Derive continuity for one chapter (turn 129): a press, never a save. */

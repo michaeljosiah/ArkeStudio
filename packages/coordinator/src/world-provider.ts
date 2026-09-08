@@ -1,4 +1,4 @@
-import type { WorldBundle, WorldSummary } from "@arke-studio/contracts";
+import type { WorldBundle, WorldSummary, WorldImageReference } from "@arke-studio/contracts";
 import type { ProposalManager } from "./gate/proposals.js";
 import type { WorldStore } from "./world/store.js";
 
@@ -10,8 +10,8 @@ import type { WorldStore } from "./world/store.js";
  */
 export interface WorldProvider {
   listWorlds(): Promise<WorldSummary[]>;
-  /** Image paths only; reads no second store and acquires no world lock. */
-  listReferenceImages?(slug: string): Promise<string[]>;
+  /** Read-only image catalogue; opens no second store and acquires no world lock. */
+  listReferenceImages?(slug: string): Promise<WorldImageReference[]>;
   loadWorld(worldId: string): Promise<WorldBundle>;
   createWorld?(input: {
     name: string;
