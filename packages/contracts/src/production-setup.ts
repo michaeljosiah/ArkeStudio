@@ -3,7 +3,7 @@ import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchem
 import { FrameRateSchema, SeasonSchema, pickableSheets, type Sheet } from "./world.js";
 import { ScriptBlockSchema } from "./scene.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
-import { ProductionCreationPlanSchema } from "./production-creation.js";
+import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
 
 export const PRODUCTION_SETUP_BOUNDS = {
   episodes: 50, scenes: 300, arcs: 50, blocks: 200, references: 100, questions: 100,
@@ -102,6 +102,8 @@ function items<T extends { key: string }>(current: T[], replacements: Array<Part
 export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: ProductionSetupUpdate): ProductionSetupDraft {
   const update = ProductionSetupUpdateSchema.parse(raw);
   if (draft.revision !== update.expectedRevision) throw new Error("Production so far changed. Read the current draft before editing it.");
+  const defaults = draft.kind !== "microdrama" && update.fields?.kind === "microdrama"
+    ? { ...MICRODRAMA_DEFAULTS, ...draft.defaults } : draft.defaults;
 
   return ProductionSetupDraftSchema.parse({
     ...draft, ...update.fields, revision: draft.revision + 1,
@@ -109,7 +111,7 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
     series: update.fields?.series === null ? undefined : update.fields?.series
       ? { ...draft.series, ...update.fields.series } : draft.series,
     defaults: update.fields?.defaults === null ? undefined : update.fields?.defaults
-      ? { ...draft.defaults, ...update.fields.defaults } : draft.defaults,
+      ? { ...defaults, ...update.fields.defaults } : defaults,
     episodes: items(draft.episodes, update.episodes?.map(episode => ({ ...episode,
       ...(episode.promise ? { promise: { ...draft.episodes.find(item => item.key === episode.key)?.promise, ...episode.promise } } : {}),
     })), update.removeEpisodes, update.episodeOrder),

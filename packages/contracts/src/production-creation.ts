@@ -4,6 +4,14 @@ import { EpisodeSchema, ProductionSchema, SeasonSchema, SeriesSchema } from "./w
 import { SceneRecordSchema, validateSceneFlow } from "./scene-flow.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 
+/** Delivery defaults shared by direct creation and conversational setup. Story endings remain authored. */
+export const MICRODRAMA_DEFAULTS = {
+  episodeSecondsMin: 45,
+  episodeSecondsMax: 75,
+  hookWindowSec: 3,
+  exportPreset: "social-1080x1920",
+};
+
 /** Journalled operational association; discussion remains in the private conversation log. */
 export const ProductionSetupOriginSchema = z.object({
   worldId: UlidSchema, setupId: ConversationIdSchema, revision: z.number().int().min(1),

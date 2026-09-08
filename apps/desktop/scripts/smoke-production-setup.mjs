@@ -29,7 +29,8 @@ const adapter = {
     try { for await (const [event] of on(bus, "event", { signal })) yield event; }
     catch (error) { if (error.name !== "AbortError") throw error; }
   })(),
-  dispatchAsync: async ({ sessionId, parts }) => {
+  // GPU coordination holds its reservation until this completed-turn call returns.
+  sendMessage: async ({ sessionId, parts }) => {
     runs++;
     const prompt = parts.map(part => part.text ?? "").join("");
     assert.match(prompt, /Current world records, read this turn/);
@@ -46,8 +47,9 @@ const adapter = {
           { key: "departure", title: "Departure", synopsis: "The empty boat leaves." },
         ] },
     }) });
-    return { ok: true };
+    return { sessionId, correlationId: "setup-smoke" };
   },
+  dispatchAsync(input) { return this.sendMessage(input); },
 };
 let coordinator;
 let provider;

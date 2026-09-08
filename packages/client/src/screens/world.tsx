@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import {
   CHARACTER_ROLE_MAX,
+  MICRODRAMA_DEFAULTS,
   newId,
   deriveCut,
   designatedCompilation,
@@ -4997,19 +4998,7 @@ const KINDS_BY_DOOR: Record<DoorId, readonly (typeof VIDEO_KIND_CHOICES)[number]
   choose: [],
 };
 
-/**
- * What a micro drama starts with. `episodeEnding` is deliberately not here (turn 99): how a
- * season ends is storytelling, and asking it in a dropdown of somebody who has not written a
- * line makes it a setting. It reaches `season.ending` through the conversation instead.
- */
 export const FRAME_RATE_CHOICES = [24, 25, 30] as const satisfies readonly FrameRate[];
-
-export const MICRODRAMA_DEFAULTS = {
-  episodeSecondsMin: 45,
-  episodeSecondsMax: 75,
-  hookWindowSec: 3,
-  exportPreset: "social-1080x1920",
-};
 
 export function NewProductionScreen() {
   const { worldId } = useParams();

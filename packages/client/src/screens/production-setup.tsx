@@ -134,8 +134,7 @@ export function ProductionSetupScreen() {
                 placeholder="A working title is enough" onBlur={event => { if (event.target.value !== draft.title) update({ title: event.target.value }); }} /></label>
               <label>Format<select value={draft.kind} onChange={event => {
                 const kind = event.target.value as ProductionSetupDraft["kind"];
-                update({ kind, aspect: kind === "microdrama" ? "9:16" : "16:9",
-                  ...(kind === "microdrama" && !draft.defaults ? { defaults: { episodeSecondsMin: 45, episodeSecondsMax: 75, hookWindowSec: 3, exportPreset: "social-1080x1920" } } : {}) });
+                update({ kind, aspect: kind === "microdrama" ? "9:16" : "16:9" });
               }}>
                 <option value="microdrama">Micro drama</option><option value="film">Film · short</option>
                 <option value="music-video">Music video</option><option value="other">Other</option>

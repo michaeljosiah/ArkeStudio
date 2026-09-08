@@ -1003,14 +1003,10 @@ export class Coordinator {
   private readonly lifecycleTimers = new Set<NodeJS.Timeout>();
   /** Last emitted local-runtime statuses, so an unchanged poll stays off the wire (issue 462). */
   private lastLocalRuntimeStatuses = "";
-  /**
-   * The last hardware measurement, with the moment it was taken. Held rather than read back off
-   * the read model because the re-gate needs the original `detectedAt`: re-gating is not a
-   * measurement, and a fresh timestamp would claim a probe that never ran.
-   */
-  private lastRuntimeDetection: { probes: RuntimeProbes; detectedAt: string } | null = null;
   /** The last gate result on the wire, so an unchanged re-gate stays off it. */
   private lastRuntimeStatus = "";
+  /** An older readiness walk must not overwrite the result of a newer hardware measurement. */
+  private comfyUiRefreshRevision = 0;
   /** A local-runtime pass already in flight. A probe that stalls must not stack up behind itself. */
   private localRuntimeProbeInFlight = false;
   private comfyUiSetupWork: Promise<void> = Promise.resolve();
@@ -3952,8 +3948,9 @@ export class Coordinator {
    * transition and re-render Settings behind it. Same guard, same reason, as the local-provider
    * poll above.
    */
-  private emitLocalRuntimeStatus(): void {
-    const measured = this.lastRuntimeDetection;
+  private emitLocalRuntimeStatus(
+    measured: { probes: RuntimeProbes; detectedAt: string } | null = this.readModel.getState().app.runtime,
+  ): void {
     if (!this.opts.manifest || measured === null) return;
     const runtime = gateLocalRuntimes(
       this.opts.manifest,
@@ -3971,8 +3968,10 @@ export class Coordinator {
   private async refreshComfyUi(): Promise<void> {
     const service = this.opts.comfyui?.service;
     if (!service || this.stopping) return;
+    const revision = ++this.comfyUiRefreshRevision;
     const probes = this.readModel.getState().app.runtime?.probes ?? null;
     const status = queueableLocalMemory(await service.status(probes));
+    if (this.stopping || revision !== this.comfyUiRefreshRevision) return;
     this.emit({ at: new Date().toISOString(), type: "comfyui.status", comfyui: status });
     // The engine's locality decides every ComfyUI model's fit verdict, so the two statuses move
     // together (R-13). Nothing is re-probed — a machine that was never measured has no verdict
@@ -13772,8 +13771,7 @@ export class Coordinator {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
           const probes = await this.opts.probeRuntime();
-          this.lastRuntimeDetection = { probes, detectedAt: new Date().toISOString() };
-          this.emitLocalRuntimeStatus();
+          this.emitLocalRuntimeStatus({ probes, detectedAt: new Date().toISOString() });
         } catch {
           // Detection failure means unknown, not unavailable (D12) — nothing is emitted over
           // the last known figures, and nothing gets disabled by a broken probe.
