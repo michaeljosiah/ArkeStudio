@@ -4,7 +4,7 @@ import { act, useState, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { renderToString } from "react-dom/server";
-import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate, type InitialEntry, type NavigateFunction } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -57,11 +57,12 @@ function DraftScreen() {
   const [draft, setDraft] = useState("Empty");
   return <button onClick={() => setDraft("Unsaved draft")}>{draft}</button>;
 }
-async function mount(path: string, children: ReactNode = <App />) {
+async function mount(path: string | InitialEntry[], children: ReactNode = <App />) {
   const container = document.createElement("div");
   caught = [];
   root = createRoot(container, { onCaughtError: (error) => { caught.push(error); } });
-  await act(async () => root!.render(<MemoryRouter initialEntries={[path]}><Navigation />{children}</MemoryRouter>));
+  await act(async () => root!.render(<MemoryRouter initialEntries={typeof path === "string" ? [path] : path} initialIndex={0}>
+    <Navigation />{children}</MemoryRouter>));
   return container;
 }
 afterEach(async () => {
@@ -163,5 +164,16 @@ describe("navigation survives a failed world (issue 981)", () => {
     await act(async () => { await navigate("/broken"); });
     await act(async () => { await navigate("/editor"); });
     assert.equal(container.textContent, "Empty", "ordinary navigation also recovers");
+  });
+
+  it("recovers when direct hash navigation reuses the default history key", async () => {
+    const container = await mount([{ pathname: "/broken", key: "default" }, { pathname: "/worlds", key: "default" }],
+      <RouteErrorBoundary><Routes>
+        <Route path="/broken" element={<BrokenScreen />} />
+        <Route path="/worlds" element={<p>World picker recovered</p>} />
+      </Routes></RouteErrorBoundary>);
+    assert.ok(container.textContent?.includes("This screen could not be shown"));
+    await act(async () => { await navigate(1); });
+    assert.equal(container.textContent, "World picker recovered");
   });
 });

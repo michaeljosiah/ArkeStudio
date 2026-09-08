@@ -32,5 +32,7 @@ class ScreenBoundary extends Component<{ locationKey: string; children: ReactNod
 
 export function RouteErrorBoundary({ children }: { children: ReactNode }) {
   const location = useLocation();
-  return <ScreenBoundary locationKey={location.key}>{children}</ScreenBoundary>;
+  // Direct hash changes have no router history state and can all carry the key "default".
+  const locationKey = JSON.stringify([location.key, location.pathname, location.search, location.hash]);
+  return <ScreenBoundary locationKey={locationKey}>{children}</ScreenBoundary>;
 }
