@@ -34,10 +34,15 @@ export function ArtStyleGrid({
           onClick={() => onSelect(preset)}
         >
           {/*
-           * The same harbour, nine treatments. The preview is the control here — a name and a
-           * sentence describe a look, but only seeing one scene rendered nine ways lets you
-           * compare the treatment instead of the subject, which is the whole reason this step
-           * is a grid rather than a dropdown.
+           * One scene, nine treatments. The preview is the control here — a name and a sentence
+           * describe a look, but only seeing one scene rendered nine ways lets you compare the
+           * treatment instead of the subject, which is the whole reason this step is a grid
+           * rather than a dropdown.
+           *
+           * The scene is deliberately nobody's: it was the design's own sample world, a harbour
+           * and its lighthouse, which told every other world what kind of story it was in
+           * (issue 1006). Holding the subject constant is the point; holding *that* subject
+           * constant was an accident of where the drawing came from.
            */}
           <span className="fy-styles__frame">
             {/* Relative, not absolute: the packaged app loads from file://, where a leading

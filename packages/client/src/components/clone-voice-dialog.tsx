@@ -350,7 +350,7 @@ export function NameStep({
     <div className="fy-clone__body">
       <label className="fy-clone__field">
         <span className="fy-clone__label">Name</span>
-        <Input value={name} data-testid="clone-name" placeholder="Harbour glass" onChange={(e) => onName(e.target.value)} />
+        <Input value={name} data-testid="clone-name" placeholder="Name this voice" onChange={(e) => onName(e.target.value)} />
       </label>
       <label className="fy-clone__field">
         <span className="fy-clone__label">

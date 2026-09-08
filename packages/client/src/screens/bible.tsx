@@ -31,7 +31,12 @@ const AUTOSAVE_MS = 1200;
  */
 const NOTABLE_CHARACTERS = 24_000;
 
-/** What an empty bible says. The source editor appends an example; the rich one cannot show one. */
+/**
+ * What an empty bible says. The source editor appends an example of the *shape* — a heading and a
+ * paragraph under it — because that is the one thing the rich editor shows by itself and the
+ * source view cannot. It used to append a heading from the design's own sample world, which told
+ * every other world what kind of story it was in (issue 1006).
+ */
 const PLACEHOLDER =
   "Write anything here — what this world is about, how it should feel, what you have not decided yet.";
 
@@ -223,7 +228,7 @@ export function BibleScreen() {
               value={text}
               onChange={(e) => onChange(e.target.value)}
               spellCheck
-              placeholder={`${PLACEHOLDER}\n\n## The tides\n\nThe tide is the world's clock and its accountant.`}
+              placeholder={`${PLACEHOLDER}\n\n## A heading\n\nAnd a paragraph under it — Markdown, as you would write it anywhere else.`}
               aria-label="The world bible"
             />
           )}
