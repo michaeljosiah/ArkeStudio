@@ -43,6 +43,7 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
 import { Pin } from "./icons.js";
 import { ReadAloud } from "./read-aloud.js";
+import { renderInlineMarkdown } from "./inline-markdown.js";
 import { mediaUrl } from "../lib/media.js";
 
 /**
@@ -130,7 +131,7 @@ export function ConversationTranscript({
           )}
         >
           <div className="fy-chat__bubble">
-            {m.text}
+            {m.role === "studio" ? renderInlineMarkdown(m.text) : m.text}
             {m.role === "studio" && m.receipts.length > 0 && (
               // One tick for the row, not one per receipt: the tick means "this is what was
               // read", and repeating it turned a footnote into a checklist.

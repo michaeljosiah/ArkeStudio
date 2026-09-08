@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -529,6 +530,38 @@ describe("the wrap-up action", () => {
 });
 
 describe("the transcript", () => {
+  it("formats Arke's replies in production chat and shared docks without interpreting authored text or HTML (#997)", () => {
+    const state = structuredClone(stateWithConversation());
+    const production = state.world!.productions[0]!;
+    production.meta = { ...production.meta, medium: "story", kind: "novel" };
+    production.chapters = [{ id: "night-one", file: "night-one", order: 1, title: "Night one", status: "planned", version: 1, words: 0 }];
+    state.world!.conversations[0]!.entryContext = { kind: "production", productionId: production.meta.id };
+    const authored = "Keep **these markers** and *this wording* exactly.";
+    const reply = "**One — Carrier, Unident.** Third night of the carrier.\nShe writes *carrier, unident., 0200–0206* in `night.md`.\n<img src=x onerror=alert(1)>";
+    state.worldChat!.messages[0]!.text = authored;
+    state.worldChat!.messages[1]!.text = reply;
+    const base = `/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}`;
+    try {
+      for (const path of [`${base}/story`, `${base}/story/chapters/night-one`, `/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]) {
+        __setStateForTest(state);
+        const { document } = parseHTML(renderToString(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>));
+        const studio = document.querySelector(".fy-chat__turn--studio .fy-chat__bubble")!;
+        const user = document.querySelector(".fy-chat__turn--user .fy-chat__bubble")!;
+        assert.ok(studio, path);
+        assert.equal(studio.querySelector("strong")?.textContent, "One — Carrier, Unident.");
+        assert.equal(studio.querySelector("em")?.textContent, "carrier, unident., 0200–0206");
+        assert.equal(studio.querySelector("code")?.textContent, "night.md");
+        assert.ok(studio.textContent?.includes("\nShe writes"), "line breaks survive");
+        assert.equal(studio.querySelector("img"), null, "HTML is never inserted into the reply");
+        assert.ok(studio.textContent?.includes("<img src=x onerror=alert(1)>"));
+        assert.equal(user.textContent, authored);
+        assert.equal(user.querySelector("strong, em"), null);
+      }
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("shows what was read beneath the reply that used it", () => {
     const html = renderConversation();
     assert.ok(html.includes("read Maren Kest v4"));
