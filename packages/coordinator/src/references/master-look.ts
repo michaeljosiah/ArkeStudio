@@ -1,5 +1,21 @@
 import type { ManifestModel, ResolvedArtDirection, SizeTier, WorldMeta } from "@arke-studio/contracts";
-import { estimateMicroUsd, imageConstraintSuffix, imageOutputFor } from "@arke-studio/contracts";
+import { ArtDirectionRecordSchema, estimateMicroUsd, imageConstraintSuffix, imageOutputFor } from "@arke-studio/contracts";
+import { isDeepStrictEqual } from "node:util";
+
+/** Founding may complete v1 with its already approved preview, without changing the look. */
+export function completesFoundingLook(before: string, after: string): boolean {
+  try {
+    const previous = JSON.parse(before);
+    const next = JSON.parse(after);
+    if (!ArtDirectionRecordSchema.safeParse(previous).success || !ArtDirectionRecordSchema.safeParse(next).success) return false;
+    const { masterLook, ...rest } = next;
+    return previous.version === 1 && previous.masterLook === undefined &&
+      typeof masterLook === "string" && /^art-direction\/look-v1\.[a-z0-9]+$/.test(masterLook) &&
+      isDeepStrictEqual(previous, rest);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The world look as a picture, from the world look as words.

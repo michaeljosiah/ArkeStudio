@@ -82,6 +82,7 @@ import { useThemePreference } from "./lib/theme.js";
 import { dismissPlayback } from "./lib/audio.js";
 import { replyToPermission, usePermissions, useUpdateStatus } from "./lib/store.js";
 import { Button, Callout } from "./components/ui.js";
+import { RouteErrorBoundary } from "./components/route-error-boundary.js";
 
 export function PermissionBackstops() {
   const permissions = Object.entries(usePermissions());
@@ -179,6 +180,7 @@ export function App() {
       <PermissionBackstops />
       <PlayerDock />
       <UpdateTransition />
+      <RouteErrorBoundary>
       <Routes>
         <Route path="/" element={<LaunchScreen />} />
         <Route path="/starting" element={<StartupScreen />} />
@@ -306,6 +308,7 @@ export function App() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </RouteErrorBoundary>
     </>
   );
 }

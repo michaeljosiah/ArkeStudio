@@ -146,9 +146,7 @@ function limitedFeatureCopy(copy: string): string {
 export function WorldLayout() {
   const { worldId } = useParams();
   const location = useLocation();
-  useOpenWorldGuard(worldId);
-  const { state } = useStore();
-  const world = state?.world;
+  const world = useOpenWorldGuard(worldId);
   const refusal = useWorldOpenRefusal(worldId);
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
   // addresses — /cast, /locations, /factions — and a chip row on each moves between them, so
@@ -179,8 +177,13 @@ export function WorldLayout() {
         <div className="fy-content fy-content--fixed">
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} stranded />
-          ) : (
+          ) : world ? (
             <Outlet />
+          ) : (
+            <>
+              <AppChrome back={{ label: "Worlds", to: "/worlds" }} />
+              <Loading label="opening the world" />
+            </>
           )}
         </div>
       </div>
@@ -218,7 +221,8 @@ export function WorldLayout() {
           ))}
         </nav>
         <WorldConditionBanners />
-        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> : <Outlet />}
+        {refusal ? <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} /> :
+          world ? <Outlet /> : <Loading label="opening the world" />}
       </div>
     </div>
   );
@@ -1687,6 +1691,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const [renaming, setRenaming] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState<string | null>(null);
   const lifecycle = useSingleAct();
+  const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
 
   useEffect(() => {
     if (worldId && sheetId) requestSheetRefs(worldId, sheetId);
@@ -1704,11 +1709,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
   const sheetPath = `${sheet.type === "character" ? "characters" : `${sheet.type}s`}/${sheet.id}.md`;
   const refs = sheetRefsMap[sheet.id];
   const isCharacter = sheet.type === "character";
-  /**
-   * The sheet is in front of them, so the conversation should start knowing that rather than
-   * making them describe the character they were just reading.
-   */
-  const { talk: talkAboutSheet, starting: sheetTalkStarting } = useTalkItThrough(worldId);
   const mainPhoto = kit ? mainPhotoFor(kit) : null;
   const characterSheet = kit ? designatedCompilation(kit) : null;
   const slug = world.meta.slug;

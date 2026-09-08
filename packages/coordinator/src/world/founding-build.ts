@@ -38,7 +38,7 @@ import { atomicWriteFile } from "./atomic.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { foldBlueprint } from "../harness/blueprint.js";
 import { openThread } from "../canon/authoring.js";
-import { MarkdownFile } from "./text-files.js";
+import { MarkdownFile, sha256 } from "./text-files.js";
 import { createSheetFromSentence } from "../sheets/authoring.js";
 import {
   characterSheetRequest,
@@ -913,12 +913,19 @@ export class FoundingBuildService {
     const destination = masterLookFile(active.record.artDirectionVersion, extension);
     await store.gateOp(async () => {
       await copyFile(toExtendedLength(image), toExtendedLength(join(store.dir, fromPortable(destination))));
-      // Still v1, written before anything has read it: the record the world was founded
-      // with simply gains the picture the author already approved in conversation.
+      // The store already seeded v1 on open. Complete the record and its snapshot in one
+      // recoverable commit so a restart cannot mistake our own preview for damaged history.
       const recordPath = join(store.dir, fromPortable(ART_DIRECTION_PATH));
-      const parsed = JSON.parse(await readFile(toExtendedLength(recordPath), "utf8")) as Record<string, unknown>;
+      const raw = await readFile(toExtendedLength(recordPath), "utf8");
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed["masterLook"] === destination) return;
       parsed["masterLook"] = destination;
-      await atomicWriteFile(recordPath, JSON.stringify(parsed, null, 2) + "\n");
+      await store.commitUnserialised({
+        kind: "founding-look-preview",
+        source: "founding-build",
+        files: [{ path: ART_DIRECTION_PATH, action: "replace", content: JSON.stringify(parsed, null, 2) + "\n",
+          baseHash: sha256(raw), preserveVersion: true }],
+      });
     });
     await this.ports.refreshWorldSnapshot(active.record.worldId).catch(() => {});
   }

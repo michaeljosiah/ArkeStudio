@@ -12,6 +12,7 @@ import { join, sep } from "node:path";
 import { discoverConversations } from "../world-chat/discover.js";
 import { discoverBenchSessions } from "../bench/service.js";
 import {
+  BIBLE_PATH,
   CLONED_VOICES_PATH,
   parseVoiceLibrary,
   type ClonedVoice,
@@ -124,12 +125,14 @@ export interface ScanResult {
   meta: WorldMeta;
   bundle: WorldBundle;
   problems: WorldProblem[];
-  /** Gated text files only — the reconciliation surface. Portable paths. */
+  /** Authored text hashes; Bible participates in history checks but not reconciliation. */
   manifest: Record<string, string>;
   /** Hashes of measured take media — for staleness only; never an adoptable text path. */
   mediaManifest: Record<string, string>;
   /** Complete durable change-line count; the bundle carries only the latest 50 records. */
   changeCount: number;
+  /** Latest durable file receipt, reused by history checks without retaining or rereading the log. */
+  historyCommits: Record<string, { hash: string | null; version?: number; changeCount: number }>;
 }
 
 /** What counts as an image when reading a candidate off the disk rather than out of a record. */
@@ -370,10 +373,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   manifest["world.json"] = sha256(await read(join(dir, "world.json")));
 
-  // Deliberately outside `tryParse`, so it never joins `manifest`. The manifest is the
-  // reconciliation surface for gated files (R-28); the bible is ungated and invites hand-edits,
-  // which the store adopts silently rather than reporting (see `adoptBibleIfMoved`).
+  // Bible bytes participate in history integrity checks. Outside-edit reconciliation still
+  // excludes this ungated document; the store adopts its hand-edits directly.
   const bible = await readBible(dir);
+  if (bible.present) manifest[BIBLE_PATH] = sha256(await read(join(dir, BIBLE_PATH)));
 
   let artDirectionRecord: ArtDirectionRecord | null = null;
   const artDirectionPath = ART_DIRECTION_PATH;
@@ -929,6 +932,14 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   }
 
   const allChanges = await readChanges(join(dir, "changes.jsonl"));
+  const historyCommits: ScanResult["historyCommits"] = {};
+  for (const [index, change] of allChanges.entries()) {
+    const path = change["path"];
+    const hash = change["contentHashAfter"];
+    if (typeof path !== "string" || (hash !== null && typeof hash !== "string")) continue;
+    historyCommits[path] = { hash, changeCount: index + 1,
+      ...(typeof change["toVersion"] === "number" ? { version: change["toVersion"] } : {}) };
+  }
   const changes = allChanges
     .map((line) => {
       const r = ChangeRecordSchema.safeParse(line);
@@ -1120,5 +1131,5 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     problems,
     externalEdits: [],
   };
-  return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length };
+  return { meta, bundle, problems, manifest, mediaManifest, changeCount: allChanges.length, historyCommits };
 }

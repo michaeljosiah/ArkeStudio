@@ -29,6 +29,7 @@ import {
   STAGE_RIG_SCHEMA_VERSION,
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
+import { completesFoundingLook } from "../references/master-look.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -81,6 +82,7 @@ export interface CommitFileInput {
    * Save without cutting a version (SPEC-012 R-5): direct chapter authoring and shot prompt
    * overrides are production output, not gated change. The history snapshot for the current
    * version is refreshed rather than a new one cut.
+   * Art direction permits only completion of founding v1 with its approved preview.
    */
   preserveVersion?: boolean;
 }
@@ -571,7 +573,11 @@ export class Committer {
           const proposed = ArtDirectionRecordSchema.parse(JSON.parse(newContent!));
           const worldMeta = WorldMetaSchema.parse(worldDoc.value);
           const effectiveFrom = baseRecord?.version ?? 1;
-          toVersion = effectiveFrom + 1;
+          const completingFounding = f.preserveVersion === true;
+          if (completingFounding && (base === null || !completesFoundingLook(base, newContent!))) {
+            throw new CommitPlanError("Only the founding preview may complete art direction without a new version");
+          }
+          toVersion = completingFounding ? effectiveFrom : effectiveFrom + 1;
           // Rebuilt field by field, which is why the standing constraints have to be named here
           // too (#244). This is the authoritative author of the record — the version and the
           // history are decided here, not by whatever the proposal staged.
@@ -595,10 +601,10 @@ export class Committer {
             description: proposed.description,
             ...(proposed.masterLook ? { masterLook: proposed.masterLook } : {}),
             ...(proposed.keyArtIntent !== undefined ? { keyArtIntent: proposed.keyArtIntent } : {}),
-            acceptedAt: at,
+            acceptedAt: completingFounding ? baseRecord!.acceptedAt : at,
             audio: proposed.audio,
             failureModes: proposed.failureModes,
-            history: [...(baseRecord?.history ?? []), previous],
+            history: completingFounding ? baseRecord!.history : [...(baseRecord?.history ?? []), previous],
           });
           newContent = `${JSON.stringify(next, null, 2)}\n`;
           historyNew = `.history/art-direction/v${toVersion}.json`;
