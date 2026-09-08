@@ -12,6 +12,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { describeCoordinatorError } from "../errors/user-message.js";
+import { completesFoundingLook } from "../references/master-look.js";
 import { WorldIndex } from "../index-db/world-index.js";
 import type { DatabaseCtor } from "../index-db/sqlite.js";
 import { restoredSceneContent } from "../productions/scene-record.js";
@@ -184,7 +185,7 @@ export class WorldStore {
       if (!opts.readOnly) {
         await store.adoptBibleIfMoved();
         await store.adoptProseStyleBoundary();
-        await store.ensureCurrentHistorySnapshots();
+        await store.checkCurrentHistorySnapshots(true);
         await store.saveScanState();
         store.startWatcher();
         try {
@@ -192,7 +193,7 @@ export class WorldStore {
         } catch {
           store.index = null;
         }
-      }
+      } else await store.checkCurrentHistorySnapshots();
       return store;
     } catch (err) {
       store?.watcher?.stop();
@@ -726,6 +727,7 @@ export class WorldStore {
    */
   private async rescan(changedPaths?: string[]): Promise<void> {
     this.scan = await scanWorld(this.dir);
+    await this.checkCurrentHistorySnapshots();
     await this.saveScanState();
     try {
       if (this.index && changedPaths) this.index.applyCommit(changedPaths, this.scan.bundle);
@@ -772,8 +774,8 @@ export class WorldStore {
     );
   }
 
-  /** Seed the current committed snapshot when adopting a world that predates history tracking. */
-  private async ensureCurrentHistorySnapshots(): Promise<void> {
+  /** History damage costs a snapshot, not access to the world's committed work (issue 979). */
+  private async checkCurrentHistorySnapshots(seed = false): Promise<void> {
     const unresolved = new Set(this.externalEdits.map((edit) => edit.path));
     const seeds = Object.entries(this.scan.manifest)
       .filter(([portablePath]) => !unresolved.has(portablePath) && historyDirectory(portablePath) !== null)
@@ -782,14 +784,20 @@ export class WorldStore {
         if (content === null || sha256(content) !== hash) return;
         const snapshot = historySnapshot(portablePath, content);
         if (snapshot === null) return;
-        const existing = await this.readEntity(snapshot.path);
-        if (existing === null) {
+        this.scan.bundle.problems = this.scan.bundle.problems.filter((problem) => problem.path !== snapshot.path);
+        const report = () => this.scan.bundle.problems.push({ path: snapshot.path,
+          message: `History for ${portablePath === ART_DIRECTION_PATH ? "art direction" : portablePath}, version ${snapshot.version}, is unavailable. The current record is usable; restore this snapshot from a backup to use its history.` });
+        let existing: string | null;
+        try { existing = await this.readEntity(snapshot.path); }
+        catch { report(); return; }
+        // Old founding builds added only the approved image after the initial snapshot.
+        // Require the committed baseline to match and every existing field to be unchanged.
+        const repair = existing !== null && portablePath === ART_DIRECTION_PATH && completesFoundingLook(existing, content);
+        if (seed && (existing === null || repair)) {
           await this.verifyOwnership();
           await atomicWriteFile(join(this.dir, fromPortable(snapshot.path)), content);
         }
-        else if (existing !== content) {
-          throw new CommitPlanError(`${snapshot.path}: history snapshot conflicts with the committed version`);
-        }
+        else if (existing !== null && existing !== content) report();
       });
     // A failed open must not release the world lock while another seed is still writing.
     const results = await Promise.allSettled(seeds);

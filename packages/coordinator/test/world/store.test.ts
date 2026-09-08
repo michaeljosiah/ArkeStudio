@@ -563,7 +563,7 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await second.close();
   });
 
-  it("releases ownership when history seeding fails during open", async () => {
+  it("opens with conflicting history, preserves it and keeps the problem after a rescan", async () => {
     const dir = await makeTempWorld();
     const first = await WorldStore.open(dir, { clock: CLOCK });
     await first.close();
@@ -573,10 +573,52 @@ describe("WorldStore (R-3, R-20, R-23, R-26, R-28)", () => {
     await mkdir(join(snapshot, ".."), { recursive: true });
     await writeFile(snapshot, "conflicting history", "utf8");
 
-    await assert.rejects(() => WorldStore.open(dir, { clock: CLOCK }), /history snapshot conflicts/);
-    await writeFile(snapshot, live, "utf8");
     const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    try {
+      assert.ok(reopened.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md"));
+      await reopened.gateOp(async () => {});
+      assert.ok(reopened.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md"));
+      assert.equal(await readFile(snapshot, "utf8"), "conflicting history");
+      assert.equal(await readFile(join(dir, "characters/bray-half-hitch.md"), "utf8"), live);
+    } finally { await reopened.close(); }
+    const readOnly = await WorldStore.open(dir, { readOnly: true });
+    try { assert.ok(readOnly.getBundle().problems.some((p) => p.path === ".history/characters/bray-half-hitch/v6.md")); }
+    finally { await readOnly.close(); }
+  });
+
+  it("repairs only the committed founding preview addition, never other changes or outside edits", async () => {
+    const dir = await makeTempWorld();
+    const path = join(dir, "art-direction/art-direction.json");
+    const before = JSON.stringify({ version: 1, description: "Painted sunlight", acceptedAt: CLOCK(), history: [] }, null, 2) + "\n";
+    const completed = JSON.stringify({ ...JSON.parse(before), masterLook: "art-direction/look-v1.png" }, null, 2) + "\n";
+    await writeFile(path, before);
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    // Reproduce the old app-owned writer, which updated the scan baseline but skipped history.
+    await first.gateOp(() => writeFile(path, completed));
+    await first.close();
+    const snapshot = join(dir, ".history/art-direction/v1.json");
+    assert.equal(await readFile(snapshot, "utf8"), before);
+    const readOnly = await WorldStore.open(dir, { readOnly: true });
+    await readOnly.close();
+    assert.equal(await readFile(snapshot, "utf8"), before, "read-only open never repairs");
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    assert.equal(await readFile(snapshot, "utf8"), completed);
+    assert.equal(await readFile(path, "utf8"), completed, "repair never changes the committed record");
+    assert.ok(!reopened.getBundle().problems.some((p) => p.path === ".history/art-direction/v1.json"));
     await reopened.close();
+
+    const conflicting = before.replace("Painted sunlight", "A different look");
+    await writeFile(snapshot, conflicting);
+    const conflict = await WorldStore.open(dir, { clock: CLOCK });
+    assert.equal(await readFile(snapshot, "utf8"), conflicting, "existing fields cannot be replaced");
+    await conflict.close();
+
+    await writeFile(snapshot, before);
+    await writeFile(path, completed.replace("Painted sunlight", "Outside edit"));
+    const external = await WorldStore.open(dir, { clock: CLOCK });
+    assert.ok(external.getBundle().externalEdits.some((edit) => edit.path === "art-direction/art-direction.json"));
+    assert.equal(await readFile(snapshot, "utf8"), before);
+    await external.close();
   });
 
   it("adopts a world with no history or scan-state as-is (R-28)", async () => {

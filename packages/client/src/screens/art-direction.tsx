@@ -702,6 +702,9 @@ export function ArtDirectionScreen() {
           )
         )}
         <div className="fy-artdirection__spacer" />
+        {world.problems.filter((problem) => problem.path.startsWith(".history/art-direction/")).map((problem) => (
+          <p role="status" key={problem.path}>{problem.message}</p>
+        ))}
         <History worldSlug={world.meta.slug} history={direction.history} />
       </div>
     </div>

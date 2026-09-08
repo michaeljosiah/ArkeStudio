@@ -84,6 +84,11 @@ Follow the refusal cases too: stale bases, pending review, unresolved choices/co
 
 ### Open a world and reconnect
 
+`WorldStore.checkCurrentHistorySnapshots` reports current snapshot conflicts as world problems;
+the art-direction page shows its own history warning. Writable open repairs only the known
+founding-v1 master-look addition against the committed baseline. New founding previews use
+`commitUnserialised` to complete the record and snapshot in one recoverable transaction (issue 979).
+
 The client sends `open-world`; Coordinator uses the world provider. `world/provider.ts` opens the filesystem-backed store, while `world/store.ts` owns recovery, ownership, scanning/indexing and watcher lifecycle. Follow the provider's failure events and client `components/world-open-refusal.tsx` for refusal presentation. Disk changes feed reconciliation and refreshed state rather than becoming invisible mutations of client state.
 
 On reconnect, `transport.ts` authenticates hello and sends a fresh snapshot regardless of the supplied last sequence. Sequence numbers are per connection; transient held events can be replayed after the snapshot. It is not a missing-event replay log. Read coordinator `test/transport.test.ts`, `test/world-provider.test.ts`, `test/world/watcher.test.ts` and client `test/world-open-failure.test.tsx`. Ownership loss requires the recovery policy in CLAUDE.md, not retries under the previous claim.

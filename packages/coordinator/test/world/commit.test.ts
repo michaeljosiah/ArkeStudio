@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { CommitPlanError, CommitStaleError, Committer } from "../../src/world/commit.js";
+import { CommitPlanError, CommitStaleError, Committer, CrashSignal } from "../../src/world/commit.js";
 import { readChanges } from "../../src/world/change-writer.js";
 import { MarkdownFile, sha256 } from "../../src/world/text-files.js";
 import { makeTempWorld } from "./helpers.js";
@@ -15,6 +15,27 @@ async function readWorld(dir: string) {
 }
 
 describe("the commit primitive (R-13, R-15..R-21, R-27)", () => {
+  it("recovers founding preview completion with matching v1 history and refuses unversioned look edits", async () => {
+    const dir = await makeTempWorld();
+    const path = "art-direction/art-direction.json";
+    const before = JSON.stringify({ version: 1, description: "Painted sunlight", acceptedAt: CLOCK(), history: [] }, null, 2) + "\n";
+    await writeFile(join(dir, path), before);
+    const committer = new Committer(dir, CLOCK);
+    const file = { path, action: "replace" as const, baseHash: sha256(before), preserveVersion: true,
+      content: JSON.stringify({ ...JSON.parse(before), masterLook: "art-direction/look-v1.png" }) };
+    await assert.rejects(committer.commit({ kind: "founding-look-preview", source: "test", files: [{ ...file,
+      content: file.content.replace("Painted sunlight", "Changed look") }] }), /Only the founding preview/);
+    await assert.rejects(committer.commit({ kind: "founding-look-preview", source: "test", files: [file] }, {
+      at(point) { if (point === "committing-marked") throw new CrashSignal(); },
+    }), CrashSignal);
+    await new Committer(dir, CLOCK).recover();
+    const after = await readFile(join(dir, path), "utf8");
+    assert.equal(JSON.parse(after).version, 1);
+    assert.equal(JSON.parse(after).masterLook, "art-direction/look-v1.png");
+    assert.deepEqual(JSON.parse(after).history, []);
+    assert.equal(await readFile(join(dir, ".history/art-direction/v1.json"), "utf8"), after);
+  });
+
   it("replaces binary bytes with byte hashes and refuses stale binary bases", async () => {
     const dir = await makeTempWorld();
     const committer = new Committer(dir, CLOCK);

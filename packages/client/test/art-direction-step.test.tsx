@@ -487,6 +487,13 @@ function renderArtDirection(world: Partial<typeof WORLD> = {}): string {
 }
 
 describe("key art on the art-direction page (design 64)", () => {
+  it("names unavailable look history while keeping the art-direction page usable", () => {
+    const message = "History for art direction, version 1, is unavailable. The current record is usable.";
+    const html = renderArtDirection({ problems: [{ path: ".history/art-direction/v1.json", message }] });
+    assert.ok(html.includes(message));
+    assert.match(html, /WORLD KEY ART/);
+  });
+
   it("gives key art a frame and two doors of its own", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
     assert.match(html, /WORLD KEY ART/, "it is named, so which picture you are looking at is never a guess");

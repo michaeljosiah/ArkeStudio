@@ -592,6 +592,8 @@ describe("the founding build (SPEC-031)", () => {
     };
     assert.equal(record.version, 1, "still v1 — the record gains the picture, not a version");
     assert.equal(record.masterLook, "art-direction/look-v1.png");
+    assert.equal(await readFile(join(store.dir, ".history/art-direction/v1.json"), "utf8"),
+      await readFile(join(store.dir, "art-direction/art-direction.json"), "utf8"), "founding completes the snapshot too (issue 979)");
     assert.ok(await readFile(join(store.dir, "art-direction", "look-v1.png")).catch(() => null));
     assert.ok(
       ![...h.queue.jobs.values()].some((job) => job.target.kind === "master-look"),
