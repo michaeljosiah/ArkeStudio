@@ -1,4 +1,5 @@
 import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
+import { Loading } from "../components/loading.js";
 import {
   resolvedAuthoredDuration,
   type ProseReadSource,
@@ -1068,6 +1069,8 @@ export function ProductionLayout() {
               onto a production leaves every screen under it on its loader forever (issue 571). */}
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
+          ) : !world ? (
+            <Loading label="opening the world" />
           ) : (
             <NewSceneContext.Provider value={newScene}>
               <NewChapterContext.Provider value={newChapter}>

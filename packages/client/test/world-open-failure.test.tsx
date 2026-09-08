@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
+import { act, useState, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { parseHTML } from "linkedom";
 import { renderToString } from "react-dom/server";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes, useNavigate, type NavigateFunction } from "react-router";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { RouteErrorBoundary } from "../src/components/route-error-boundary.js";
+import { LocationDetailScreen } from "../src/screens/world.js";
+import { ReplaceMainPhotoScreen } from "../src/screens/character-reference.js";
 
 /**
  * A world that would not open used to look exactly like one still opening (issue 571): the
@@ -31,6 +37,38 @@ const refused: ClientState = {
   world: null,
   worldOpenFailure: { worldId: FIXTURE_WORLD_ID, reason: REASON },
 };
+
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
+Object.assign(dom.HTMLElement.prototype, {
+  scrollIntoView() {}, showModal() {}, close() {},
+});
+Object.assign(globalThis, {
+  window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event,
+  IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (time: number) => void) => setTimeout(() => cb(0), 0),
+});
+let root: Root | undefined;
+let navigate: NavigateFunction;
+let caught: unknown[];
+function Navigation() { navigate = useNavigate(); return null; }
+function BrokenScreen(): never { throw new Error("test render failure"); }
+function DraftScreen() {
+  const [draft, setDraft] = useState("Empty");
+  return <button onClick={() => setDraft("Unsaved draft")}>{draft}</button>;
+}
+async function mount(path: string, children: ReactNode = <App />) {
+  const container = document.createElement("div");
+  caught = [];
+  root = createRoot(container, { onCaughtError: (error) => { caught.push(error); } });
+  await act(async () => root!.render(<MemoryRouter initialEntries={[path]}><Navigation />{children}</MemoryRouter>));
+  return container;
+}
+afterEach(async () => {
+  await act(async () => root?.unmount());
+  root = undefined;
+  __setStateForTest(FIXTURE_STATE);
+});
 
 describe("a refused world open, on screen (issue 571)", () => {
   it("says so, and says why, instead of the loader", () => {
@@ -72,5 +110,58 @@ describe("a refused world open, on screen (issue 571)", () => {
       worldOpenFailure: { worldId: OTHER_WORLD, reason: REASON },
     });
     assert.equal(html.includes("This world did not open"), false);
+  });
+});
+
+describe("navigation survives a failed world (issue 981)", () => {
+  for (const [path, screen] of [["locations/the-vigil", "location-detail"], ["cast/maren-kest/main-photo", "replace-main-photo"],
+    ["p/saltlight/scenes", "scenes"]]) {
+    it(`loads ${path} after a refusal and returns to Worlds`, async () => {
+      __setStateForTest({ ...refused, worldOpenFailure: { worldId: OTHER_WORLD, reason: REASON } });
+      const container = await mount(`/w/${OTHER_WORLD}`);
+      assert.ok(container.textContent?.includes("This world did not open"));
+      await act(async () => { await navigate(`/w/${FIXTURE_WORLD_ID}/${path}`); });
+      assert.ok(container.textContent?.includes("opening the world"));
+      assert.ok(container.querySelector(".fy-titlebar"), "chrome remains available while loading");
+      await act(async () => __setStateForTest(FIXTURE_STATE));
+      assert.ok(container.querySelector(`[data-screen="${screen}"]`));
+      await act(async () => { await navigate("/worlds"); });
+      assert.ok(container.querySelector('[data-screen="world-picker"]'));
+      assert.deepEqual(caught, [], "the boundary must not hide a loading regression");
+    });
+  }
+
+  it("keeps detail and main-photo hook order stable when their world arrives or disappears", async () => {
+    __setStateForTest({ ...FIXTURE_STATE, world: null });
+    const container = await mount(`/w/${FIXTURE_WORLD_ID}/locations/the-vigil`, <Routes>
+      <Route path="/w/:worldId/locations/:sheetId" element={<LocationDetailScreen />} />
+      <Route path="/w/:worldId/cast/:sheetId/main-photo" element={<ReplaceMainPhotoScreen />} />
+    </Routes>);
+    await act(async () => __setStateForTest(FIXTURE_STATE));
+    assert.ok(container.querySelector('[data-screen="location-detail"]'));
+    await act(async () => __setStateForTest({ ...FIXTURE_STATE, world: null }));
+    await act(async () => { await navigate(`/w/${FIXTURE_WORLD_ID}/cast/maren-kest/main-photo`); });
+    await act(async () => __setStateForTest(FIXTURE_STATE));
+    assert.ok(container.querySelector('[data-screen="replace-main-photo"]'));
+  });
+
+  it("contains render errors, recovers on navigation and preserves healthy screen state on query changes", async () => {
+    const container = await mount("/editor", <RouteErrorBoundary><Routes>
+      <Route path="/editor" element={<DraftScreen />} />
+      <Route path="/broken" element={<BrokenScreen />} />
+      <Route path="/worlds" element={<p>World picker recovered</p>} />
+    </Routes></RouteErrorBoundary>);
+    await act(async () => container.querySelector("button")!.click());
+    await act(async () => { await navigate("/editor?panel=details"); });
+    assert.equal(container.textContent, "Unsaved draft");
+    await act(async () => { await navigate("/broken"); });
+    assert.ok(container.textContent?.includes("This screen could not be shown"));
+    assert.ok(container.querySelector(".fy-titlebar"));
+    assert.equal(caught.length, 1);
+    await act(async () => container.querySelector<HTMLElement>('[role="alert"] button')!.click());
+    assert.equal(container.textContent, "World picker recovered");
+    await act(async () => { await navigate("/broken"); });
+    await act(async () => { await navigate("/editor"); });
+    assert.equal(container.textContent, "Empty", "ordinary navigation also recovers");
   });
 });

@@ -84,6 +84,9 @@ Follow the refusal cases too: stale bases, pending review, unresolved choices/co
 
 ### Open a world and reconnect
 
+Client `components/route-error-boundary.tsx` contains route render errors and resets on navigation.
+World and production layouts wait for the routed world before mounting their outlets (issue 981).
+
 `WorldStore.checkCurrentHistorySnapshots` reports current snapshot conflicts as world problems;
 the art-direction page shows its own history warning. Writable open repairs only the known
 founding-v1 master-look addition against the committed baseline. New founding previews use
