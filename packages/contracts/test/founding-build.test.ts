@@ -189,6 +189,29 @@ describe("the fold (SPEC-031 R-32, R-39, R-40, R-46)", () => {
     assert.equal(state.items.find((item) => item.key === "thread:1")?.state, "skipped");
   });
 
+  /*
+   * The notice is dated off the journal rather than the clock at render (issue 1007): the run
+   * ended once, and every session that opens the world afterwards should say the same day.
+   */
+  it("carries the end of the run, and only once it has ended", () => {
+    const rec = record(blueprint(), { model: MODEL, referenceImages: 3 });
+    const ENDED = "2026-09-06T09:12:00.000Z";
+    const failed: BuildJournalEntry[] = [
+      { kind: "intent", key: "main-photo:maren-kest", at: AT },
+      { kind: "terminal", key: "main-photo:maren-kest", outcome: "failed", detail: "x", at: AT },
+    ];
+    assert.equal(foldFoundingBuild(rec, failed, [], "w").endedAt, undefined, "a run still going has no end");
+    assert.equal(
+      foldFoundingBuild(rec, [...failed, { kind: "completed", at: ENDED }], [], "w").endedAt,
+      ENDED,
+    );
+    assert.equal(
+      foldFoundingBuild(rec, [...failed, { kind: "stopped", at: ENDED }], [], "w").endedAt,
+      ENDED,
+      "a stopped run ended too",
+    );
+  });
+
   it("the notice persists until dismissed, and dismissal is a journal fact (R-45)", () => {
     const rec = record(blueprint(), { model: MODEL, referenceImages: 3 });
     const entries: BuildJournalEntry[] = [

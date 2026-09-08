@@ -18,6 +18,29 @@ export function shortDate(iso: string | undefined): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/**
+ * How long ago, in the fewest characters that carry it — `now`, `4h ago`, `4d ago`, `Sep 7`.
+ *
+ * The world card's own band (design 1a). It reads the timestamp as an age because that is the
+ * question the front door asks — which of these did I touch last — and because the band it
+ * shares with the world's counts is 280px wide: a full `Sep 7, 02:22` took the room the counts
+ * needed and truncated them at every window width (issue 1007). Past a week an age stops being
+ * informative and the date is shorter anyway.
+ */
+export function relativeDate(iso: string | undefined, now: Date = new Date()): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const minutes = Math.floor((now.getTime() - d.getTime()) / 60000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d ago`;
+  return shortDate(iso);
+}
+
 export function shortDateTime(iso: string | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

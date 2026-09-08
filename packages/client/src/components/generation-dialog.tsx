@@ -339,10 +339,28 @@ export function GenerationDialog({
 
         <div className="fy-gendialog__columns">
         <div className="fy-gendialog__compose">
-        <label className="fy-gendialog__label" htmlFor={promptId}>
-          {promptLabel}
-          {promptMetadata&&<span className="fy-gendialog__info" tabIndex={0} role="img" aria-label={`Fixed constraints: ${promptMetadata.constraints}`} title={`Fixed constraints: ${promptMetadata.constraints}`}>ⓘ</span>}
-        </label>
+        {/*
+          Reset sits on the label row, not on the writing surface (issue 1007). Floated at the
+          textarea's bottom-right it sat on top of the prompt's own last line — and the prompts
+          this dialog opens with are written from the sheet, so the overlap was the default
+          state of the screen rather than an edge case somebody typed their way into.
+        */}
+        <div className="fy-gendialog__labelrow">
+          <label className="fy-gendialog__label" htmlFor={promptId}>
+            {promptLabel}
+            {promptMetadata&&<span className="fy-gendialog__info" tabIndex={0} role="img" aria-label={`Fixed constraints: ${promptMetadata.constraints}`} title={`Fixed constraints: ${promptMetadata.constraints}`}>ⓘ</span>}
+          </label>
+          {onResetPrompt && (
+            <button
+              type="button"
+              className="fy-gendialog__reset"
+              {...(resetTitle !== undefined ? { title: resetTitle } : {})}
+              onClick={onResetPrompt}
+            >
+              Reset
+            </button>
+          )}
+        </div>
         <div className={`fy-gendialog__promptbox${promptMetadata?" fy-gendialog__promptbox--counted":""}`}>
           <Textarea
             id={promptId}
@@ -355,16 +373,6 @@ export function GenerationDialog({
           {promptMetadata&&<span className="fy-gendialog__count" title={`${promptCharacters} Unicode characters · ${new TextEncoder().encode(normalizedPrompt).length} UTF-8 bytes`}>
             {promptCharacters}{promptDelta!==undefined&&<> · {promptDelta>=0?"+":""}{promptDelta}</>}
           </span>}
-          {onResetPrompt && (
-            <button
-              type="button"
-              className="fy-gendialog__reset"
-              {...(resetTitle !== undefined ? { title: resetTitle } : {})}
-              onClick={onResetPrompt}
-            >
-              Reset
-            </button>
-          )}
         </div>
         {promptHint && <p className="fy-gendialog__hint">{promptHint}</p>}
         <ResolvedPromptCapabilityNotices text={prompt} capability={capability} modelId={choice.modelId} />

@@ -184,6 +184,18 @@ export function WorldLayout() {
   }
   const onArtDirection = location.pathname.endsWith("/art-direction");
   const onCast = location.pathname.endsWith("/cast");
+  /*
+   * The world screens that are a fixed frame rather than a page that scrolls: art direction's
+   * two picture bands, and the gate screens, whose two columns each scroll inside themselves.
+   * They were sized against the viewport minus a constant, which was 28px optimistic even with
+   * nothing above them and had no answer at all for a banner that was (issue 1007) — so the
+   * edit sheet's Save and World Chat's composer sat below the fold. The column measures the
+   * room it actually has and gives the screen the remainder.
+   */
+  const fixedFrame =
+    onArtDirection ||
+    /\/(chat|edit)(\/[^/]+)?$/.test(location.pathname) ||
+    /\/canon\/(new|[^/]+\/thread)$/.test(location.pathname);
   return (
     <div className="fy-app">
       <AppChrome
@@ -195,7 +207,11 @@ export function WorldLayout() {
         }
         divided={onArtDirection}
       />
-      <div className={cx("fy-content", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
+      {/* Art direction is the one world screen laid out as a fixed-height row rather than a
+          column that scrolls, so it is the one that has to be told how much room it has. The
+          column measures it instead of subtracting a guessed constant from the viewport: the
+          nav above it is sticky and therefore in flow, and any condition banner is too. */}
+      <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             slug === "cast" && onSheets ? (
@@ -231,31 +247,39 @@ export function WorldLayout() {
 /** Staleness, closed-world edits and parse failures — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
+  const location = useLocation();
   const world = useWorld();
   const navigate = useNavigate();
   const clientState = useClientState();
   if (!world || world.meta.worldId !== worldId) return null;
   // The completion notice (SPEC-031 R-44..R-47): persists until dismissed or the work it
   // names is no longer outstanding, and its one action opens the screen that can act.
+  //
+  // On Overview and nowhere else (issue 1007). R-44 raises it on arrival at the world, and
+  // Overview is the arrival; drawing it on all nine tabs made it a permanent 110px band on
+  // top of nine screens laid out against the window, which is what pushed Save off the foot
+  // of the edit sheet, the composer off World Chat and the key art below the fold. It is one
+  // row now — title, cause, date, two presses — rather than a callout with a paragraph in it.
+  const onOverview = location.pathname.replace(/\/$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
-  const notice = build ? foundingNote(build) : null;
+  const notice = onOverview && build ? foundingNote(build) : null;
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
     <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
       {notice && (
-        <Callout tone="warning" title={notice.title}>
-          {notice.reason}
-          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", alignItems: "center" }}>
-            <Button onClick={() => navigate(notice.action!.to)}>{notice.action!.label}</Button>
-            <Button variant="ghost" onClick={() => dismissBuildNotice(worldId!)}>
-              Dismiss
-            </Button>
-            <span className="mono" style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
-              {notice.meta}
-            </span>
-          </div>
-        </Callout>
+        <div className="fy-buildnotice" role="status">
+          <span className="fy-buildnotice__dot" aria-hidden="true" />
+          <span className="fy-buildnotice__title">{notice.title}</span>
+          {notice.reason && <span className="fy-buildnotice__cause" title={notice.reason}>{notice.reason}</span>}
+          {notice.meta !== "" && <span className="fy-buildnotice__when">{notice.meta}</span>}
+          <button type="button" className="fy-buildnotice__act" onClick={() => navigate(notice.action!.to)}>
+            {notice.action!.label}
+          </button>
+          <button type="button" className="fy-buildnotice__act" onClick={() => dismissBuildNotice(worldId!)}>
+            Dismiss
+          </button>
+        </div>
       )}
       {world.externalEdits.length > 0 && (
         <Callout
@@ -2365,6 +2389,12 @@ export function CharacterEditScreen() {
                   </span>
                 </div>
               )}
+              {/*
+                A sheet's sections are paragraphs, not a line each, and the shared textarea's
+                112px showed about four lines of them behind an inner scrollbar — two nested
+                scrollers on a page that already scrolls (issue 1007). The editor is the point
+                of this screen, so it gets the room; the column scrolls, as it did.
+              */}
               {sections.map((s, i) => {
                 const isChanged = s.body !== sheet?.sections[i]?.body;
                 return (
@@ -2374,6 +2404,7 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />

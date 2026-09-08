@@ -24,7 +24,7 @@ import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
-import { shortDateTime } from "../lib/format.js";
+import { relativeDate, shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
@@ -599,7 +599,9 @@ export function WorldPickerScreen() {
                       {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
                       production{w.counts.productions === 1 ? "" : "s"}
                     </span>
-                    <span className="mono">{shortDateTime(w.updated)}</span>
+                    {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
+                        took the room the counts beside it needed (issue 1007). */}
+                    <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
                   </div>
                 </div>
               </div>

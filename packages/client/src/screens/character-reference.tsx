@@ -705,7 +705,11 @@ export function ReplaceMainPhotoScreen() {
     <>
       <div className="fy-gendialog__refbuttons">
         {/* Two different things, so two buttons: one decides what travels with the generation,
-            the other brings in a finished image that needs no generation. */}
+            the other brings in a finished image that needs no generation.
+
+            Labels, not sentences: three of these share a 420px column, and "Use current photo ·
+            Choose from world · Upload your own" broke 2 + 1, which reads as two groups with a
+            loose one underneath (issue 1007). What each one means is on its title. */}
         <Button
           disabled={!photo}
           title={
@@ -715,9 +719,14 @@ export function ReplaceMainPhotoScreen() {
           }
           onClick={() => setCarryIdentity(!carryIdentity)}
         >
-          Use current photo
+          Current photo
         </Button>
-        <Button onClick={() => setWorldRef(!worldRef)}>Choose from world</Button>
+        <Button
+          title="Carry an image already in this world as the style reference"
+          onClick={() => setWorldRef(!worldRef)}
+        >
+          From world
+        </Button>
         <Button
           disabled={!canImport}
           title={
@@ -727,7 +736,7 @@ export function ReplaceMainPhotoScreen() {
           }
           onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
         >
-          Upload your own
+          Upload
         </Button>
       </div>
       <div className="fy-gendialog__refs">
