@@ -28,7 +28,7 @@ describe("conversational production setup (SPEC-012 §4)", () => {
     assert.deepEqual(edited.defaults, { ...explicit.defaults, episodeSecondsMax: 40 });
     const cleared = applyProductionSetupUpdate(edited, { expectedRevision: 3, fields: { kind: "microdrama", defaults: null } });
     assert.equal(cleared.defaults, undefined);
-    assert.equal(applyProductionSetupUpdate(cleared, { expectedRevision: 4, fields: { title: "A new title" } }).defaults, undefined);
+    assert.equal(applyProductionSetupUpdate(cleared, { expectedRevision: 4, fields: { kind: "microdrama", title: "A new title" } }).defaults, undefined);
     assert.equal(applyProductionSetupUpdate(draft(), { expectedRevision: 1, fields: { kind: "film" } }).defaults, undefined);
   });
 

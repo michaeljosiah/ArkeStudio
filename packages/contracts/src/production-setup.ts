@@ -102,7 +102,7 @@ function items<T extends { key: string }>(current: T[], replacements: Array<Part
 export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: ProductionSetupUpdate): ProductionSetupDraft {
   const update = ProductionSetupUpdateSchema.parse(raw);
   if (draft.revision !== update.expectedRevision) throw new Error("Production so far changed. Read the current draft before editing it.");
-  const defaults = update.fields?.kind === "microdrama"
+  const defaults = draft.kind !== "microdrama" && update.fields?.kind === "microdrama"
     ? { ...MICRODRAMA_DEFAULTS, ...draft.defaults } : draft.defaults;
 
   return ProductionSetupDraftSchema.parse({
