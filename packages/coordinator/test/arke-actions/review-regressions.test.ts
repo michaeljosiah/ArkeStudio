@@ -12,7 +12,7 @@ import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
+import { chaptersFence, jobsFence, sceneFence, storyFence, timelineFence, worldMetadataFence } from "../../src/world-chat/target-reads.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStateStaleError, type WorldStore } from "../../src/world/store.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -35,13 +35,15 @@ async function setup(ffmpeg?: FfmpegRunner) {
     recoverWorldChat(store: WorldStore): Promise<void>;
     refreshBench(worldId: string, sessionId: SessionId): Promise<void>;
     refreshConversations(store: WorldStore): Promise<void>;
+    refreshWorldSnapshot(worldId: string): Promise<void>;
+    refreshConversationOutcome(store: WorldStore, conversationId: string): Promise<void>;
     backgroundWork: Set<Promise<unknown>>;
     useMasterLookForConversationAction(store: WorldStore, index: number, mutation: { source: string; requestId: string; precondition: () => string | null }): Promise<boolean>;
   };
   return { ...made, provider, store: provider.openStore()!, gate: provider.gate()!, coordinator, internal, events };
 }
 
-for (const decision of ["accept", "discard", "journal-discard"] as const) {
+for (const decision of ["accept", "card-accept", "discard", "journal-discard"] as const) {
   it(`reconciles an overview card after ${decision} through the proposal panel (#953)`, async () => {
     const w = await setup();
     await w.coordinator.openWorld(WORLD_ID);
@@ -66,19 +68,81 @@ for (const decision of ["accept", "discard", "journal-discard"] as const) {
       // The authority landed, but no best-effort conversation resolution was recorded.
       await w.gate.discard(action.authority.id);
       w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: "discarded" });
+    } else if (decision === "card-accept") {
+      const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
+      await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
+        actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
     } else {
       await w.internal.handleClientMessage({ kind: decision === "accept" ? "proposal-accept" : "proposal-discard", worldId: WORLD_ID, proposalId: action.authority.id });
     }
     await Promise.all(w.internal.backgroundWork);
     const folded = () => log.read().then(({ events }) => foldConversation(conversationId, AT, events).view);
-    assert.equal((await folded()).actions[0]!.status, decision === "accept" ? "completed" : "cancelled");
-    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, decision === "accept" ? "completed" : "cancelled", "the open card updates without navigation");
+    assert.equal((await folded()).actions[0]!.status, decision.endsWith("accept") ? "completed" : "cancelled");
+    assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, decision.endsWith("accept") ? "completed" : "cancelled", "the open card updates without navigation");
+    if (decision.endsWith("accept")) {
+      const displayed = w.coordinator.getState().world!.productions.find(p => p.meta.id === production.meta.id)!;
+      assert.equal(displayed.story?.logline, "The last watch finds a missing page.", "the rail sees the accepted overview without reopening");
+    }
     const count = (await log.read()).events.length;
-    w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: decision === "accept" ? "accepted" : "discarded" });
+    w.coordinator.emit({ type: "proposal.resolved", at: AT, worldId: WORLD_ID, proposalId: action.authority.id, outcome: decision.endsWith("accept") ? "accepted" : "discarded" });
     await Promise.all(w.internal.backgroundWork);
     assert.equal((await log.read()).events.length, count, "duplicate notifications do not settle or execute twice");
   });
 }
+
+it("publishes all six chapters when the outline card completes (#974)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const production = w.store.getBundle().productions.find(p => p.meta.id === "the-ledger-of-nights")!;
+  const conversationId = newId("cv");
+  const log = new WorldChatStore(conversationDir(w.worldDir, conversationId));
+  await log.create(conversationId, AT);
+  await log.append({ type: "conversation.created", title: "Outline", entryContext: { kind: "production", productionId: production.meta.id } }, { at: AT });
+  const action = await w.internal.conversationActionLifecycle(w.store).prepare({
+    conversationId, turnId: newId("turn"), worldId: WORLD_ID, actionKind: "world-chat-production-chapter", productionId: production.meta.id,
+    targets: [{ kind: "production", id: production.meta.id }],
+    payload: { kind: "world-chat-production-chapter", worldId: WORLD_ID, action: {
+      kind: "production-chapter", productionId: production.meta.id, checkReceiptIds: [newId("check")],
+      change: { operation: "outline", chapters: Array.from({ length: 6 }, (_, i) => ({ title: `New chapter ${i+1}`, synopsis: `Plan ${i+1}.` })) },
+    } },
+    baseObservations: [{ requirement: "chapters", target: production.meta.id, revisionOrDigest: chaptersFence(production), complete: true },
+      { requirement: "story", target: production.meta.id, revisionOrDigest: storyFence(production), complete: true }], createdAt: AT,
+  });
+  await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
+  const seq = foldConversation(conversationId, AT, (await log.read()).events).view.seq;
+  await w.internal.handleClientMessage({ kind: "conversation-action-decide", worldId: WORLD_ID, conversationId,
+    actionId: action.actionId, requestId: ulid(), decision: "approve", expectedConversationSeq: seq, expectedStatus: "pending" });
+  const displayed = w.coordinator.getState().world!.productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(w.coordinator.getState().worldChat?.actions[0]?.status, "completed");
+  assert.equal(displayed.chapters.length, production.chapters.length + 6);
+  assert.deepEqual(displayed.chapters, w.store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.chapters);
+});
+
+it("does not publish an outcome from a world that was left (#974)", async () => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const next = await w.provider.createWorld({ name: "Next world" });
+  await w.coordinator.openWorld(next.worldId);
+  await w.internal.refreshConversationOutcome(w.store, newId("cv"));
+  assert.equal(w.coordinator.getState().world?.meta.worldId, next.worldId);
+  assert.equal(w.provider.openStore()?.worldId, next.worldId);
+});
+
+it("logs a failed world refresh and sends a reopen notice without a stale snapshot (#974)", async (t) => {
+  const w = await setup();
+  await w.coordinator.openWorld(WORLD_ID);
+  const internals = w.coordinator as unknown as { transport: { broadcastSnapshot(): void }; appLog: { append(record: unknown): Promise<void> } };
+  const snapshots = t.mock.method(internals.transport, "broadcastSnapshot", () => {});
+  const records: unknown[] = [];
+  internals.appLog = { append: async record => { records.push(record); } };
+  t.mock.method(w.provider, "loadWorld", async () => { throw new Error("read failed"); });
+  await w.internal.refreshWorldSnapshot(WORLD_ID);
+  assert.equal(snapshots.mock.callCount(), 0);
+  assert.ok(records.some(record => (record as { message?: string }).message === "read failed"));
+  const notice = w.events.findLast(event => event.type === "command.failed");
+  assert.ok(notice?.type === "command.failed");
+  assert.match(notice.reason, /Reopen the world/);
+});
 
 describe("PR 815 coordinator regressions", () => {
   for (const legacy of [false, true]) {
@@ -290,7 +354,7 @@ describe("PR 815 coordinator regressions", () => {
       await w.internal.handleClientMessage({ kind: "world-chat-open", worldId: WORLD_ID, conversationId });
       await w.internal.handleClientMessage({ kind: "editor-request-decide", worldId: WORLD_ID, productionId: "saltlight", requestId: action.authority.id, decision });
       const view = foldConversation(conversationId, AT, (await log.read()).events).view;
-      assert.equal(view.actions[0]!.status, decision === "accept" ? "completed" : "cancelled");
+      assert.equal(view.actions[0]!.status, decision.endsWith("accept") ? "completed" : "cancelled");
       assert.notEqual(view.deletionBlock, "pending-actions");
       assert.equal(w.coordinator.getState().worldChat?.actions[0]!.status, view.actions[0]!.status);
     });

@@ -4956,13 +4956,7 @@ export class Coordinator {
         const result = await this.conversationActionLifecycle(store).decide(msg);
         if (!this.stillOpen(store)) return;
         this.emit({ at: this.nowIso(), type: "conversation-action.decision-result", ...result });
-        await this.refreshConversations(store);
-        if (!this.stillOpen(store)) return;
-        if (this.readModel.getState().worldChat?.conversationId === msg.conversationId) {
-          await this.openWorldChat(store, msg.conversationId);
-        } else {
-          this.transport.broadcastSnapshot();
-        }
+        await this.refreshConversationOutcome(store, msg.conversationId);
         return;
       }
       case "world-chat-send": {
@@ -15301,6 +15295,10 @@ export class Coordinator {
   }
 
   private async refreshConversationOutcome(store: WorldStore, conversationId: ConversationId): Promise<void> {
+    if (!this.stillOpen(store)) return;
+    // Card acceptance commits through the store just like the proposal panel. Publish that
+    // bundle before the completed card, or its chapters and overview stay at their old values.
+    this.readModel.setWorld(store.getBundle());
     await this.refreshConversations(store);
     if (!this.stillOpen(store)) return;
     if (this.getState().worldChat?.conversationId === conversationId) {
@@ -15532,8 +15530,12 @@ export class Coordinator {
   private async refreshWorldSnapshot(worldId: string): Promise<void> {
     try {
       this.readModel.setWorld(await this.opts.provider.loadWorld(worldId));
-    } catch {
-      /* the previous snapshot stands */
+    } catch (error) {
+      void this.appLog?.append({ kind: "world-refresh.failed", worldId,
+        message: error instanceof Error ? error.message : String(error) });
+      this.emit({ at: this.nowIso(), type: "command.failed", command: "refresh-world", requestId: null,
+        reason: "The world display could not refresh. Reopen the world to see its current state." });
+      return;
     }
     this.transport.broadcastSnapshot();
   }
