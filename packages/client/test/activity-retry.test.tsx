@@ -88,6 +88,18 @@ describe("a failed job's recovery route on the Activity row (issue 226)", () => 
       assert.ok(label.startsWith(scene.title));
       assert.ok(!label.includes(orderedShots(scene)[0]!.title));
     }
+    const scene = production.scenes[0]!;
+    const speaker = state.world!.sheets.find((candidate) => candidate.type === "character")!;
+    const performanceTarget = { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version,
+      shotId: orderedShots(scene)[0]!.id, speakerSheetId: speaker.id, authoredTextHash: `sha256:${"a".repeat(64)}` };
+    for (const kind of ["table-read-cache", "performance-generation", "performance-conversion"] as const) {
+      const params = kind === "table-read-cache" ? { tableReadSceneId: scene.id, tableReadSpeakerSheetId: speaker.id }
+        : { [kind === "performance-generation" ? "performanceGeneration" : "performanceConversion"]: { target: performanceTarget } };
+      const label = activityJobLabels(state, { ...shot, target: { kind, id: "pf_opaque" }, params }).target;
+      assert.ok(label.includes(speaker.name), label);
+      assert.ok(label.includes(`Scene ${scene.number}`), label);
+      assert.ok(label.includes(kind === "table-read-cache" ? scene.title : orderedShots(scene)[0]!.title), label);
+    }
     const other = { ...shot, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" };
     assert.ok(!activityJobLabels(state, other).target.includes(production.meta.title));
   });

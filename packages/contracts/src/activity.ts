@@ -6,6 +6,7 @@ import { PROVIDERS } from "./provider.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
 import { orderedShots } from "./scene-flow.js";
+import { PerformanceTargetSchema } from "./performance.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
 export function activityJobLabels(state: ClientState | null | undefined, job: Job): { target: string; model: string } {
@@ -13,15 +14,22 @@ export function activityJobLabels(state: ClientState | null | undefined, job: Jo
   const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
   const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId);
   const targetId = job.target.id?.split("/")[0];
-  const shotId = job.target.coversShots?.[0] ?? targetId;
-  const scene = production?.scenes.find((candidate) => candidate.id === targetId || orderedShots(candidate).some((shot) => shot.id === shotId));
+  const performanceInput = (job.target.kind === "performance-generation" ? job.params.performanceGeneration : job.target.kind === "performance-conversion" ? job.params.performanceConversion : undefined) as { target?: unknown } | undefined;
+  const parsedTarget = PerformanceTargetSchema.safeParse(performanceInput?.target);
+  const performance = parsedTarget.success && parsedTarget.data.productionId === job.productionId ? parsedTarget.data : undefined;
+  const tableRead = job.target.kind === "table-read-cache";
+  const sceneId = performance?.sceneId ?? (tableRead && typeof job.params.tableReadSceneId === "string" ? job.params.tableReadSceneId : undefined);
+  const shotId = performance?.shotId ?? job.target.coversShots?.[0] ?? targetId;
+  const scene = production?.scenes.find((candidate) => sceneId ? candidate.id === sceneId : candidate.id === targetId || orderedShots(candidate).some((shot) => shot.id === shotId));
   const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
   const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
   const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
   const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
   const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
-  const subject = sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title);
-  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && shot ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
+  const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
+  const subject = [speaker?.name, sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
+  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
   const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
   return { target, model };
 }
