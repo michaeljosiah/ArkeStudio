@@ -127,6 +127,8 @@ describe("a chapter is prose the read-aloud can address", () => {
     assert.equal(targetWords("Each chapter is 3,000 words", 6), 18_000);
     assert.equal(targetWords("Each of 6 chapters is 3,000 words", 5), 18_000);
     assert.equal(targetWords("Each of 6 chapters is 3,000 words; 20,000 words total", 5), 20_000);
+    assert.equal(targetWords("6 chapters, each at 3,000 words", 5), 18_000);
+    assert.equal(targetWords("3,000 words in each chapter", 6), 18_000);
     assert.equal(targetWords("Per chapter: 3,000 words; total: 20,000 words", 6), 20_000);
     assert.equal(targetWords("3,000 words/chapter"), null);
     assert.equal(targetWords("6 chapters at 3,000 words each", 5), 18_000, "the authored planned count is the target");

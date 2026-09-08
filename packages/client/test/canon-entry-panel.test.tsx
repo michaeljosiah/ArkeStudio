@@ -166,6 +166,9 @@ describe("readable canon context (issue 1003)", () => {
         const text = parseHTML(html).document.querySelector('[data-screen^="canon"]')!.textContent!;
         assert.equal(text.split(question).length - 1, 1, `${path} shows the question once`);
         assert.equal(text.split(context).length - 1, 1, `${path} retains the considered candidates`);
+        const headings = Array.from(parseHTML(html).document.querySelectorAll(".fy-gridcard__title, h1"), (node) => node.textContent);
+        assert.ok(headings.includes(question), `${path} keeps the question as its own heading`);
+        assert.ok(headings.every((heading) => !heading?.includes(context)), `${path} keeps candidate context in supporting text`);
       }
     } finally {
       __setStateForTest(FIXTURE_STATE);

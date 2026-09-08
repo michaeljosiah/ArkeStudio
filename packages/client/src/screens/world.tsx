@@ -3583,7 +3583,7 @@ function ClosestList({
 }
 
 /** Generated thread titles are often the question, shortened for storage (issue 1003). */
-function threadQuestion(entry: CanonEntry): string | null {
+function threadQuestion(entry: CanonEntry): { text: string; context: string } | null {
   if (entry.status !== "open") return null;
   const title = entry.title.trim().replace(/\s+/g, " ");
   // Refused asks append candidate context; it is not part of the generated title.
@@ -3592,7 +3592,7 @@ function threadQuestion(entry: CanonEntry): string | null {
   // Only the known 77-character truncation is generated; an authored ellipsis is a title.
   const generated = body.length > 80 && entry.title.trim() === `${body.slice(0, 77)}…`;
   return question && (title === question || generated)
-    ? entry.body
+    ? { text: body, context: entry.body.trim().slice(body.length).trim() }
     : null;
 }
 
@@ -3716,16 +3716,18 @@ export function CanonScreen() {
         </div>
       )}
       <div className="fy-cardgrid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        {shown.map((entry) =>
-          entry.status === "open" ? (
+        {shown.map((entry) => {
+          const question = threadQuestion(entry);
+          const body = question?.context ?? entry.body;
+          return entry.status === "open" ? (
             <div key={entry.id} className="fy-gridcard fy-gridcard--quiet">
               <div className="fy-gridcard__id" style={{ display: "flex", alignItems: "center", gap: 7 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 7, height: 7 }} />
                 {entry.id} · open thread
               </div>
-              <div className="fy-gridcard__title">{threadQuestion(entry) ?? entry.title}</div>
-              {!threadQuestion(entry) && <div className="fy-gridcard__body">
-                {entry.body.length > 150 ? `${entry.body.slice(0, 147)}…` : entry.body}
+              <div className="fy-gridcard__title">{question?.text ?? entry.title}</div>
+              {body && <div className="fy-gridcard__body">
+                {body.length > 150 ? `${body.slice(0, 147)}…` : body}
               </div>}
               <div style={{ marginTop: 12 }}>
                 <Button onClick={() => navigate(`/w/${worldId}/canon/${entry.id}/thread`)}>
@@ -3754,8 +3756,8 @@ export function CanonScreen() {
                 {entry.amendedAt !== undefined ? ` · amended v${entry.amendedAt}` : ""}
               </div>
             </button>
-          ),
-        )}
+          );
+        })}
         {shown.length === 0 && (
           <EmptyState title="No matches" hint="The closest entries appear in the ask refusal above." />
         )}
@@ -3846,7 +3848,10 @@ export function CanonEntryScreen() {
           {/* The statement is the one thing on this screen somebody reads rather than scans. */}
           <div className="fy-texthost">
             {question
-              ? <h1 className="fy-entry__title">{question}</h1>
+              ? <>
+                  <h1 className="fy-entry__title">{question.text}</h1>
+                  {question.context && <div className="fy-entry__body">{question.context}</div>}
+                </>
               : <div className="fy-entry__body">{entry.body}</div>}
             <ReadAloud
               source={{ of: "canon", canonId: entry.id }}
@@ -4042,6 +4047,8 @@ const SETTLE_TYPES = ["rule", "lore", "location", "faction", "timeline", "tone"]
 
 export function CanonThreadScreen() {
   const { entry, worldId } = useCanonEntry();
+  const question = entry ? threadQuestion(entry) : null;
+  const context = question?.context ?? entry?.body;
   const world = useWorld();
   const navigate = useNavigate();
   const { state } = useStore();
@@ -4118,11 +4125,11 @@ export function CanonThreadScreen() {
                 OPEN THREAD{entry ? ` · ${entry.id} · since v${entry.introducedAt}` : ""}
               </span>
             </div>
-            <h1 className="fy-story__h1">{entry ? threadQuestion(entry) ?? entry.title : "Thread"}</h1>
+            <h1 className="fy-story__h1">{question?.text ?? entry?.title ?? "Thread"}</h1>
           </div>
         </div>
         <div className="fy-gate__body" style={{ gap: 14 }}>
-          {entry && !threadQuestion(entry) && <div className="fy-bubble--gate">{entry.body}</div>}
+          {context && <div className="fy-bubble--gate">{context}</div>}
           {transcript.length === 0 && (
             <div className="fy-bubble--gate">
               Talk it through — the studio drafts the answer on a proposal over this entry, checked against
@@ -4230,7 +4237,7 @@ export function CanonThreadScreen() {
           <div className="fy-gridcard__id">
             {entry?.id ?? "CANON-…"} · {resolvedType}
           </div>
-          {entry && !threadQuestion(entry) && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
+          {entry && !question && <div style={{ font: "600 16px var(--font-sans)", letterSpacing: "-0.01em", marginTop: 7 }}>
             {entry.title}
           </div>}
           <div

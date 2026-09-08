@@ -245,8 +245,8 @@ export function targetWords(targetLength: string | undefined, chapterCount?: num
     if (!Number.isFinite(words) || words < 100) continue;
     const before = targetLength.slice(0, match.index);
     const after = targetLength.slice(match.index + match[0].length);
-    if (/\b(?:per\s+chapter|each\s+(?:of\s+(?:the\s+)?\d+\s+)?chapters?)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
-        /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b)/i.test(after)) {
+    if (/\b(?:per\s+chapter|each\s+(?:of\s+(?:the\s+)?\d+\s+)?chapters?|chapters?\s*[,;:]?\s*each)\s*(?:(?:is|at|of|:)\s*)?(?:(?:about|approximately|~)\s*)?$/i.test(before) ||
+        /^\s*(?:words?\s*)?(?:per\s+chapter\b|\/\s*chapter\b|a\s+chapter\b|each\b|in\s+each\s+chapter\b)/i.test(after)) {
       perChapter = words;
     } else {
       return Math.round(words);
