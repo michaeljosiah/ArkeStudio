@@ -32,33 +32,30 @@ the history is deliberately left alone. What the arrangement buys is that everyt
 2026-09-09 forward is private — which for documents still being written is where the value is.
 Do not repeat the claim that the specs "were never public"; say they are no longer published.
 
-**A fresh checkout or worktree has no junctions.** The paths are simply absent, and every spec
-link in this file dead-ends. That is not a broken repository; it is a checkout that has not been
-linked yet. From the checkout root, in PowerShell:
+**A fresh checkout or worktree has no links.** The paths are simply absent, and every spec link
+in this file dead-ends. That is not a broken repository; it is a checkout nobody has linked yet:
 
-```powershell
-$specs = "$env:USERPROFILE\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs"
-foreach ($n in @("specifications", "decisions")) {
-  New-Item -ItemType Junction -Path "docs\$n" -Target "$specs\$n"
-}
-New-Item -ItemType HardLink -Path "docs\specification.md" -Target "$specs\specification.md"
-New-Item -ItemType HardLink -Path "docs\architecture\character-audio-foundation.md" -Target "$specs\architecture\character-audio-foundation.md"
+```
+node scripts/link-private-docs.mjs           # dry run, as with prune-merged.mjs
+node scripts/link-private-docs.mjs --apply
 ```
 
-The two hard links are files rather than directories, which is why they are not junctions — and
-OneDrive can break a hard link by replacing the file on sync, leaving the checkout holding a
-stale copy that looks fine. If either disagrees with what you last wrote there, re-link it:
+Run it again whenever a link looks stale — it is idempotent, and re-linking is the repair. Set
+`ARKE_PRIVATE_DOCS` if the document set is not at the OneDrive path above.
 
-```powershell
-Remove-Item "docs\specification.md" -Force
-New-Item -ItemType HardLink -Path "docs\specification.md" -Target "$specs\specification.md"
-```
+Do not hand-roll these four links. Two of the paths are directories and take junctions, two are
+single files and take hard links, and `New-Item -ItemType HardLink` **fails when the destination
+already exists** — so the obvious repair for a stale link errors and leaves you attached to the
+old inode, still reading an obsolete spec while believing you just fixed it. The script deletes
+before re-linking, which is safe because the private copy has its own directory entry: dropping
+the checkout-side name drops one link, never the content.
 
-**The `Remove-Item` is not optional and it is not dangerous.** `New-Item -ItemType HardLink`
-fails outright when the destination exists, so re-running the setup line over a stale file
-errors and leaves you attached to the old inode — still reading an obsolete spec, now with the
-belief that you repaired it. Deleting first is safe because the OneDrive file has its own
-directory entry: removing the checkout-side name drops one link, never the content.
+**It refuses more than it does.** If git still tracks those paths, the change that removes them
+has not merged or this checkout predates it — linking would delete tracked files and any
+uncommitted edit to them, so the script stops. It also refuses a real directory sitting where a
+junction belongs, and refuses a hard-link target whose content differs from the private copy,
+because one side then holds writing the other does not and guessing which to keep discards
+somebody's work. A refusal is the tool working; move the file yourself and re-run.
 
 Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
 of those citations sit in `packages/`, they are the only record of why a great deal of this code
