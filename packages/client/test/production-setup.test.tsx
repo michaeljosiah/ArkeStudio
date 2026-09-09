@@ -83,6 +83,28 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("offers Stop for a live turn and Retry and Review after interruption (#1030)", async () => {
+    const m = await mount();
+    await answer(m.commands()[0]!, draft());
+    const live = fixture(draft());
+    live.worldChat!.runStatus = "running";
+    live.worldChat!.runStartedAt = AT;
+    await act(async () => __setStateForTest(live, { connection: "open" }));
+    assert.ok([...m.container.querySelectorAll("button")].find(button => button.textContent === "Review production")!.disabled);
+    await click(m.container, "Stop esc");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "cancel" });
+    await answer(m.commands().at(-1)!, draft());
+
+    const recovered = fixture(draft());
+    const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
+    recovered.worldChat!.lastFailure = { turnId, status: "interrupted" };
+    await act(async () => __setStateForTest(recovered, { connection: "open" }));
+    assert.match(m.container.textContent!, /turn was interrupted/);
+    assert.ok(![...m.container.querySelectorAll("button")].find(button => button.textContent === "Review production")!.disabled);
+    await click(m.container, "Try that again");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "retry", turnId });
+  });
+
   it("shows every inherited scene field in the outline the author reviews", async () => {
     const setup = draft();
     setup.draft.scenes[0]!.inherits = { location: "the-crossing", timeOfDay: "Before sunrise", tone: "Quiet unease" };

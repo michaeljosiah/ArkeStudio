@@ -540,10 +540,12 @@ export function foldConversation(
   // interrupted immediately so nothing renders a spinner that will never stop, and the caller
   // makes it durable.
   let needsInterruptedRunRepair = false;
+  let activeRun: WorldChatRun | null = null;
   for (const [runId, run] of runs) {
     if (run.status === "running") {
       needsInterruptedRunRepair = true;
-      runs.set(runId, { ...run, status: "interrupted", safeDetail: "the app closed mid-turn" });
+      activeRun = { ...run, status: "interrupted", safeDetail: "the app closed mid-turn" };
+      runs.set(runId, activeRun);
     }
   }
 
@@ -614,10 +616,12 @@ export function foldConversation(
     mediaHandoffs,
     groups: [...groups.values()],
     attachments: [...attachments.values()],
-    activeRun: [...runs.values()].find((r) => r.status === "interrupted" || r.status === "running") ?? null,
+    // Only a start without a terminal event is active. Cleanup owed by a finished interruption
+    // must not keep setup Review locked or hide a newer live turn (#1030).
+    activeRun,
     // The newest run only, and only when it failed: an older failure that a later turn already
     // answered is history, not a thing to keep apologising for.
-    lastFailedRun: lastRunIfFailed([...runs.values()], shown),
+    lastFailedRun: activeRun ? null : lastRunIfFailed([...runs.values()], shown),
     ...(summary ? { summary } : {}),
     proposalIds: [...proposalIds],
     notCarried,
@@ -684,9 +688,8 @@ function dependencyBlockReason(dependency: ConversationActionRecord): string {
 /**
  * The newest run, when it failed and left the conversation without an answer.
  *
- * Cancelling is excluded: the person pressed stop, so they know why there is no reply, and being
- * told about it would be the app explaining their own decision back to them. Everything else --
- * timeout, failure, an exhausted budget -- is the app owing an explanation.
+ * Explicitly cancelled runs are excluded. Interruptions after world closure remain retryable
+ * because a turn lost to navigation must not fail silently.
  *
  * Also excluded once a later studio message exists for the same turn, which is what a retry
  * produces: the failure is then answered history rather than the state of the conversation.
@@ -698,7 +701,6 @@ function lastRunIfFailed(runs: WorldChatRun[], messages: WorldChatMessage[]): Wo
   );
   if (newest === null) return null;
   if (newest.status === "running" || newest.status === "completed" || newest.status === "cancelled") return null;
-  if (newest.status === "interrupted") return null; // already carried by activeRun, with its own repair
   const answered = messages.some((m) => m.turnId === newest.turnId && m.role === "studio");
   return answered ? null : newest;
 }

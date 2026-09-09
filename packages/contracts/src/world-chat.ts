@@ -1500,7 +1500,8 @@ export type WorldChatLoaded = z.infer<typeof WorldChatLoadedSchema>;
  */
 export const WorldChatCheckpointSchema = z
   .object({
-    schemaVersion: z.literal(1),
+    // Derived projections from the old fold kept terminal interruptions active (#1030).
+    schemaVersion: z.literal(2),
     throughSeq: z.number().int().min(0),
     view: WorldChatLoadedSchema,
   })
