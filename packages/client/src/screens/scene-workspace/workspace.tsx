@@ -470,8 +470,8 @@ export function SceneWorkspace({
               </div>
             </div>
             {(videoPlan?.timingWarnings?.length || videoPlan?.timingProblems?.length) ? <div aria-label="Generation timing">
-              {videoPlan.timingWarnings?.map((message,i)=><p key={`warning-${i}`}>{message}</p>)}
-              {videoPlan.timingProblems?.map((message,i)=><p role="alert" key={`problem-${i}`}>{message}</p>)}
+              {[...new Set(videoPlan.timingWarnings)].map(message=><p key={message}>{message}</p>)}
+              {[...new Set(videoPlan.timingProblems)].map(message=><p role="alert" key={message}>{message}</p>)}
             </div> : null}
             {/*
               What the frame route leaves behind, said before the money moves (issue 851). The
@@ -499,7 +499,7 @@ export function SceneWorkspace({
             {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0 || masterAudio.length > 0 || videoAudioProblems.length > 0) && <div aria-label="Scene character audio references">
               <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>
               {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.label}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}
-              {videoAudioProblems.map((problem, i) => <p role="alert" key={i}>{problem}</p>)}
+              {[...new Set(videoAudioProblems)].map(problem => <p role="alert" key={problem}>{problem}</p>)}
             </div>}
             <MasterAudioPicker key={`${sceneKey}/master`} world={world} production={production} sceneId={scene.id} value={masterAudio} onChange={setMasterAudio} />
             <DialogueGuidance world={world} production={production} scene={scene} plan={videoPlan} model={videoModel ?? null} manifest={state?.app.manifest ?? null} acknowledged={dialogueAcknowledgements} onAcknowledge={setDialogueAcknowledgements} />
