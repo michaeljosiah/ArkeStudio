@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   DEFAULT_SHOT_SEC,
   effectiveStageBlocking,
@@ -38,6 +38,8 @@ import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
+type MotionLane = { kind: "performance" | "object"; id: string };
+type MotionMark = MotionLane & { index: number };
 
 function aspectNumber(aspect: string): number {
   const [wide, high] = aspect.split(":").map(Number);
@@ -167,6 +169,9 @@ export function SceneStage({
   const [keyIndex, setKeyIndex] = useState(0);
   const [mode, setMode] = useState<"look" | "camera">("look");
   const [selection, setSelection] = useState<StageSelection>(null);
+  const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
+  const stageRoot = useRef<HTMLElement | null>(null);
+  const keyDrag = useRef<{ pointerId: number; which: number; lane?: MotionLane; left: number; width: number; low: number; high: number } | null>(null);
   const [ghost, setGhost] = useState(false);
   const [staging, setStaging] = useState(false);
   const [constructing, setConstructing] = useState(false);
@@ -263,9 +268,21 @@ export function SceneStage({
     setPlaying(false);
     setKeyIndex(0);
     setSelection(null);
+    setMotionMark(null);
+    keyDrag.current = null;
     setNote(null);
     playStart.current = null;
   }, [shot?.id]);
+  useEffect(() => {
+    if (frozen) keyDrag.current = null;
+  }, [frozen]);
+  useEffect(() => {
+    if (motionMark === null) return;
+    const mark = stageRoot.current?.querySelector<HTMLElement>('[data-motion-mark="selected"]');
+    const details = mark?.closest("details");
+    if (details) details.open = true;
+    mark?.scrollIntoView?.({ block: "nearest" });
+  }, [motionMark]);
 
   // The clock is elapsed from a start timestamp, never accumulated (SPEC-036 R-29).
   useEffect(() => {
@@ -390,7 +407,7 @@ export function SceneStage({
         latest.current.working?.performances?.some(p => p.sheetId === sheetId) ? patchPerformanceAt(sheetId,{x,z}) : patchBlocking((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, x, z } : figure)) })),
       walkchange: (sheetId, x, z) =>
         patchBlocking((current) => ({ ...current, cast: current.cast.map((figure) => (figure.sheetId === sheetId ? { ...figure, to: [x, z] } : figure)) })),
-      selchange: setSelection,
+      selchange: selected => { setSelection(selected); setMotionMark(null); },
       trackpick: (sheetId) => patchKey(latest.current.active, { track: sheetId, l: [0, 1.25, 0] }),
     });
     viewport.current = created;
@@ -621,6 +638,7 @@ export function SceneStage({
     if (frozen || keys[which] === undefined) return;
     stop();
     setKeyIndex(which);
+    setMotionMark(null);
     setAt(keys[which]?.t ?? 0);
   };
   const seekTime = (time: number) => {
@@ -668,31 +686,53 @@ export function SceneStage({
     patchCamera((current) => ({ ...current, keys: current.keys.filter((_, position) => position !== active) }));
     setKeyIndex(Math.max(0, active - 1));
   };
-  const retime = (which: number, event: ReactMouseEvent<HTMLSpanElement>) => {
-    if (event.button !== 0 || which === 0 || which === keys.length - 1 || frozen) return;
+  const motionKeys = (current: ResolvedShotStaging, lane: MotionLane) => lane.kind === "performance"
+    ? current.performances?.find(track => track.sheetId === lane.id)?.keys ?? []
+    : current.objectMotions?.find(track => track.group === lane.id)?.keys ?? [];
+  const selectMotion = (lane: MotionLane, which: number) => {
+    if (frozen || working === null) return;
+    const key = motionKeys(working, lane)[which];
+    if (!key) return;
+    seekTime(key.t);
+    setMotionMark({ ...lane, index: which });
+    const selected: StageSelection = lane.kind === "performance" ? { kind: "cast", sheetId: lane.id } : null;
+    setSelection(selected);
+    viewport.current?.select(selected);
+  };
+  const retime = (which: number, event: ReactPointerEvent<HTMLElement>, lane?: MotionLane) => {
     event.stopPropagation();
+    if (event.button !== 0 || frozen || working === null) return;
+    event.preventDefault();
     const track = event.currentTarget.closest<HTMLElement>("[data-key-track]");
     if (track === null) return;
+    event.currentTarget.focus();
+    const marks = lane ? motionKeys(working, lane) : keys;
+    const key = marks[which];
+    if (!key) return;
+    if (lane) selectMotion(lane, which);
+    else seek(which);
+    if (!lane && (which === 0 || which === keys.length - 1)) return;
     const bounds = track.getBoundingClientRect();
-    const low = keys[which - 1]!.t + 0.1;
-    const high = keys[which + 1]!.t - 0.1;
-    stop();
-    setKeyIndex(which);
-    // Selecting a key is arriving at it: the playhead, the viewport and the gizmo move to its
-    // time at once, so a nudge or a drag that follows edits the key the panel names.
-    setAt(keys[which]!.t);
-    const move = (next: MouseEvent) => {
-      if (latest.current.frozen) return;
-      const when = round(Math.max(low, Math.min(high, ((next.clientX - bounds.left) / Math.max(1, bounds.width)) * durationSec)));
-      patchKey(which, { t: when });
-      setAt(when);
-    };
-    const up = () => {
-      window.removeEventListener("mousemove", move);
-      window.removeEventListener("mouseup", up);
-    };
-    window.addEventListener("mousemove", move);
-    window.addEventListener("mouseup", up);
+    // Preserve already-close marks; dragging must never cross a neighbour or pin a late action.
+    const low = which === 0 ? 0 : Math.min(key.t, marks[which - 1]!.t + 0.1);
+    const high = which === marks.length - 1 ? durationSec : Math.max(key.t, marks[which + 1]!.t - 0.1);
+    keyDrag.current = { pointerId: event.pointerId, which, ...(lane ? { lane } : {}), left: bounds.left, width: bounds.width, low, high };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveKey = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = keyDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId || latest.current.frozen) return;
+    const when = Math.max(drag.low, Math.min(drag.high, round((event.clientX - drag.left) / Math.max(1, drag.width) * durationSec)));
+    const { lane, which } = drag;
+    if (!lane) patchKey(which, { t: when });
+    else patchCamera(current => lane.kind === "performance"
+      ? { ...current, performances: current.performances?.map(track => track.sheetId === lane.id ? { ...track, keys: track.keys.map((key, i) => i === which ? { ...key, t: when } : key) } : track) }
+      : { ...current, objectMotions: current.objectMotions?.map(track => track.group === lane.id ? { ...track, keys: track.keys.map((key, i) => i === which ? { ...key, t: when } : key) } : track) });
+    setAt(when);
+  };
+  const endKeyDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    keyDrag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const nudge = (axis: 1 | 2, delta: number) => {
     if (activeKey === null) return;
@@ -793,7 +833,9 @@ export function SceneStage({
     rigIntensity: Math.max(0, Math.min(2, round((current.rigIntensity ?? 1) + delta))),
   }));
   const selLabel =
-    selection === null
+    motionMark?.kind === "object"
+      ? motionMark.id
+      : selection === null
       ? "nothing selected"
       : selection.kind === "rig"
         ? "camera"
@@ -805,7 +847,7 @@ export function SceneStage({
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   return (
-    <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
+    <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       <div className="fy-swstage__head">
         <button
           type="button"
@@ -1012,7 +1054,7 @@ export function SceneStage({
                 {working.cast.map(figure => <details key={figure.sheetId}>
                   <summary>{nameOf(figure.sheetId)}</summary>
                   <Button size="sm" disabled={frozen} onClick={() => patchPerformanceAt(figure.sheetId,{})}>Mark action here</Button>
-                  {working.performances?.find(p=>p.sheetId===figure.sheetId)?.keys.map((key,index) => <div className="fy-swstage__motion-mark" key={index}>
+                  {working.performances?.find(p=>p.sheetId===figure.sheetId)?.keys.map((key,index) => <div className="fy-swstage__motion-mark" key={index} data-motion-mark={motionMark?.kind === "performance" && motionMark.id === figure.sheetId && motionMark.index === index ? "selected" : undefined}>
                     <span>{key.t.toFixed(2)}s</span>
                     {(["x","z","y","facing"] as const).map(field => <label key={field}>{field === "facing" ? "Facing °" : field}<input type="number" aria-label={`${nameOf(figure.sheetId)} ${key.t}s ${field}`} value={key[field] ?? 0} step={field === "facing" ? 5 : .1} disabled={frozen} onChange={e=>{ const value=Number(e.target.value); if(Number.isFinite(value))patchPerformanceAt(figure.sheetId,{[field]:value},key.t); }} /></label>)}
                     <select aria-label={`${nameOf(figure.sheetId)} ${key.t}s posture`} value={key.pose ?? "stand"} disabled={frozen} onChange={e=>patchPerformanceAt(figure.sheetId,{pose:e.target.value as StagePerformanceKey["pose"]},key.t)}><option value="stand">Standing</option><option value="sit">Seated</option><option value="lie">Lying</option></select>
@@ -1024,7 +1066,7 @@ export function SceneStage({
                 <div className="fy-swstage__eyebrow">Object motion</div>
                 {[...new Set(working.sets.flatMap(s=>s.group?[s.group]:[]))].map(group=><details key={group}><summary>{group}</summary>
                   <Button size="sm" disabled={frozen} onClick={()=>patchObjectAt(group,{})}>Mark motion here</Button>
-                  {working.objectMotions?.find(m=>m.group===group)?.keys.map((key,index)=><div key={index} className="fy-swstage__motion-mark"><span>{key.t.toFixed(2)}s</span>
+                  {working.objectMotions?.find(m=>m.group===group)?.keys.map((key,index)=><div key={index} className="fy-swstage__motion-mark" data-motion-mark={motionMark?.kind === "object" && motionMark.id === group && motionMark.index === index ? "selected" : undefined}><span>{key.t.toFixed(2)}s</span>
                     {(["p","rotation"] as const).flatMap(field=>([0,1,2] as const).map(axis=><label key={`${field}${axis}`}>{field==="p"?["x","y","z"][axis]:["Pitch °","Turn °","Roll °"][axis]}<input type="number" aria-label={`${group} ${key.t}s ${field} ${axis}`} value={key[field]?.[axis]??0} disabled={frozen} step={field==="p"?.1:5} onChange={e=>{const value=Number(e.target.value);if(!Number.isFinite(value))return;const tuple:[number,number,number]=[...(key[field]??[0,0,0])];tuple[axis]=value;patchObjectAt(group,{[field]:tuple},key.t);}}/></label>))}
                     {index>0?<button disabled={frozen} onClick={()=>patchCamera(current=>({...current,objectMotions:current.objectMotions?.map(m=>m.group===group?{...m,keys:m.keys.filter((_,i)=>i!==index)}:m)}))}>Remove mark</button>:null}
                   </div>)}
@@ -1143,11 +1185,13 @@ export function SceneStage({
 
       {working === null ? null : (
         <div className="fy-swstage__timeline">
+          <div className="fy-swstage__transport">
           <button type="button" className="fy-swstage__play" aria-label={playing ? "Pause" : "Play"} disabled={frozen} onClick={toggle}>
             {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
           </button>
           <button type="button" className="fy-swstage__loop" aria-pressed={loop} disabled={frozen} onClick={() => { if (!frozen) setLoop(!loop); }}>Loop</button>
           <span className="fy-swstage__time">{Math.min(at, durationSec).toFixed(1)}s / {durationSec.toFixed(1)}s</span>
+          </div>
           <div className="fy-swstage__track" data-key-track="1" role="slider" tabIndex={0}
             aria-label="Stage playhead" aria-valuemin={0} aria-valuemax={durationSec} aria-valuenow={at} aria-valuetext={`${at.toFixed(2)} seconds`} aria-disabled={frozen}
             onPointerDown={event => {
@@ -1167,26 +1211,22 @@ export function SceneStage({
               const last = position === keys.length - 1;
               const left = `${Math.max(0, Math.min(100, (key.t / Math.max(0.01, durationSec)) * 100)).toFixed(2)}%`;
               return (
-                <span
+                <button type="button" disabled={frozen}
                   key={position}
                   className="fy-swstage__key"
                   data-on={position === active ? "true" : undefined}
                   data-mid={!first && !last ? "true" : undefined}
                   style={first ? { left: 0 } : last ? { right: 0 } : { left, transform: "translateX(-50%)" }}
                   title={`${keyName(position, keys.length)} · ${key.t.toFixed(1)}s${first || last ? "" : " · drag to retime"}`}
-                  onPointerDown={event => event.stopPropagation()}
-                  onMouseDown={(event) => {
-                    if (frozen) return;
-                    event.currentTarget.closest<HTMLElement>("[data-key-track]")?.focus();
-                    if (first || last) {
-                      event.stopPropagation();
-                      seek(position);
-                    } else retime(position, event);
-                  }}
+                  aria-label={`Camera ${keyName(position, keys.length)} at ${key.t.toFixed(2)} seconds`}
+                  onPointerDown={event => retime(position, event)}
+                  onPointerMove={moveKey} onPointerUp={endKeyDrag} onPointerCancel={endKeyDrag}
+                  onLostPointerCapture={() => { keyDrag.current = null; }}
+                  onClick={() => seek(position)}
                 >
                   <span aria-hidden="true" />
                   {position === active ? <b>{keyName(position, keys.length)} · {key.t.toFixed(1)}s</b> : null}
-                </span>
+                </button>
               );
             })}
           </div>
@@ -1195,8 +1235,33 @@ export function SceneStage({
             {keys.length > 2 ? (
               <button type="button" aria-label="Remove the selected key" title="Remove the selected key" disabled={frozen || active === 0 || active === keys.length - 1} onClick={dropKey}><Minus size={12} /></button>
             ) : null}
+            <span className="fy-swstage__count">{keys.length} keys</span>
           </span>
-          <span className="fy-swstage__count">{keys.length} keys</span>
+          {[
+            ...(working.performances ?? []).map(track => ({ kind: "performance" as const, id: track.sheetId, name: nameOf(track.sheetId), keys: track.keys, colour: figureColour(Math.max(0, working.cast.findIndex(figure => figure.sheetId === track.sheetId))) })),
+            ...(working.objectMotions ?? []).map((track, i) => ({ kind: "object" as const, id: track.group, name: track.group, keys: track.keys, colour: figureColour(i) })),
+          ].map(lane => (
+            <Fragment key={`${lane.kind}:${lane.id}`}>
+              <button type="button" className="fy-swstage__lane-label" disabled={frozen} title={lane.name} onClick={() => selectMotion(lane, 0)}>
+                <i style={{ background: `#${lane.colour.toString(16).padStart(6, "0")}` }} />{lane.name}
+              </button>
+              <div className="fy-swstage__track fy-swstage__motion-track" data-key-track={lane.kind} aria-label={`${lane.name} ${lane.kind === "performance" ? "action" : "motion"}`} style={{ color: `#${lane.colour.toString(16).padStart(6, "0")}` }}>
+                <span className="fy-swstage__rail" aria-hidden="true" />
+                <span className="fy-swstage__lane-head" style={{ left: `${at / durationSec * 100}%` }} aria-hidden="true" />
+                {lane.keys.map((key, i) => (
+                  <button type="button" key={i} className="fy-swstage__key" data-mid="true" disabled={frozen}
+                    data-on={motionMark?.kind === lane.kind && motionMark.id === lane.id && motionMark.index === i ? "true" : undefined}
+                    style={{ left: `${key.t / durationSec * 100}%`, transform: "translateX(-50%)" }}
+                    aria-label={`${lane.name} mark ${i + 1} at ${key.t.toFixed(2)} seconds`} title={`${key.t.toFixed(2)}s · drag to retime`}
+                    onPointerDown={event => retime(i, event, lane)} onPointerMove={moveKey} onPointerUp={endKeyDrag} onPointerCancel={endKeyDrag}
+                    onLostPointerCapture={() => { keyDrag.current = null; }} onClick={() => selectMotion(lane, i)}>
+                    <span aria-hidden="true" />
+                  </button>
+                ))}
+              </div>
+              <span className="fy-swstage__count">{lane.keys.length} marks</span>
+            </Fragment>
+          ))}
         </div>
       )}
     </section>

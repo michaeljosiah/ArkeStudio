@@ -7494,7 +7494,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__set-add { width: 100%; }
 .fy-swstage__spacer { flex: 1; }
 .fy-swstage__block--playblast .ui-btn { width: 100%; }
-.fy-swstage__timeline { flex: none; display: flex; align-items: center; gap: 12px; }
+.fy-swstage__timeline { flex: none; display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; max-height: 240px; overflow: auto; padding: 6px; }
+.fy-swstage__transport { display: flex; align-items: center; gap: 8px; }
+.fy-swstage__lane-label { display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: transparent; color: var(--foreground); font: 400 11px var(--font-mono); text-align: left; overflow: hidden; white-space: nowrap; cursor: pointer; }
+.fy-swstage__lane-label i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
+.fy-swstage__lane-head { position: absolute; top: 0; height: 16px; border-left: 1px solid var(--foreground); pointer-events: none; }
+.fy-swstage__motion-mark[data-motion-mark="selected"] { outline: 1px solid var(--ring); outline-offset: 2px; }
 .fy-swstage__play { width: 30px; height: 30px; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: 999px; background: var(--foreground); color: var(--background); cursor: pointer; transition: var(--transition-control); }
 .fy-swstage__play:hover { opacity: .88; }
 .fy-swstage__time { flex: none; color: var(--muted-foreground); font: 400 11px var(--font-mono); }
@@ -7505,10 +7510,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__track:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
 .fy-swstage__rail { position: absolute; left: 0; right: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--secondary); }
 .fy-swstage__head-fill { position: absolute; left: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--foreground); transition: width .1s linear; }
-.fy-swstage__key { position: absolute; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; z-index: 2; }
+.fy-swstage__key { position: absolute; top: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; z-index: 2; border: 0; padding: 0; background: transparent; color: inherit; touch-action: none; }
 .fy-swstage__key[data-mid="true"] { cursor: ew-resize; z-index: 3; }
 .fy-swstage__key > span { width: 9px; height: 9px; box-sizing: border-box; border: 1px solid var(--foreground); border-radius: 2px; background: var(--background); transform: translateY(3px) rotate(45deg); }
 .fy-swstage__key[data-on="true"] > span { background: var(--foreground); }
+.fy-swstage__motion-track .fy-swstage__key > span { border-color: currentColor; }
+.fy-swstage__motion-track .fy-swstage__key[data-on="true"] > span { background: currentColor; }
 .fy-swstage__key > b { color: var(--foreground); font: 500 9px var(--font-mono); white-space: nowrap; pointer-events: none; }
 .fy-swstage__keytools { display: inline-flex; align-items: center; gap: 2px; flex: none; }
 .fy-swstage__keytools button { width: 26px; height: 26px; display: inline-grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
