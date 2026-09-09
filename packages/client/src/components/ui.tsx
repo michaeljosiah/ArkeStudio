@@ -36,12 +36,11 @@ export function Button({
 /**
  * A verb drawn as its glyph, with the word on its tooltip and its accessible name (issue 1010).
  *
- * The tooltip is the platform's `title` and not the timeline's drawn `.fy-tip` bubble, which was
- * tried first and reverted: `.fy-tip` is an absolutely positioned pseudo-element, so it is cut
- * off by any ancestor that clips — the put-away World Chat rail is 48px wide with
- * `overflow: hidden`, and its two icon-only controls would have had no discoverable name at all.
- * A control that appears anywhere cannot rely on nothing above it clipping. `.fy-tip` stays
- * where its container is known: the cut's toolbar.
+ * The tooltip is `.fy-tip`'s drawn bubble rather than the platform's `title`, because `title`
+ * answers the pointer and nobody else: tab to a glyph-only control and it says nothing, which is
+ * exactly what a row of marks costs a keyboard user that a row of words did not. `.fy-tip` draws
+ * on `:hover` and `:focus-visible` alike, and escapes clipping ancestors — see the rule for how,
+ * and for what the put-away World Chat rail taught us about needing that.
  */
 export function IconButton({
   label,
@@ -60,9 +59,9 @@ export function IconButton({
 }) {
   return (
     <button
-      className={cx("ui-iconbtn", className)}
+      className={cx("ui-iconbtn", "fy-tip", className)}
       aria-label={label}
-      title={hint === undefined ? label : `${label} — ${hint}`}
+      data-tip={hint === undefined ? label : `${label} — ${hint}`}
       {...rest}
     >
       {children}

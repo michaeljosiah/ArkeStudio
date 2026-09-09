@@ -27,7 +27,9 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const WORLD = FIXTURE_STATE.world!;
 const WORLD_ID = WORLD.meta.worldId;
-const UI_CSS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/components/ui.css"), "utf8");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const UI_CSS = readFileSync(join(HERE, "../src/components/ui.css"), "utf8");
+const FIDELITY_CSS = readFileSync(join(HERE, "../src/screens/fidelity.css"), "utf8");
 
 function renderRoute(path: string): string {
   __setStateForTest(FIXTURE_STATE);
@@ -55,16 +57,17 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
       const button = labelled(html, verb);
       assert.ok(button, `${verb} is a control with an accessible name`);
       assert.match(button, /class="[^"]*ui-iconbtn/, `${verb} is drawn as a glyph`);
-      // `title`, not the timeline's drawn tip: an icon-only control can sit inside a clipping
-      // ancestor — the put-away World Chat rail is 48px and hides its overflow.
-      assert.match(button, new RegExp(`title="${verb}`), `${verb} carries a tooltip`);
+      // The drawn tip, not `title`: `title` answers the pointer only, so a glyph tabbed to would
+      // say nothing at all — which is what the row of words it replaced never did.
+      assert.match(button, /class="[^"]*fy-tip/, `${verb} carries the tooltip that answers focus`);
+      assert.match(button, new RegExp(`data-tip="${verb}`), `${verb} carries a tooltip`);
     }
     // Dropping the word must not drop what the word stood next to: the text button carried this
     // on its own `title`, and a glyph with less to say than the control it replaced is a worse
     // control (codex review of this change).
     assert.match(
       html,
-      /title="Retire — stays resolvable for existing citations; leaves pickers for new work"/,
+      /data-tip="Retire — stays resolvable for existing citations; leaves pickers for new work"/,
       "and Retire still says what it leaves behind",
     );
     assert.doesNotMatch(
@@ -86,6 +89,22 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
     assert.doesNotMatch(UI_CSS, /\.ui-iconbtn:hover\s*\{/, "and the unguarded hover rule is gone");
     // A fieldset disables everything inside it without passing any of them `disabled`.
     assert.match(UI_CSS, /\.ui-check:has\(input:disabled\)/);
+  });
+
+  /*
+   * A tooltip that only answers the pointer leaves a keyboard user with a glyph and nothing,
+   * and one that cannot leave its container leaves the put-away chat rail's two controls unnamed.
+   * Both were regressions of this change, one round apart (codex review).
+   */
+  it("shows the tooltip on focus as well as hover, and leaves room for it where it is clipped", () => {
+    assert.match(FIDELITY_CSS, /\.fy-tip:hover::after,\s*\.fy-tip:focus-visible::after/);
+    // The put-away rail is 48px and both its controls are glyphs; a tip is wider than that, and
+    // the column used to hide its overflow. `position: fixed` is no escape here — fy-fade-up
+    // leaves a transform on the column, which is a containing block for fixed descendants.
+    const rail = /\.fy-chatnav \{([\s\S]*?)\}/.exec(FIDELITY_CSS);
+    assert.ok(rail, "the rail is styled");
+    assert.doesNotMatch(rail[1]!, /overflow:\s*hidden/, "the rail does not clip its controls' tips");
+    assert.match(FIDELITY_CSS, /\.fy-chatnav__list \{[^}]*overflow-x:\s*hidden/, "the list still clips");
   });
 
   it("gives the bible's contents one speaker per heading rather than the word Listen", () => {
