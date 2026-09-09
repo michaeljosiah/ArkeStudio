@@ -143,6 +143,18 @@ describe("the Stage's arithmetic", () => {
     assert.ok(stagingFov("1mm", "16:9") > 160, "a valid extreme lens is not clamped");
   });
 
+  it("keeps each first-pass framed height consistent at 24, 35 and 85mm (#1047)", () => {
+    for (const [size, fraction] of [["ECU", .3], ["CU", .55], ["Medium", .9], ["Wide", 1.5], ["EWS", 2.5]] as const) {
+      for (const mm of [24, 35, 85]) {
+        const staged = stageShot(shot({ framing: { size, lens: `${mm}mm` } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "16:9" });
+        const depth = staged.keys[0]!.p[2] - staged.cast[0]!.z;
+        assert.ok(Math.abs(2 * depth * Math.tan(stagingFov(`${mm}mm`, "16:9") * Math.PI / 360) - 1.8 * fraction) < .006, `${size} at ${mm}mm`);
+      }
+    }
+    const portrait = stageShot(shot({ framing: { size: "CU", lens: "85mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "9:16", subjectHeight: 2.2 });
+    assert.ok(Math.abs(2 * portrait.keys[0]!.p[2] * Math.tan(stagingFov("85mm", "9:16") * Math.PI / 360) - 2.2 * .55) < .006);
+  });
+
   it("plans a fixed-rate, half-open playblast timeline", () => {
     assert.equal(STAGE_FRAME_RATE, 30);
     assert.equal(stageFrameCount(4), 120);

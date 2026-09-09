@@ -586,12 +586,14 @@ export function SceneStage({
   const stage = () => {
     const inherited = effectiveStageBlocking(scene, undefined);
     const firstBlock = scene.blocking === undefined
-      ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing })
+      ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
     const availableCast = firstBlock?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
+      aspect,
+      subjectHeight: availableCast.find(figure => figure.sheetId === cameraCastIds[0])?.height,
       sets: [],
       durationSec,
       framing,

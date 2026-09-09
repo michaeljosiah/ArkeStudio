@@ -57,3 +57,5 @@ World schema 11 is the earlier compatibility fence: expanded Stage fields, anima
 the normal committer to advance the world minimum reader version. No bulk migration is required;
 legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.
+
+First-pass framing (#1047) solves distance from the production-aspect Super 35 vertical FOV and subject height (default 1.8m). Frame-height fractions retain the existing size ranges: extreme close-up 0.3, close-up/MCU 0.55, medium 0.9, wide 1.5 and extreme wide 2.5. The same table and rule are supplied to Stage construction. The camera-angle height table is unchanged; 24, 35 and 85mm lenses now show the same subject-plane height for a given size.

@@ -173,14 +173,17 @@ export function stagingFocalForFov(fov: number, aspect: number): number {
   return Math.min(SUPER_35_HEIGHT_MM,SUPER_35_WIDTH_MM/aspect)/(2*Math.tan(fov*Math.PI/360));
 }
 
-/** How far back a shot size stands, in metres, measured to the subject. */
-function distanceFor(size: string | undefined, camera: string | undefined): number {
+/** Frame height as a fraction of a standing subject, retaining the first pass's size ranges (#1047). */
+export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
+
+/** Solve the subject-plane height through the same cropped Super 35 lens as the viewport. */
+function distanceFor(size: string | undefined, camera: string | undefined, lens: string | undefined, aspect: string, subjectHeight: number): number {
   const words = `${size ?? ""} ${camera ?? ""}`.toLowerCase();
-  if (/extreme close|ecu/.test(words)) return 1.4;
-  if (/close|mcu|\bcu\b/.test(words)) return 2.4;
-  if (/extreme wide|ews/.test(words)) return 10;
-  if (/wide|\bws\b/.test(words)) return 6.5;
-  return 4;
+  const fraction = /extreme close|ecu/.test(words) ? STAGE_FRAMED_HEIGHT["extreme close-up"]
+    : /close|mcu|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
+    : /extreme wide|ews/.test(words) ? STAGE_FRAMED_HEIGHT["extreme wide"]
+    : /wide|\bws\b/.test(words) ? STAGE_FRAMED_HEIGHT.wide : STAGE_FRAMED_HEIGHT.medium;
+  return subjectHeight * fraction / (2 * Math.tan(stagingFov(lens, aspect) * Math.PI / 360));
 }
 
 function heightFor(angle: string | undefined): number {
@@ -266,7 +269,7 @@ function stagingProp(action: string, x: number, z: number): StagingSet | null {
  */
 export function stageShot(
   shot: Shot,
-  input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"] },
+  input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"]; aspect?: string; subjectHeight?: number },
 ): ResolvedShotStaging {
   const framing = input.framing ?? shot.framing;
   const blocked = input.cast.slice(0, 5).map((sheetId, index) => {
@@ -300,7 +303,7 @@ export function stageShot(
   }));
   const sets = [...locations, ...blocked.flatMap(({ prop }) => prop === null ? [] : [prop])];
   const subject = cast[0]?.sheetId ?? null;
-  const distance = distanceFor(framing?.size, shot.camera);
+  const distance = distanceFor(framing?.size, shot.camera, framing?.lens, input.aspect ?? "16:9", input.subjectHeight ?? cast[0]?.height ?? 1.8);
   const height = heightFor(framing?.angle);
   const aimHeight = subject === null ? 1.1 : 1.25;
   const dur = Math.max(0.5, input.durationSec);
