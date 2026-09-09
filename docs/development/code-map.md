@@ -55,6 +55,7 @@ Client, coordinator and integrations ──> shared contracts
 | Generation reference slot | contracts `src/world-image-references.ts` supplies the image catalogue and roles; client `components/generation-dialog.tsx` embeds `reference-picker.tsx`; coordinator `pick-staged-reference` validates and writes a pointer, read by `world/scan.ts`; `FsWorldProvider.listReferenceImages` supplies local and borrowed catalogues, reuses `world/scan.ts` media hashing to verify aliases, and scans another world read-only; borrowing copies only the chosen image | coordinator `test/references/master-look.test.ts`; client `test/world-reference-slot.test.tsx`, `test/staged-reference-picker.test.tsx`; coordinator `test/references/borrowed-image.test.ts` |
 | Derived search | coordinator `src/index-db/world-index.ts`, `app-index.ts`, `queries.ts`, `sqlite.ts` | coordinator `test/index-db/cache-contract.test.ts` |
 | Artifact shelf import/removal | client `screens/world.tsx`, `components/artifact-viewer.tsx`, `lib/artifact-view.ts` (current-use names); contracts `artifact.ts` (`retiredAt`, shared pickers); coordinator `artifacts/filing.ts` (`retireArtifact`, dedup restoration). Retirement retains the complete bundle and media for existing citations | client `test/artifact-viewers.test.tsx`; coordinator `test/artifacts/artifacts.test.ts`, `upload-artifacts.test.ts`; SPEC-015 R-18/R-19 |
+| Production artifact shelf | client `screens/production-artifacts.tsx` (the world's shelf and this production's own in one grid, `only here` on the card, `Remove`/`Lift facts` on owned files alone), `lib/artifact-view.ts` (`artifactsForProduction`, `productionShelf` — the set the page shows and the rail row counts); contracts `frames.ts` `upload-artifacts.production`; coordinator `upload-artifacts` files at that scope, world by default, and raises `artifact.notice` for a large picked file so the consent retry exists; `artifacts/filing.ts` `reownOnDuplicate` keeps an import from re-homing bytes the world already holds (only the §2.5 re-file transfers) | client `test/production-artifacts.test.tsx`; coordinator `test/artifacts/upload-artifacts.test.ts`; SPEC-020 R-13, [design turn 134](../../design-system/Arke%20Studio.dc.html#t134) |
 
 Chapter autosave recovery stays in client `screens/chapter-workspace.tsx`: file-hash changes refresh the base, while `parkedDrafts` retains unacknowledged or refused prose across navigation. Conflicting saved prose requires an explicit choice; the coordinator's base-hash guard is unchanged (issue 954).
 
@@ -96,7 +97,9 @@ Client `components/route-error-boundary.tsx` contains route render errors and re
 World and production layouts wait for the routed world before mounting their outlets (issue 981).
 Production navigation lives in `screens/production.tsx` (`ProductionLayout`); `screens/fidelity.css`
 distinguishes the current rail item from hover. The rail omits retired Audio/Exports destinations;
-`App.tsx` retains their redirects into the Cut (SPEC-039 R-1, issue 995).
+`App.tsx` retains their redirects into the Cut (SPEC-039 R-1, issue 995). Every rail row addresses
+the production: `Artifacts` reaches `p/<id>/artifacts` on all three branches and counts
+`productionShelf`, the set that page shows (SPEC-020 R-13, design 134).
 
 `WorldStore.checkCurrentHistorySnapshots` reports current snapshot conflicts as world problems;
 the art-direction page shows its own history warning. Writable open repairs only the known

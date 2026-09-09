@@ -309,6 +309,19 @@ export interface FileInput {
    * exercising the escape hatch (§2.5) and must not be read as having no opinion.
    */
   production?: string | null;
+  /**
+   * Whether a stated `production` also re-owns bytes the world already holds.
+   *
+   * Off unless the caller is making that decision, and it has to be off by default. Dedup is by
+   * content hash across the whole world, so an ordinary import of a file the world already has
+   * would otherwise take that artifact off the world's shelf — or out of another production,
+   * whose placements then fail scope validation — as a side effect of adding it here. Nobody
+   * asked for a transfer; they asked for a copy, and the answer is "already held".
+   *
+   * The re-file *is* the transfer (§2.5's escape hatch), so `file-artifact` and the picker say
+   * yes. A plain import says nothing and the existing owner stands.
+   */
+  reownOnDuplicate?: boolean;
   /** Correlation and stale guard supplied by a conversation action; direct controls omit them. */
   mutation?: ArtifactMutationOptions;
 }
@@ -374,7 +387,11 @@ export async function fileArtifact(store: WorldStore, input: FileInput): Promise
         let changed = links.length !== current.sidecar.links.length;
         // An explicit re-import restores the same record instead of copying its media again.
         if (next.retiredAt !== undefined) { delete next.retiredAt; changed = true; }
-        if (input.production !== undefined && (current.sidecar.production ?? null) !== input.production) {
+        if (
+          input.reownOnDuplicate === true &&
+          input.production !== undefined &&
+          (current.sidecar.production ?? null) !== input.production
+        ) {
           changed = true;
           if (input.production === null) delete next.production;
           else next.production = input.production as ArtifactSidecar["production"];
