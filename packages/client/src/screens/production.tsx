@@ -4310,7 +4310,8 @@ function ArtifactPanel({
   /** Desktop files over the window right now: the whole panel becomes the target (issue 1035). */
   fileKinds: readonly DroppedKind[] | null;
   pendingImports: readonly PendingImport[];
-  onDismissImport: (requestId: string) => void;
+  /** Takes one row off — the file at `index` of that request — never the whole batch. */
+  onDismissImport: (requestId: string, index: number) => void;
   /** The shot picker, offered only when the production has shots to bring in. */
   onOpenPicker: (() => void) | null;
   /** A read line lands on Dialogue (the Audio screen's rows, kept here since it redirects; R-1). */
@@ -4490,7 +4491,10 @@ function ArtifactPanel({
       add: why === null && onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
       placeAt: why === null && onPlaceAtPlayhead !== null && lane === "Picture" ? () => onPlaceAtPlayhead(artifact) : null,
       overlay: why === null && onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
-      remove: why !== null && onRemoveFromLibrary !== null && inLibrary.has(`artifact:${artifact.id}`) ? () => onRemoveFromLibrary(item) : null,
+      // Membership comes off from the row once the record has no more use for it: an unavailable
+      // file's, or an available one's after its last clip is gone — deleting a clip leaves the
+      // membership behind, and the picker offers shots only, so nowhere else could take it off.
+      remove: (why !== null || !usedArtifactIds.has(artifact.id)) && onRemoveFromLibrary !== null && inLibrary.has(`artifact:${artifact.id}`) ? () => onRemoveFromLibrary(item) : null,
       drag: why !== null || lane === null ? null : artifact.id,
       durationFrames: still ? secondsToFrames(CLIP_DEFAULT_SEC, frameRate) : duration !== undefined ? Math.max(1, secondsToFrames(duration, frameRate)) : null,
       search: `${name} ${artifact.file} ${artifact.kind} ${artifact.links.join(" ")}`,
@@ -4691,7 +4695,7 @@ function ArtifactPanel({
                     <span className={cx("fy-artrow__meta", failure !== null && "fy-artrow__meta--destructive")}>{[file.sizeBytes > 0 ? formatBytes(file.sizeBytes) : null, state].filter((part) => part !== null).join(" · ")}</span>
                   </span>
                   {pending.failures !== null && (
-                    <button type="button" className="fy-artrow__dismiss" aria-label={`Dismiss ${file.name}`} onClick={() => onDismissImport(pending.requestId)}>&times;</button>
+                    <button type="button" className="fy-artrow__dismiss" aria-label={`Dismiss ${file.name}`} onClick={() => onDismissImport(pending.requestId, index)}>&times;</button>
                   )}
                 </div>
               </div>
@@ -7510,7 +7514,16 @@ export function CutScreen() {
         linkName={linkName}
         fileKinds={fileKinds}
         pendingImports={pendingImports}
-        onDismissImport={(requestId) => setPendingImports((current) => current.filter((pending) => pending.requestId !== requestId))}
+        onDismissImport={(requestId, index) => setPendingImports((current) => current.flatMap((pending) => {
+          if (pending.requestId !== requestId) return [pending];
+          // One row, not the request: a batch with several failures keeps the others until each is read.
+          const files = pending.files.filter((_, at) => at !== index);
+          if (files.length === 0) return [];
+          const failures = pending.failures === null ? null : pending.failures
+            .filter((failure) => failure.index !== index)
+            .map((failure) => (failure.index > index ? { ...failure, index: failure.index - 1 } : failure));
+          return [{ ...pending, files, failures }];
+        }))}
         onOpenPicker={editableTimeline !== null && !commandsDisabled ? () => setPickerOpen(true) : null}
         onAddLine={editableTimeline !== null && !commandsDisabled ? placeVoiceTake : null}
         onAddArtifact={commandsDisabled ? null : appendArtifact}

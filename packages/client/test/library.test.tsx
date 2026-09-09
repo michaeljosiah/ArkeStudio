@@ -162,6 +162,12 @@ describe("the Library (SPEC-039 T-3)", () => {
       const bells = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${BELLS}"]`)!;
       assert.equal(bells.querySelector(".fy-artrow__lane")?.textContent, "Audio", "an audio file lands on Audio");
       assert.ok(bells.querySelector(".fy-artrow__dot"), "a used file carries the in-the-cut dot");
+      // A member the cut no longer uses can leave the record from its row; one in use cannot.
+      await act(async () => rowButton(screen, `artifact:${BOARD}`).click());
+      assert.ok(action(screen, "Remove from library"), "the unused board's membership comes off from its row");
+      await act(async () => rowButton(screen, `artifact:${BELLS}`).click());
+      assert.equal(action(screen, "Remove from library"), null, "the bells are in the cut; their membership stays");
+      await act(async () => rowButton(screen, `artifact:${BELLS}`).click());
       const document_ = screen.container.querySelector<HTMLElement>('[data-library-item^="artifact:"] .fy-artrow__meta--destructive, [data-library-item] .fy-artrow__meta');
       assert.ok(document_, "rows carry a status line");
       // Named by its link (issue 1005) — the production's title, here — so the row is found by its key.

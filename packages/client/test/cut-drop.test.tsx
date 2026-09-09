@@ -245,6 +245,29 @@ describe("where a drop lands", () => {
     }
   });
 
+  it("dismisses one failed row at a time, keeping the batch's other reasons until each is read", async () => {
+    const screen = await mount(lanesState());
+    try {
+      const overlay = screen.container.querySelector<HTMLElement>("[data-track-id='tr_overlay-1'] .fy-track__lane")!;
+      await act(async () => reactProps(overlay)["onDrop"]!(dragEvent([video(), still()], 50)));
+      const [request] = uploads(screen);
+      await act(async () => __applyEventForTest({ type: "queue.enqueue-result", at: "2026-09-09T12:00:00Z", command: "upload-artifacts", requestId: request!.requestId,
+        disposition: "rejected", requestedCount: 2, acceptedJobIds: [], failures: [
+          { index: 0, reason: "clip.mp4: saved, but needs a measured duration before placement" },
+          { index: 1, reason: "plate.png: saved, but has no sound; Overlay 1 takes picture" },
+        ] }));
+      assert.equal(screen.container.querySelectorAll("[data-testid='pending-import']").length, 2, "both failures are rows");
+      await act(async () => screen.container.querySelector<HTMLButtonElement>("button[aria-label='Dismiss clip.mp4']")!.click());
+      const left = [...screen.container.querySelectorAll<HTMLElement>("[data-testid='pending-import']")];
+      assert.equal(left.length, 1, "the other failure is still there to be read");
+      assert.match(left[0]!.textContent ?? "", /plate\.png.*Overlay 1 takes picture/);
+      await act(async () => screen.container.querySelector<HTMLButtonElement>("button[aria-label='Dismiss plate.png']")!.click());
+      assert.equal(screen.container.querySelector("[data-testid='pending-import']"), null);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("clears the row when every file landed", async () => {
     const screen = await mount(lanesState());
     try {

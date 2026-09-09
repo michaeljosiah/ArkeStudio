@@ -62,6 +62,10 @@ export function mediaPlacementCommands(
    */
   let madeSound: TimelineTrackId | null = null;
   let madePicture: TimelineTrackId | null = null;
+  // Each lane the drop makes chains from the dropped frame on its own: a video and a song dropped
+  // together open a picture lane and a sound lane that both start under the hand, not the song
+  // after the video. One cursor for both put every later file behind the other lane's.
+  const laneCursors = new Map<TimelineTrackId, number>();
   const laneTrack = onLane && "trackId" in destination ? current.tracks.find((track) => track.id === destination.trackId) : undefined;
   if (onLane && "trackId" in destination && laneTrack === undefined) {
     throw new TimelineOperationRefused("that lane is no longer on the timeline");
@@ -98,6 +102,7 @@ export function mediaPlacementCommands(
           }
           trackId = madePicture;
         }
+        startFrame = laneCursors.get(trackId) ?? destination.frame;
       } else if (sound) {
         const audioTrack = current.tracks.find(track => track.kind === "audio");
         if (audioTrack) {
@@ -114,8 +119,10 @@ export function mediaPlacementCommands(
         ...(sound ? { gainDb: 0 } : artifact.kind === "video" ? { audio: "keep" as const } : {}),
       } });
       // Append and a bare frame chain picture only; a lane chains whatever lands on it, so a
-      // handful of files dropped together read in the order they were dropped.
-      if (onLane || !sound) cursor += durationFrames;
+      // handful of files dropped together read in the order they were dropped — per lane, when
+      // the drop made the lanes.
+      if (onLane && laneTrack === undefined) laneCursors.set(trackId, startFrame + durationFrames);
+      else if (onLane || !sound) cursor += durationFrames;
     }
     if (!batch.length) continue;
     current = applyTimelineCommands(current, batch);

@@ -105,10 +105,11 @@ describe("a drop on the new-lane strip", () => {
       ["tr_audio-1", "audio", "Audio 1"],
     ]);
     const placed = commands.filter((command) => command.kind === "place");
+    // The song starts where the hand was, on its own lane; the plate follows the film on theirs.
     assert.deepEqual(placed.map((command) => command.kind === "place" && [command.trackId, command.clip.startFrame]), [
       ["tr_overlay-1", 12],
-      ["tr_audio-1", 60],
-      ["tr_overlay-1", 132],
+      ["tr_audio-1", 12],
+      ["tr_overlay-1", 60],
     ]);
     const after = applyTimelineCommands(base, commands);
     assert.equal(after.tracks.length, 3);
