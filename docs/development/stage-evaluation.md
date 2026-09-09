@@ -13,6 +13,7 @@ script-relevant openings and props. Review intermediate motion, not only the fir
 | Doorway entry | Actor waits to 1s, crosses z=0 at 3s, stops at 5s; 1.4m opening and 2.4m clearance | Actor visibly passes through an opening, not a wall |
 | Seated furniture | Actor stays seated for 6s; face visible above table | Chair/table dimensions and body relationship are plausible |
 | Delayed action | Hold to 1s; cross by 3s; finish turn by 4s; sit at 5s | Distinct beats read without sliding through furniture |
+| Eased action (#1046) | Hold to 1s; curved travel through (0, -0.5) at 3s to (1, 0) at 5s; sit at 6s | Visible wait, gradual starts/stops and smooth travel; legacy delayed-action fixture remains unchanged |
 | Independent motion | Actor crosses x=-2 to +2 in 6s while camera completes an orbit | Camera and actor move independently; tracking keeps subject framed |
 | Valley chase | Driver rides car from z=0 to 50 in 8s; camera settles in car space at 6s; final offset holds within 1e-8m | Valley/road/car silhouettes read, windows are open, final driver view is unobstructed |
 
@@ -47,6 +48,8 @@ The transport regression files an MP4, admits it in Bench, resolves contained by
 the real provider client's request. This proves delivery without spending on generation. An
 explicitly authorized paid smoke test can separately evaluate whether generated motion follows
 the accepted reference. Compare the generated take and playable Stage reference in Bench.
+
+World schema 21 fences authored gait and object speed ceilings (#1044); schema 22 fences performance ease and hold (#1046). Legacy performance tracks retain linear travel until a hold or ease control is authored. New action marks use the shared camera/object spline with zero ease by default. Performance holds leave at least 0.1s of travel, scale with shot duration, and are reflected in timeline spans, speed measurements and generation beats.
 
 World schema 20 additionally fences the expanded playblast reference pin, so older readers refuse before scanning its strict scene fields. Opening, last, key and overview artifacts share the pin’s source fingerprint and staleness checks. Bench offers the opening/last pair to end-frame routes and the ordered still strip to image-reference routes, within existing manifest limits.
 
