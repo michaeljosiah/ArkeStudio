@@ -792,6 +792,16 @@ describe("kit mutations through the one commit primitive", () => {
     await store.close();
   });
 
+  it("attaches a location's view to a scene through the same door a character's look uses (SPEC-044 R-20)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "the-vigil", { id: "dusk", file: "looks/dusk.png", kind: "view", prompt: "The vigil at dusk",
+      takeId: "tk_01J8E0000000000000000000T9", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "the-vigil", "dusk", { kind: "scene", productionId: "saltlight", sceneId: "sc_04" });
+    assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.kind, look.attachedTo]),
+      [["view", { kind: "scene", productionId: "saltlight", sceneId: "sc_04" }]]);
+    await store.close();
+  });
+
   it("generates looks only after a main photo and carries it as identity", () => {
     const kit = kitOf([], {
       anchor: "main-photo.png",

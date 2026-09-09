@@ -132,6 +132,7 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   applyBibleEdits,
+  characterAudioRoute,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -276,7 +277,7 @@ import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/p
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
+import { applySceneCommand, detachRemovedCastLooks, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
@@ -7288,21 +7289,18 @@ export class Coordinator {
             // comes from here rather than from the write path reaching for the dispatcher.
             activePlans: (productionId) => this.activeScenePlans(store, productionId),
           },
-        ).then(async () => {
-          // Removing a member takes its scene look with it (SPEC-044 R-9): the look itself stays
-          // on the kit; only the attachment that made it ride here goes, in the same request.
-          const removed = msg.command.kind === "edit-scene" && msg.command.cast
-            ? Object.entries(msg.command.cast).filter(([, member]) => member === null).map(([sheetId]) => sheetId)
-            : [];
-          for (const sheetId of removed) {
-            for (const look of store.getBundle().referenceKits.find((kit) => kit.sheetId === sheetId)?.looks ?? []) {
-              const held = look.attachedTo;
-              if (held?.kind === "scene" && held.productionId === msg.productionId && held.sceneId === msg.sceneId) {
-                await attachCharacterLook(store, sheetId, look.id, null);
-              }
-            }
-          }
-        }).catch((err: unknown) => {
+        ).then(() => detachRemovedCastLooks(store, msg.productionId, msg.sceneId, sceneCommandFrom(msg.command)).catch((err: unknown) => {
+          // The edit is on disk; only the look's attachment did not follow it. Said as that,
+          // rather than as a refusal of a write that landed.
+          this.emit({
+            at: new Date().toISOString(),
+            type: "scene.write-refused",
+            worldId: msg.worldId,
+            productionId: msg.productionId,
+            sceneFile: msg.sceneFile,
+            reason: `removed from the scene, but the scene look stayed attached: ${describeCoordinatorError(err)}`,
+          });
+        })).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
           // throws away the edit with nothing to show for it (the save-scene lesson).
           this.emit({
@@ -7800,8 +7798,15 @@ export class Coordinator {
         }
         // The scene chooses nothing per dispatch (SPEC-044 R-26): its cast's voices are resolved
         // here, each on its own, so a read that cannot ride becomes a clause and the sample
-        // rides (R-28) rather than the whole plan refusing.
-        const castVoices = msg.audioReferencesDisabled ? { references: [], notSent: [] } : await resolveCastVoices(store, production, scene, msg.requestId);
+        // rides (R-28) rather than the whole plan refusing. A model with no audio route takes
+        // none of it (T-9): nothing is resolved — no rights written for an upload that never
+        // happens — and each chosen read is said once as not sent.
+        const takesNoAudio = characterAudioRoute(model) === null;
+        const audioReferencesDisabled = msg.audioReferencesDisabled || takesNoAudio;
+        const castVoices = audioReferencesDisabled
+          ? { references: [], notSent: takesNoAudio ? Object.entries(scene.cast ?? {}).filter(([, member]) => member.voice?.kind === "performance")
+              .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find((s) => s.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
+          : await resolveCastVoices(store, production, scene, msg.requestId);
         let performanceReferences, masterReferences;
         try {
           if (msg.audioReferencesDisabled && msg.masterAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
@@ -7817,7 +7822,7 @@ export class Coordinator {
         const scenePlan = planScene(
           {
             timingProduction: production,
-            audioReferencesDisabled: msg.audioReferencesDisabled,
+            audioReferencesDisabled,
             performanceReferences, masterReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
@@ -7856,7 +7861,7 @@ export class Coordinator {
         try {
           const aggregate = await createDispatchPlan(store, {
             manifest: this.opts.manifest, acknowledgedRecommendationIds: msg.acknowledgedRecommendationIds,
-            castNotSent: castVoices.notSent,
+            castNotSent: [...castVoices.notSent, ...castVoices.refused],
             worldId: msg.worldId,
             productionId: production.meta.id,
             scene,
@@ -9945,8 +9950,19 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
           return;
         }
-        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29).
-        const castVoices = await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId);
+        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29) — for
+        // a video dispatch that wants audio; a still, a rerun or a disabled box resolves nothing,
+        // because resolving acknowledges an upload. The record-level clauses are the Bench's own
+        // to show; what only the bytes or the ledger refused is refused here, in the same words,
+        // with the Bench's checkbox as the way past it.
+        const benchParams = bench.session.composer.params;
+        const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined
+          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId)
+          : { references: [], notSent: [], refused: [] };
+        if (castVoices.refused.length > 0) {
+          this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
+          return;
+        }
         const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
           worldId: msg.worldId,
           requestId: msg.requestId,
@@ -14934,12 +14950,12 @@ export class Coordinator {
       },
     };
     const revision = (await bench.store.read()).length;
-    // A quote acknowledges nothing new: the session id keeps repeated quotes on one rights entry.
-    const castVoices = await resolveSubjectCastVoices(store, session.subject, `quote-${session.id}`);
+    // A quote prices; it acknowledges nothing. The cast's reads cost nothing to carry
+    // (`incrementalInputMicroUsd: 0`), so the number is the same without them, and resolving
+    // them here wrote a rights entry per quote for an upload that never happened.
     const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
       worldId: store.worldId,
       requestId: `quote-${createdAt}`,
-      performanceReferences: castVoices.references,
       at: createdAt,
       recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
     });

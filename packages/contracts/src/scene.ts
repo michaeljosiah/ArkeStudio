@@ -419,6 +419,8 @@ export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
  */
 export const SceneVoiceChoiceSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("sample") }).strict(),
+  // `prefixedIdSchema("pf")` rather than PerformanceIdSchema: performance.ts reaches this file
+  // through scene-flow.ts, so importing it back here is a cycle that resolves as a TDZ crash.
   z.object({ kind: z.literal("performance"), performanceId: prefixedIdSchema("pf"), hash: FullSha256Schema }).strict(),
 ]);
 export type SceneVoiceChoice = z.infer<typeof SceneVoiceChoiceSchema>;

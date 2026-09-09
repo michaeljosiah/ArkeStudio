@@ -905,9 +905,14 @@ function BenchWorkspace({
    */
   const withReferences = session.composer.activeTokens.length > 0;
   const taskMode = model === null ? "generate" : taskModeForKeyframes(model, session.composer.keyframeTokens.length);
+  // The reads the scene's cast chose ride here as they do on the plan card (SPEC-044 R-29): they
+  // join the Bench's own plan as previews, so the list below is one list, and the coordinator
+  // freezes the real thing at dispatch.
+  const castVoices = world && subject ? castVoiceSummary(world, subject) : [];
   const characterAudio = world && model && subject && draft.params.kind === "video" ? planSubjectCharacterAudio({
     world, subject, model, imageCount: session.composer.keyframeTokens.length || carried.length,
-    taskMode, disabled: draft.params.audioReferencesDisabled }) : null;
+    taskMode, disabled: draft.params.audioReferencesDisabled,
+    performanceReferences: castVoices.flatMap(v => v.preview ? [v.preview] : []) }) : null;
   // The track's geometry and its states, worked out in one place so the fill, the ends, the
   // handle and the pill cannot drift apart. See lib/duration.ts for why it has two extra stops.
   const track =
@@ -2125,12 +2130,13 @@ function BenchWorkspace({
             {characterAudio && <div aria-label="Character audio references" style={{ flexBasis: "100%" }}>
               <label><input type="checkbox" checked={!characterAudio.disabled} onChange={e => compose({ ...draft,
                 params: { ...draft.params, kind: "video", audioReferencesDisabled: !e.target.checked } as BenchParams })} /> Use assigned character voice references for this dispatch</label>
-              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
+              {characterAudio.references.map(r => <p key={r.label}>{r.characterName} · {"performance" in r ? `${castVoices.find(v => v.sheetId === r.sheetId)?.line ?? "read"} · ` : ""}{r.label} · {("sample" in r ? r.sample : "master" in r ? r.prepared : r.performance).provenance.outputTechnical.durationSec?.toFixed(1)}s · voice guidance, new scene dialogue</p>)}
               {characterAudio.references.length > 0 && <p>The model generates synchronized audio. Voice identity and cadence are guidance, not guaranteed reproduction.</p>}
-              {/* The reads the scene's cast chose ride here too (SPEC-044 R-29); the coordinator freezes them at dispatch. */}
-              {!characterAudio.disabled && world && subject && castVoiceSummary(world, subject).map(v => (
-                <p key={`cast/${v.sheetId}`}>{v.name} · {v.line} · voice{characterAudio.route === null ? " · not riding · takes no audio" : ""}</p>
+              {/* A read the record rules out is said as the plan card would say it (R-31); a route with no audio says so once, on the voice. */}
+              {!characterAudio.disabled && castVoices.filter(v => v.reason !== undefined).map(v => (
+                <p key={`cast/${v.sheetId}`}>{v.name} · {v.line} · voice · not riding · {v.reason}</p>
               ))}
+              {!characterAudio.disabled && characterAudio.route === null && castVoices.some(v => v.preview !== undefined) && <p>voice · not riding · takes no audio</p>}
               {characterAudio.problems.map((problem, i) => <p key={i} role="alert">{problem}</p>)}
             </div>}
             <Button

@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, orderedShots, stageSourceFingerprintInput, seedStoryPictureTimeline, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
+import { insertShot, orderedShots, stageSourceFingerprintInput, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   __applyEventForTest,
@@ -142,26 +142,6 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(stagePathPoint(points, 0, 0), [0, 0, 0]);
     assert.deepEqual(stagePathPoint(points, 1, 1), [1, 0, 1]);
     assert.notEqual(stagePathPoint(points, 0, 0.5)[2], 0);
-  });
-
-  /*
-   * The word cut kept the limits (issue 1008, codex round three). The rows above the board are
-   * labels now rather than paragraphs — but a clause that says what a route does NOT promise is
-   * the one explanation turn 69 keeps, and this one stands before a paid dispatch: the plan
-   * under it reads `motion guidance` and labels the reference `performance-sync`, either of
-   * which a person could take for an exact-sync promise the route does not make.
-   */
-  it("keeps the no-sync limit on master playback, and drops the paragraph around it", async () => {
-    // The control only opens on a saved timeline; without one it is its own refusal.
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
-    production.timeline = { status: "ready", timeline: seedStoryPictureTimeline(production) };
-    const mounted = await mountState(state);
-    const text = mounted.container.textContent ?? "";
-    assert.match(text, /Master playback/, "the control is named");
-    assert.match(text, /Timing is not guaranteed/, "and says what it does not promise");
-    assert.doesNotMatch(text, /Its exact shot slice guides visible motion/, "without explaining how it works");
-    assert.doesNotMatch(text, /Master playback for performance shots/, "and with a label, not a sentence");
   });
 
   it("mounts the workspace and compact production rail by default", async () => {

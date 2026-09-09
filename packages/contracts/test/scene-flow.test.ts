@@ -118,6 +118,15 @@ describe("the read union (SPEC-029 R-1; T-1)", () => {
     assert.equal(scene.shots.length, 1);
   });
 
+  it("carries the scene's cast through both arms, byte for byte (SPEC-044 R-40)", () => {
+    const cast = { "maren-kest": { added: "2026-09-09T10:00:00.000Z",
+      voice: { kind: "performance", performanceId: "pf_01J8E0000000000000000000P1", hash: `sha256:${"a".repeat(64)}` } } };
+    const legacy = SceneRecordSchema.parse({ id: "sc_1", number: 1, slug: "old", title: "Old", status: "accepted", version: 1, shots: [shot(1)], cast });
+    assert.deepEqual(legacy.cast, cast);
+    assert.deepEqual(SceneRecordSchema.parse({ ...bellRoom, cast }).cast, cast);
+    assert.throws(() => SceneRecordSchema.parse({ ...bellRoom, cast: { "maren-kest": { voice: { kind: "sample" }, look: "x" } } }), "a member holds no look: it lives on the kit");
+  });
+
   it("refuses a scene carrying both structural fields, naming them", () => {
     const result = SceneRecordSchema.safeParse({ ...bellRoom, shots: [shot(1)] });
     assert.ok(!result.success);

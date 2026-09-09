@@ -2,8 +2,11 @@ import { readFile } from "node:fs/promises";
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema, performanceLineKey, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
-import { applySceneCommand } from "../productions/scene-commands.js";
+import { applySceneCommand, SceneVersionMoved } from "../productions/scene-commands.js";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
+import { audioWorldPath } from "./storage.js";
+import { readAudioBytes } from "./media-tools.js";
+import { audioHash } from "./qc.js";
 
 /**
  * Keep selects (SPEC-044 R-15): after a recording is kept, accept it, select it for its line and
@@ -13,19 +16,24 @@ import { readPerformance, currentPerformanceTarget } from "./performances.js";
  */
 export async function selectKeptPerformance(store: WorldStore, record: PerformanceRecord,
   request: Extract<ClientMessage, { kind: "keep-performance-recording" }>): Promise<void> {
-  await acceptKeptPerformance(store, { requestId: request.requestId, worldId: request.worldId, productionId: request.productionId, performanceId: record.id });
   const production = store.getBundle().productions.find(p => p.meta.id === request.productionId);
   const sceneFile = production?.sceneFiles[request.sceneId];
   const scene = production?.scenes.find(s => s.id === request.sceneId);
   if (!production || !sceneFile || !scene) throw new Error("The scene is no longer available.");
   const speaker = record.target.speakerSheetId;
-  const member = { ...scene.cast?.[speaker], voice: { kind: "performance" as const, performanceId: record.id, hash: record.provenance.outputHash } };
+  const voice = { kind: "performance" as const, performanceId: record.id, hash: record.provenance.outputHash };
+  // A redelivered Keep finds its own choice standing and is done: the record and the accept are
+  // idempotent by request id, but the cast write moved the version this request was fenced
+  // against, so retrying it would refuse a choice that already holds.
+  if (JSON.stringify(scene.cast?.[speaker]?.voice) === JSON.stringify(voice)) return;
+  // Fenced before anything lands (T-6): the only other check sits inside the cast write, and a
+  // scene that moved between Keep and here would otherwise leave the read accepted and selected
+  // for a line whose cast does not use it, while the caller reports it was not chosen.
+  if (scene.version !== request.expectedSceneVersion) throw new SceneVersionMoved(request.expectedSceneVersion, scene.version);
+  await acceptKeptPerformance(store, { requestId: request.requestId, worldId: request.worldId, productionId: request.productionId, performanceId: record.id });
   await applySceneCommand(store, { productionId: request.productionId, sceneFile, sceneId: request.sceneId, baseVersion: request.expectedSceneVersion,
-    command: { kind: "edit-scene", cast: { [speaker]: member } } });
+    command: { kind: "edit-scene", cast: { [speaker]: { ...scene.cast?.[speaker], voice } } } });
 }
-import { audioWorldPath } from "./storage.js";
-import { readAudioBytes } from "./media-tools.js";
-import { audioHash } from "./qc.js";
 
 /** Review and line selection share one existing commit transaction; neither edits picture selection. */
 export async function reviewPerformance(store: WorldStore, request: Extract<ClientMessage, { kind: "review-performance" }>) {

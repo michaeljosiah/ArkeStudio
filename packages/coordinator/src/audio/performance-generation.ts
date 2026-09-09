@@ -1,13 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
-  estimateMicroUsd, mapCadence, normalizeSpeechText, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost } from "@arke-studio/contracts";
+  estimateMicroUsd, mapCadence, normalizeSpeechText, type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { audioWorldPath, prepareAudio, acceptPreparedAudio } from "./storage.js";
 import { performanceTarget, currentPerformanceTarget, readPerformance } from "./performances.js";
 import { audioHash, analyzePcmWav, unavailableAudioReport } from "./qc.js";
 import { requireUnpurgedPerformance } from "./performance-purge.js";
+import { readAudioRights } from "./rights.js";
 import { readAudioBytes, type AudioMediaTools } from "./media-tools.js";
 import { verifyArtifact } from "../queue/verify.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -72,10 +73,21 @@ export async function finalizeGeneratedPerformance(store: WorldStore, tools: Aud
   let candidate: Awaited<ReturnType<typeof prepareAudio>> | undefined;
   if (tools) { try { candidate = await prepareAudio(store, tools, { kind: "performance-recording", productionId: quote.target.productionId, performanceId: id }); } catch { /* Preserve verified provider output; unavailable QC is truthful. */ } }
   if (signal.aborted) throw new Error("Performance generation cancelled.");
-  const makeRecord = (file: string, provenance: unknown) => PerformanceRecordSchema.parse({
+  // A synthesized line speaks with one voice and no music by construction (SPEC-044 R-14), so it
+  // attests both without being asked. Its cloud basis is the voice's: the basis the character's
+  // sample was acknowledged under, when the voice was cloned from one, else a provider's licensed
+  // stock voice — generate-performance asks nothing, and a read that said nothing would never ride.
+  const sample = store.getBundle().referenceKits.find(k => k.sheetId === quote.target.speakerSheetId)?.designatedVoiceSample;
+  const sampleAcknowledgement = sample && "acknowledgementId" in sample ? sample.acknowledgementId : undefined;
+  const acknowledged = sampleAcknowledgement === undefined ? undefined
+    : (await readAudioRights(store)).find(e => e.action === "acknowledge" && e.id === sampleAcknowledgement);
+  const cloudBasis = (acknowledged?.action === "acknowledge" ? acknowledged.basis : undefined) ?? "licensed";
+  const makeRecord = (file: string, provenance: AudioAssetProvenance) => PerformanceRecordSchema.parse({
     id, kind: "generated-tts", operationId: quote.operationId, target: quote.target, authoredText: quote.authoredText,
     voiceAssignment: quote.voiceAssignment, cadencePlan: quote.cadencePlan, cadencePlanHash: quote.cadencePlanHash,
-    mapping: quote.mapping, file, provenance, cost, ...(jobId ? { jobId } : {}), createdAt: store.now() });
+    mapping: quote.mapping, file, provenance, cost, ...(jobId ? { jobId } : {}), createdAt: store.now(),
+    attestations: (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: provenance.outputHash, statementVersion: 1, acknowledgedAt: store.now() })),
+    cloudBasis });
   let record: ReturnType<typeof makeRecord>;
   if (candidate) {
     await acceptPreparedAudio(store, candidate, prefix, (file, provenance) => {

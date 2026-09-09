@@ -45,6 +45,8 @@ export const PerformanceConversionInputSchema = z.object({
   target: PerformanceTargetSchema, voiceAssignment: VoiceAssignmentSchema,
   acknowledgementId: z.string().min(1), warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema),
   wordingConfirmedAt: IsoDateTimeSchema, retention: z.enum(["provider-history", "zero-retention"]),
+  /** Said at the request (SPEC-044 R-14) and carried to the record; optional because queued jobs predate it. */
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 
 /** Stable script blocks win when coverage exists. Multiple lines require an explicit block choice. */

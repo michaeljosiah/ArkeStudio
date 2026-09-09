@@ -209,6 +209,16 @@ function stateWith(options: { runs?: FrameRunState[]; allFramed?: boolean; noSho
   return state;
 }
 
+/** The world with a look attached to this scene for Maren (SPEC-044 R-30): the row must name it. */
+function stateWithSceneLook(): ClientState {
+  const state = stateWith();
+  state.world!.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.looks = [{
+    id: "council-coat", file: "looks/council-coat.png", kind: "costume", prompt: "Formal council coat, storm-grey wool with a high collar",
+    acceptedAt: "2026-07-14T09:00:00Z", attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" },
+  }];
+  return state;
+}
+
 function retriedFrameState(): FrameRunState {
   const failed = frameState({
     first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
@@ -455,6 +465,13 @@ const named = (item: Mounted, text: string): HTMLElement => {
 const click = async (element: HTMLElement) => act(async () => element.click());
 
 describe("frame-run quote authorization", () => {
+  it("names the look riding for a character beside the sheet, as the kit names it", async () => {
+    const item = await mount(stateWithSceneLook(), []);
+    await click(named(item, "Generate frames"));
+    const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+    assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);
@@ -484,8 +501,9 @@ describe("frame-run quote authorization", () => {
     const vigil = references.find((reference) => reference.textContent?.includes("The Vigil"));
     assert.match(maren?.textContent ?? "", /rides/);
     assert.equal(maren?.dataset.riding, "true");
-    assert.match(vigil?.textContent ?? "", /citation only/);
+    assert.match(vigil?.textContent ?? "", /citation only · plate/, "the location row names its plate (SPEC-044 R-30)");
     assert.equal(vigil?.dataset.riding, "false");
+    assert.doesNotMatch(maren?.textContent ?? "", /look ·/, "a character on the kit's own portrait says nothing about a look");
     assert.equal(vigil?.querySelector("img")?.getAttribute("alt"), "", "the adjacent name leaves the thumbnail decorative");
     await click([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
     assert.deepEqual(sent.at(-1), {

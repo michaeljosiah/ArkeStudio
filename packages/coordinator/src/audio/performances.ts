@@ -136,7 +136,7 @@ export async function performanceConversionRequest(store: WorldStore, model: Man
     basis: request.cloudBasis, scopes: ["cloud-voice-conversion"], statementVersion: 1, at });
   const input = PerformanceConversionInputSchema.parse({ sourcePerformanceId: source.id, sourceHash: hash,
     outputPerformanceId: `pf_${request.requestId}`, target: source.target, voiceAssignment: voice, acknowledgementId,
-    warningCodes: request.warningCodes, attestations, wordingConfirmedAt: at, retention: request.retention });
+    warningCodes: request.warningCodes, attestations, wordingConfirmedAt: at, retention: request.retention, cloudBasis: request.cloudBasis });
   const job: EnqueueInput = { idempotencyKey: request.requestId, worldId: store.worldId, productionId: request.productionId,
     target: { kind: "performance-conversion", id: input.outputPerformanceId }, capability: "voice-conversion", provider: model.provider, model: model.id,
     params: { performanceConversion: input, voiceId: voice.voiceId, retention: request.retention }, estimatedMicroUsd,
@@ -189,6 +189,13 @@ export async function finalizePerformanceConversion(store: WorldStore, tools: Au
     if (!previous) await atomicWriteFile(metadata, sourceJson);
   });
   const candidate = await prepareAudio(store, tools, { kind: "performance-recording", productionId: input.target.productionId, performanceId: input.outputPerformanceId });
+  // What the converted read may say for itself (SPEC-044 R-14): the conversion attested one
+  // speaker, the source's Keep attested the rest, and a voice swap that preserves timing adds
+  // neither a speaker nor music — so the statements re-bind to the bytes this job produced. The
+  // cloud basis is the one the source was sent under: the same recording in another voice.
+  const attested = [...new Set([...input.attestations.map(a => a.kind),
+    ...(source.attestations ?? []).filter(a => a.audioHash === source.provenance.outputHash).map(a => a.kind)])];
+  const cloudBasis = input.cloudBasis ?? source.cloudBasis;
   await acceptPreparedAudio(store, candidate, prefix, (file, provenance) => ({ kind: "performance-converted", source: "system",
     files: [{ path: `${prefix}/performance.json`, action: "create", baseHash: null, content: JSON.stringify(PerformanceRecordSchema.parse({
       id: input.outputPerformanceId, kind: "speech-to-speech", target: input.target, file: file.slice(prefix.length + 1), provenance,
@@ -196,5 +203,7 @@ export async function finalizePerformanceConversion(store: WorldStore, tools: Au
       wordingConfirmedAt: input.wordingConfirmedAt, sourcePerformanceId: input.sourcePerformanceId, sourcePerformanceHash: input.sourceHash,
       jobId: job.id, voiceAssignment: input.voiceAssignment, cost,
       conversion: { provider: "elevenlabs", model: job.model, retention: input.retention, preservesTiming: true, preservesProsody: true },
+      attestations: attested.map(kind => ({ kind, audioHash: provenance.outputHash, statementVersion: 1, acknowledgedAt: input.wordingConfirmedAt })),
+      ...(cloudBasis ? { cloudBasis } : {}),
     }), null, 2) + "\n" }] }));
 }

@@ -116,29 +116,73 @@ export function characterAudioRoute(model: { provider: string; id: string }, tas
       lipSync: "generated", generatedAudio: true, suppliedAudioPreserved: false, separateAudioArtifact: false } } as const;
 }
 
+/** Who speaks in these shots, in coverage order: authored speaking roles, never incidental mentions. */
+export function shotSpeakers(scene: SceneRecord, shots: readonly Shot[]): { speakers: string[]; problems: string[] } {
+  const speakers: string[] = [], problems: string[] = [];
+  const add = (speaker: string | undefined) => {
+    if (!speaker) problems.push("Resolve the speaker for the covered dialogue before dispatch.");
+    else if (!speakers.includes(speaker)) speakers.push(speaker);
+  };
+  for (const shot of shots) {
+    const covered = shot.covers?.map(c => scene.script?.blocks.find(b => b.id === c.blockId));
+    if (covered?.length) {
+      for (const block of covered) {
+        if (!block) problems.push("A covered script block is missing. Repair shot coverage before dispatch.");
+        else if (block.kind === "dialogue") add(block.speaker);
+      }
+    } else if (shot.audio?.kind === "dialogue" || shot.audio?.kind === "vo") add(shot.audio.speaker);
+  }
+  return { speakers, problems };
+}
+
+export interface CastVoiceNotSent { sheetId: string; name: string; reason: string }
+
+/**
+ * The scene's cast as performance requests (SPEC-044 R-26): one voice reference per member whose
+ * voice is a read. What a per-dispatch picker used to ask — the accept, the hash, the
+ * attestations, the cloud basis — is read off the record and the review history, because the
+ * read was chosen once and its Keep said those things. A member whose read cannot be asked for
+ * is returned with one clause, never thrown; the plan card and the Bench both say it from here,
+ * so the two cannot drift.
+ */
+export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord):
+  { requests: PerformanceAudioRequest[]; notSent: CastVoiceNotSent[] } {
+  const requests: PerformanceAudioRequest[] = [], notSent: CastVoiceNotSent[] = [];
+  for (const [sheetId, member] of Object.entries(scene.cast ?? {})) {
+    const voice = member.voice;
+    if (voice?.kind !== "performance") continue;
+    const name = sheets.find(s => s.id === sheetId)?.name ?? sheetId;
+    const skip = (reason: string) => notSent.push({ sheetId, name, reason });
+    const record = production.performances.find(p => p.id === voice.performanceId);
+    if (!record || record.provenance.outputHash !== voice.hash) { skip("read missing"); continue; }
+    const review = production.performanceReview.reviews.filter(r => r.performanceId === record.id).at(-1);
+    if (review?.decision !== "accept") { skip("read not accepted"); continue; }
+    const attested = new Set(record.attestations?.filter(a => a.audioHash === record.provenance.outputHash).map(a => a.kind));
+    if (!attested.has("single-speaker") || !attested.has("no-music")) { skip("attest one speaker and no music"); continue; }
+    if (!record.cloudBasis) { skip("no permission to send it"); continue; }
+    // Choosing the read is the acknowledgement of its QC report: the person kept it after hearing
+    // it and made it the voice in the same press (R-15). A second sign-off on the same warnings,
+    // asked at every dispatch, is what the per-dispatch picker was retired for.
+    requests.push({ performanceId: record.id, hash: record.provenance.outputHash, acceptedReviewAt: review.ts, intent: "voice-reference",
+      warningCodes: Object.values(record.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code),
+      singleSpeaker: true, noMusic: true, cloudBasis: record.cloudBasis, source: "scene-cast" });
+  }
+  return { requests, notSent };
+}
+
 /** Resolve authored speaking roles, never incidental mentions. Ordering follows reviewed script coverage. */
 export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly Shot[]; sheets: readonly Sheet[];
   kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[]; requiredMasterShots?: readonly string[] }): CharacterAudioPlan {
   const route = characterAudioRoute(input.model, input.taskMode);
   const plan: CharacterAudioPlan = { version: 1, disabled: input.disabled === true, route: route?.endpoint ?? null, references: [], problems: [] };
   if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length && !input.masterReferences?.length && !input.requiredMasterShots?.length)) return plan;
-  const speakers: string[] = [];
-  const add = (speaker: string | undefined) => {
-    if (!speaker) plan.problems.push("Resolve the speaker for the covered dialogue before dispatch.");
-    else if (!speakers.includes(speaker)) speakers.push(speaker);
-  };
   const masters = (input.masterReferences ?? []).filter(ref => input.shots.some(shot => shot.id === ref.master.shotId));
   for (const shot of input.shots) {
     if (input.requiredMasterShots?.includes(shot.id) && !masters.some(ref => ref.master.shotId === shot.id)) plan.problems.push("An enabled performance shot needs its prepared master slice. Prepare it or explicitly disable audio references.");
-    if (masters.some(ref => ref.master.shotId === shot.id)) continue;
-    const covered = shot.covers?.map(c => input.scene.script?.blocks.find(b => b.id === c.blockId));
-    if (covered?.length) {
-      for (const block of covered) {
-        if (!block) plan.problems.push("A covered script block is missing. Repair shot coverage before dispatch.");
-        else if (block.kind === "dialogue") add(block.speaker);
-      }
-    } else if (shot.audio?.kind === "dialogue" || shot.audio?.kind === "vo") add(shot.audio.speaker);
   }
+  const spoken = shotSpeakers(input.scene, input.shots.filter(shot => !masters.some(ref => ref.master.shotId === shot.id)));
+  const speakers = spoken.speakers;
+  plan.problems.push(...spoken.problems);
   for (const ref of masters) {
     if (!route) plan.problems.push("This route cannot carry master performance playback.");
     plan.references.push({ ...ref, label: `@Audio${plan.references.length + 1}` });
@@ -149,6 +193,9 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
     ? speakers.includes(ref.sheetId)
     : input.shots.some(shot => shot.id === ref.performance.target.shotId));
   for (const ref of explicit) {
+    // A route that takes no audio takes no read either: the scene's choice is said as not sent
+    // (R-28, R-31) rather than refusing the pass; one chosen per dispatch keeps its refusal.
+    if (!route && ref.source === "scene-cast") continue;
     if (!route) plan.problems.push("This route cannot carry the selected performance audio.");
     if (masters.some(master => master.master.shotId === ref.performance.target.shotId)) plan.problems.push("Choose a master slice or character performances for a shot, not both.");
     if (!speakers.includes(ref.sheetId)) plan.problems.push("The performance does not match a speaking character in this shot.");
@@ -189,23 +236,29 @@ export function characterAudioInstructions(plan: CharacterAudioPlan): string {
 
 /**
  * The reads the scene's cast has chosen for the speakers in a subject (SPEC-044 R-29, R-31),
- * as the Bench names them beside the plan: the renderer cannot freeze a read — rights are
- * acknowledged on the coordinator — but it can say which read will be asked for.
+ * as the Bench names them beside the plan. The renderer cannot freeze a read — rights are
+ * acknowledged on the coordinator — so a read that will be asked for is handed back as a
+ * preview reference for the Bench's own plan, and one that will not carries the same clause the
+ * plan card would.
  */
-export function castVoiceSummary(world: WorldBundle, subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }):
-  { sheetId: string; name: string; line: string }[] {
+export interface CastVoiceLine { sheetId: string; name: string; line: string; reason?: string; preview?: FrozenPerformanceAudio }
+export function castVoiceSummary(world: WorldBundle, subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }): CastVoiceLine[] {
   const production = world.productions.find(p => p.meta.id === subject.productionId);
   const scene = production?.scenes.find(s => s.id === subject.sceneId);
   if (!production || !scene) return [];
   const shots = orderedShots(scene);
-  return Object.entries(scene.cast ?? {}).flatMap(([sheetId, member]) => {
-    const voice = member.voice;
-    if (voice?.kind !== "performance") return [];
-    const record = production.performances.find(p => p.id === voice.performanceId && p.provenance.outputHash === voice.hash);
-    const sheet = world.sheets.find(s => s.id === sheetId);
-    if (!record || !sheet) return [];
+  const ids = new Set(subject.shotId ? [subject.shotId] : subject.members?.map(m => m.shotId) ?? shots.map(s => s.id));
+  const speakers = shotSpeakers(scene, shots.filter(s => ids.has(s.id))).speakers;
+  const { requests, notSent } = castVoiceRequests(world.sheets, production, scene);
+  return Object.entries(scene.cast ?? {}).flatMap(([sheetId, member]): CastVoiceLine[] => {
+    if (member.voice?.kind !== "performance" || !speakers.includes(sheetId)) return [];
+    const name = world.sheets.find(s => s.id === sheetId)?.name ?? sheetId;
+    const request = requests.find(r => production.performances.find(p => p.id === r.performanceId)?.target.speakerSheetId === sheetId);
+    const record = request && production.performances.find(p => p.id === request.performanceId);
+    if (!request || !record) return [{ sheetId, name, line: "read", reason: notSent.find(n => n.sheetId === sheetId)?.reason ?? "not cleared" }];
     const number = shots.find(s => s.id === record.target.shotId)?.number;
-    return [{ sheetId, name: sheet.name, line: number === undefined ? "read" : `read · shot ${number}` }];
+    return [{ sheetId, name, line: number === undefined ? "read" : `read · shot ${number}`, preview: { intent: "voice-reference", sheetId, characterName: name,
+      label: "@Audio1", performance: record, acceptedReviewAt: request.acceptedReviewAt, warningCodes: request.warningCodes, attestations: [], acknowledgementId: "preview-only", source: "scene-cast" } }];
   });
 }
 

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
 import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "./storage.js";
 import type { AudioMediaTools } from "./media-tools.js";
-import { type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
+import { castVoiceRequests, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
 import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset, type Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -101,63 +101,46 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
   return references;
 }
 
-/**
- * The scene's cast as performance requests (SPEC-044 R-26): one `voice-reference` per member
- * whose voice is a read. What a per-dispatch picker used to ask — the accept, the hash, the
- * attestations, the cloud basis, the warnings acknowledged — is read off the record and the
- * review history instead, because the read was chosen once and its Keep said those things.
- * A member whose read cannot be requested is returned with one clause, never thrown.
- */
-export function castPerformanceRequests(store: WorldStore, production: ProductionBundle, scene: SceneRecord):
-  { requests: PerformanceAudioRequest[]; notSent: { sheetId: string; name: string; reason: string }[] } {
-  const requests: PerformanceAudioRequest[] = [], notSent: { sheetId: string; name: string; reason: string }[] = [];
-  for (const [sheetId, member] of Object.entries(scene.cast ?? {})) {
-    const voice = member.voice;
-    if (voice?.kind !== "performance") continue;
-    const name = store.getBundle().sheets.find(s => s.id === sheetId)?.name ?? sheetId;
-    const skip = (reason: string) => notSent.push({ sheetId, name, reason });
-    const record = production.performances.find(p => p.id === voice.performanceId);
-    if (!record || record.provenance.outputHash !== voice.hash) { skip("read missing · the sample rides"); continue; }
-    const review = production.performanceReview.reviews.filter(r => r.performanceId === record.id).at(-1);
-    if (review?.decision !== "accept") { skip("read not accepted · the sample rides"); continue; }
-    const attested = new Set(record.attestations?.filter(a => a.audioHash === record.provenance.outputHash).map(a => a.kind));
-    if (!attested.has("single-speaker") || !attested.has("no-music")) { skip("voice not sent · attest one speaker and no music"); continue; }
-    if (!record.cloudBasis) { skip("voice not sent · no permission to send it"); continue; }
-    requests.push({ performanceId: record.id, hash: record.provenance.outputHash, acceptedReviewAt: review.ts, intent: "voice-reference",
-      warningCodes: Object.values(record.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code),
-      singleSpeaker: true, noMusic: true, cloudBasis: record.cloudBasis, source: "scene-cast" });
-  }
-  return { requests, notSent };
+/** What a clearance failure is called on a card: the gate's codes and sentences, as labels. */
+function clearanceLabel(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("audio-source-changed") || message.startsWith("The reviewed performance changed")) return "read changed";
+  if (message.startsWith("audio-qc-")) return "QC stale";
+  if (message.startsWith("audio-warning-")) return "QC warnings not acknowledged";
+  if (message.startsWith("audio-attestation-")) return "attest one speaker and no music";
+  if (message.startsWith("audio-rights-")) return "rights missing";
+  if (message.startsWith("The performance uses an earlier character voice")) return "voice changed";
+  return "not cleared";
 }
 
 /**
- * Resolve the cast's reads one at a time (SPEC-044 R-28): a read that fails the resolver's
- * checks becomes a clause and the sample rides, where a per-dispatch request would have
- * refused the whole plan. Each read acknowledges rights under its own id, so two reads under
- * one request never share one.
+ * Resolve the cast's reads one at a time (SPEC-044 R-28): a read that fails clearance becomes a
+ * clause and the sample rides, where a per-dispatch request would have refused the whole plan.
+ * `notSent` is what the record itself rules out — the same words the Bench reads off the bundle —
+ * and `refused` what only the bytes and the rights ledger could. Each read acknowledges rights
+ * under its own id, so two reads under one request never share one.
  */
 export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string):
-  Promise<{ references: FrozenPerformanceAudio[]; notSent: { sheetId: string; name: string; reason: string }[] }> {
-  const { requests, notSent } = castPerformanceRequests(store, production, scene);
-  const references: FrozenPerformanceAudio[] = [];
+  Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
+  const { requests, notSent } = castVoiceRequests(store.getBundle().sheets, production, scene);
+  const references: FrozenPerformanceAudio[] = [], refused: CastVoiceNotSent[] = [];
   for (const request of requests) {
     const sheetId = production.performances.find(p => p.id === request.performanceId)!.target.speakerSheetId;
     try {
       references.push(...await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, [request], `${requestId}/cast-${sheetId}`));
     } catch (error) {
-      notSent.push({ sheetId, name: store.getBundle().sheets.find(s => s.id === sheetId)?.name ?? sheetId,
-        reason: `voice not sent · ${error instanceof Error ? error.message : String(error)}` });
+      refused.push({ sheetId, name: store.getBundle().sheets.find(s => s.id === sheetId)?.name ?? sheetId, reason: clearanceLabel(error) });
     }
   }
-  return { references, notSent };
+  return { references, notSent, refused };
 }
 
-/** The same resolution for a Bench subject (SPEC-044 R-29), found from its scene; none when the subject has no scene. */
-export async function resolveSubjectCastVoices(store: WorldStore, subject: { productionId: string; sceneId: string } | undefined, requestId: string):
-  Promise<{ references: FrozenPerformanceAudio[]; notSent: { sheetId: string; name: string; reason: string }[] }> {
-  const production = subject && store.getBundle().productions.find(p => p.meta.id === subject.productionId);
-  const scene = production?.scenes.find(s => s.id === subject!.sceneId);
-  if (!production || !scene) return { references: [], notSent: [] };
+/** The same resolution for a Bench subject (SPEC-044 R-29), found from its scene; none when the scene is gone. */
+export async function resolveSubjectCastVoices(store: WorldStore, subject: { productionId: string; sceneId: string }, requestId: string):
+  Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
+  const production = store.getBundle().productions.find(p => p.meta.id === subject.productionId);
+  const scene = production?.scenes.find(s => s.id === subject.sceneId);
+  if (!production || !scene) return { references: [], notSent: [], refused: [] };
   return resolveCastVoices(store, production, scene, requestId);
 }
 

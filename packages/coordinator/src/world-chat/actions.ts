@@ -190,7 +190,7 @@ import {
   landBoard,
 } from "../productions/ops.js";
 import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
-import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySceneCommand, detachRemovedCastLooks, sceneCommandFrom } from "../productions/scene-commands.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
@@ -3582,14 +3582,18 @@ async function executeSharedResource(
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const sceneFile = production?.sceneFiles[payload.action.sceneId];
       if (!scene || !sceneFile) throw new Error("That scene is no longer in this production.");
+      const command = sceneCommandFrom(payload.action.command);
       await applySceneCommand(store, {
         productionId: payload.action.productionId,
         sceneFile,
         sceneId: payload.action.sceneId,
         baseVersion: scene.version,
-        command: sceneCommandFrom(payload.action.command),
+        command,
         requestId: action.actionId,
       }, deps.activePlans ? { activePlans: deps.activePlans } : {});
+      await detachRemovedCastLooks(store, payload.action.productionId, payload.action.sceneId, command).catch((error: unknown) => {
+        throw new Error(`The member left the scene, but its scene look stayed attached: ${error instanceof Error ? error.message : String(error)}`);
+      });
       return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${scene.version + 1}`, summary: "The semantic scene command was applied." } };
     }
     case "world-chat-production-board-compile":

@@ -3,6 +3,7 @@ import {
   aspectSupport,
   formatMicroUsd,
   isReplayableFinalization,
+  lookHoldingScope,
   orderedShots,
   PROVIDERS,
   resolveCast,
@@ -21,6 +22,7 @@ import {
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { lookTileLabel } from "../character-reference.js";
 import { Button } from "../../components/ui.js";
 import {
   clearFrameRunQuote,
@@ -589,14 +591,15 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
 function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
-  // What rides beside the sheet (SPEC-044 R-30): a look chosen for this scene on a character's
-  // row, the plate on the location's. Voice never applies to stills and is not said here.
+  // What rides beside the sheet (SPEC-044 R-30): the look in use on a character's row when it is
+  // not the kit's — this scene's, else the production's, the order the resolver prefers — and
+  // the plate on the location's. Voice never applies to stills and is not said here.
   const detailFor = (sheetId: string): string | null => {
     const sheet = sheetById.get(sheetId);
     if (sheet?.type === "location") return "plate";
-    const look = world.referenceKits.find((kit) => kit.sheetId === sheetId)?.looks
-      ?.find((candidate) => candidate.attachedTo?.kind === "scene" && candidate.attachedTo.productionId === productionId && candidate.attachedTo.sceneId === scene.id);
-    return look === undefined ? null : `look · ${lookName(look.prompt)}`;
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
+    const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
+    return look === undefined ? null : `look · ${lookTileLabel(look.prompt, look.kind)}`;
   };
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
@@ -634,12 +637,6 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       ? locationPortraitPath(world, entry.sheet.id)
       : characterPortraitPath(world, entry.sheet.id)),
   }));
-}
-
-/** A look is named by its prompt's first clause — the words a person typed to make it. */
-function lookName(prompt: string): string {
-  const first = prompt.split(/[,.;\n]/)[0]?.trim() ?? prompt.trim();
-  return first.length > 28 ? `${first.slice(0, 27).trimEnd()}…` : first;
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

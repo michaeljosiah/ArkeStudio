@@ -429,7 +429,7 @@ export async function acceptCharacterLook(
   input: {
     id: string;
     file: string;
-    kind: "costume" | "pose-expression" | "condition-age";
+    kind: NonNullable<ReferenceKit["looks"]>[number]["kind"];
     prompt: string;
     jobId?: Job["id"];
     takeId: Take["id"];

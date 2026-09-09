@@ -17,7 +17,7 @@ import { orderedShots, resolvePerformanceLine, performanceLineKey, ulid } from "
 import { WorldStore } from "../../src/world/store.js";
 import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
-import { keepPerformanceRecording } from "../../src/audio/performances.js";
+import { keepPerformanceRecording, currentPerformanceTarget } from "../../src/audio/performances.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "./helpers.js";
@@ -301,9 +301,12 @@ it("keep selects: accepts, selects the line and makes the read the character's v
   assert.equal(record.attestations?.[0]?.audioHash, record.provenance.outputHash);
   assert.equal(record.cloudBasis, "self");
   await selectKeptPerformance(store, record, request);
+  // Redelivered: the same request finds its choice standing, moves nothing and refuses nothing.
+  await selectKeptPerformance(store, record, request);
   await store.close(); store = await WorldStore.open(dir);
   const current = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
   assert.equal(current.performanceReview.selections[performanceLineKey(record.target)]?.performanceId, record.id, "the line is selected");
+  assert.equal(current.performanceReview.reviews.length, 1, "one accept, however many times Keep is delivered");
   assert.equal(current.performanceReview.reviews.at(-1)?.decision, "accept");
   const after = current.scenes.find(s => s.id === scene.id)!;
   assert.deepEqual(after.cast?.[record.target.speakerSheetId]?.voice, { kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
@@ -311,7 +314,10 @@ it("keep selects: accepts, selects the line and makes the read the character's v
   // The scene moved under a second Keep: the record is kept, the choice is refused, nothing is retried (T-6).
   const stale = await keepPerformanceRecording(store, tools, spool, { ...request, requestId: ulid(), spoolId: "00000000-0000-4000-8000-000000000002", expectedSceneVersion: after.version });
   await assert.rejects(selectKeptPerformance(store, stale, { ...request, requestId: ulid(), expectedSceneVersion: scene.version }), /version|moved/i);
-  assert.equal(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.scenes.find(s => s.id === scene.id)!.cast?.[record.target.speakerSheetId]?.voice?.kind, "performance");
+  const held = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.deepEqual(held.performanceReview.reviews.filter(r => r.performanceId === stale.id), [], "a refused choice leaves the read kept but unaccepted (T-6)");
+  assert.equal(held.performanceReview.selections[performanceLineKey(record.target)]?.performanceId, record.id, "and the line still names the chosen read");
+  assert.deepEqual(held.scenes.find(s => s.id === scene.id)!.cast?.[record.target.speakerSheetId]?.voice, { kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
 });
 
 it("the scene's cast resolves into voice references that ride wherever the character speaks (SPEC-044 R-26, R-27, R-28)", async t => {
@@ -339,8 +345,13 @@ it("the scene's cast resolves into voice references that ride wherever the chara
   const after = store.getBundle();
   const currentProduction = after.productions.find(p => p.meta.id === production.meta.id)!;
   const currentScene = currentProduction.scenes.find(s => s.id === scene.id)!;
+  // The cast write bumped the scene version; the read is still the same line (R-16), while a
+  // reworded line or another block is not.
+  assert.ok(currentPerformanceTarget(store, record.target), "a version bump alone never silences a read");
+  assert.equal(currentPerformanceTarget(store, { ...record.target, authoredTextHash: `sha256:${"e".repeat(64)}` }), false, "rewording does");
   const resolved = await resolveCastVoices(store, currentProduction, currentScene, ulid());
   assert.deepEqual(resolved.notSent, []);
+  assert.deepEqual(resolved.refused, []);
   assert.equal(resolved.references.length, 1);
   assert.equal(resolved.references[0]!.source, "scene-cast");
   assert.equal(resolved.references[0]!.performance.id, record.id);
@@ -362,6 +373,5 @@ it("the scene's cast resolves into voice references that ride wherever the chara
   const stale = { ...currentScene, cast: { [speaker]: { voice: { kind: "performance" as const, performanceId: record.id, hash: `sha256:${"f".repeat(64)}` } } } };
   const missing = await resolveCastVoices(store, currentProduction, stale, ulid());
   assert.deepEqual(missing.references, []);
-  assert.equal(missing.notSent[0]?.sheetId, speaker);
-  assert.match(missing.notSent[0]!.reason, /sample rides/);
+  assert.deepEqual(missing.notSent.map(entry => [entry.sheetId, entry.reason]), [[speaker, "read missing"]]);
 });

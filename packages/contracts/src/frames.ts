@@ -5,7 +5,7 @@ import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
-import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
+import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
@@ -1520,7 +1520,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     // Keep selects (SPEC-044 R-15): accept, select the line and choose it as the character's
     // voice in one request. Attestations and the cloud basis are said here, once (R-14).
     select: z.boolean().optional(),
-    attestations: z.array(z.enum(["single-speaker", "no-music"])).optional(),
+    attestations: z.array(AudioAttestationSchema.shape.kind).optional(),
     cloudBasis: z.enum(["self", "authorized", "licensed"]).optional() }).strict(),
   z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),

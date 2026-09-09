@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { linearizeSceneFlow, orderedShots, SceneRecordSchema, type SceneRecord, type ShotStaging } from "@arke-studio/contracts";
 import {
   applySceneCommand,
+  detachRemovedCastLooks,
   sceneCommandFrom,
   SceneCommandRefused,
   SceneVersionMoved,
 } from "../../src/productions/scene-commands.js";
+import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -923,5 +925,24 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
       applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: removed.version, command: { kind: "edit-scene" } }),
       /names neither/,
     );
+  });
+
+  it("removing a member detaches the look this scene held and leaves the look on its kit (R-9)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "maren-kest", { id: "council-coat", file: "looks/council-coat.png", kind: "costume",
+      prompt: "Formal council coat", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "maren-kest", "council-coat", { kind: "scene", productionId: PRODUCTION, sceneId: SCENE_ID });
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK() } } },
+    });
+    const remove = { kind: "edit-scene" as const, cast: { "maren-kest": null } };
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version + 1, command: remove });
+    await detachRemovedCastLooks(store, PRODUCTION, SCENE_ID, remove);
+    const looks = (await readKit(store, "maren-kest"))!.kit.looks ?? [];
+    assert.deepEqual(looks.map((look) => [look.id, look.attachedTo]), [["council-coat", undefined]], "the look stays; only its attachment to this scene goes");
+    // Nothing to detach is not a failure: the helper reads the kit and writes nothing.
+    await detachRemovedCastLooks(store, PRODUCTION, SCENE_ID, remove);
   });
 });

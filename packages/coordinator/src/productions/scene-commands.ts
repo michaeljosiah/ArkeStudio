@@ -28,6 +28,7 @@ import {
   type ShotStageEdit,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { attachCharacterLook } from "../references/kit.js";
 import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -455,6 +456,32 @@ export function stemOrThrow(sceneFile: string): string {
     throw new SceneCommandRefused([`"${sceneFile}" is not a scene file name`]);
   }
   return sceneFile;
+}
+
+/**
+ * Removing a member takes its scene look with it (SPEC-044 R-9): the look stays on the kit, and
+ * only the attachment that made it ride here goes. One detach per character — clearing a look
+ * empties the scope it held (design 67), so a look-by-look loop rewrote the kit for nothing.
+ * Called after the scene write landed, by every arm that applies the wire command.
+ */
+export async function detachRemovedCastLooks(
+  store: WorldStore,
+  productionId: string,
+  sceneId: string,
+  command: SceneCommand,
+): Promise<void> {
+  if (command.kind !== "edit-scene" || command.cast === undefined) return;
+  for (const [sheetId, member] of Object.entries(command.cast)) {
+    if (member !== null) continue;
+    const look = store
+      .getBundle()
+      .referenceKits.find((kit) => kit.sheetId === sheetId)
+      ?.looks?.find((candidate) => {
+        const held = candidate.attachedTo;
+        return held?.kind === "scene" && held.productionId === productionId && held.sceneId === sceneId;
+      });
+    if (look !== undefined) await attachCharacterLook(store, sheetId, look.id, null);
+  }
 }
 
 export { SceneOperationRefused };
