@@ -1909,7 +1909,14 @@ describe("retry classification (R-7, R-9, D5)", () => {
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
     fake.submitDelayMs = 40;
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 1200, backoffCapMs: 1200, rng: () => 1 });
+    // The same clock as the queue-position tests below: between the failed attempt and the
+    // second sibling's submit sit the 200 ms wait, two enqueues and the dispatches, every
+    // transition an fsync'd journal append. At 1200 ms a loaded Windows runner ran the retry's
+    // backoff out inside that stretch and sent the retry among the siblings (CI runs
+    // 34415278836, 34416898303), so the backoff is widened to dwarf the latency while the
+    // 150 ms interval the siblings ride stays where it was; the gap they must fit inside is
+    // widened with it, still a third of the backoff, so what is asserted does not change.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 150, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -1925,7 +1932,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     const [a, b, c] = fake.submittedKeys;
     assert.ok(b !== a && c !== a && c !== b, "the two siblings went out while the first job waited");
     const gap = fake.submitStartedAt[2]! - fake.submitStartedAt[1]!;
-    assert.ok(gap < 600, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 1200 ms backoff`);
+    assert.ok(gap < 2000, `the third job went out ${gap} ms after the second; it rides the 150 ms interval, not the 6000 ms backoff`);
     await until(() => foldedJob(h, first.id)?.status === "succeeded", "the retry to succeed", FOLD_MS);
     h.queue.dispose();
   });
@@ -1967,7 +1974,9 @@ describe("retry classification (R-7, R-9, D5)", () => {
     // both sides. At 600/900 a loaded runner passed the first gate before the enqueue and
     // dispatched the second job outright (CI run 34024294005), so the gates are widened to
     // dwarf the fsync'd appends between the failure and the read, keeping the same ratio.
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 2000, backoffBaseMs: 3000, backoffCapMs: 3000, rng: () => 1 });
+    // At 2000/3000 a Windows runner still passed the first gate before the enqueue (CI run
+    // 34415278836); doubled, at the same ratio, and still well inside FOLD_MS.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, baseIntervalMs: 4000, backoffBaseMs: 6000, backoffCapMs: 6000, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
