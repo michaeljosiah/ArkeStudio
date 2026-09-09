@@ -327,7 +327,7 @@ export class StageViewport {
     this.events = events;
     this.data = data;
     // Preserve the workspace's absolute fill; making it relative lets the canvas's intrinsic
-    // aspect grow the host with window width and clip the camera view (#1064).
+    // aspect grow the host with window width and clip the camera view (issue 1064).
     if (window.getComputedStyle(host).position === "static") host.style.position = "relative";
     host.style.cursor = "grab";
 
