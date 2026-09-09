@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
  * screen — the clip's width at the current zoom — not about the file, and a sprite sheet per
  * zoom level is a folder of pictures nobody asked for. One hidden `<video>` per source seeks
  * through the times a clip needs and paints each onto a small canvas; the result is cached by
- * source, time and height, so scrolling and re-rendering never decode a frame twice.
+ * source, time and height, so scrolling and re-rendering can reuse decoded frames.
  *
  * Best-effort throughout: a source that will not decode, a canvas the origin taints, a browser
  * without the elements (the tests' DOM) all leave the clip on its poster.
@@ -29,7 +29,8 @@ const MAX_FRAMES = 2000;
  * Make room in the cache: up to a quarter of `max` goes, oldest first, skipping every frame a
  * mounted strip still shows. An evicted frame is never asked for again — the hook asks once per
  * signature — so a strip that lost one to a long session's browsing stayed on its poster for
- * good. When everything is wanted nothing goes; the screen bounds it. Returns how many went.
+ * good. Active requests share the cache's budget, so any excess is unclaimed and can go.
+ * Returns how many went.
  */
 export function evictFrames(cache: Map<string, string>, stillWanted: (key: string) => boolean, max = MAX_FRAMES): number {
   const target = Math.floor(max / 4);
@@ -84,6 +85,9 @@ const listeners = new Map<string, Set<() => void>>();
 const sources = new Map<string, Source>();
 /** The frames some mounted strip still wants, by key, with how many want them. A decode nobody wants any more is skipped. */
 const wanted = new Map<string, number>();
+/** Strips over the frame budget stay on their posters until another strip releases room. */
+const waitingStrips = new Set<() => void>();
+let admissionScheduled = false;
 /** Frames asked of a source not made yet, because the cap was reached with every decoder busy. */
 const pending = new Map<string, Source["queue"]>();
 
@@ -251,6 +255,7 @@ export function resetFilmstrips(): void {
   sources.clear();
   wanted.clear();
   pending.clear();
+  waitingStrips.clear();
 }
 
 /**
@@ -268,7 +273,7 @@ export function useFilmstrip(args: {
   const { src, inSec, durationSec, widthPx } = args;
   const heightPx = args.heightPx ?? FILMSTRIP_HEIGHT_PX;
   const [, bump] = useState(0);
-  const count = src === null || !supported() ? 0 : filmstripFrameCount(widthPx, heightPx);
+  const count = src === null || !supported() ? 0 : Math.min(MAX_FRAMES, filmstripFrameCount(widthPx, heightPx));
   const times = filmstripTimes(inSec, durationSec, count);
   const keys = src === null ? [] : times.map((timeSec) => frameKey(src, timeSec, heightPx));
   const signature = keys.join("|");
@@ -277,7 +282,25 @@ export function useFilmstrip(args: {
   // unwanted by the time it runs.
   useEffect(() => {
     if (src === null || keys.length === 0) return;
-    for (const key of keys) wanted.set(key, (wanted.get(key) ?? 0) + 1);
+    const claimed = new Set<string>();
+    const ask = () => {
+      let waiting = false;
+      let added = false;
+      keys.forEach((key, index) => {
+        if (claimed.has(key)) return;
+        if (!wanted.has(key) && wanted.size >= MAX_FRAMES) {
+          waiting = true;
+          return;
+        }
+        wanted.set(key, (wanted.get(key) ?? 0) + 1);
+        claimed.add(key);
+        added = true;
+        filmstripFrame(src, times[index]!, heightPx);
+      });
+      if (waiting) waitingStrips.add(ask);
+      else waitingStrips.delete(ask);
+      if (added) bump((n) => n + 1);
+    };
     const listener = () => bump((n) => n + 1);
     let waking = listeners.get(src);
     if (waking === undefined) {
@@ -285,14 +308,24 @@ export function useFilmstrip(args: {
       listeners.set(src, waking);
     }
     waking.add(listener);
-    times.forEach((timeSec) => filmstripFrame(src, timeSec, heightPx));
+    ask();
     return () => {
+      waitingStrips.delete(ask);
       waking.delete(listener);
       if (waking.size === 0) listeners.delete(src);
-      for (const key of keys) {
+      for (const key of claimed) {
         const count = wanted.get(key) ?? 0;
         if (count <= 1) wanted.delete(key);
         else wanted.set(key, count - 1);
+      }
+      // Defer admission until all effect cleanups finish, so disappearing strips cannot claim
+      // the room just released. A waiting strip asks again even though its signature is unchanged.
+      if (waitingStrips.size > 0 && !admissionScheduled) {
+        admissionScheduled = true;
+        queueMicrotask(() => {
+          admissionScheduled = false;
+          for (const ask of waitingStrips) ask();
+        });
       }
       // A strip gone may leave a decoder idle; whoever waited at the cap gets it.
       admitPending();
