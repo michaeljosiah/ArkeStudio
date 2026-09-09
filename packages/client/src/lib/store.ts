@@ -3593,6 +3593,18 @@ export function listPlans(worldId: string, productionId: string): void {
   send({ kind: "list-plans", worldId, productionId });
 }
 
+/** What the scene's lines can play (SPEC-044 R-33); the answer is a rehearsal result under this id. */
+export function planTableRead(worldId: string, productionId: string, sceneId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "plan-table-read", requestId, worldId, productionId, sceneId }) ? requestId : null;
+}
+
+/** Prepare the lines that have no read, at the cost the plan quoted (R-33); answered as the plan is. */
+export function prepareTableRead(worldId: string, productionId: string, sceneId: string, confirmationToken: string, confirmedMicroUsd: number): string | null {
+  const requestId = ulid();
+  return send({ kind: "prepare-table-read", requestId, worldId, productionId, sceneId, confirmationToken, confirmedMicroUsd }) ? requestId : null;
+}
+
 /** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
 export function saveRouting(worldId: string, productionId: string, routing: unknown): void {
   send({ kind: "save-routing", worldId, productionId, routing });

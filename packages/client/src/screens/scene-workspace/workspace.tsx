@@ -670,7 +670,9 @@ export function SceneWorkspace({
               scene={scene}
               artifacts={artifacts}
               boards={acceptedBoardPack.ok ? acceptedBoardPack.boards : []}
+              worldId={world.meta.worldId}
               worldSlug={world.meta.slug}
+              sheets={world.sheets}
               aspect={aspect}
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}

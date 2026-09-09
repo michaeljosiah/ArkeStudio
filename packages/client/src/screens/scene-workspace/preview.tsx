@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_SHOT_SEC,
   deriveCut,
+  deriveRehearsalLines,
   effectiveFraming,
+  formatMicroUsd,
   pickableArtifacts,
   productionAspect,
   stagePlayblastIsStale,
@@ -13,11 +15,15 @@ import {
   type PackedBoard,
   type ProductionBundle,
   type SceneRecord,
+  type Sheet,
   type Shot,
+  type TableReadPlan,
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
 import { artifactsForProduction } from "../../lib/artifact-view.js";
+import { clearPlaylist, loadPlaylist, playPlaylistLine, setPlaylistRate, setPlaylistSolo, type PlaylistState } from "../../lib/audio.js";
 import { mediaUrl } from "../../lib/media.js";
+import { planTableRead, prepareTableRead, subscribeRehearsalResults, useStore } from "../../lib/store.js";
 import { posterize } from "../../lib/poster.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback-engine.js";
 import { ShotLightbox, shotFramePath } from "./lightbox.js";
@@ -101,7 +107,9 @@ export function ScenePreview({
   scene,
   artifacts,
   boards,
+  worldId,
   worldSlug,
+  sheets,
   aspect,
   onEditShot,
   onOpenShotInGenerator,
@@ -110,7 +118,9 @@ export function ScenePreview({
   scene: SceneRecord;
   artifacts: readonly ArtifactSidecar[];
   boards: readonly PackedBoard[];
+  worldId: string;
   worldSlug: string | undefined;
+  sheets: readonly Sheet[];
   aspect: string;
   // The lightbox's Advanced and Generate frame hand off to the workspace; optional only so a
   // caller that has not wired them yet still compiles, in which case those two buttons just close.
@@ -138,6 +148,53 @@ export function ScenePreview({
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+
+  // Play lines (SPEC-044 R-33): the scene's spoken lines that have a read — a selected one, or the
+  // table-read cache — in shot order through the one player; the rest are counted, not played, and
+  // a dashed door prepares them at the cost the plan quoted. The plan is asked for when the lines,
+  // the reviews or the cache's jobs change, so the door's count and price are current before a press.
+  const { state } = useStore();
+  const lines = useMemo(() => deriveRehearsalLines(scene, sheets).filter((line) => line.reason === undefined), [scene, sheets]);
+  const [plan, setPlan] = useState<TableReadPlan | null>(null);
+  const [linesNotice, setLinesNotice] = useState("");
+  const [preparing, setPreparing] = useState(false);
+  const [solo, setSolo] = useState<string | null>(null);
+  const [rate, setRate] = useState<PlaylistState["rate"]>(1);
+  const planRequest = useRef<string | null>(null);
+  const prepareRequest = useRef<string | null>(null);
+  const requestPlan = useCallback(() => { planRequest.current = planTableRead(worldId, production.meta.id, scene.id); }, [worldId, production.meta.id, scene.id]);
+  useEffect(() => subscribeRehearsalResults((result) => {
+    if (result.requestId !== planRequest.current && result.requestId !== prepareRequest.current) return;
+    if (result.requestId === prepareRequest.current) { prepareRequest.current = null; setPreparing(false); setLinesNotice(result.reason); }
+    else planRequest.current = null;
+    if (result.plan) setPlan(result.plan);
+    else if (result.status === "refused") setLinesNotice(result.reason);
+  }), []);
+  const cacheJobs = state?.app.jobs.filter((job) => job.target.kind === "table-read-cache" && job.worldId === worldId).map((job) => `${job.id}:${job.status}`).join("|") ?? "";
+  useEffect(() => { if (lines.length > 0) requestPlan(); }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, requestPlan]);
+  useEffect(() => () => clearPlaylist(), []);
+  const playable = plan?.items.filter((item) => item.file !== undefined) ?? [];
+  const missing = plan?.items.filter((item) => item.route === "local" || item.route === "cloud") ?? [];
+  const playLines = () => {
+    if (plan === null || worldSlug === undefined) return;
+    const items = plan.items.flatMap((item) => {
+      const line = lines.find((candidate) => candidate.id === item.lineId);
+      if (item.file === undefined || line?.speakerSheetId === undefined) return [];
+      const name = sheets.find((sheet) => sheet.id === line.speakerSheetId)?.name ?? line.speakerSheetId;
+      return [{ id: `table/${line.id}`, lineId: line.id, speakerSheetId: line.speakerSheetId, url: mediaUrl(worldSlug, item.file), title: `${name}: ${line.text}` }];
+    });
+    loadPlaylist(items);
+    setPlaylistRate(rate);
+    setPlaylistSolo(solo);
+    void playPlaylistLine();
+  };
+  const prepareLines = () => {
+    if (plan === null) return;
+    setPreparing(true);
+    prepareRequest.current = prepareTableRead(worldId, production.meta.id, scene.id, plan.confirmationToken, plan.totalEstimatedMicroUsd);
+    if (prepareRequest.current === null) { setPreparing(false); setLinesNotice("The studio is disconnected."); }
+  };
+  const speakers = [...new Set(lines.flatMap((line) => (line.speakerSheetId === undefined ? [] : [line.speakerSheetId])))];
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
   const [stageSize, setStageSize] = useState<{ width: number; height: number } | null>(null);
   const [failedClips, setFailedClips] = useState<ReadonlySet<string>>(() => new Set());
@@ -376,6 +433,31 @@ export function ScenePreview({
           </div>
           <span className="fy-swpreview__progress"><span style={{ width: `${totalSec === 0 ? 0 : (time / totalSec) * 100}%` }} /></span>
         </div>
+        {lines.length === 0 ? null : (
+          <div className="fy-swpreview__lines" aria-label="Lines">
+            <button type="button" className="fy-swpreview__lines-play" disabled={playable.length === 0} onClick={playLines}>
+              <PlaySolid size={10} />Play lines
+            </button>
+            <label>solo
+              <select value={solo ?? ""} onChange={(event) => { const next = event.target.value || null; setSolo(next); setPlaylistSolo(next); }}>
+                <option value="">all</option>
+                {speakers.map((sheetId) => <option key={sheetId} value={sheetId}>{sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId}</option>)}
+              </select>
+            </label>
+            <label>rate
+              <select value={rate} onChange={(event) => { const next = Number(event.target.value) as PlaylistState["rate"]; setRate(next); setPlaylistRate(next); }}>
+                {[0.75, 1, 1.25, 1.5].map((stop) => <option key={stop} value={stop}>{stop}×</option>)}
+              </select>
+            </label>
+            {plan === null ? null : <span className="fy-swpreview__lines-count">{playable.length} of {lines.length} line{lines.length === 1 ? "" : "s"} {lines.length === 1 ? "has" : "have"} a read</span>}
+            {plan === null || missing.length === 0 ? null : (
+              <button type="button" className="fy-swpreview__lines-door" disabled={preparing} onClick={prepareLines}>
+                Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {formatMicroUsd(plan.totalEstimatedMicroUsd)}
+              </button>
+            )}
+            {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-count">{linesNotice}</span>}
+          </div>
+        )}
       </div>
       <p className="fy-swpreview__script">{current?.shot.description ?? ""}</p>
       <ShotLightbox

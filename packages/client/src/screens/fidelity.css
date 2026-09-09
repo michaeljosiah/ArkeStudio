@@ -7660,6 +7660,16 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .dark .fy-swpreview__stageplay:hover .fy-swpreview__playdisc { background: var(--neutral-50); }
 .fy-swpreview__controls { flex: none; display: flex; align-items: center; gap: 12px; }
 .fy-swpreview__transport { display: flex; align-items: center; gap: 12px; flex: none; }
+/* Play lines (SPEC-044 R-33): one control, two selects, the count, and a dashed door that spends. */
+.fy-swpreview__lines { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; flex: none; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-swpreview__lines > label { display: inline-flex; align-items: center; gap: 4px; }
+.fy-swpreview__lines select { font: 400 10px var(--font-mono); color: var(--foreground); }
+.fy-swpreview__lines-play { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--background); color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; }
+.fy-swpreview__lines-play:hover { border-color: var(--neutral-400); }
+.fy-swpreview__lines-door { height: 26px; padding: 0 10px; border: 1px dashed var(--neutral-300); border-radius: 999px; background: transparent; color: var(--neutral-400); font: 400 10px var(--font-mono); cursor: pointer; }
+.fy-swpreview__lines-door:hover { border-color: var(--neutral-400); color: var(--foreground); }
+.fy-swpreview__lines-play:disabled, .fy-swpreview__lines-door:disabled { opacity: .5; cursor: default; }
+.fy-swpreview__lines-count { white-space: nowrap; }
 .fy-swpreview__transport button { flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 0; cursor: pointer; transition: var(--transition-control), opacity var(--dur-fast) var(--ease-standard); }
 .fy-swpreview__toggle { width: 32px; height: 32px; border-radius: 999px; background: var(--foreground); color: var(--background); }
 .fy-swpreview__toggle:hover { opacity: .88; }
