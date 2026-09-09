@@ -41,7 +41,7 @@ it("keeps inspection and the two-step deletion behind the compact job actions", 
     await act(async () => inspections[0]!.click());
     assert.ok(sent.some(m => m.kind === "list-provider-calls" && m.jobId === running.id));
     const inspect = inspections[1]!;
-    assert.equal(inspect.title, "Provider calls");
+    assert.equal(inspect.getAttribute("data-tip"), "Provider calls");
     assert.ok(inspect.closest(".fy-activityrow__summary"));
     await act(async () => inspect.click());
     assert.ok(sent.some(m => m.kind === "list-provider-calls" && m.jobId === job.id));

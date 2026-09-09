@@ -1,4 +1,4 @@
-import { useCallback, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { Copy, PauseSolid, PlaySolid, Speaker, X } from "./icons.js";
 import { cx } from "./ui.js";
 import { dismissPlayback, playClip, seekTo, togglePlayback, usePlayback, type Clip } from "../lib/audio.js";
@@ -152,6 +152,62 @@ export function ClipPlayButton({
     >
       {playing ? <PauseSolid /> : <PlaySolid />}
     </button>
+  );
+}
+
+/**
+ * A picture you can watch, without the browser's own player (issue 1010, U2).
+ *
+ * `<video controls>` paints the platform's chrome — play, scrubber, 0:00/0:04, mute, fullscreen
+ * and a kebab — inside a card that is otherwise entirely ours, and at a wide window that strip
+ * is the loudest thing on the screen. The take tiles already answered this: the poster is the
+ * card, and one drawn button over it starts and stops the picture.
+ */
+export function PosterVideo({
+  src,
+  poster,
+  label,
+  className,
+  muted,
+}: {
+  src: string;
+  poster?: string;
+  label: string;
+  /** The video element's own class — each surface keeps its own frame. */
+  className?: string;
+  muted?: boolean;
+}) {
+  const video = useRef<HTMLVideoElement>(null);
+  const [playing, setPlaying] = useState(false);
+  return (
+    <span className="fy-posterplayer">
+      <video
+        ref={video}
+        className={className}
+        src={src}
+        preload="metadata"
+        playsInline
+        muted={muted === true}
+        aria-label={label}
+        {...(poster === undefined ? {} : { poster })}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+      <button
+        type="button"
+        className="fy-playbtn fy-posterplay"
+        aria-label={`${playing ? "Pause" : "Play"} ${label}`}
+        onClick={() => {
+          const element = video.current;
+          if (element === null) return;
+          if (element.paused) void element.play().catch(() => setPlaying(false));
+          else element.pause();
+        }}
+      >
+        {playing ? <PauseSolid size={15} /> : <PlaySolid size={15} />}
+      </button>
+    </span>
   );
 }
 

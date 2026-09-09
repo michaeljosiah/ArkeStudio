@@ -18,7 +18,7 @@ import { resolveModel } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, IconButton, cx } from "../components/ui.js";
-import { RefreshCw, Sparkle, Upload } from "../components/icons.js";
+import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
@@ -295,19 +295,19 @@ export function CharacterReferenceScreen() {
               <h2>Main photo</h2>
               <p>the face and physical identity to preserve</p>
             </div>
+            {/* Every card carried the same pair of words (issue 1010, U1). Upload is the quiet
+                half — a file from this computer, nothing generated — so it becomes the glyph and
+                the card keeps one named button. */}
             <IconButton
-              type="button"
-              label={photoUploading ? "Uploading main photo…" : "Upload main photo"}
-              aria-busy={photoUploading}
+              label={photoUploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
               disabled={!canUpload || photoUploading}
-              title={canUpload ? "Upload main photo · use an image from this computer" : UPLOAD_UNAVAILABLE}
               onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
             >
-              <Upload />
+              {photoUploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
-            <IconButton type="button" label={photo ? "Replace main photo" : "Create main photo"} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
-              {photo ? <RefreshCw /> : <Sparkle />}
-            </IconButton>
+            <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
+              {photo ? "Replace" : "Create"}
+            </Button>
           </div>
           {photoUpload?.status === "failed" && (
             <p className="fy-reference-fallback">{photoUpload.reason ?? "The main photo was not changed."}</p>
@@ -349,24 +349,23 @@ export function CharacterReferenceScreen() {
                 purpose behind it. Gated on a generation in flight, though — that one designates
                 itself when it lands, and would quietly replace a sheet uploaded while it ran. */}
             <IconButton
-              type="button"
-              label={sheetUploading ? "Uploading character sheet…" : "Upload character sheet"}
-              aria-busy={sheetUploading}
-              disabled={!canUpload || runningSheet || sheetUploading}
-              title={
-                !canUpload
-                  ? UPLOAD_UNAVAILABLE
-                  : runningSheet
-                    ? "A generated sheet is on its way and will take this slot when it lands"
-                    : "Upload character sheet · use a composite from this computer"
+              label={
+                sheetUploading
+                  ? "Uploading…"
+                  : !canUpload
+                    ? UPLOAD_UNAVAILABLE
+                    : runningSheet
+                      ? "A generated sheet is on its way"
+                      : "Upload"
               }
+              disabled={!canUpload || runningSheet || sheetUploading}
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
-              <Upload />
+              {sheetUploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
-            <IconButton type="button" label={runningSheet ? "Generating character sheet…" : compilation ? "Regenerate character sheet" : "Generate character sheet"} aria-busy={runningSheet} disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
-              {compilation ? <RefreshCw /> : <Sparkle />}
-            </IconButton>
+            <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
+              {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
+            </Button>
           </div>
           {sheetUpload?.status === "failed" && (
             <p className="fy-reference-fallback">{sheetUpload.reason ?? "The character sheet was not changed."}</p>

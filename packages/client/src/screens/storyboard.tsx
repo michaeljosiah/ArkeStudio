@@ -21,7 +21,7 @@ import {
   resolvePropStates,
 } from "@arke-studio/contracts";
 import { EmptyState } from "../components/layout.js";
-import { Button, Callout, Textarea, cx } from "../components/ui.js";
+import { Button, Callout, Select, Textarea, cx } from "../components/ui.js";
 import { X } from "../components/icons.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { acceptedTakeId, takesForShot, useProduction } from "../lib/selectors.js";
@@ -698,8 +698,9 @@ export function ShotSheetScreen() {
                       <label key={entry.propId} className="fy-sheetref">
                         <span className="fy-mono">PROP</span>
                         <span style={{ flex: 1, minWidth: 0, font: "500 11.5px var(--font-sans)" }}>{entry.propName}</span>
-                        <select
-                          aria-label={`${entry.propName} state for this shot`}
+                        <Select
+                          label={`${entry.propName} state for this shot`}
+                          className="fy-sheetselect"
                           value={entry.stateId ?? ""}
                           onChange={(e) => {
                             const stateId = e.target.value;
@@ -713,7 +714,7 @@ export function ShotSheetScreen() {
                               {state.name} · {state.reference ? "has a reference" : "no ref yet"}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </label>
                     );
                   })}
@@ -757,7 +758,8 @@ export function ShotSheetScreen() {
                 </div>
               ))}
               {addingRef ? (
-                <select
+                <Select
+                  label="Add a reference"
                   autoFocus
                   className="fy-sheetselect"
                   defaultValue=""
@@ -776,7 +778,7 @@ export function ShotSheetScreen() {
                       {s.name} · {s.type}
                     </option>
                   ))}
-                </select>
+                </Select>
               ) : (
                 <button type="button" className="fy-sheetaddref" onClick={() => setAddingRef(true)}>
                   + Add a reference
@@ -847,9 +849,9 @@ export function ShotSheetScreen() {
                     {field.label}
                     {own !== undefined && <span className="fy-sheetcam__dot" title="overrides the scene" />}
                   </span>
-                  <select
+                  <Select
+                    label={`Shot ${field.label}`}
                     className="fy-sheetselect"
-                    aria-label={field.label}
                     value={own ?? ""}
                     onChange={(e) => framingSet(field.key, e.target.value === "" ? undefined : e.target.value)}
                   >
@@ -859,7 +861,7 @@ export function ShotSheetScreen() {
                         {o}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               );
             })}

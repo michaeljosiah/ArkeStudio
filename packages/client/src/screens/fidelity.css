@@ -1149,7 +1149,6 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 .fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
-.fy-sheet-state { margin-left: 8px; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 /* The tabs flow beside the name, wrapping below it when needed, and below world notices. */
 .fy-sheet__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 10px; }
 .fy-sheet__heading > .fy-sheet__name { margin-bottom: 0; margin-right: auto; }
@@ -1842,6 +1841,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border: 1px solid var(--border); border-radius: 8px; background: var(--background);
   padding: 6px 9px; box-shadow: var(--shadow-xs);
 }
+/* The camera rows are selects and text boxes side by side and must stay the same control at the
+   same size (issue 1010, U2). The wrapper takes the row's share; the select keeps the sheet's
+   type and reserves the drawn chevron's room. */
+.fy-sheetcam > .ui-select, .fy-sheetref > .ui-select, .fy-sheetrefs > .ui-select { flex: 1; min-width: 0; }
+select.fy-sheetselect { padding-right: 24px; }
 .fy-sheetstep {
   display: flex; align-items: center;
   border: 1px solid var(--border); border-radius: 8px; background: var(--background);
@@ -3264,39 +3268,8 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   cursor: pointer;
   transition: var(--transition-control);
 }
-.fy-set__pill:hover { background-color: var(--accent); }
+.fy-set__pill:hover { background: var(--accent); }
 .fy-set__pill:disabled { opacity: 0.5; cursor: default; }
-/* Keep the browser's keyboard and option semantics while drawing the closed controls with
-   the same type, border and chevron as the rest of the studio (issue 1010). */
-.fy-set__select {
-  min-width: 0;
-  max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  padding: 7px 12px;
-  font: 500 11.5px var(--font-sans);
-  background: var(--background);
-  color: var(--foreground);
-}
-select.fy-set__select, select.fy-set__pill, select.fy-sheetselect {
-  appearance: none;
-  padding-right: 30px;
-  background-image:
-    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
-    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
-  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
-  background-size: 4px 4px;
-  background-repeat: no-repeat;
-  cursor: pointer;
-}
-select.fy-set__select:focus-visible, select.fy-set__pill:focus-visible, .fy-sheetselect:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
-select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; cursor: default; }
-@media (forced-colors: active) {
-  select.fy-set__select, select.fy-set__pill, select.fy-sheetselect { appearance: auto; background-image: none; }
-}
 /* Turn 124: a pane of rows keeps a 760px reading column. Native selects must shrink
    independently of their longest option; the state stays readable below the same control. */
 .fy-set--general { grid-template-columns: minmax(0, 760px); }
@@ -3306,7 +3279,11 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
   grid-template-columns: 118px minmax(0, 1fr) 6px;
   gap: 6px 12px;
 }
-.fy-set__row--routing > .fy-set__pill { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+/* The pill is a `<select>` inside the house wrapper now (issue 1010, U2), so the grid places the
+   wrapper and the control fills it. The chevron is drawn rather than the platform's, and it is
+   drawn over the control — so the text keeps clear of the last 24px. */
+.fy-set__row--routing > .ui-select { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+select.fy-set__pill { padding-right: 26px; }
 .fy-set__row--routing > .fy-set__state { grid-column: 2; }
 .fy-set__row--routing > .fy-set__dot { grid-column: 3; grid-row: 1; }
 /*
@@ -4269,7 +4246,9 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
 .fy-reference-card__foot .ui-btn { height: 32px; }
 /* Only the first button takes the slack, so a second one sits beside it rather than having the
    leftover space split between them — which is what an auto margin on every button does. */
-.fy-reference-card__foot :is(.ui-btn, .ui-iconbtn):first-of-type { margin-left: auto; }
+/* Matched by element, not by class: since issue 1010 the first control in the foot is the upload
+   glyph, so `.ui-btn:first-of-type` matched nothing and the pair stopped being pushed right. */
+.fy-reference-card__foot > button:first-of-type { margin-left: auto; }
 .fy-reference-card__dispatch { margin-top: auto; border-top: 1px solid var(--border); min-height: 58px; padding: 10px 15px; display: flex; align-items: center; gap: 12px; }
 .fy-reference-card__dispatch > span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-reference-card__dispatch .ui-btn { margin-left: auto; }
@@ -4575,7 +4554,10 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
   border-right: 1px solid var(--border);
   /* 52px, as the head and the far rail pad, so the three columns clear the nav band together. */
   padding: 52px 14px 16px;
-  overflow: hidden;
+  /* Not `hidden`: put away, this column is 48px and its two controls are glyphs whose tooltips
+     are wider than the column (issue 1010). The list below does its own clipping, which is where
+     the long conversation titles actually are. */
+  overflow: visible;
   animation: fy-fade-up 0.6s var(--ease-out) both;
 }
 /*
@@ -4587,7 +4569,7 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
 .fy-chatnav--shut .fy-chatnav__head { flex-direction: column; gap: 8px; }
 .fy-chatnav__new { flex: 1; min-width: 0; }
 .fy-chatnav__list {
-  flex: 1; min-height: 0; overflow-y: auto; margin-top: 14px;
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; margin-top: 14px;
   display: flex; flex-direction: column; gap: 1px;
 }
 /*
@@ -4740,6 +4722,12 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
 .fy-actioncard__body p { margin: 0; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__body { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .fy-actioncard__media { display: block; width: 100%; max-height: 280px; border-radius: 7px; background: var(--media-overlay-bg); object-fit: contain; }
+/* One drawn button over the poster instead of the browser's player (issue 1010, U2). The wrapper
+   is what the layout now sees, so where the `<video>` used to be the flex item that filled its
+   row, the wrapper has to be the one that does. */
+.fy-posterplayer { position: relative; display: block; }
+.fy-actioncard__line > .fy-posterplayer { width: 100%; }
+.fy-posterplay { width: 40px; height: 40px; }
 .fy-actioncard__body ul { margin: 0; padding-left: 18px; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font: 400 12px/1.5 var(--font-sans); }
 .fy-actioncard__change { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: baseline; font: 400 12px/1.5 var(--font-sans); }
@@ -6216,10 +6204,26 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
 .fy-timeline__zoom { display: inline-flex; align-items: center; gap: 1px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
 .fy-timeline__zoom .fy-tlbtn { border: 0; border-radius: 0; height: 20px; }
 .fy-timeline__zoom .fy-mono { font-size: 9.5px; color: var(--muted-foreground); padding: 0 4px; }
+/*
+ * The house tooltip, on hover *and* on keyboard focus (issue 1010).
+ *
+ * It has to be drawn rather than the platform's `title`, because `title` answers the pointer and
+ * nobody else: tab to a glyph-only control and it says nothing at all, which is exactly what
+ * turning a row of words into a row of marks would otherwise cost a keyboard user.
+ *
+ * The cost of drawing it is that it is an absolutely positioned pseudo-element, so a container
+ * that clips cuts it off. Anchor positioning with `position: fixed` was tried as the general
+ * escape and does not work here: `fy-fade-up` leaves a resolved identity transform on most of
+ * this app's columns, and a transformed ancestor is a containing block for fixed descendants and
+ * clips them anyway. So the rule stays simple, and a container that both clips and holds an icon
+ * button is fixed where it is — see `.fy-chatnav`, which was the one.
+ */
 .fy-tip { position: relative; }
 .fy-tip::after {
   content: attr(data-tip); position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
-  background: var(--foreground); color: var(--background); font: 400 10px var(--font-sans); white-space: nowrap;
+  background: var(--foreground); color: var(--background); font: 400 10px/1.5 var(--font-sans);
+  /* A short tip still sits on one line; a consequence long enough to need two gets two. */
+  white-space: normal; width: max-content; max-width: 220px; text-align: center;
   padding: 3px 7px; border-radius: 5px; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 40;
 }
 .fy-tip:hover::after, .fy-tip:focus-visible::after { opacity: 1; }

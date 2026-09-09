@@ -4,11 +4,12 @@ import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceU
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
 import { Button, Callout, IconButton } from "../components/ui.js";
+import { Speaker } from "../components/icons.js";
+import { Loading } from "../components/loading.js";
 import { readBibleSection, restoreBible, saveBible, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
-import { Speaker } from "../components/icons.js";
 import { ClipPlayButton } from "../components/player.js";
 
 /**
@@ -275,11 +276,15 @@ export function BibleScreen() {
                             }}
                           />
                         ) : (
+                          /* One per heading, six times down the page (issue 1010, U1). The
+                             speaker is the word; only the wait still needs one, because a
+                             glyph cannot say it is busy. */
                           <IconButton
-                            type="button"
-                            label={`Read ${section.heading} aloud`}
-                            title={read?.heading === section.heading && !mine ? "Preparing audio…" : `Read ${section.heading} aloud`}
-                            aria-busy={read?.heading === section.heading && !mine}
+                            label={
+                              read?.heading === section.heading && !mine
+                                ? `Preparing ${section.heading}`
+                                : `Read ${section.heading} aloud`
+                            }
                             disabled={section.body.trim() === "" || (read?.heading === section.heading && !mine)}
                             onClick={() => {
                               if (!worldId) return;
@@ -288,7 +293,7 @@ export function BibleScreen() {
                               setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
                             }}
                           >
-                            <Speaker />
+                            {read?.heading === section.heading && !mine ? <Loading inline size={13} /> : <Speaker />}
                           </IconButton>
                         )}
                       </span>

@@ -100,7 +100,7 @@ Follow [Stage evaluation](stage-evaluation.md) for fixture constraints, the actu
 and separate live-model cinematic evaluation. Focused regression set from the repository root:
 
 ```powershell
-node --import tsx --test packages/contracts/test/staging.test.ts packages/contracts/test/stage-scenes.test.ts packages/coordinator/test/productions/stage-construction.test.ts packages/coordinator/test/productions/stage-playblast.test.ts
+node --import tsx --test packages/contracts/test/staging.test.ts packages/contracts/test/stage-camera-semantics.test.ts packages/contracts/test/stage-scenes.test.ts packages/coordinator/test/productions/stage-construction.test.ts packages/coordinator/test/productions/stage-playblast.test.ts
 ```
 
 Use the client scene-workspace tests for Keep/Discard and scope controls, and coordinator scene

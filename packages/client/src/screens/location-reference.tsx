@@ -18,7 +18,9 @@ import {
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { Portrait } from "../components/portrait.js";
-import { Button, Callout, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Upload } from "../components/icons.js";
+import { Loading } from "../components/loading.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { shortDate } from "../lib/format.js";
 import {
@@ -413,14 +415,14 @@ export function LocationReferenceScreen() {
             <Button ref={addRef} disabled={full} onClick={() => setAdding(true)}>
               {establishing ? "Generate" : "Add a view"}
             </Button>
-            <Button
-              variant="ghost"
+            {/* The glyph, for the same reason the character kit's is one (issue 1010, U1). */}
+            <IconButton
+              label={uploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
               disabled={!canUpload || uploading || full}
-              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
               onClick={() => importLocationViewCandidate(worldId, sheetId)}
             >
-              {uploading ? "Uploading…" : "Upload"}
-            </Button>
+              {uploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
           </div>
           <GenerationDialog

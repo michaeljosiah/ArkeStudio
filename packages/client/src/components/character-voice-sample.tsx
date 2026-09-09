@@ -6,6 +6,8 @@ import { generateCharacterVoiceSample, send, sendAttachFilesCorrelated, subscrib
 import { mediaUrl } from "../lib/media.js";
 import { playClip } from "../lib/audio.js";
 import { Button, cx } from "./ui.js";
+import { Check } from "./icons.js";
+import { PosterVideo } from "./player.js";
 import { Portrait, sheetPortraitPath } from "./portrait.js";
 
 const ReviewOperationId = z.string().uuid();
@@ -30,7 +32,11 @@ function Tick({ on, onChange, label, note, testId }: {
   on: boolean; onChange: (next: boolean) => void; label: string; note?: string; testId?: string;
 }) {
   return <label className="fy-vstick">
-    <input type="checkbox" checked={on} data-testid={testId} onChange={event => onChange(event.target.checked)} />
+    {/* The house box, not the platform's (issue 1010, U2). */}
+    <span className="ui-check__box">
+      <input type="checkbox" checked={on} data-testid={testId} onChange={event => onChange(event.target.checked)} />
+      <Check size={11} />
+    </span>
     <span>{label}</span>
     {note !== undefined && <span className="fy-mono">{note}</span>}
   </label>;
@@ -211,7 +217,10 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
           <div className="fy-vssources__head">
             <h3>Or use something already here</h3>
             <label className="fy-vstick">
-              <input type="checkbox" checked={trim} data-testid="sample-trim" onChange={e => setTrim(e.target.checked)} />
+              <span className="ui-check__box">
+                <input type="checkbox" checked={trim} data-testid="sample-trim" onChange={e => setTrim(e.target.checked)} />
+                <Check size={11} />
+              </span>
               <span>Take a range</span>
             </label>
             {(trim || sourceId.startsWith("take:")) && <span className="fy-vsrange">
@@ -237,7 +246,7 @@ export function VoiceSampleFlow({ world, sheet, onClose }: { world: WorldBundle;
               <Button disabled={busy} onClick={() => { setSourceId(`take:${production}:${take}`); prepare(`take:${production}:${take}`); }}>Review</Button>
             </div>)}
           </div>
-          {selectedArtifact?.kind === "video" && <video aria-label="Speaking video picture preview" controls muted src={mediaUrl(world.meta.slug, `artifacts/${selectedArtifact.file}`)} className="fy-vsvideo" />}
+          {selectedArtifact?.kind === "video" && <PosterVideo label="Speaking video picture preview" muted src={mediaUrl(world.meta.slug, `artifacts/${selectedArtifact.file}`)} className="fy-vsvideo" />}
         </section>
       </div>
       <footer className="fy-voicesheet__foot">

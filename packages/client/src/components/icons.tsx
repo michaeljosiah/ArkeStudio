@@ -502,3 +502,13 @@ export const Power = icon(<><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12
 export const FileText = icon(<><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>);
 export const ArrowLeftRight = icon(<><path d="m8 3-4 4 4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" /></>);
 export const Wrench = icon(<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />);
+
+// ---- Row verbs and one-register toolbars (issue 1010) ----------------------------------------
+export const ChevronUp = icon(<path d="m18 15-6-6-6 6" />);
+export const Help = icon(<><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></>);
+/* A track of sound, and the plus that adds one — the verb drawn as its own noun. */
+export const AudioPlus = icon(<><path d="M3 10v4M7 6v12M11 9v6" /><path d="M16 13h6M19 10v6" /></>);
+export const Tag = icon(<><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2v7.17a2 2 0 0 0 .59 1.42l8.7 8.7a2 2 0 0 0 2.83 0l6.58-6.58a2 2 0 0 0 0-2.83z" /><path d="M7.5 7.5h.01" /></>);
+/* Split is not the blade: the tool cuts wherever you click, this one cuts at the playhead — so
+   the mark is the line between two pieces rather than a second pair of scissors. */
+export const SplitMark = icon(<><path d="M12 3v18" /><path d="M8 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h4" /><path d="M16 8h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4" /></>);
