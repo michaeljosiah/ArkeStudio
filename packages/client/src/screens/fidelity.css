@@ -4176,7 +4176,9 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-reference-card__foot .ui-btn { height: 32px; }
 /* Only the first button takes the slack, so a second one sits beside it rather than having the
    leftover space split between them — which is what an auto margin on every button does. */
-.fy-reference-card__foot .ui-btn:first-of-type { margin-left: auto; }
+/* Matched by element, not by class: since issue 1010 the first control in the foot is the upload
+   glyph, so `.ui-btn:first-of-type` matched nothing and the pair stopped being pushed right. */
+.fy-reference-card__foot > button:first-of-type { margin-left: auto; }
 .fy-reference-card__dispatch { margin-top: auto; border-top: 1px solid var(--border); min-height: 58px; padding: 10px 15px; display: flex; align-items: center; gap: 12px; }
 .fy-reference-card__dispatch > span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-reference-card__dispatch .ui-btn { margin-left: auto; }
@@ -4647,8 +4649,11 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-actioncard__body p { margin: 0; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__body { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .fy-actioncard__media { display: block; width: 100%; max-height: 280px; border-radius: 7px; background: var(--media-overlay-bg); object-fit: contain; }
-/* One drawn button over the poster instead of the browser's player (issue 1010, U2). */
+/* One drawn button over the poster instead of the browser's player (issue 1010, U2). The wrapper
+   is what the layout now sees, so where the `<video>` used to be the flex item that filled its
+   row, the wrapper has to be the one that does. */
 .fy-posterplayer { position: relative; display: block; }
+.fy-actioncard__line > .fy-posterplayer { width: 100%; }
 .fy-posterplay { width: 40px; height: 40px; }
 .fy-actioncard__body ul { margin: 0; padding-left: 18px; font: 400 12px/1.55 var(--font-sans); }
 .fy-actioncard__line { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font: 400 12px/1.5 var(--font-sans); }

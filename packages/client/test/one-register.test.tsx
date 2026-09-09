@@ -57,8 +57,16 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
       assert.match(button, /class="[^"]*ui-iconbtn/, `${verb} is drawn as a glyph`);
       // `title`, not the timeline's drawn tip: an icon-only control can sit inside a clipping
       // ancestor — the put-away World Chat rail is 48px and hides its overflow.
-      assert.match(button, new RegExp(`title="${verb}"`), `${verb} carries a tooltip`);
+      assert.match(button, new RegExp(`title="${verb}`), `${verb} carries a tooltip`);
     }
+    // Dropping the word must not drop what the word stood next to: the text button carried this
+    // on its own `title`, and a glyph with less to say than the control it replaced is a worse
+    // control (codex review of this change).
+    assert.match(
+      html,
+      /title="Retire — stays resolvable for existing citations; leaves pickers for new work"/,
+      "and Retire still says what it leaves behind",
+    );
     assert.doesNotMatch(
       html,
       /<button[^>]*class="ui-btn[^"]*"[^>]*>Rename<\/button>/,

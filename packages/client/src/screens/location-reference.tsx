@@ -420,7 +420,7 @@ export function LocationReferenceScreen() {
               disabled={!canUpload || uploading || full}
               onClick={() => importLocationViewCandidate(worldId, sheetId)}
             >
-              {uploading ? <Loading size={13} /> : <Upload />}
+              {uploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
             {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
           </div>

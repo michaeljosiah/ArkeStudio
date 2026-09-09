@@ -45,12 +45,26 @@ export function Button({
  */
 export function IconButton({
   label,
+  hint,
   className,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  /**
+   * What the press costs or leaves behind, for the tooltip only. The accessible name stays the
+   * verb; this is where a consequence the text button used to carry in its own `title` goes, so
+   * dropping the word does not drop what the word was standing next to.
+   */
+  hint?: string;
+}) {
   return (
-    <button className={cx("ui-iconbtn", className)} aria-label={label} title={label} {...rest}>
+    <button
+      className={cx("ui-iconbtn", className)}
+      aria-label={label}
+      title={hint === undefined ? label : `${label} — ${hint}`}
+      {...rest}
+    >
       {children}
     </button>
   );

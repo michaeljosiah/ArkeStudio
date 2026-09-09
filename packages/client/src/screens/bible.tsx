@@ -298,7 +298,7 @@ export function BibleScreen() {
                               setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
                             }}
                           >
-                            {read?.heading === section.heading && !mine ? <Loading size={13} /> : <Speaker />}
+                            {read?.heading === section.heading && !mine ? <Loading inline size={13} /> : <Speaker />}
                           </IconButton>
                         )}
                       </span>

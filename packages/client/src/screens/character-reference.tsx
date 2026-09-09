@@ -283,7 +283,7 @@ export function CharacterReferenceScreen() {
               disabled={!canUpload || photoUploading}
               onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
             >
-              {photoUploading ? <Loading size={13} /> : <Upload />}
+              {photoUploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
             <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
               {photo ? "Replace" : "Create"}
@@ -341,7 +341,7 @@ export function CharacterReferenceScreen() {
               disabled={!canUpload || runningSheet || sheetUploading}
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
-              {sheetUploading ? <Loading size={13} /> : <Upload />}
+              {sheetUploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}

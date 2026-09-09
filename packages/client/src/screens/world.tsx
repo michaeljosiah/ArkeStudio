@@ -1940,6 +1940,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         {sheet.production !== undefined && (
           <IconButton
             label="Promote to the world"
+            hint={`out of ${sheet.production}, keeping the id, every citation and the reference kit`}
             onClick={() => worldId && lifecycle.track(promoteGuest(worldId, sheetPath))}
           >
             <Users />
@@ -1947,6 +1948,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         )}
         <IconButton
           label="Retire"
+          hint="stays resolvable for existing citations; leaves pickers for new work"
           disabled={sheet.retired === true}
           onClick={() => worldId && retireEntity(worldId, sheetPath)}
         >
