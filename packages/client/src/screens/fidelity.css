@@ -6273,7 +6273,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-pictclip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; z-index: 3; }
 .fy-pictclip.fy-cutseg--gap { display: flex; align-items: center; justify-content: center; }
 .fy-pictclip__gap { font: 400 9px var(--font-mono); padding: 0 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-pictclip__grip { position: absolute; top: 0; bottom: 0; width: 7px; cursor: ew-resize; touch-action: none; z-index: 2; }
+.fy-pictclip__grip { position: absolute; top: 0; bottom: 0; width: 12px; cursor: ew-resize; touch-action: none; z-index: 2; }
 .fy-pictclip__grip--start { left: 0; }
 .fy-pictclip__grip--end { right: 0; }
 .fy-pictclip__grip:hover { background: color-mix(in srgb, var(--foreground) 22%, transparent); }
@@ -6305,7 +6305,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-track[data-track="overlay"] .fy-track__lane { height: 44px; }
 .fy-track[data-track="ambience"] .fy-typedlane, .fy-track[data-track="music"] .fy-typedlane { height: 38px; }
 .fy-typedlane--over { border-color: var(--foreground); background: color-mix(in srgb, var(--accent) 60%, transparent); }
-.fy-typedclip { position: absolute; top: 2px; bottom: 2px; box-sizing: border-box; margin: 0; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font: 400 8.5px var(--font-mono); display: flex; align-items: center; gap: 6px; overflow: hidden; cursor: grab; user-select: none; touch-action: none; }
+.fy-typedclip { position: absolute; top: 2px; bottom: 2px; box-sizing: border-box; margin: 0; padding: 0 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font: 400 8.5px var(--font-mono); display: flex; align-items: center; gap: 6px; overflow: hidden; cursor: grab; user-select: none; touch-action: none; }
 .fy-typedclip--audio { background: color-mix(in srgb, var(--accent) 70%, var(--muted)); }
 .fy-typedclip--selected { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); z-index: 2; }
 .fy-typedclip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; z-index: 3; }
@@ -8380,13 +8380,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 /* ---- Drags, drops and handles on the lanes (issues 1034, 1035, 1036, 1037) --------------------
    The clip in hand travels; the slot the sequence will use is drawn; a neighbour slides rather
    than swaps; a drop target says what it will do; a handle can be found without hunting. */
-.fy-pictclip__grip { width: 12px; }
 .fy-pictclip__grip > i { position: absolute; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 2px; background: var(--foreground); opacity: 0; transition: opacity .12s; }
 .fy-pictclip__grip--start > i { left: 3px; }
 .fy-pictclip__grip--end > i { right: 3px; }
 .fy-pictclip__grip:hover { background: color-mix(in srgb, var(--foreground) 14%, transparent); }
 .fy-pictclip:hover .fy-pictclip__grip > i, .fy-cutseg--selected .fy-pictclip__grip > i, .fy-typedclip:hover .fy-pictclip__grip > i, .fy-typedclip--selected .fy-pictclip__grip > i, .fy-pictclip__grip:hover > i { opacity: .9; }
-.fy-typedclip { padding: 0 12px; }
 .fy-typedclip--picture > .fy-portrait { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; z-index: 0; }
 .fy-typedclip--picture > .fy-portrait--fallback { display: none; }
 .fy-typedclip--picture > .fy-typedclip__name { position: relative; z-index: 1; flex: none; max-width: calc(100% - 20px); background: color-mix(in srgb, var(--media-overlay-bg) 65%, transparent); color: var(--media-overlay-fg); border-radius: 4px; padding: 1px 5px; }

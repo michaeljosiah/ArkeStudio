@@ -516,8 +516,10 @@ describe("filing states an owner, and dedup honours it (R-11, D8)", () => {
     assert.equal(filed.outcome === "filed" ? filed.artifact.production : null, "saltlight");
 
     // The escape hatch of §2.5: the same document, filed from the world's shelf, says "the
-    // world's" out loud. Dedup returns the existing sidecar, so silence could not have said it.
-    const again = await fileArtifact(store, { sourcePath: source, production: null });
+    // world's" out loud. Dedup returns the existing sidecar, so silence could not have said it —
+    // and since PR 1039 only a caller making that decision re-homes; a plain import (the next
+    // test) leaves the owner alone.
+    const again = await fileArtifact(store, { sourcePath: source, production: null, reownOnDuplicate: true });
     assert.equal(again.outcome, "deduplicated");
     assert.equal(again.outcome === "deduplicated" ? again.artifact.production : "still owned", undefined);
     assert.equal(
