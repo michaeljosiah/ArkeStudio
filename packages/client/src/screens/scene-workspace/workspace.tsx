@@ -39,6 +39,7 @@ import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./fram
 import { ShotLightbox } from "./lightbox.js";
 import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
 import { CharacterDialog } from "./character-dialog.js";
+import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
 import { Pin, Plus } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
@@ -98,7 +99,7 @@ export function SceneWorkspace({
   // A closed picker or dialog is unmounted, and a removed modal drops focus on the body; the
   // door that opened it takes focus back, as the Generate frames dialog's does.
   const doorFocus = useRef<HTMLElement | null>(null);
-  const closeDoor = () => { setPicker(null); setOpenMember(null); doorFocus.current?.focus(); };
+  const closeDoor = () => { setPicker(null); setOpenMember(null); setPlaceOpen(false); doorFocus.current?.focus(); };
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
@@ -469,7 +470,7 @@ export function SceneWorkspace({
                   <Plus size={10} />Add a location
                 </button>
               ) : (
-                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={placeOpen} onClick={() => setPlaceOpen(true)}>
+                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={placeOpen} onClick={(event) => { doorFocus.current = event.currentTarget; setPlaceOpen(true); }}>
                   {locationSheet === undefined ? null : <span className="fy-sw__plate" aria-hidden="true"><SheetPicture world={world} sheet={locationSheet} /></span>}
                   {locationName}
                 </button>
@@ -772,6 +773,18 @@ export function SceneWorkspace({
             onWrite={write}
           />
         )}
+        {placeOpen && scene.inherits?.location !== undefined ? (
+          <LocationDialog
+            key={scene.inherits.location}
+            world={world}
+            production={production}
+            scene={scene}
+            onClose={closeDoor}
+            // Change location is the picker in its third title (R-19); the dialog steps aside
+            // for it and the door's focus comes back when the picker closes.
+            onChangeLocation={() => { setPlaceOpen(false); setPicker("change-location"); }}
+          />
+        ) : null}
         {picker === null ? null : (
           <CastPicker
             world={world}

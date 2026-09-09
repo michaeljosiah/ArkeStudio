@@ -3342,6 +3342,16 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     assert.equal(place.getAttribute("aria-haspopup"), "dialog");
   });
 
+  it("opens the place from its chip, and Change location hands over to the picker (R-18, R-19)", async () => {
+    const mounted = await mountState(FIXTURE_STATE);
+    await click(q(mounted, ".fy-sw__place")!);
+    assert.equal(q(mounted, ".fy-chardialog")?.getAttribute("aria-label"), "The Vigil in scene 4");
+    await click([...q(mounted, ".fy-chardialog")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Change location") as HTMLElement);
+    assert.equal(q(mounted, ".fy-chardialog"), null, "the dialog steps aside for the picker");
+    assert.equal(q(mounted, ".fy-castpicker")?.getAttribute("aria-label"), "Change location");
+    assert.deepEqual([...q(mounted, ".fy-castpicker")!.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil · in the scene"]);
+  });
+
   it("offers a dashed door when the scene has no location, and that door's picker lists locations only (R-2, R-20)", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));

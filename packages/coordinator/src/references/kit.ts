@@ -494,8 +494,16 @@ export async function attachCharacterLook(
 ): Promise<void> {
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const looks = [...(kit.looks ?? [])];
-  const index = looks.findIndex((look) => look.id === lookId);
-  if (index === -1) throw new Error(`no accepted look "${lookId}"`);
+  let index = looks.findIndex((look) => look.id === lookId);
+  if (index === -1) {
+    // A location's views are not looks, but a view chosen as a scene's plate rides as one
+    // (SPEC-044 R-18, §2.6): the first attachment makes the look, keyed by the view, so the
+    // planner's one scoping rule covers places without a second record of the choice.
+    const view = (kit.locationViews ?? []).find((candidate) => candidate.id === lookId && candidate.status === "active");
+    if (view === undefined) throw new Error(`no accepted look "${lookId}"`);
+    looks.push({ id: view.id, file: view.file, kind: "view", prompt: view.name, sourceTakeId: view.sourceTakeId, artDirectionVersion: view.artDirectionVersion, acceptedAt: view.acceptedAt });
+    index = looks.length - 1;
+  }
   const previous = looks[index]!.attachedTo;
   const next = { ...looks[index]! };
   if (scope) next.attachedTo = scope;

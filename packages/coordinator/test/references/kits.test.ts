@@ -1235,6 +1235,24 @@ describe("location views and the sheet they assemble (#243)", () => {
     await store.close();
   });
 
+  it("attaches a view to a scene as its plate, and the plate rides where the location's picture does (SPEC-044 R-18, §2.6)", async () => {
+    const { dir, store } = await openTicking();
+    await acceptView(store, dir, 1, "Establishing view");
+    await acceptView(store, dir, 2, "From the door");
+    const scope = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
+    await attachCharacterLook(store, VIGIL.id, "v2", scope);
+    const kit = (await readKit(store, VIGIL.id))!.kit;
+    const door = orderedLocationViews(kit).find((candidate) => candidate.name === "From the door")!;
+    assert.deepEqual(kit.looks?.map((look) => [look.id, look.kind, look.file, look.attachedTo]), [["v2", "view", door.file, scope]], "the first attachment makes the look, keyed by the view");
+    assert.equal(attachmentFor(kit, VIGIL, "primary", scope).file, `references/${VIGIL.id}/${door.file}`, "the plate that rides is the view");
+    assert.equal(attachmentFor(kit, VIGIL, "primary", { productionId: "saltlight", sceneId: "sc_05" }).mode, "designated", "another scene keeps the kit's sheet");
+    await attachCharacterLook(store, VIGIL.id, "v2", null);
+    const detached = (await readKit(store, VIGIL.id))!.kit;
+    assert.deepEqual(detached.looks?.map((look) => [look.id, look.attachedTo]), [["v2", undefined]], "detaching keeps the look and drops the scope");
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v9", scope), /no accepted look/);
+    await store.close();
+  });
+
   it("keeps panel order establishing-first and rebuilds the sheet on every acceptance", async () => {
     const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");

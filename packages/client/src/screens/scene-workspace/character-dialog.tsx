@@ -32,7 +32,7 @@ const seconds = (value: number | null | undefined): string | null => (value == n
 const shotList = (numbers: readonly number[]): string => `shot${numbers.length === 1 ? "" : "s"} ${numbers.join(", ")}`;
 
 /** One card in a row (SPEC-044 R-11): solid is a choice, dashed is a door, the one in use is ringed. */
-function Card({ on, door, thumb, label, sub, disabled, onPress }: {
+export function Card({ on, door, thumb, label, sub, disabled, onPress }: {
   on?: boolean; door?: boolean; thumb?: React.ReactNode; label: string; sub?: string | null; disabled?: boolean; onPress: () => void;
 }) {
   return (
