@@ -138,6 +138,38 @@ describe("drawing the picture", () => {
     assert.equal(await backfillArtifactPosters(store, exhausted.maker, { budgetMs: 1, now: () => (late += 1000) }), 0);
   });
 
+  it("moves past a video that exhausts every timeout and removes its partial poster (#1061)", async (t) => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    t.after(() => store.close());
+    for (const name of ["broken.mp4", "good.mp4"]) {
+      const source = join(dir, name);
+      await writeFile(source, `film ${name}`);
+      assert.equal((await fileArtifact(store, { sourcePath: source, production: null, mediaProbe: probe })).outcome, "filed");
+    }
+    let now = 0;
+    const attempts: string[] = [];
+    const posters: TakePosterMaker = { write: async (input, output, options) => {
+      attempts.push(input);
+      if (input.endsWith("broken.mp4")) {
+        now += options!.timeoutMs!;
+        await writeFile(output, "partial");
+        return { ok: false, reason: "timeout" };
+      }
+      now += 10;
+      await writeFile(output, "png");
+      return { ok: true };
+    } };
+    assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), 1);
+    assert.equal(attempts.length, 2, "the first timeout leaves time for the next video");
+    assert.ok(now < 5_000);
+    const broken = store.getBundle().artifacts.find((artifact) => artifact.file === "broken.mp4")!;
+    assert.equal(await stat(join(dir, artifactPosterPath(broken.id))).catch(() => null), null);
+    attempts.length = 0;
+    assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), 0);
+    assert.equal(attempts.length, 1, "later opens reuse the successful poster despite the repeated failure");
+  });
+
   it("does not hold the open past its budget for a maker that hangs", async (t) => {
     const dir = await makeTempWorld();
     const store = await WorldStore.open(dir);

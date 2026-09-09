@@ -119,6 +119,8 @@ async function writeMediaPoster(
 
 /** How long past its own deadline the backfill waits for a maker that does not honour one. */
 const BACKSTOP_MS = 1_000;
+/** A corrupt first video must leave time for later posters on each open (#1061). */
+const BACKFILL_POSTER_SLICE_MS = 1_000;
 
 /**
  * How long one import spends drawing posters, all files together. The maker allows fifteen
@@ -146,6 +148,7 @@ export async function backfillArtifactPosters(
   if (maker === undefined) return 0;
   const now = options.now ?? Date.now;
   const deadline = now() + options.budgetMs;
+  const sliceMs = Math.min(BACKFILL_POSTER_SLICE_MS, Math.max(1, options.budgetMs / 2));
   let drawn = 0;
   for (const artifact of store.getBundle().artifacts) {
     // Retired ones included: retirement keeps the bytes for the cuts that cite them (#957), and a
@@ -158,16 +161,18 @@ export async function backfillArtifactPosters(
     /*
      * The budget binds the wait, not only the start. A maker stuck on a corrupt file has its own
      * timeout, fifteen seconds, and the open this pass sits in front of would otherwise wait it
-     * out. So the maker is given what is left and stops its process at that — drained, not
+     * out. Each file gets at most a slice of the pass, leaving later videos a turn even when the
+     * first always times out. The maker stops its process at that — drained, not
      * abandoned to draw into a world that may have closed — and a maker that ignores the figure
      * is left behind at a backstop a second later. The backstop timer stays referenced on
      * purpose: against a maker that never settles it is the only thing keeping the loop alive,
      * and Node 22 resolves an empty loop out from under the await.
      */
     let backstop: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = Math.min(remaining, sliceMs);
     const outcome = await Promise.race([
-      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs: remaining }),
-      new Promise<null>((resolve) => { backstop = setTimeout(() => resolve(null), remaining + BACKSTOP_MS); }),
+      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs }),
+      new Promise<null>((resolve) => { backstop = setTimeout(() => resolve(null), timeoutMs + BACKSTOP_MS); }),
     ]);
     // A maker that won leaves no timer behind to hold the process — or a test — open after it.
     clearTimeout(backstop);
