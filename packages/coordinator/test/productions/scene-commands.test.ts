@@ -740,7 +740,7 @@ describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amen
         baseVersion: before.version,
         command: { kind: "edit-scene" },
       }),
-      (err: unknown) => err instanceof SceneCommandRefused && /neither a title nor a synopsis/.test(err.message),
+      (err: unknown) => err instanceof SceneCommandRefused && /names neither a title, a synopsis, the inherited context nor the cast/.test(err.message),
     );
     assert.equal(await worldPrint(dir), print);
   });
@@ -872,4 +872,56 @@ it("retimes a one-key camera's action and hold using the previous shot duration 
   assert.deepEqual(after.staging?.keys.map(key => key.t), [0, 8]);
   assert.deepEqual(after.staging?.performances?.[0]?.keys.map(key => key.t), [0, 4]);
   assert.equal(after.staging?.performances?.[0]?.keys[0]?.hold, 2);
+});
+
+describe("edit-scene writes the place and the cast, and refuses a place the world does not hold (SPEC-044 R-7, R-9, R-19)", () => {
+  it("writes a location the world holds, and refuses one it does not, leaving the world byte-identical", async () => {
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", inherits: { location: "the-weigh-house", tone: null } },
+    });
+    const moved = await sceneOnDisk(store);
+    assert.deepEqual(moved.inherits, { location: "the-weigh-house", timeOfDay: "night" });
+    assert.equal(moved.version, before.version + 1);
+    const print = await worldPrint(dir);
+    await assert.rejects(
+      applySceneCommand(store, {
+        productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: moved.version,
+        command: { kind: "edit-scene", inherits: { location: "maren-kest" } },
+      }),
+      /location maren-kest is not in this world/,
+    );
+    assert.equal(await worldPrint(dir), print);
+  });
+
+  it("adds a member, chooses its voice, and removes it — one version each, nothing else touched", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK() } } },
+    });
+    const added = await sceneOnDisk(store);
+    assert.deepEqual(added.cast, { "maren-kest": { added: CLOCK() } });
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: added.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK(), voice: { kind: "sample" } } } },
+    });
+    const voiced = await sceneOnDisk(store);
+    assert.deepEqual(voiced.cast?.["maren-kest"], { added: CLOCK(), voice: { kind: "sample" } });
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: voiced.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": null } },
+    });
+    const removed = await sceneOnDisk(store);
+    assert.equal(removed.cast, undefined);
+    assert.equal(removed.version, before.version + 3);
+    assert.deepEqual(shotIds(removed), shotIds(before));
+    await assert.rejects(
+      applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: removed.version, command: { kind: "edit-scene" } }),
+      /names neither/,
+    );
+  });
 });

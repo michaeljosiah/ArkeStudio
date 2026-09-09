@@ -22,6 +22,7 @@ import {
   type GraphScene,
   type SceneRecord,
   type SceneBlocking,
+  type SceneCastMember,
   type Shot,
   type ShotAnchor,
   type ShotStageEdit,
@@ -45,7 +46,13 @@ import type { WorldStore } from "./../world/store.js";
  */
 
 export type SceneCommand =
-  | { kind: "edit-scene"; title?: string; synopsis?: string | null }
+  | {
+      kind: "edit-scene";
+      title?: string;
+      synopsis?: string | null;
+      inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
+      cast?: Record<string, SceneCastMember | null>;
+    }
   | { kind: "edit-stage"; shotId: string; blocking?: Omit<SceneBlocking, "version"> | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
@@ -273,13 +280,21 @@ async function candidateFor(
     case "edit-scene": {
       // A command that names nothing is refused rather than committed as a version cut over
       // an unchanged record — the schema cannot say "at least one", so this is where it is said.
-      if (command.title === undefined && command.synopsis === undefined) {
-        throw new SceneCommandRefused(["this edit names neither a title nor a synopsis"]);
+      if (command.title === undefined && command.synopsis === undefined && command.inherits === undefined && command.cast === undefined) {
+        throw new SceneCommandRefused(["this edit names neither a title, a synopsis, the inherited context nor the cast"]);
+      }
+      // The place must be a location this world holds (SPEC-044 R-19) — the same refusal Arke's
+      // proposal path makes, so a picker and a proposal cannot disagree about what a place is.
+      const location = command.inherits?.location;
+      if (location && !store.getBundle().sheets.some((sheet) => sheet.id === location && sheet.type === "location")) {
+        throw new SceneCommandRefused([`location ${location} is not in this world`]);
       }
       return editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),
         // Null on the wire is the clear; the operation reads present-with-undefined as the clear.
         ...(command.synopsis !== undefined ? { synopsis: command.synopsis ?? undefined } : {}),
+        ...(command.inherits !== undefined ? { inherits: command.inherits } : {}),
+        ...(command.cast !== undefined ? { cast: command.cast } : {}),
       });
     }
     case "edit-stage": {

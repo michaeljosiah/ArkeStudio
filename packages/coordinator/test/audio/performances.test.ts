@@ -15,7 +15,7 @@ import { writeFile, readFile, rename, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, resolvePerformanceLine, performanceLineKey, ulid } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
-import { reviewPerformance, clearPerformanceSelection } from "../../src/audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
 import { keepPerformanceRecording } from "../../src/audio/performances.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -274,4 +274,42 @@ it("keeps one immutable scratch through retries and reopen without selecting pic
       "removing the last deleted-scene note removes only its empty orphaned session");
   } finally { await rename(`${scenePath}.missing`, scenePath); }
 
+});
+
+it("keep selects: accepts, selects the line and makes the read the character's voice in one request (SPEC-044 R-15)", async t => {
+  const dir = await makeTempWorld();
+  let store = await WorldStore.open(dir); t.after(() => store.close());
+  const bundle = store.getBundle(), production = bundle.productions[0]!;
+  const scene = production.scenes.find(scene => orderedShots(scene).some(s => resolvePerformanceLine(scene, s.id).ok))!;
+  const shot = orderedShots(scene).find(s => resolvePerformanceLine(scene, s.id).ok)!;
+  const bytes = wav(Array.from({ length: 48000 }, (_, i) => Math.round(Math.sin(i / 10) * 3000)));
+  const source = join(dir, "capture-select.webm"); await writeFile(source, bytes);
+  const spool = { async claim() { return { absolutePath: source, contentType: "audio/webm", sizeBytes: bytes.length }; }, async discard() {} };
+  const tools = createAudioMediaTools({ async run(tool, args) {
+    let stdout = "";
+    if (tool === "ffprobe") stdout = JSON.stringify({ format: { duration: "1", format_name: "wav" }, streams: [{ codec_type: "audio",
+      codec_name: "pcm_s16le", sample_fmt: "s16", sample_rate: "48000", channels: 1, bits_per_sample: 16 }] });
+    else if (args[0] === "-version") stdout = "ffmpeg version test\n";
+    else await writeFile(args.at(-1)!, bytes);
+    return { code: 0, stdout: Buffer.from(stdout), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false };
+  } });
+  const request = { kind: "keep-performance-recording" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, spoolId: "00000000-0000-4000-8000-000000000001",
+    captureBasis: "self" as const, select: true, attestations: ["single-speaker" as const, "no-music" as const], cloudBasis: "self" as const };
+  const record = await keepPerformanceRecording(store, tools, spool, request);
+  assert.deepEqual(record.attestations?.map(a => a.kind), ["single-speaker", "no-music"], "attestations are said once, at Keep");
+  assert.equal(record.attestations?.[0]?.audioHash, record.provenance.outputHash);
+  assert.equal(record.cloudBasis, "self");
+  await selectKeptPerformance(store, record, request);
+  await store.close(); store = await WorldStore.open(dir);
+  const current = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(current.performanceReview.selections[performanceLineKey(record.target)]?.performanceId, record.id, "the line is selected");
+  assert.equal(current.performanceReview.reviews.at(-1)?.decision, "accept");
+  const after = current.scenes.find(s => s.id === scene.id)!;
+  assert.deepEqual(after.cast?.[record.target.speakerSheetId]?.voice, { kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
+  assert.equal(after.version, scene.version + 1, "the cast write is one scene version");
+  // The scene moved under a second Keep: the record is kept, the choice is refused, nothing is retried (T-6).
+  const stale = await keepPerformanceRecording(store, tools, spool, { ...request, requestId: ulid(), spoolId: "00000000-0000-4000-8000-000000000002", expectedSceneVersion: after.version });
+  await assert.rejects(selectKeptPerformance(store, stale, { ...request, requestId: ulid(), expectedSceneVersion: scene.version }), /version|moved/i);
+  assert.equal(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.scenes.find(s => s.id === scene.id)!.cast?.[record.target.speakerSheetId]?.voice?.kind, "performance");
 });

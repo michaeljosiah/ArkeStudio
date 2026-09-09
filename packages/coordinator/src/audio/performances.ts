@@ -80,7 +80,10 @@ export async function keepPerformanceRecording(store: WorldStore, tools: AudioMe
     if (!currentPerformanceTarget(store, resolved.target)) throw new Error("The authored target changed while audio was being prepared.");
     record = PerformanceRecordSchema.parse({ id, kind: "scratch", target: resolved.target, file: file.slice(prefix.length + 1),
       provenance, createdAt: at, recordedAt: at, transcript,
-      captureAcknowledgement: { basis: request.captureBasis, statementVersion: 1, at } });
+      captureAcknowledgement: { basis: request.captureBasis, statementVersion: 1, at },
+      // Said once, here (SPEC-044 R-14): the attestations bind the bytes this Keep produced.
+      ...(request.attestations?.length ? { attestations: request.attestations.map(kind => ({ audioHash: provenance.outputHash, kind, statementVersion: 1, acknowledgedAt: at })) } : {}),
+      ...(request.cloudBasis ? { cloudBasis: request.cloudBasis } : {}) });
     return { kind: "keep-performance-recording", source: "user", requestId: request.requestId,
       files: [{ path: `${prefix}/performance.json`, action: "create", baseHash: null, content: JSON.stringify(record, null, 2) + "\n" }] };
   });

@@ -17,6 +17,10 @@ export const PerformanceRecordBaseSchema = z.object({
   createdAt: IsoDateTimeSchema,
   captureAcknowledgement: z.object({ basis: z.enum(["self", "authorized", "licensed"]), statementVersion: z.literal(1), at: IsoDateTimeSchema }).strict().optional(),
   transcript: AudioTranscriptComparisonSchema.optional(), wordingConfirmedAt: IsoDateTimeSchema.optional(),
+  // Said once, at Keep (SPEC-044 R-14): what a dispatch needs attested about this audio, and the
+  // permission to send it, so no surface asks again per dispatch.
+  attestations: z.array(AudioAttestationSchema).optional(),
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 export const ScratchPerformanceSchema = PerformanceRecordBaseSchema.extend({ captureAcknowledgement: PerformanceRecordBaseSchema.shape.captureAcknowledgement.unwrap(), kind: z.literal("scratch"), recordedAt: IsoDateTimeSchema }).strict();
 export const SpeechToSpeechPerformanceSchema = PerformanceRecordBaseSchema.extend({

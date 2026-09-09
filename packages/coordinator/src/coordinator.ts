@@ -20,7 +20,7 @@ import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
   finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
-import { reviewPerformance, clearPerformanceSelection } from "./audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
@@ -7288,7 +7288,21 @@ export class Coordinator {
             // comes from here rather than from the write path reaching for the dispatcher.
             activePlans: (productionId) => this.activeScenePlans(store, productionId),
           },
-        ).catch((err: unknown) => {
+        ).then(async () => {
+          // Removing a member takes its scene look with it (SPEC-044 R-9): the look itself stays
+          // on the kit; only the attachment that made it ride here goes, in the same request.
+          const removed = msg.command.kind === "edit-scene" && msg.command.cast
+            ? Object.entries(msg.command.cast).filter(([, member]) => member === null).map(([sheetId]) => sheetId)
+            : [];
+          for (const sheetId of removed) {
+            for (const look of store.getBundle().referenceKits.find((kit) => kit.sheetId === sheetId)?.looks ?? []) {
+              const held = look.attachedTo;
+              if (held?.kind === "scene" && held.productionId === msg.productionId && held.sceneId === msg.sceneId) {
+                await attachCharacterLook(store, sheetId, look.id, null);
+              }
+            }
+          }
+        }).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
           // throws away the edit with nothing to show for it (the save-scene lesson).
           this.emit({
@@ -13448,9 +13462,16 @@ export class Coordinator {
           if (!this.opts.audioMediaTools || !this.opts.performanceSpool) throw new Error("Keeping a performance requires desktop audio preparation.");
           const performance = await keepPerformanceRecording(store, this.opts.audioMediaTools, this.opts.performanceSpool, msg,
             this.voiceService ? bytes => this.voiceService!.transcribe(bytes, "audio/wav") : undefined);
+          // Keep selects (SPEC-044 R-15). A step that fails after the record landed names itself;
+          // the record stays and nothing is retried against a scene that moved.
+          let reason: string | undefined;
+          if (msg.select) {
+            try { await selectKeptPerformance(store, performance, msg); }
+            catch (error) { reason = `Kept, but not chosen: ${describeCoordinatorError(error)}`; }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "kept", performance });
+            productionId: msg.productionId, status: "kept", performance, ...(reason ? { reason } : {}) });
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: "The recording could not be kept. Check the current authored line, desktop audio tools and capture, then retry. Existing performances are retained." });

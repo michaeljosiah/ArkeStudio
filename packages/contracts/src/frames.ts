@@ -1516,7 +1516,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
-    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]),
+    // Keep selects (SPEC-044 R-15): accept, select the line and choose it as the character's
+    // voice in one request. Attestations and the cloud basis are said here, once (R-14).
+    select: z.boolean().optional(),
+    attestations: z.array(z.enum(["single-speaker", "no-music"])).optional(),
+    cloudBasis: z.enum(["self", "authorized", "licensed"]).optional() }).strict(),
   z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
