@@ -83,6 +83,12 @@ function keyName(index: number, count: number): string {
   return index === 0 ? "start" : index === count - 1 ? "end" : `key ${index}`;
 }
 
+function holdsPosition(from: StagingKey, to: StagingKey): boolean {
+  // Equal offsets only describe a hold when they belong to the same coordinate space.
+  return from.anchor === to.anchor && (from.anchorSpace ?? "world") === (to.anchorSpace ?? "world") &&
+    from.p.reduce((distance, value, axis) => distance + (value - to.p[axis]!) ** 2, 0) < 1e-12;
+}
+
 /**
  * The Stage (the design's Stage tab; the Stage guide): a greybox previs where the shot is
  * blocked out — cast as figures, set as massing, one camera on a motion path — and exported as a
@@ -1016,6 +1022,17 @@ export function SceneStage({
                   patchKey(active,{...key,p:stageKeyOffset(working,key,world.p,key.t,durationSec),l:key.track?key.l:stageKeyOffset(working,key,world.l,key.t,durationSec)});
                 }}/>Turn with target</label>:null}
                 {(["roll","focalMm"] as const).map(field=><label className="fy-swstage__row" key={field}>{field==="roll"?"Roll °":"Lens mm"}<input type="number" aria-label={field==="roll"?"Camera roll":"Camera focal length"} value={activeKey?.[field]??""} min={field==="roll"?-180:1} max={field==="roll"?180:1000} disabled={frozen} onChange={e=>{const value=Number(e.target.value);if(e.target.value==="")patchKey(active,{[field]:undefined});else if(Number.isFinite(value)&&value>=(field==="roll"?-180:1)&&value<=(field==="roll"?180:1000))patchKey(active,{[field]:value});}}/></label>)}
+                {(["easeIn", "easeOut"] as const).map(field => (
+                  <label className="fy-swstage__row" key={field}>{field === "easeIn" ? "Ease in" : "Ease out"}
+                    <input type="number" aria-label={field === "easeIn" ? "Ease in" : "Ease out"} min={0} max={0.5} step={0.05}
+                      value={activeKey?.[field] ?? 0} disabled={frozen}
+                      onChange={event => {
+                        const value = Number(event.target.value);
+                        if (event.target.value === "") patchKey(active, { [field]: undefined });
+                        else if (Number.isFinite(value) && value >= 0 && value <= 0.5) patchKey(active, { [field]: value });
+                      }} />
+                  </label>
+                ))}
                 <span className="fy-swstage__quiet">{activeKey?.anchor === undefined ? "fixed in the set" : `rides with ${nameOf(activeKey.anchor)}`}</span>
               </div>
 
@@ -1206,6 +1223,22 @@ export function SceneStage({
           >
             <span className="fy-swstage__rail" aria-hidden="true" />
             <span className="fy-swstage__head-fill" style={{ width: `${((Math.min(at, durationSec) / Math.max(0.01, durationSec)) * 100).toFixed(1)}%` }} aria-hidden="true" />
+            {keys.slice(1).map((key, i) => {
+              const from = keys[i]!;
+              if (!holdsPosition(from, key) || key.t <= from.t) return null;
+              const pinned = i + 1 === keys.length - 1;
+              return (
+                <span key={i} className="fy-swstage__hold" aria-label={`Hold from ${from.t.toFixed(2)} to ${key.t.toFixed(2)} seconds`}
+                  style={{ left: `${from.t / durationSec * 100}%`, width: `${(key.t - from.t) / durationSec * 100}%` }}>
+                  <span aria-hidden="true">Hold</span>
+                  <button type="button" className="fy-swstage__hold-end" aria-label={`Retime hold ending at ${key.t.toFixed(2)} seconds`}
+                    title={pinned ? "Hold to shot end" : "Drag hold end"} disabled={frozen || pinned}
+                    onPointerDown={event => retime(i + 1, event)} onPointerMove={moveKey} onPointerUp={endKeyDrag} onPointerCancel={endKeyDrag}
+                    onLostPointerCapture={() => { keyDrag.current = null; }} onClick={() => seek(i + 1)} />
+                </span>
+              );
+            })}
+            <span className="fy-swstage__lane-head" style={{ left: `${at / durationSec * 100}%` }} aria-hidden="true" />
             {keys.map((key, position) => {
               const first = position === 0;
               const last = position === keys.length - 1;
@@ -1216,7 +1249,7 @@ export function SceneStage({
                   className="fy-swstage__key"
                   data-on={position === active ? "true" : undefined}
                   data-mid={!first && !last ? "true" : undefined}
-                  style={first ? { left: 0 } : last ? { right: 0 } : { left, transform: "translateX(-50%)" }}
+                  style={{ left, transform: "translateX(-50%)" }}
                   title={`${keyName(position, keys.length)} · ${key.t.toFixed(1)}s${first || last ? "" : " · drag to retime"}`}
                   aria-label={`Camera ${keyName(position, keys.length)} at ${key.t.toFixed(2)} seconds`}
                   onPointerDown={event => retime(position, event)}
@@ -1225,7 +1258,7 @@ export function SceneStage({
                   onClick={() => seek(position)}
                 >
                   <span aria-hidden="true" />
-                  {position === active ? <b>{keyName(position, keys.length)} · {key.t.toFixed(1)}s</b> : null}
+                  {position === active ? <b style={first ? { left: 0, transform: "none" } : last ? { left: "auto", right: 0, transform: "none" } : undefined}>{keyName(position, keys.length)} · {key.t.toFixed(1)}s</b> : null}
                 </button>
               );
             })}

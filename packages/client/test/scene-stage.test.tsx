@@ -221,3 +221,53 @@ it("scales every lane with the shot and stops an active key drag when frozen (#1
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
   assert.equal(q('[data-testid="stage-moved"]'), null);
 });
+
+it("edits camera easing through Keep and preserves duplicate-key holds when their edge is dragged (#1042)", async () => {
+  const { q, sent } = await mount(shot => {
+    shot.staging!.keys[2]!.p = [2, 1.5, 3];
+  });
+  const setEase = async (label: string, value: string) => {
+    const input = q(`[aria-label="${label}"]`) as HTMLInputElement;
+    assert.equal(input.getAttribute("min"), "0");
+    assert.equal(input.getAttribute("max"), "0.5");
+    input.value = value;
+    const propsKey = Object.keys(input).find(key => key.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onChange: (event: { target: HTMLInputElement }) => void }>)[propsKey]!;
+    await act(async () => props.onChange({ target: input }));
+  };
+  await click(q('[aria-label="Camera key 1 at 2.00 seconds"]'));
+  await setEase("Ease in", "0.25");
+  await setEase("Ease out", "0.5");
+  await setEase("Ease out", "0.75");
+  const track = q('[aria-label="Stage playhead"]');
+  const edge = q('[aria-label="Retime hold ending at 2.00 seconds"]');
+  capturePointer(track);
+  capturePointer(edge);
+  await pointer(edge, "pointerdown", 300);
+  await pointer(edge, "pointermove", 350);
+  await pointer(edge, "pointerup", 350);
+  assert.equal(track.getAttribute("aria-valuenow"), "2.5");
+  assert.ok(q('[aria-label="Hold from 0.00 to 2.50 seconds"]'));
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind !== "edit-stage") return;
+  assert.deepEqual(command.staging?.keys.map(key => key.t), [0, 2.5, 4]);
+  assert.deepEqual(command.staging?.keys[0]?.p, command.staging?.keys[1]?.p);
+  assert.equal(command.staging?.keys[1]?.easeIn, 0.25);
+  assert.equal(command.staging?.keys[1]?.easeOut, 0.5);
+  assert.equal(command.staging?.keys.length, 3, "a hold remains the same pair of keys");
+});
+
+it("distinguishes equal coordinates in different anchor spaces and pins a terminal hold (#1042)", async () => {
+  const { q, render } = await mount(shot => {
+    shot.staging!.cast = [{ sheetId: "maren-kest", x: 3, z: 0 }];
+    shot.staging!.keys[1]!.anchor = "maren-kest";
+    shot.staging!.keys[2]!.anchor = "maren-kest";
+  });
+  assert.equal(q('[aria-label="Hold from 0.00 to 2.00 seconds"]'), null);
+  assert.ok(q('[aria-label="Hold from 2.00 to 4.00 seconds"]'));
+  assert.equal((q('[aria-label="Retime hold ending at 4.00 seconds"]') as HTMLButtonElement).disabled, true);
+  await render(true);
+  assert.equal((q('[aria-label="Ease in"]') as HTMLInputElement).disabled, true);
+});
