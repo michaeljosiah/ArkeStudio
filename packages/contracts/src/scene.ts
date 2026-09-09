@@ -165,6 +165,9 @@ export type StageGait = z.infer<typeof StageGaitSchema>;
 export const StagePerformanceKeySchema = z.object({
   t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
   gait: StageGaitSchema.optional(),
+  easeIn: z.number().min(0).max(.5).optional(),
+  easeOut: z.number().min(0).max(.5).optional(),
+  hold: z.number().finite().nonnegative().optional(),
   y: z.number().finite().optional(), facing: z.number().finite().optional(),
   pose: z.enum(["stand", "sit", "lie"]).optional(),
 }).strict();

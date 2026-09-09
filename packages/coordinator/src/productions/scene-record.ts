@@ -350,6 +350,12 @@ export function carriesStageSpeed(raw: string): boolean {
   catch { return false; }
 }
 
+/** Performance ease and holds change interpolation only when authored (issue 1046). */
+export function carriesStagePerformanceEase(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.performances?.some(track => track.keys.some(key => key.easeIn !== undefined || key.easeOut !== undefined || key.hold !== undefined))); }
+  catch { return false; }
+}
+
 /** Expanded Stage geometry, shot-local performance and camera lens/roll need schema 10. */
 export function carriesStageConstruction(raw: string): boolean {
   try {

@@ -301,8 +301,8 @@ it("clears a motion selection when its mark is removed or an earlier mark is ins
   assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
 });
 
-it("warns about timed speed and lets a gait change travel through Keep (#1044)", async () => {
-  const { q, sent } = await mount(shot => {
+it("edits gait, ease and hold through retiming and Keep (#1044, #1046)", async () => {
+  const { q, sent, shot, render } = await mount(shot => {
     shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }];
     shot.staging!.performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 1, x: 5, z: 0 }] }];
   });
@@ -313,8 +313,25 @@ it("warns about timed speed and lets a gait change travel through Keep (#1044)",
   await act(async () => props.onChange({ target: { value: "run" } }));
   assert.match(q('.fy-swstage__mover').textContent ?? "", /run/);
   assert.doesNotMatch(q('.fy-swstage__mover').textContent ?? "", /too fast/);
+  for (const [label, value] of [["0s easeOut", "0.25"], ["1s easeIn", "0.5"], ["0s hold", "0.25"]]) {
+    const input = q(`[aria-label="Maren Kest ${label}"]`);
+    const key = Object.keys(input).find(key => key.startsWith("__reactProps$"))!;
+    const handlers = (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+    await act(async () => handlers.onChange({ target: { value: value! } }));
+  }
+  assert.ok(q('[aria-label="Maren Kest hold from 0.00 to 0.25 seconds"]'));
+  shot.durationSec = 8;
+  await render();
+  assert.ok(q('[aria-label="Maren Kest hold from 0.00 to 0.50 seconds"]'));
   await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
   const command = sent.at(-1)!;
   assert.equal(command.kind, "edit-stage");
-  if (command.kind === "edit-stage") assert.equal(command.staging?.performances?.[0]?.keys[0]?.gait, "run");
+  if (command.kind === "edit-stage") {
+    const keys = command.staging?.performances?.[0]?.keys;
+    assert.equal(keys?.[0]?.gait, "run");
+    assert.equal(keys?.[0]?.easeOut, .25);
+    assert.equal(keys?.[0]?.hold, .5);
+    assert.equal(keys?.[1]?.easeIn, .5);
+    assert.equal(keys?.[1]?.t, 2);
+  }
 });

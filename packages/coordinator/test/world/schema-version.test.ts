@@ -128,3 +128,16 @@ it("fences gait and object speed metadata in the scene commit (#1044)", async ()
   assert.equal((await readWorldMeta(dir)).schemaVersion, 21);
   await assert.rejects(readWorldMeta(dir, { supports: 20 }), /newer|schema|version/i);
 });
+
+it("fences performance easing and hold in the scene commit (#1046)", async () => {
+  const { dir, store } = await open();
+  const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+  const raw = await readFile(join(dir, path), "utf8");
+  const scene = editShot(parseSceneRecord(raw), { shotId: "sh_12", change: { staging: { version: 1, cast: [], sets: [],
+    keys: [{ t: 0, p: [0, 2, 4], l: [0, 1, 0] }],
+    performances: [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0, easeIn: .25, easeOut: .5, hold: 1 }] }],
+  } } });
+  await store.commit({ kind: "scene-command", source: "test", files: [{ path, action: "replace", content: JSON.stringify(scene), baseHash: sha256(raw) }] });
+  assert.equal((await readWorldMeta(dir)).schemaVersion, 22);
+  await assert.rejects(readWorldMeta(dir, { supports: 21 }), /newer|schema|version/i);
+});
