@@ -1,9 +1,10 @@
-import { mkdir, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { ArtifactSidecar } from "@arke-studio/contracts";
-import { isVideoMedia, writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "../takes/poster.js";
+import { ARTIFACT_POSTER_DIR, artifactPosterPath, type ArtifactSidecar } from "@arke-studio/contracts";
+import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "../takes/poster.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { containedArtifactFile, ownDirectory } from "./contained.js";
 
 /**
  * A video artifact's picture (issue 1037).
@@ -19,19 +20,16 @@ import type { WorldStore } from "../world/store.js";
  * poster maker itself; both write one frame to one file with the same bounded runner.
  */
 
-/** World-relative directory holding one picture per video artifact, named by artifact id. */
-export const ARTIFACT_POSTER_DIR = ".index/posters";
-
-/** The client asks for exactly this path; a test pins both sides to it. */
-export function artifactPosterPath(artifactId: string): string {
-  return `${ARTIFACT_POSTER_DIR}/${artifactId}.png`;
-}
+// The path is what the client asks for, so it is stated once, in contracts; re-exported here for
+// the coordinator's own callers.
+export { ARTIFACT_POSTER_DIR, artifactPosterPath };
 
 /** Whether this artifact is one that gets a picture drawn for it. */
 export function wantsArtifactPoster(artifact: Pick<ArtifactSidecar, "kind" | "file">): boolean {
-  // The kind, not only the extension: an `.mp4` measured as sound alone is filed as audio and
-  // has no frame to draw (PR 944), and asking ffmpeg for one would only cost a timeout.
-  return artifact.kind === "video" && isVideoMedia(artifact.file);
+  // The kind, and only the kind: filing names a video by what it measured — an `.mp4` with
+  // sound alone is audio and has no frame to draw (PR 944) — and an `.mkv` is a video whatever
+  // the take path's shorter extension list says; gating on that list left every MKV on its mark.
+  return artifact.kind === "video";
 }
 
 /**
@@ -39,23 +37,38 @@ export function wantsArtifactPoster(artifact: Pick<ArtifactSidecar, "kind" | "fi
  * Reports whether a picture now exists; never throws.
  */
 export async function writeArtifactPoster(
-  store: WorldStore,
+  store: Pick<WorldStore, "dir">,
   artifact: Pick<ArtifactSidecar, "id" | "kind" | "file">,
   maker: TakePosterMaker | undefined,
   onUnavailable?: (reason: TakePosterUnavailableReason) => void,
 ): Promise<boolean> {
   if (!wantsArtifactPoster(artifact) || maker === undefined) return false;
-  // A sidecar names a file inside artifacts/ and nothing else; anything stranger is the scan's
-  // to report, not this pass's to read.
-  if (basename(artifact.file) !== artifact.file || artifact.file === "..") return false;
-  const output = join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"), `${artifact.id}.png`);
-  try {
-    await mkdir(toExtendedLength(join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"))), { recursive: true });
-  } catch {
-    return false;
+  /*
+   * Both ends are the world's own once links are followed. A world copied in from elsewhere can
+   * carry a sidecar naming a link to a host file, or an `.index/` that is a link out, and this
+   * pass runs on open — nobody asked for the read or the write. The input check is filing's own
+   * (`containedArtifactFile`); the output is checked one directory at a time, so that nothing
+   * is created behind a link either.
+   */
+  if (basename(artifact.id) !== artifact.id || artifact.id === "..") return false;
+  const input = await containedArtifactFile(store.dir, artifact.file);
+  if (input === null) return false;
+  const segments = ARTIFACT_POSTER_DIR.split("/");
+  for (let depth = 1; depth <= segments.length; depth += 1) {
+    const partial = segments.slice(0, depth);
+    try {
+      await mkdir(toExtendedLength(join(store.dir, ...partial)), { recursive: true });
+    } catch {
+      return false;
+    }
+    if ((await ownDirectory(store.dir, ...partial)) === null) return false;
   }
-  if (await posterExists(output)) return true;
-  return await writeMediaPoster(toExtendedLength(join(store.dir, "artifacts", artifact.file)), toExtendedLength(output), maker, onUnavailable);
+  const output = join(store.dir, ...segments, `${artifact.id}.png`);
+  // An entry already there that is not a plain file — a link, say — is not written through.
+  const existing = await lstat(toExtendedLength(output)).catch(() => null);
+  if (existing !== null && !existing.isFile()) return false;
+  if (existing !== null && existing.size > 0) return true;
+  return await writeMediaPoster(toExtendedLength(input), toExtendedLength(output), maker, onUnavailable);
 }
 
 /** A poster is a file with bytes in it; a zero-byte leftover is drawn again. */
@@ -66,7 +79,8 @@ async function posterExists(path: string): Promise<boolean> {
 
 /**
  * `writePosterFor` names the output itself (`frame.png` beside the input); an artifact's poster
- * lives elsewhere, so the write goes to the maker directly with the same error handling.
+ * lives elsewhere, so the write goes to the maker directly with the same error handling. The
+ * caller has already said the input is a video; the maker's runner says whether it can read it.
  */
 async function writeMediaPoster(
   input: string,
@@ -74,7 +88,6 @@ async function writeMediaPoster(
   maker: TakePosterMaker,
   onUnavailable?: (reason: TakePosterUnavailableReason) => void,
 ): Promise<boolean> {
-  if (!isVideoMedia(input)) return false;
   // A run that is killed or exits badly can leave a partial file where the poster should be, and
   // every later pass would take it for a finished picture; a failure leaves nothing behind.
   const discard = async (): Promise<void> => {
@@ -122,10 +135,21 @@ export async function backfillArtifactPosters(
   let drawn = 0;
   for (const artifact of store.getBundle().artifacts) {
     if (!wantsArtifactPoster(artifact) || artifact.retiredAt !== undefined) continue;
-    if (now() > deadline || options.stillOpen?.() === false || store.isClosed()) break;
+    const remaining = deadline - now();
+    if (remaining <= 0 || options.stillOpen?.() === false || store.isClosed()) break;
     const output = join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"), `${artifact.id}.png`);
     if (await posterExists(output)) continue;
-    if (await writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason))) drawn += 1;
+    /*
+     * The budget binds the wait, not only the start. A maker stuck on a corrupt file has its own
+     * timeout, fifteen seconds, and the open this pass sits in front of would otherwise wait it
+     * out. The extraction runs on unwatched: the file it leaves is found next time, or nothing is.
+     */
+    const outcome = await Promise.race([
+      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason)),
+      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining).unref(); }),
+    ]);
+    if (outcome === null) break;
+    if (outcome) drawn += 1;
   }
   return drawn;
 }

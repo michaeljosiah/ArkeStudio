@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
+  artifactPicturePath,
   basePictureTrack,
   detachAudioCommands,
   type ArtifactSidecar,
@@ -17,7 +18,7 @@ import {
 } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
 import { cx } from "../components/ui.js";
-import { artifactPicturePath, posterize } from "../lib/poster.js";
+import { posterize } from "../lib/poster.js";
 import { mediaUrl } from "../lib/media.js";
 import { FILMSTRIP_HEIGHT_PX, useFilmstrip } from "../lib/filmstrip.js";
 import {
@@ -167,7 +168,7 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   const pictureKey = `${slug ?? ""}|${view.poster ?? ""}`;
   const posterMissing = view.poster !== null && missingFor === pictureKey;
   return (
-    <button ref={ref} type="button" className={className} style={style} {...rest}>
+    <button ref={ref} type="button" className={className} style={style} data-in-sec={view.footage?.inSec} {...rest}>
       {children}
       {view.gap ? (
         <span className="fy-pictclip__gap">{view.label}</span>

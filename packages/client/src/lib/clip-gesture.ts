@@ -158,10 +158,13 @@ export function fileKindsFromTransfer(transfer: {
 }
 
 /**
- * Whether a lane can take these files, from what is known of them. A sound lane takes sound and
- * video (a video may carry sound; only the import can say); a picture lane takes video and
- * stills. A file the browser cannot name is let through: the import reads it and says.
+ * Whether a lane can take this drop, from what is known of the files: at least one of them may
+ * land. A sound lane takes sound and video (a video may carry sound; only the import can say); a
+ * picture lane takes video and stills. A file the browser cannot name is let through: the import
+ * reads it and says. A drop that mixes a file the lane takes with one it does not is not refused
+ * whole — the import files each and reports the one it could not place, by name (issue 1035);
+ * refused whole, the file that could have landed was neither filed nor explained.
  */
 export function laneTakesFiles(kinds: readonly DroppedKind[], wantsSound: boolean): boolean {
-  return kinds.every((kind) => kind === "unknown" || (wantsSound ? kind !== "image" : kind !== "audio"));
+  return kinds.length === 0 || kinds.some((kind) => kind === "unknown" || (wantsSound ? kind !== "image" : kind !== "audio"));
 }

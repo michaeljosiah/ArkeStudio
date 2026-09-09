@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
+  artifactPicturePath,
   AUDIO_TRACK_KINDS,
   effectiveAudioRole,
   placementAudioRole,
@@ -27,7 +28,6 @@ import { Portrait } from "../components/portrait.js";
 import type { EditorTool } from "./editor-timeline.js";
 import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
 import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
-import { artifactPicturePath } from "../lib/poster.js";
 import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 

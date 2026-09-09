@@ -7,6 +7,7 @@ import { MemoryRouter, Route, Routes } from "react-router";
 import {
   applyTimelineCommands,
   formatFrames,
+  seedEmptyPictureTimeline,
   seedStoryPictureTimeline,
   type ClientMessage,
   type ClientState,
@@ -115,6 +116,29 @@ function bellsState(): ClientState {
       { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" },
       { kind: "place", trackId: "tr_music", clip: { id: "cl_bells-1", startFrame: 0, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "harbour-bells.wav" } } },
       { kind: "place", trackId: "tr_music", clip: { id: "cl_bells-2", startFrame: 120, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "harbour-bells.wav" } } },
+    ]),
+  };
+  return state;
+}
+
+const PLATE = "ar_01J8G0000000000000000000V1";
+
+/** One imported eight-second video on the Picture track, placed a second in: a clip with a strip to trim. */
+function plateState(): ClientState {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const world = state.world!;
+  world.artifacts = [
+    ...world.artifacts,
+    {
+      id: PLATE, kind: "video", file: "plate.mp4", hash: "sha256:6a1e02b9c44d7f33", origin: { by: "user" }, links: [],
+      created: "2026-06-11T10:00:00Z", mediaInfo: { durationSec: 8, hasAudio: false },
+    } as (typeof world.artifacts)[number],
+  ];
+  const production = world.productions[0]!;
+  production.timeline = {
+    status: "ready",
+    timeline: applyTimelineCommands(seedEmptyPictureTimeline(production), [
+      { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 0, durationFrames: 96, sourceInFrames: 24, source: { kind: "artifact", artifactId: PLATE, label: "plate.mp4" } } },
     ]),
   };
   return state;
@@ -259,6 +283,30 @@ describe("a trim the viewer follows (issue 1036)", () => {
       await act(async () => pointer(grip, "pointerup", { clientX: 400 - px(24, span) }));
       assert.deepEqual(commandsSent(screen).map((message) => message.commands), [[{ kind: "trim", clipId: "cl_sh-12", edge: "end", deltaFrames: -24 }]]);
       assert.equal(ruler.getAttribute("aria-valuetext"), formatFrames(71, 24), "parked on the edge the cut now has");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("moves the strip's in-point with the head while the trim is still in hand", async () => {
+    // The strip reads its in-point from the resolved cut. Resolved from the saved record alone,
+    // a head trim in progress kept showing the frames before the new head until the command
+    // came back; the draft is resolved too, so the strip and the edge agree under the hand.
+    const screen = await mountCut(plateState());
+    try {
+      const clip = screen.container.querySelector<HTMLElement>("[data-clip='cl_plate']")!;
+      assert.equal(clip.getAttribute("data-in-sec"), "1", "placed a second into its source");
+      const span = spanFrom(clip, 96);
+      await act(async () => clip.click());
+      const grip = clip.querySelector<HTMLElement>(".fy-pictclip__grip--start")!;
+      await act(async () => {
+        pointer(grip, "pointerdown", { clientX: 0 });
+        pointer(grip, "pointermove", { clientX: px(24, span) });
+      });
+      assert.equal(screen.container.querySelector<HTMLElement>("[data-clip='cl_plate']")!.getAttribute("data-in-sec"), "2", "the strip starts where the draft's head now is");
+      assert.equal(commandsSent(screen).length, 0);
+      await act(async () => pointer(grip, "pointerup", { clientX: px(24, span) }));
+      assert.deepEqual(commandsSent(screen).map((message) => message.commands), [[{ kind: "trim", clipId: "cl_plate", edge: "start", deltaFrames: 24 }]]);
     } finally {
       await close(screen);
     }

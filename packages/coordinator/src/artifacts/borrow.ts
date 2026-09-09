@@ -1,14 +1,16 @@
-import { realpath, stat } from "node:fs/promises";
-import { basename, join, sep } from "node:path";
+import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import {
+  ARTIFACT_POSTER_DIR,
   artifactDisplayName,
+  artifactPosterPath,
   linkNameResolver,
   pickableArtifacts,
   type BorrowableArtifact,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
-import { ARTIFACT_POSTER_DIR, artifactPosterPath } from "./poster.js";
+import { containedArtifactFile } from "./contained.js";
 
 /**
  * What another world offers the Cut's Library (issue 1033): its placeable, world-owned files,
@@ -23,21 +25,11 @@ const PLACEABLE = new Set<BorrowableArtifact["kind"]>(["audio", "video", "image"
  * The absolute path of one of a shelf's files, or null. The media route's resolver would also
  * answer, but it answers for a renderer and refuses anything its MIME table does not name — a
  * `.mov` or an `.m4a` the shelf legitimately holds. A borrow copies bytes, so what it needs is
- * containment: a plain filename, inside `artifacts/` once links are followed, and a file.
+ * containment: a plain filename, inside the world's own `artifacts/` once links are followed,
+ * and a file — the same check the poster pass and filing's measurement make.
  */
-export async function resolveBorrowedFile(dir: string, file: string): Promise<string | null> {
-  if (basename(file) !== file || file === "..") return null;
-  const root = join(dir, "artifacts");
-  try {
-    const [rootReal, target] = await Promise.all([
-      realpath(toExtendedLength(root)),
-      realpath(toExtendedLength(join(root, file))),
-    ]);
-    if (target !== join(rootReal, basename(target)) || !target.startsWith(rootReal + sep)) return null;
-    return (await stat(target)).isFile() ? target : null;
-  } catch {
-    return null;
-  }
+export function resolveBorrowedFile(dir: string, file: string): Promise<string | null> {
+  return containedArtifactFile(dir, file);
 }
 
 export async function listBorrowableArtifacts(

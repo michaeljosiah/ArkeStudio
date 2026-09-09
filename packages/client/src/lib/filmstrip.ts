@@ -54,6 +54,8 @@ const listeners = new Set<() => void>();
 const sources = new Map<string, Source>();
 /** The frames some mounted strip still wants, by key, with how many want them. A decode nobody wants any more is skipped. */
 const wanted = new Map<string, number>();
+/** Frames asked of a source not made yet, because the cap was reached with every decoder busy. */
+const pending = new Map<string, Source["queue"]>();
 
 function supported(): boolean {
   if (typeof document === "undefined" || typeof HTMLVideoElement === "undefined") return false;
@@ -73,22 +75,39 @@ function notify(): void {
   for (const listener of listeners) listener();
 }
 
-function sourceFor(src: string): Source {
+/**
+ * Which source to release so another can be made, or null when none may go. Only an idle source
+ * nobody still wants frames from qualifies: one evicted mid-decode leaves its strips on their
+ * posters, since nothing re-asks for a source that vanished under them. Oldest use goes first.
+ */
+export function evictableSource<T extends { busy: boolean; queue: ReadonlyArray<{ key: string }>; lastUsed: number }>(
+  candidates: Iterable<readonly [string, T]>,
+  stillWanted: (key: string) => boolean,
+): string | null {
+  let oldest: readonly [string, T] | null = null;
+  for (const candidate of candidates) {
+    if (candidate[1].busy || candidate[1].queue.some((entry) => stillWanted(entry.key))) continue;
+    if (oldest === null || candidate[1].lastUsed < oldest[1].lastUsed) oldest = candidate;
+  }
+  return oldest === null ? null : oldest[0];
+}
+
+/** The decoder for `src`, or null when the cap is reached and every decoder is still at work. */
+function sourceFor(src: string): Source | null {
   const existing = sources.get(src);
   if (existing !== undefined) {
     existing.lastUsed = Date.now();
     return existing;
   }
   if (sources.size >= MAX_SOURCES) {
-    // Only an idle source nobody still wants frames from may go: one evicted mid-decode leaves
-    // its strips on their posters, since nothing re-asks for a source that vanished under them.
-    const idle = [...sources.entries()].filter(([, candidate]) => !candidate.busy && !candidate.queue.some((entry) => wanted.has(entry.key)));
-    const oldest = idle.sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
-    if (oldest !== undefined) {
-      oldest[1].video.removeAttribute("src");
-      try { oldest[1].video.load(); } catch { /* releasing a decoder is best-effort */ }
-      sources.delete(oldest[0]);
-    }
+    const evict = evictableSource(sources.entries(), (key) => wanted.has(key));
+    // At the cap with every decoder busy, the new source waits its turn (`pending`) rather than
+    // becoming a seventh decoder — and an eighth — on a cut with many distinct clips.
+    if (evict === null) return null;
+    const gone = sources.get(evict)!;
+    gone.video.removeAttribute("src");
+    try { gone.video.load(); } catch { /* releasing a decoder is best-effort */ }
+    sources.delete(evict);
   }
   const video = document.createElement("video");
   // The canvas the frames are painted onto must stay readable: the media route answers CORS
@@ -153,6 +172,24 @@ async function drain(src: string, source: Source): Promise<void> {
     notify();
   } finally {
     source.busy = false;
+    admitPending();
+  }
+}
+
+/** Sources that waited at the cap take their turn as decoders go idle, in the order they asked. */
+function admitPending(): void {
+  // Deleting the entry in hand while a Map is iterated is defined behaviour; nothing here adds one.
+  for (const [src, queue] of pending) {
+    const live = queue.filter((entry) => wanted.has(entry.key) && !frames.has(entry.key));
+    if (live.length === 0) {
+      pending.delete(src);
+      continue;
+    }
+    const source = sourceFor(src);
+    if (source === null) return;
+    pending.delete(src);
+    for (const entry of live) if (!source.queue.some((queued) => queued.key === entry.key)) source.queue.push(entry);
+    void drain(src, source);
   }
 }
 
@@ -163,6 +200,15 @@ export function filmstripFrame(src: string, timeSec: number, heightPx: number): 
   if (cached !== undefined) return cached;
   if (!supported()) return null;
   const source = sourceFor(src);
+  if (source === null) {
+    const waiting = pending.get(src) ?? [];
+    if (!waiting.some((entry) => entry.key === key)) {
+      waiting.push({ key, timeSec, heightPx });
+      if (waiting.length > MAX_QUEUE) waiting.splice(0, waiting.length - MAX_QUEUE);
+    }
+    pending.set(src, waiting);
+    return null;
+  }
   if (source.failed) return null;
   if (!source.queue.some((entry) => entry.key === key)) {
     source.queue.push({ key, timeSec, heightPx });
@@ -177,6 +223,7 @@ export function resetFilmstrips(): void {
   frames.clear();
   sources.clear();
   wanted.clear();
+  pending.clear();
 }
 
 /**
@@ -214,6 +261,8 @@ export function useFilmstrip(args: {
         if (count <= 1) wanted.delete(key);
         else wanted.set(key, count - 1);
       }
+      // A strip gone may leave a decoder idle; whoever waited at the cap gets it.
+      admitPending();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [src, heightPx, signature]);

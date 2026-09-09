@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storyTimelineFingerprint } from "@arke-studio/contracts";
@@ -16,6 +16,7 @@ import { createProduction } from "../../src/productions/ops.js";
 import type { TakePosterMaker } from "../../src/takes/poster.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
+import { tempDir } from "../tmp.js";
 import type { MediaProbe } from "../../src/media/probe.js";
 
 /**
@@ -43,6 +44,7 @@ describe("which artifacts get a picture", () => {
   it("draws for a video and for nothing else", () => {
     assert.equal(wantsArtifactPoster({ kind: "video", file: "clip.mp4" }), true);
     assert.equal(wantsArtifactPoster({ kind: "audio", file: "song.mp4" }), false, "an mp4 measured as sound has no frame");
+    assert.equal(wantsArtifactPoster({ kind: "video", file: "clip.mkv" }), true, "a video whatever its container; the runner says if it can read it");
     assert.equal(wantsArtifactPoster({ kind: "image", file: "plate.png" }), false);
     assert.equal(artifactPosterPath("ar_01J8G0000000000000000000F1"), `${ARTIFACT_POSTER_DIR}/ar_01J8G0000000000000000000F1.png`);
   });
@@ -126,5 +128,54 @@ describe("drawing the picture", () => {
     const exhausted = maker();
     let late = 0;
     assert.equal(await backfillArtifactPosters(store, exhausted.maker, { budgetMs: 1, now: () => (late += 1000) }), 0);
+  });
+
+  it("does not hold the open past its budget for a maker that hangs", async (t) => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir);
+    t.after(() => store.close());
+    const source = join(dir, "stuck.mp4");
+    await writeFile(source, "a film ffmpeg cannot finish");
+    assert.equal((await fileArtifact(store, { sourcePath: source, production: null, mediaProbe: probe })).outcome, "filed");
+    // The maker's own timeout is fifteen seconds; the pass in front of `world.opened` waits only its budget.
+    const hanging: TakePosterMaker = { write: () => new Promise(() => undefined) };
+    const started = Date.now();
+    assert.equal(await backfillArtifactPosters(store, hanging, { budgetMs: 50 }), 0);
+    assert.ok(Date.now() - started < 5_000, "returned at the budget, not the maker's timeout");
+  });
+});
+
+describe("where the picture is read from and written to", () => {
+  it("draws nothing for a shelf or an index that is a link out of the world, and draws into the world's own", async () => {
+    const asked = maker();
+    const artifact = { id: "ar_01J8G0000000000000000000L1", kind: "video" as const, file: "clip.mp4" };
+    // A world whose artifacts/ is a link to a directory elsewhere on the host: not read.
+    const outside = await tempDir("arke-outside-");
+    await writeFile(join(outside, "clip.mp4"), "host bytes");
+    const linkedShelf = await tempDir("arke-linked-shelf-");
+    await symlink(outside, join(linkedShelf, "artifacts"), "junction");
+    assert.equal(await writeArtifactPoster({ dir: linkedShelf }, artifact, asked.maker), false);
+    assert.deepEqual(asked.written, [], "a linked shelf is not handed to the maker");
+    // A real shelf whose .index/posters is a link out: nothing is written through it.
+    const linkedIndex = await tempDir("arke-linked-index-");
+    const elsewhere = await tempDir("arke-elsewhere-");
+    await mkdir(join(linkedIndex, "artifacts"));
+    await writeFile(join(linkedIndex, "artifacts", "clip.mp4"), "film");
+    await mkdir(join(linkedIndex, ".index"));
+    await symlink(elsewhere, join(linkedIndex, ".index", "posters"), "junction");
+    assert.equal(await writeArtifactPoster({ dir: linkedIndex }, artifact, asked.maker), false);
+    assert.deepEqual(asked.written, []);
+    assert.deepEqual(await readdir(elsewhere), [], "nothing landed outside the world");
+    // A sidecar naming a path, or an id that is one, is not a poster either.
+    assert.equal(await writeArtifactPoster({ dir: linkedIndex }, { ...artifact, file: "../world.json" }, asked.maker), false);
+    assert.equal(await writeArtifactPoster({ dir: linkedIndex }, { ...artifact, id: "../escape" }, asked.maker), false);
+    assert.deepEqual(asked.written, []);
+    // The world's own directories are drawn into as before, index created on the way.
+    const own = await tempDir("arke-own-");
+    await mkdir(join(own, "artifacts"));
+    await writeFile(join(own, "artifacts", "clip.mp4"), "film");
+    assert.equal(await writeArtifactPoster({ dir: own }, artifact, asked.maker), true);
+    assert.equal(asked.written.length, 1);
+    assert.equal(await readFile(join(own, ".index", "posters", `${artifact.id}.png`), "utf8"), "png");
   });
 });

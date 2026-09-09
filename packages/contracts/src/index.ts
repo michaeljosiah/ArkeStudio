@@ -14,6 +14,7 @@ export * from "./take.js";
 export * from "./artifact.js";
 export * from "./artifact-access.js";
 export * from "./artifact-names.js";
+export * from "./artifact-picture.js";
 export * from "./reference.js";
 export * from "./prop.js";
 export * from "./prose.js";

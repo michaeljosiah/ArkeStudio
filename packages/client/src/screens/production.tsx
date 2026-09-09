@@ -1,6 +1,7 @@
 import { TakeDialogueFeedbackPanel } from "../components/take-dialogue-feedback.js";
 import { Loading } from "../components/loading.js";
 import {
+  artifactPicturePath,
   resolvedAuthoredDuration,
   type ProseReadSource,
   targetWords,
@@ -166,7 +167,7 @@ import {
 } from "../lib/selectors.js";
 import { lookTileLabel } from "./character-reference.js";
 import { DevelopmentWorkspace } from "./development.js";
-import { artifactPicturePath, isVideoMedia, posterize, posterNameFor } from "../lib/poster.js";
+import { isVideoMedia, posterize, posterNameFor } from "../lib/poster.js";
 import { playbackSnapshot, togglePlayback } from "../lib/audio.js";
 import { formatTimecode, useScrubDrag } from "../lib/timeline-drag.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../lib/playback-engine.js";
@@ -6926,7 +6927,22 @@ export function CutScreen() {
     decideEditorRequest(worldId, prodId, requestId, decision);
   };
   const shownTimeline = draft ?? ghostTimeline ?? editableTimeline;
-  const views = shownTimeline ? pictureClipViews(shownTimeline, cut, artifacts, nameOf) : [];
+  /*
+   * The strip under a clip reads its in-point from the resolver's entry, and a live head trim
+   * shows the draft: resolved from the saved record, the entry would name the old in-point until
+   * the command round-trips, and the strip would go on showing frames before the new head. So a
+   * draft or a ghost is resolved too, at the record's own cost; the saved cut stands in if the
+   * resolver refuses it.
+   */
+  let shownCut = cut;
+  if (production && shownTimeline && shownTimeline !== editableTimeline && cut !== null && !(production.spine && timelineState.status !== "ready")) {
+    try {
+      shownCut = resolvePictureTimeline(production, { status: "ready", timeline: shownTimeline }, world?.artifacts ?? []);
+    } catch {
+      shownCut = cut;
+    }
+  }
+  const views = shownTimeline ? pictureClipViews(shownTimeline, shownCut, artifacts, nameOf) : [];
   const usedShotIds = new Set(
     editableTimeline
       ? editableTimeline.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "shot" ? [clip.source.shotId] : [])))

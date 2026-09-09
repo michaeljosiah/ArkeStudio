@@ -10,8 +10,7 @@ import {
   snapFrame,
   snapMoveDelta,
 } from "../src/lib/clip-gesture.js";
-import { filmstripFrameCount, filmstripTimes } from "../src/lib/filmstrip.js";
-import { ARTIFACT_POSTER_DIR, artifactPicturePath, artifactPosterPath } from "../src/lib/poster.js";
+import { evictableSource, filmstripFrameCount, filmstripTimes } from "../src/lib/filmstrip.js";
 
 /**
  * What a drag shows before it commits (issue 1034): the slot a reorder lands in and the way the
@@ -115,6 +114,10 @@ describe("what a dragged file says it is", () => {
     assert.equal(laneTakesFiles(["video", "audio"], true), true, "a video may carry sound; the import decides");
     assert.equal(laneTakesFiles(["image"], true), false, "a still on a sound lane");
     assert.equal(laneTakesFiles(["unknown"], true), true);
+    // A mixed drop is not refused whole: the video lands and the import names the still it could not place.
+    assert.equal(laneTakesFiles(["video", "image"], true), true);
+    assert.equal(laneTakesFiles(["image", "image"], true), false, "nothing in it could land");
+    assert.equal(laneTakesFiles(["audio", "image"], false), true, "the still lands on the picture lane");
   });
 });
 
@@ -127,10 +130,18 @@ describe("the strip and the poster", () => {
     assert.deepEqual(filmstripTimes(0, 0, 3), []);
   });
 
-  it("names a video artifact's poster by its id under the derived index, and a still by itself", () => {
-    assert.equal(artifactPosterPath("ar_01J8G0000000000000000000R2"), `${ARTIFACT_POSTER_DIR}/ar_01J8G0000000000000000000R2.png`);
-    assert.equal(artifactPicturePath({ id: "ar_1", kind: "video", file: "clip.mp4" }), ".index/posters/ar_1.png");
-    assert.equal(artifactPicturePath({ id: "ar_2", kind: "image", file: "plate.png" }), "artifacts/plate.png");
-    assert.equal(artifactPicturePath({ id: "ar_3", kind: "audio", file: "song.wav" }), null);
+  it("releases only an idle source nobody still wants, oldest first, and none while every decoder is busy", () => {
+    const wanted = new Set(["b#1"]);
+    const entries: Array<readonly [string, { busy: boolean; queue: ReadonlyArray<{ key: string }>; lastUsed: number }]> = [
+      ["a", { busy: false, queue: [], lastUsed: 2 }],
+      ["b", { busy: false, queue: [{ key: "b#1" }], lastUsed: 1 }],
+      ["c", { busy: true, queue: [], lastUsed: 0 }],
+      ["d", { busy: false, queue: [{ key: "d#1" }], lastUsed: 3 }],
+    ];
+    assert.equal(evictableSource(entries, (key) => wanted.has(key)), "a", "b is still wanted, c is decoding, d is younger");
+    // With only a wanted source and a busy one left, nothing goes: the next source waits its turn
+    // instead of becoming a decoder past the cap.
+    assert.equal(evictableSource(entries.filter(([name]) => name === "b" || name === "c"), (key) => wanted.has(key)), null);
+    assert.equal(evictableSource([], () => false), null);
   });
 });
