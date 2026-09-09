@@ -1,8 +1,12 @@
-import type { ResolvedShotStaging } from "../../src/staging.js";
+import { stageCameraMove, type ResolvedShotStaging } from "../../src/staging.js";
 
 // Geometry is authored after the measurable constraints in docs/development/stage-evaluation.md.
 const hold = (duration:number, p:[number,number,number], l:[number,number,number]) => [{t:0,p,l},{t:duration,p,l}];
+const vertigo: ResolvedShotStaging = { version: 1, cast: [{ sheetId: "actor", x: 0, z: 0 }], sets: [],
+  keys: [{ t: 0, p: [0, 1.6, 10], l: [0, 1.17, 0], focalMm: 85 }],
+};
 export const stageFixtures: Array<{name:string;duration:number;stage:ResolvedShotStaging}> = [
+  {name:"vertigo",duration:6,stage:{...vertigo,keys:stageCameraMove("vertigo",vertigo,{durationSec:6})}},
   {name:"dialogue",duration:6,stage:{version:1,cast:[{sheetId:"speaker-one",x:-.7,z:0},{sheetId:"speaker-two",x:.7,z:0}],sets:[],keys:hold(6,[0,1.5,4.5],[0,1.1,0])}},
   {name:"over-shoulder",duration:6,stage:{version:1,cast:[{sheetId:"speaker-one",x:-.8,z:1.4,facing:180},{sheetId:"speaker-two",x:.3,z:0}],sets:[],keys:hold(6,[-.25,1.7,3],[.3,1.35,0])}},
   {name:"doorway",duration:6,stage:{version:1,cast:[{sheetId:"actor",x:0,z:-2}],sets:[{name:"Left wall",x:-1.5,z:0,w:1.6,h:3,d:.2,solid:true},{name:"Right wall",x:1.5,z:0,w:1.6,h:3,d:.2,solid:true},{name:"Lintel",x:0,y:2.4,z:0,w:1.4,h:.6,d:.2,solid:true}],keys:hold(6,[0,1.6,6],[0,1.1,0]),performances:[{sheetId:"actor",keys:[{t:0,x:0,z:-2},{t:1,x:0,z:-2},{t:5,x:0,z:2},{t:6,x:0,z:2}]}]}},

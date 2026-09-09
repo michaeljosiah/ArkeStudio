@@ -8,6 +8,7 @@ script-relevant openings and props. Review intermediate motion, not only the fir
 
 | Fixture | Measurable expectations | Cinematic review |
 |---|---|---|
+| Vertigo (#1048) | Generated dolly increases camera distance and focal length by the same factor over 6s; subject stays the same projected size | Background perspective changes while the subject framing holds |
 | Dialogue two-shot | Both heads remain in frame for 6s; fixed camera; left/right order preserved | Balanced readable faces and eyelines |
 | Over shoulder | Foreground shoulder may crop; listener remains visible throughout 6s | Shoulder establishes relation without hiding listener |
 | Doorway entry | Actor waits to 1s, crosses z=0 at 3s, stops at 5s; 1.4m opening and 2.4m clearance | Actor visibly passes through an opening, not a wall |

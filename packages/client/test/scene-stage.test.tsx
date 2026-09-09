@@ -336,3 +336,24 @@ it("edits gait, ease and hold with a single-key camera through retiming and Keep
     assert.equal(keys?.[1]?.t, 2);
   }
 });
+
+it("puts a chosen camera move in the draft and Keeps it without changing timed action (#1048)", async () => {
+  const { q, sent, shot, render } = await mount(movingShot);
+  const action = structuredClone(shot.staging!.performances);
+  const objects = structuredClone(shot.staging!.objectMotions);
+  const select = q('[aria-label="Camera move"]');
+  const propsKey = Object.keys(select).find(key => key.startsWith("__reactProps$"))!;
+  const props = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[propsKey]!;
+  await act(async () => props.onChange({ target: { value: "orbit-360" } }));
+  assert.equal(sent.length, 0, "choosing a move only authors a draft");
+  assert.equal(q('[data-key-track="1"]')?.querySelectorAll("button.fy-swstage__key").length, 9);
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind !== "edit-stage") return;
+  assert.equal(command.staging?.keys.length, 9);
+  assert.deepEqual(command.staging?.performances, action);
+  assert.deepEqual(command.staging?.objectMotions, objects);
+  await render(true);
+  assert.equal((q('[aria-label="Camera move"]') as HTMLSelectElement).disabled, true);
+});

@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
 import { orderedShots } from "./scene-flow.js";
-import { stagePathPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import { stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
 import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
@@ -368,6 +368,84 @@ export function stageShot(
     keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
   }
   return { version: 1, cast, sets, keys, rig: move.rig, seed: stageRigSeed(shot.id), rigIntensity: 1 };
+}
+
+/** Named starting points produce ordinary keys; no preset identity is stored (#1048). */
+export const STAGE_CAMERA_MOVES = [
+  { id: "push-in", label: "Push in", description: "Dolly to 55% of the starting distance." },
+  { id: "pull-back", label: "Pull back", description: "Dolly to 170% of the starting distance." },
+  { id: "creep-low", label: "Creep in low", description: "Ease closer while lowering the camera." },
+  { id: "orbit-90", label: "Orbit 90°", description: "Quarter orbit around the subject." },
+  { id: "orbit-180", label: "Orbit 180°", description: "Half orbit around the subject." },
+  { id: "orbit-360", label: "Orbit 360°", description: "Full orbit with intermediate marks every 45 degrees." },
+  { id: "arc-push", label: "Arc and push", description: "Quarter orbit while halving the radius." },
+  { id: "crane-up", label: "Crane up reveal", description: "Rise and pull back to reveal the surroundings." },
+  { id: "crane-down", label: "Crane down", description: "Descend toward the subject." },
+  { id: "pedestal", label: "Pedestal", description: "Rise vertically at a fixed horizontal position." },
+  { id: "follow-behind", label: "Follow behind", description: "Settle behind the subject and ride its local transform." },
+  { id: "lead", label: "Lead", description: "Settle in front of the subject and ride its local transform." },
+  { id: "side-track", label: "Side track", description: "Settle beside the subject and ride its local transform." },
+  { id: "vertigo", label: "Vertigo", description: "Dolly and compensate focal length to preserve the subject's size." },
+] as const;
+export type StageCameraMove = typeof STAGE_CAMERA_MOVES[number]["id"];
+
+export function stageCameraMove(
+  move: StageCameraMove,
+  staging: ResolvedShotStaging,
+  input: { durationSec: number; at?: number; subjectId?: string; lens?: string; aspect?: string },
+): StagingKey[] {
+  const figure = staging.cast.find(candidate => candidate.sheetId === input.subjectId) ?? staging.cast[0];
+  if (!figure) return staging.keys;
+  const duration = input.durationSec;
+  const aspect = input.aspect ?? "16:9";
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  const fov = stagingFov(input.lens, aspect);
+  const start = sampleStageCamera(staging, input.at ?? 0, duration).p;
+  const lens = stageCameraKeyAt(staging, input.at ?? 0, duration, fov, ratio);
+  const subject = stageTargetTransform(staging, figure.sheetId, 0, duration)!;
+  const aimHeight = (figure.height ?? 1.8) * .65;
+  const aim: [number, number, number] = [subject.p[0], subject.p[1] + aimHeight, subject.p[2]];
+  const offset: [number, number, number] = [start[0] - aim[0], start[1] - aim[1], start[2] - aim[2]];
+  const radius = Math.max(.3, Math.hypot(offset[0], offset[2]));
+  const inherited = { ...(lens.roll === undefined ? {} : { roll: lens.roll }), ...(lens.focalMm === undefined ? {} : { focalMm: lens.focalMm }) };
+  const make = (t: number, p: [number, number, number]): StagingKey => ({ t, p: [p[0], Math.max(.15, p[1]), p[2]], l: [0, aimHeight, 0], track: figure.sheetId, ...inherited });
+  const world = (scale: number, angle = 0, height = start[1]): [number, number, number] => [
+    aim[0] + (offset[0] * Math.cos(angle) + offset[2] * Math.sin(angle)) * scale,
+    height,
+    aim[2] + (offset[2] * Math.cos(angle) - offset[0] * Math.sin(angle)) * scale,
+  ];
+  let keys: StagingKey[];
+  if (move === "follow-behind" || move === "lead" || move === "side-track") {
+    const local = stageWorldPoint(start, subject);
+    const destination: [number, number, number] = [move === "side-track" ? radius : 0, local[1], move === "follow-behind" ? -radius : move === "lead" ? radius : 0];
+    keys = [0, duration / 4, duration].map((t, index) => ({ ...make(t, start), p: index === 0 ? local : destination, anchor: figure.sheetId, anchorSpace: "local" }));
+  } else if (move === "vertigo") {
+    const focal = lens.focalMm ?? stagingFocalForFov(fov, ratio);
+    const factor = focal > 500 || aim[1] + offset[1] * 1.7 < .15 ? .6 : 1.7;
+    keys = [1, factor].map((scale, index) => ({
+      ...make(index * duration, start), anchor: figure.sheetId,
+      p: [offset[0] * scale, aimHeight + offset[1] * scale, offset[2] * scale],
+      focalMm: focal * scale,
+    }));
+  } else if (move.startsWith("orbit-") || move === "arc-push") {
+    const degrees = move === "arc-push" ? 90 : Number(move.slice(6));
+    const count = Math.ceil(degrees / 45);
+    keys = Array.from({ length: count + 1 }, (_, index) => {
+      const u = index / count;
+      return make(duration * u, world(move === "arc-push" ? 1 - .45 * u : 1, degrees * u * Math.PI / 180));
+    });
+  } else {
+    const end = move === "push-in" ? world(.55)
+      : move === "pull-back" ? world(1.7)
+      : move === "creep-low" ? world(.8, 0, Math.min(start[1], subject.p[1] + .45))
+      : move === "crane-up" ? world(1.25, 0, start[1] + Math.max(1.4, (figure.height ?? 1.8) * 1.5))
+      : move === "crane-down" ? world(1, 0, Math.max(.15, start[1] - 1.8))
+      : world(1, 0, start[1] + 1.2);
+    keys = [make(0, [...start]), make(duration, end)];
+  }
+  keys[0] = { ...keys[0]!, easeOut: .25 };
+  keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: .25 };
+  return keys;
 }
 
 /** What the framing words ask the camera to do, one component per clause. */

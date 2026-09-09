@@ -16,6 +16,9 @@ import {
   type StageObjectMotion,
   type StagePerformanceKey,
   stageShot,
+  STAGE_CAMERA_MOVES,
+  stageCameraMove,
+  type StageCameraMove,
   stageMotionSpeeds,
   stageSpeedWarning,
   stagePerformanceDeparture,
@@ -984,6 +987,19 @@ export function SceneStage({
                   <span>Camera</span>
                   <span>{keyName(active, keys.length)}</span>
                 </div>
+                <label className="fy-swstage__row">Move
+                  <select aria-label="Camera move" value="" disabled={frozen || !working.cast.length} onChange={event => {
+                    const move = event.target.value as StageCameraMove;
+                    if (!STAGE_CAMERA_MOVES.some(candidate => candidate.id === move)) return;
+                    const subjectId = selection?.kind === "cast" || selection?.kind === "walkend" ? selection.sheetId : undefined;
+                    stop();
+                    patchCamera(current => ({ ...current, keys: stageCameraMove(move, current, { durationSec, at, subjectId, lens: framing.lens, aspect }) }));
+                    setAt(0); setKeyIndex(0); setMotionMark(null);
+                  }}>
+                    <option value="">Choose a move…</option>
+                    {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
+                  </select>
+                </label>
                 <div className="fy-swstage__row fy-swstage__row--chips">
                   <span title="Scene blocking is shared by every camera; This shot keeps a private variant">blocking</span>
                   <span className="fy-swstage__chips">
