@@ -4360,6 +4360,11 @@ function ArtifactPanel({
     return unsubscribe;
   }, [browseSlug]);
   const worldName = (slug: string): string => worlds.find((world) => world.slug === slug)?.name ?? slug;
+  // A shelf browsed from another world is that world's only while this one is open; the screen
+  // can outlive a world change, and the shelf it was browsing may be the world it is now in.
+  useEffect(() => {
+    setBrowseSlug(null);
+  }, [worldId]);
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
    * last use wraps to the first. View state, never written — Locate selects and seeks only.
@@ -4548,7 +4553,10 @@ function ArtifactPanel({
   const items = [...shotItems, ...lineItems, ...artifactItems].filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
   const narrowed = normalQuery !== "" || filter !== "all" || kindFilter !== "all" || sceneScope !== "all";
   const foreignRows = (foreign?.rows ?? []).filter((row) => {
-    if (kindFilter === "shots") return false;
+    // The pressed filter still means what it says on another world's rows: no shots, no takes
+    // to need, nothing already in the cut; Audio keeps only sound.
+    if (kindFilter === "shots" || filter === "needs-take") return false;
+    if (filter === "audio" && row.kind !== "audio") return false;
     if (kindFilter === "video" && row.kind !== "video") return false;
     if (kindFilter === "image" && row.kind !== "image" && row.kind !== "board") return false;
     if (kindFilter === "audio" && row.kind !== "audio") return false;
@@ -5985,7 +5993,7 @@ function CutInspector({
             <InspectorRow label="Voice">{selectedClip.source.sheetId}{selectedClip.source.voiceAssignedAtVersion !== undefined ? ` · sheet v${selectedClip.source.voiceAssignedAtVersion}` : ""}</InspectorRow>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
           <AudioClipSettings clip={selectedClip} track={selectedTrack} disabled={commandsDisabled} onCommands={onCommands} />
@@ -6016,7 +6024,7 @@ function CutInspector({
             </div>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
     );
@@ -6042,7 +6050,7 @@ function CutInspector({
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
         {selectedClip && (<>
-          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} />
+          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} />
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
         </>)}
         {selectedShotId && !savedPictureOrder && (

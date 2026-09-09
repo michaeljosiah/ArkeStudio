@@ -271,7 +271,14 @@ describe("the Library (SPEC-039 T-3)", () => {
       assert.match(row.querySelector(".fy-artrow__meta")?.textContent ?? "", /video · 6s · from The Other One/);
       assert.match(row.querySelector(".fy-artrow__swatch img")?.getAttribute("src") ?? "", /\/media\/the-other-one\/\.index\/posters\//, "its picture is served under its own world");
       assert.equal(row.getAttribute("draggable"), null, "read-only: nothing here drags onto a lane");
-      await act(async () => row.querySelector<HTMLButtonElement>(".fy-artrow__pick")!.click());
+      // The pressed filter still means what it says on these rows: Audio keeps only sound.
+      const chip = (label: string) => [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === label)!;
+      await act(async () => chip("Audio").click());
+      assert.equal(screen.container.querySelector('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]'), null, "a video is not sound");
+      await act(async () => chip("All").click());
+      const shownAgain = screen.container.querySelector<HTMLElement>('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]')!;
+      assert.ok(shownAgain, "back with the filter");
+      await act(async () => shownAgain.querySelector<HTMLButtonElement>(".fy-artrow__pick")!.click());
       await act(async () => action(screen, "Copy into this world")!.click());
       const borrow = screen.sent.find((message) => message.kind === "borrow-artifacts");
       assert.ok(borrow && borrow.kind === "borrow-artifacts");

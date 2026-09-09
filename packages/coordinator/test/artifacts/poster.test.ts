@@ -84,6 +84,17 @@ describe("drawing the picture", () => {
     assert.equal(await stat(join(dir, ".index", "posters", `${filed.artifact.id}.png`)).catch(() => null), null);
     // Without a maker at all nothing is asked and nothing is said: most builds have no ffmpeg.
     assert.equal(await writeArtifactPoster(store, filed.artifact, undefined), false);
+    // A run that wrote a partial file and then failed leaves nothing behind for a later pass to
+    // mistake for a picture; and an empty file already there is drawn over.
+    const output = join(dir, ".index", "posters", `${filed.artifact.id}.png`);
+    const partial: TakePosterMaker = { write: async (_input, out) => { await writeFile(out, "half"); return { ok: false, reason: "timeout" }; } };
+    assert.equal(await writeArtifactPoster(store, filed.artifact, partial), false);
+    assert.equal(await stat(output).catch(() => null), null, "the partial file is gone");
+    await mkdir(join(dir, ".index", "posters"), { recursive: true });
+    await writeFile(output, "");
+    const whole = maker();
+    assert.equal(await writeArtifactPoster(store, filed.artifact, whole.maker), true);
+    assert.equal(whole.written.length, 1, "an empty poster is not a poster");
   });
 
   it("backfills the videos filed before posters existed, skips the ones drawn, and stops at the budget", async (t) => {

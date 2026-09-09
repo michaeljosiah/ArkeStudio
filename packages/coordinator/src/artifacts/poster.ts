@@ -1,4 +1,4 @@
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ArtifactSidecar } from "@arke-studio/contracts";
 import { isVideoMedia, writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "../takes/poster.js";
@@ -54,8 +54,14 @@ export async function writeArtifactPoster(
   } catch {
     return false;
   }
-  if ((await stat(toExtendedLength(output)).catch(() => null)) !== null) return true;
+  if (await posterExists(output)) return true;
   return await writeMediaPoster(toExtendedLength(join(store.dir, "artifacts", artifact.file)), toExtendedLength(output), maker, onUnavailable);
+}
+
+/** A poster is a file with bytes in it; a zero-byte leftover is drawn again. */
+async function posterExists(path: string): Promise<boolean> {
+  const info = await stat(toExtendedLength(path)).catch(() => null);
+  return info !== null && info.size > 0;
 }
 
 /**
@@ -69,15 +75,27 @@ async function writeMediaPoster(
   onUnavailable?: (reason: TakePosterUnavailableReason) => void,
 ): Promise<boolean> {
   if (!isVideoMedia(input)) return false;
+  // A run that is killed or exits badly can leave a partial file where the poster should be, and
+  // every later pass would take it for a finished picture; a failure leaves nothing behind.
+  const discard = async (): Promise<void> => {
+    await rm(output, { force: true }).catch(() => undefined);
+  };
   let outcome;
   try {
     outcome = await maker.write(input, output);
   } catch {
+    await discard();
     try { onUnavailable?.("process-failed"); } catch { /* a diagnostic that fails is still only a diagnostic */ }
     return false;
   }
   if (!outcome.ok) {
+    await discard();
     try { onUnavailable?.(outcome.reason); } catch { /* as above */ }
+    return false;
+  }
+  if (!(await posterExists(output))) {
+    await discard();
+    try { onUnavailable?.("process-failed"); } catch { /* as above */ }
     return false;
   }
   return true;
@@ -106,7 +124,7 @@ export async function backfillArtifactPosters(
     if (!wantsArtifactPoster(artifact) || artifact.retiredAt !== undefined) continue;
     if (now() > deadline || options.stillOpen?.() === false || store.isClosed()) break;
     const output = join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"), `${artifact.id}.png`);
-    if ((await stat(toExtendedLength(output)).catch(() => null)) !== null) continue;
+    if (await posterExists(output)) continue;
     if (await writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason))) drawn += 1;
   }
   return drawn;

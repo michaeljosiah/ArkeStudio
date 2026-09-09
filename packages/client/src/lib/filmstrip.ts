@@ -80,7 +80,10 @@ function sourceFor(src: string): Source {
     return existing;
   }
   if (sources.size >= MAX_SOURCES) {
-    const oldest = [...sources.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
+    // Only an idle source nobody still wants frames from may go: one evicted mid-decode leaves
+    // its strips on their posters, since nothing re-asks for a source that vanished under them.
+    const idle = [...sources.entries()].filter(([, candidate]) => !candidate.busy && !candidate.queue.some((entry) => wanted.has(entry.key)));
+    const oldest = idle.sort((a, b) => a[1].lastUsed - b[1].lastUsed)[0];
     if (oldest !== undefined) {
       oldest[1].video.removeAttribute("src");
       try { oldest[1].video.load(); } catch { /* releasing a decoder is best-effort */ }

@@ -161,8 +161,11 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   const ref = useRef<HTMLButtonElement>(null);
   const width = useMeasuredWidth(ref);
   // A poster that never arrives — a build with no ffmpeg draws none — leaves the kind's mark, not
-  // an empty frame with a name on it.
-  const [posterMissing, setPosterMissing] = useState(false);
+  // an empty frame with a name on it. Remembered per picture, so a shot that gains a frame, or a
+  // clip whose picture changes, asks again.
+  const [missingFor, setMissingFor] = useState<string | null>(null);
+  const pictureKey = `${slug ?? ""}|${view.poster ?? ""}`;
+  const posterMissing = view.poster !== null && missingFor === pictureKey;
   return (
     <button ref={ref} type="button" className={className} style={style} {...rest}>
       {children}
@@ -172,7 +175,7 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
         <>
           {view.poster === null || posterMissing
             ? <div className="fy-portrait--fallback"><Film size={18} /></div>
-            : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} onAvailabilityChange={(available) => setPosterMissing(!available)} />}
+            : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} onAvailabilityChange={(available) => setMissingFor(available ? null : pictureKey)} />}
           <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames / frameRate} widthPx={width} />
           <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
         </>
@@ -740,6 +743,7 @@ export function PictureClipTiming({
   onCommands,
   onScrub,
   sourceLength,
+  timeline = null,
 }: {
   clip: TimelineClip;
   /** The clip's track, so a typed edge stops where its neighbours and its source do. */
@@ -749,6 +753,8 @@ export function PictureClipTiming({
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onScrub?: (frame: number) => void;
   sourceLength: SourceLengthFrames;
+  /** The record a step is checked against before it is sent, so the viewer never parks on an edge the cut refused. */
+  timeline?: ProductionTimeline | null;
 }) {
   const end = clip.startFrame + clip.durationFrames;
   /** Where the viewer goes after a command: the edge it moved, in the record it will produce. */
@@ -760,6 +766,9 @@ export function PictureClipTiming({
     }
   };
   const send = (command: TimelineClipCommand, label: string) => {
+    // A step the algebra would refuse — a tail past its source, an edge into a neighbour, a move
+    // onto another clip — sends nothing and moves the viewer nowhere; the row keeps the record.
+    if (timeline !== null && previewTimeline(timeline, [command], sourceLength) === null) return;
     onCommands([command], label);
     follow(command);
   };

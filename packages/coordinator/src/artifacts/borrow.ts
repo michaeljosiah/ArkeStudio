@@ -1,5 +1,5 @@
-import { stat } from "node:fs/promises";
-import { join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, join, sep } from "node:path";
 import {
   artifactDisplayName,
   linkNameResolver,
@@ -18,6 +18,27 @@ import { ARTIFACT_POSTER_DIR, artifactPosterPath } from "./poster.js";
  */
 
 const PLACEABLE = new Set<BorrowableArtifact["kind"]>(["audio", "video", "image", "board"]);
+
+/**
+ * The absolute path of one of a shelf's files, or null. The media route's resolver would also
+ * answer, but it answers for a renderer and refuses anything its MIME table does not name — a
+ * `.mov` or an `.m4a` the shelf legitimately holds. A borrow copies bytes, so what it needs is
+ * containment: a plain filename, inside `artifacts/` once links are followed, and a file.
+ */
+export async function resolveBorrowedFile(dir: string, file: string): Promise<string | null> {
+  if (basename(file) !== file || file === "..") return null;
+  const root = join(dir, "artifacts");
+  try {
+    const [rootReal, target] = await Promise.all([
+      realpath(toExtendedLength(root)),
+      realpath(toExtendedLength(join(root, file))),
+    ]);
+    if (target !== join(rootReal, basename(target)) || !target.startsWith(rootReal + sep)) return null;
+    return (await stat(target)).isFile() ? target : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function listBorrowableArtifacts(
   bundle: Pick<WorldBundle, "artifacts" | "sheets" | "canon" | "productions">,

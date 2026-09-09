@@ -274,7 +274,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
-import { listBorrowableArtifacts } from "./artifacts/borrow.js";
+import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -12330,27 +12330,29 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
           return;
         }
-        const source = await this.borrowSource(msg.slug);
-        if (source === null || source.world.worldId === msg.worldId || !this.opts.provider.serveMedia) {
-          this.rejectEnqueue(msg.requestId, msg.kind, "That world is unavailable.");
-          return;
-        }
-        // Checked against the shelf as it is now, not as it was browsed: a file retired or
-        // scoped to a production since then is no longer offered, whatever the row still says.
-        const offered = new Set((await listBorrowableArtifacts(source.bundle, source.dir)).map((row) => row.file));
-        const failures: Array<{ index: number; reason: string }> = [];
-        const sources: string[] = [];
-        const origins: number[] = [];
-        for (const [index, file] of msg.files.entries()) {
-          const media = offered.has(file) ? await this.opts.provider.serveMedia(msg.slug, `artifacts/${file}`) : null;
-          if (media === null) {
-            failures.push({ index, reason: `${file}: no longer offered by ${source.world.name}` });
-            continue;
-          }
-          sources.push(media.path);
-          origins.push(index);
-        }
+        // Everything from here answers the queue request, whatever fails: a source world that
+        // cannot be read mid-copy must not leave the Cut waiting on an import that never answers.
         try {
+          const source = await this.borrowSource(msg.slug);
+          if (source === null || source.world.worldId === msg.worldId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "That world is unavailable.");
+            return;
+          }
+          // Checked against the shelf as it is now, not as it was browsed: a file retired or
+          // scoped to a production since then is no longer offered, whatever the row still says.
+          const offered = new Set((await listBorrowableArtifacts(source.bundle, source.dir)).map((row) => row.file));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const origins: number[] = [];
+          for (const [index, file] of msg.files.entries()) {
+            const path = offered.has(file) ? await resolveBorrowedFile(source.dir, file) : null;
+            if (path === null) {
+              failures.push({ index, reason: `${file}: no longer offered by ${source.world.name}` });
+              continue;
+            }
+            sources.push(path);
+            origins.push(index);
+          }
           if (sources.length > 0) {
             const outcome = await importEditorMedia(store, sources, msg.editor, {
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
@@ -14515,6 +14517,11 @@ export class Coordinator {
       });
       return null;
     }
+    // Its picture, on this path too (issue 1037): `Copy it anyway` files a large video here, and
+    // a poster owed only to the first attempt would wait for the next open's backfill.
+    await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
+      void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
+    });
     this.emit({
       at: new Date().toISOString(),
       type: "artifact.attached",

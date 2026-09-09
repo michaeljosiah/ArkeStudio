@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storyTimelineFingerprint } from "@arke-studio/contracts";
-import { listBorrowableArtifacts } from "../../src/artifacts/borrow.js";
+import { listBorrowableArtifacts, resolveBorrowedFile } from "../../src/artifacts/borrow.js";
 import { fileArtifact, retireArtifact } from "../../src/artifacts/filing.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
 import { createProduction } from "../../src/productions/ops.js";
@@ -53,6 +53,10 @@ describe("what a world offers", () => {
     await writeFile(join(dir, ".index", "posters", `${clip.id}.png`), "poster");
     const again = await listBorrowableArtifacts(store.getBundle(), dir);
     assert.equal(again.find((row) => row.id === clip.id)!.picture, `.index/posters/${clip.id}.png`, "the poster once it exists");
+    // The file itself resolves by containment, whatever its format; a name that leaves the shelf does not.
+    assert.ok((await resolveBorrowedFile(dir, "clip.mp4"))?.endsWith("clip.mp4"));
+    assert.equal(await resolveBorrowedFile(dir, "../world.json"), null);
+    assert.equal(await resolveBorrowedFile(dir, "world.json"), null, "not a file the shelf holds");
     // Retired since it was browsed: the shelf no longer offers it, which is what a borrow is checked against.
     await retireArtifact(store, clip.id);
     assert.equal((await listBorrowableArtifacts(store.getBundle(), dir)).some((row) => row.id === clip.id), false);
