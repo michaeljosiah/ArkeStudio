@@ -1,3 +1,6 @@
+import { editShot } from "@arke-studio/contracts";
+import { parseSceneRecord } from "../../src/productions/scene-record.js";
+import { sha256 } from "../../src/world/text-files.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
@@ -110,4 +113,18 @@ describe("the world schema-version boundary (issue 403)", () => {
     const { readdir } = await import("node:fs/promises");
     assert.ok(!(await readdir(target)).includes(".conversations"), "the directory itself is excluded");
   });
+});
+
+it("fences gait and object speed metadata in the scene commit (#1044)", async () => {
+  const { dir, store } = await open();
+  const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+  const raw = await readFile(join(dir, path), "utf8");
+  const scene = editShot(parseSceneRecord(raw), { shotId: "sh_12", change: { staging: { version: 1, cast: [], sets: [],
+    keys: [{ t: 0, p: [0, 2, 4], l: [0, 1, 0] }],
+    performances: [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0, gait: "run" }] }],
+    objectMotions: [{ group: "car", maxSpeed: 20, keys: [{ t: 0, p: [0, 0, 0] }] }],
+  } } });
+  await store.commit({ kind: "scene-command", source: "test", files: [{ path, action: "replace", content: JSON.stringify(scene), baseHash: sha256(raw) }] });
+  assert.equal((await readWorldMeta(dir)).schemaVersion, 21);
+  await assert.rejects(readWorldMeta(dir, { supports: 20 }), /newer|schema|version/i);
 });

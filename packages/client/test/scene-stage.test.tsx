@@ -300,3 +300,21 @@ it("clears a motion selection when its mark is removed or an earlier mark is ins
   assert.equal(q('[data-motion-mark="selected"]'), null);
   assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
 });
+
+it("warns about timed speed and lets a gait change travel through Keep (#1044)", async () => {
+  const { q, sent } = await mount(shot => {
+    shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }];
+    shot.staging!.performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 1, x: 5, z: 0 }] }];
+  });
+  assert.match(q('.fy-swstage__mover').textContent ?? "", /walk.*too fast/);
+  const select = q('[aria-label="Maren Kest 0s gait"]');
+  const propsKey = Object.keys(select).find(key => key.startsWith("__reactProps$"))!;
+  const props = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[propsKey]!;
+  await act(async () => props.onChange({ target: { value: "run" } }));
+  assert.match(q('.fy-swstage__mover').textContent ?? "", /run/);
+  assert.doesNotMatch(q('.fy-swstage__mover').textContent ?? "", /too fast/);
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind === "edit-stage") assert.equal(command.staging?.performances?.[0]?.keys[0]?.gait, "run");
+});

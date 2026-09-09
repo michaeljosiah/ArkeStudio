@@ -3,7 +3,6 @@ import {
   DEFAULT_SHOT_SEC,
   effectiveStageBlocking,
   effectiveFraming,
-  MAX_STAGE_WALK_SPEED_MPS,
   STAGE_FRAME_RATE,
   STAGE_RIGS,
   orderedShots,
@@ -17,7 +16,8 @@ import {
   type StageObjectMotion,
   type StagePerformanceKey,
   stageShot,
-  stageWalkSpeed,
+  stageMotionSpeeds,
+  stageSpeedWarnings,
   stagingRetimed,
   stagingFov,
   stagingMotionWord,
@@ -819,7 +819,7 @@ export function SceneStage({
       const keys = existing?.keys ?? [{t:0,...stageObjectAt(undefined,group,0)},{t:durationSec,...stageObjectAt(undefined,group,0)}];
       const near = keys.findIndex(k=>Math.abs(k.t-time)<.01);
       const next = near>=0 ? keys.map((k,i)=>i===near?{...k,...change}:k) : [...keys,{t:round(time),...stageObjectAt(current.objectMotions,group,time),...change}];
-      return {...current,objectMotions:[...(current.objectMotions??[]).filter(m=>m.group!==group),{group,keys:next.sort((a,b)=>a.t-b.t)}]};
+      return {...current,objectMotions:[...(current.objectMotions??[]).filter(m=>m.group!==group),{...existing,group,keys:next.sort((a,b)=>a.t-b.t)}]};
     });
   };
   const patchSet = (which: number, change: Partial<StagingSet>) =>
@@ -1059,13 +1059,15 @@ export function SceneStage({
                 <div className="fy-swstage__block">
                   <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
                   {working.cast.map((figure, position) => {
-                    const speed = stageWalkSpeed(figure, durationSec);
-                    const tooFast = speed !== null && speed > MAX_STAGE_WALK_SPEED_MPS;
+                    const legs = stageMotionSpeeds({ ...working, cast: [figure], objectMotions: undefined }, durationSec);
+                    const tooFast = legs.some(leg => leg.ceiling !== undefined && leg.speed > leg.ceiling);
+                    const timed = working.performances?.some(p => p.sheetId === figure.sheetId);
+                    const gaits = [...new Set(legs.map(leg => leg.gait))].join(" / ");
                     return (
-                      <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen || working.performances?.some(p => p.sheetId === figure.sheetId)} onClick={() => toggleWalk(figure.sheetId)}>
+                      <button key={figure.sheetId} type="button" className="fy-swstage__mover" title={stageSpeedWarnings({ ...working, cast: [figure], objectMotions: undefined }, nameOf, durationSec).join("\n")} disabled={frozen || timed} onClick={() => toggleWalk(figure.sheetId)}>
                         <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
                         <span>{nameOf(figure.sheetId)}</span>
-                        <span data-walks={figure.to === undefined ? undefined : "true"}>{working.performances?.some(p => p.sheetId === figure.sheetId) ? "timed action" : figure.to === undefined ? "holds" : tooFast ? "walks · too fast" : "walks"}</span>
+                        <span data-walks={figure.to === undefined ? undefined : "true"}>{timed ? `${gaits || "holds"}${tooFast ? " · too fast" : ""}` : figure.to === undefined ? "holds" : tooFast ? "walks · too fast" : "walks"}</span>
                       </button>
                     );
                   })}
@@ -1094,6 +1096,7 @@ export function SceneStage({
                     <span>{key.t.toFixed(2)}s</span>
                     {(["x","z","y","facing"] as const).map(field => <label key={field}>{field === "facing" ? "Facing °" : field}<input type="number" aria-label={`${nameOf(figure.sheetId)} ${key.t}s ${field}`} value={key[field] ?? 0} step={field === "facing" ? 5 : .1} disabled={frozen} onChange={e=>{ const value=Number(e.target.value); if(Number.isFinite(value))patchPerformanceAt(figure.sheetId,{[field]:value},key.t); }} /></label>)}
                     <select aria-label={`${nameOf(figure.sheetId)} ${key.t}s posture`} value={key.pose ?? "stand"} disabled={frozen} onChange={e=>patchPerformanceAt(figure.sheetId,{pose:e.target.value as StagePerformanceKey["pose"]},key.t)}><option value="stand">Standing</option><option value="sit">Seated</option><option value="lie">Lying</option></select>
+                    <select aria-label={`${nameOf(figure.sheetId)} ${key.t}s gait`} value={key.gait ?? "walk"} disabled={frozen} onChange={e=>patchPerformanceAt(figure.sheetId,{gait:e.target.value as StagePerformanceKey["gait"]},key.t)}><option value="walk">Walk</option><option value="jog">Jog</option><option value="run">Run</option></select>
                     {index>0 ? <button disabled={frozen} onClick={()=>patchCamera(current=>({...current,performances:current.performances?.map(p=>p.sheetId===figure.sheetId?{...p,keys:p.keys.filter((_,i)=>i!==index)}:p)}))}>Remove mark</button> : null}
                   </div>)}
                 </details>)}
@@ -1102,6 +1105,8 @@ export function SceneStage({
                 <div className="fy-swstage__eyebrow">Object motion</div>
                 {[...new Set(working.sets.flatMap(s=>s.group?[s.group]:[]))].map(group=><details key={group}><summary>{group}</summary>
                   <Button size="sm" disabled={frozen} onClick={()=>patchObjectAt(group,{})}>Mark motion here</Button>
+                  <label>Speed ceiling (m/s)<input type="number" min="0.01" step="1" placeholder="None" aria-label={`${group} speed ceiling`} disabled={frozen || !working.objectMotions?.some(m=>m.group===group)} value={working.objectMotions?.find(m=>m.group===group)?.maxSpeed ?? ""} onChange={e=>{const raw=e.target.value;const value=Number(raw);if(raw!==""&&(!Number.isFinite(value)||value<=0))return;patchCamera(current=>({...current,objectMotions:current.objectMotions?.map(m=>m.group===group?{...m,maxSpeed:raw===""?undefined:value}:m)}));}}/></label>
+                  {stageSpeedWarnings({ cast: [], objectMotions: working.objectMotions?.filter(m=>m.group===group) }, nameOf, durationSec).map(warning=><span key={warning} className="fy-swstage__quiet">{warning}</span>)}
                   {working.objectMotions?.find(m=>m.group===group)?.keys.map((key,index)=><div key={index} className="fy-swstage__motion-mark" data-motion-mark={motionMark?.kind === "object" && motionMark.id === group && motionMark.index === index ? "selected" : undefined}><span>{key.t.toFixed(2)}s</span>
                     {(["p","rotation"] as const).flatMap(field=>([0,1,2] as const).map(axis=><label key={`${field}${axis}`}>{field==="p"?["x","y","z"][axis]:["Pitch °","Turn °","Roll °"][axis]}<input type="number" aria-label={`${group} ${key.t}s ${field} ${axis}`} value={key[field]?.[axis]??0} disabled={frozen} step={field==="p"?.1:5} onChange={e=>{const value=Number(e.target.value);if(!Number.isFinite(value))return;const tuple:[number,number,number]=[...(key[field]??[0,0,0])];tuple[axis]=value;patchObjectAt(group,{[field]:tuple},key.t);}}/></label>))}
                     {index>0?<button disabled={frozen} onClick={()=>patchCamera(current=>({...current,objectMotions:current.objectMotions?.map(m=>m.group===group?{...m,keys:m.keys.filter((_,i)=>i!==index)}:m)}))}>Remove mark</button>:null}

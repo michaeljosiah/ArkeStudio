@@ -1,5 +1,5 @@
 import { sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame } from "./scene.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -509,12 +509,7 @@ export function stagingBeats(
 ): string[] {
   staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
   const keys = staging.keys;
-  const warnings = durationSec <= 0 ? [] : staging.cast.flatMap((figure) => {
-    const speed = stageWalkSpeed(figure, durationSec);
-    if (speed === null || speed <= MAX_STAGE_WALK_SPEED_MPS) return [];
-    const shownSpeed = Math.ceil(speed * 100) / 100;
-    return [`Blocking warning — ${nameOf(figure.sheetId)} · ${(speed * durationSec).toFixed(1)}m in ${durationSec.toFixed(1)}s · ${shownSpeed.toFixed(2)}m/s · too fast for a walk`];
-  });
+  const warnings = stageSpeedWarnings(staging, nameOf, durationSec);
   const camera = keys.map((k) => {
     const subject = k.anchor ?? k.track ?? null;
     const pose = sampleStageCamera({...staging,keys},k.t,durationSec);
@@ -542,6 +537,67 @@ export function stageWalkSpeed(figure: StagingFigure, durationSec: number): numb
   const distance = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
   if (durationSec <= 0) return distance === 0 ? 0 : Number.POSITIVE_INFINITY;
   return distance / durationSec;
+}
+
+export const STAGE_GAIT_SPEEDS: Record<StageGait, number> = { walk: MAX_STAGE_WALK_SPEED_MPS, jog: 4, run: 9 };
+export interface StageMotionSpeed {
+  kind: "performance" | "object";
+  id: string;
+  from: number;
+  to: number;
+  distance: number;
+  speed: number;
+  ceiling?: number;
+  gait?: StageGait;
+}
+
+/** Measure local performer travel, so riding a moving vehicle does not count as running. */
+export function stageMotionSpeeds(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, durationSec: number): StageMotionSpeed[] {
+  const result: StageMotionSpeed[] = [];
+  const measure = (leg: Omit<StageMotionSpeed, "distance" | "speed">, point: (at: number) => readonly number[]) => {
+    let distance = 0;
+    let previous = point(leg.from);
+    for (let i = 1; i <= 32; i++) {
+      const next = point(leg.from + (leg.to - leg.from) * i / 32);
+      distance += Math.hypot(...next.map((value, axis) => value - previous[axis]!));
+      previous = next;
+    }
+    if (distance < .05) return;
+    result.push({ ...leg, distance, speed: leg.to > leg.from ? distance / (leg.to - leg.from) : Infinity });
+  };
+  for (const figure of staging.cast) {
+    const performance = staging.performances?.find(track => track.sheetId === figure.sheetId);
+    if (performance) {
+      for (let index = 0; index < performance.keys.length - 1; index++) {
+        const a = performance.keys[index]!, b = performance.keys[index + 1]!;
+        const gait = a.gait ?? "walk";
+        measure({ kind: "performance", id: figure.sheetId, from: a.t, to: b.t, gait, ceiling: STAGE_GAIT_SPEEDS[gait] }, at => {
+          const state = stageFigureLocalAt(figure, staging.performances, at, durationSec);
+          return [state.x, state.y, state.z];
+        });
+      }
+    } else if (figure.to) {
+      const speed = stageWalkSpeed(figure, durationSec)!;
+      const distance = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
+      if (distance >= .05) result.push({ kind: "performance", id: figure.sheetId, from: 0, to: durationSec, gait: "walk", ceiling: STAGE_GAIT_SPEEDS.walk, distance, speed });
+    }
+  }
+  for (const motion of staging.objectMotions ?? []) {
+    for (let index = 0; index < motion.keys.length - 1; index++) {
+      const a = motion.keys[index]!, b = motion.keys[index + 1]!;
+      measure({ kind: "object", id: motion.group, from: a.t, to: b.t, ...(motion.maxSpeed === undefined ? {} : { ceiling: motion.maxSpeed }) }, at => stageObjectAt(staging.objectMotions, motion.group, at).p);
+    }
+  }
+  return result;
+}
+
+export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number): string[] {
+  return stageMotionSpeeds(staging, durationSec).flatMap(leg => {
+    if (leg.ceiling === undefined || leg.speed <= leg.ceiling) return [];
+    const suggestion = leg.gait === undefined ? undefined : (["jog", "run"] as const).find(gait => STAGE_GAIT_SPEEDS[gait] >= leg.speed);
+    const verdict = leg.gait ? `too fast for a ${leg.gait}` : `above ${leg.ceiling.toFixed(2)}m/s ceiling`;
+    return [`Blocking warning — ${leg.kind === "performance" ? nameOf(leg.id) : leg.id} · ${leg.distance.toFixed(1)}m in ${(leg.to - leg.from).toFixed(1)}s · ${(Math.ceil(leg.speed * 100) / 100).toFixed(2)}m/s · ${verdict} (${leg.from.toFixed(2)}–${leg.to.toFixed(2)}s); ${suggestion ? `use ${suggestion} or add time` : "add time"}`];
+  });
 }
 
 /** Where a figure stands a fraction `u` of the way through the shot: on its walk, or where it was put. */
@@ -595,6 +651,7 @@ export function stagingPromptClause(
   const keys = staging.keys;
   const walkers = staging.cast
     .filter((figure) => {
+      if (staging.performances?.some(performance => performance.sheetId === figure.sheetId)) return false;
       const speed = stageWalkSpeed(figure, durationSec);
       return speed !== null && speed <= MAX_STAGE_WALK_SPEED_MPS;
     })
@@ -615,7 +672,7 @@ export function stagingPromptClause(
     "Use the blockout for composition, action and camera motion. Replace greybox geometry with the approved character, location and style references.",
     `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...sets,
-    ...(staging.performances ?? []).flatMap(performance => performance.keys.map(key => `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}`)),
+    ...(staging.performances ?? []).flatMap(performance => performance.keys.map(key => `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}, ${key.gait ?? "walk"}`)),
     ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
     ...stagingBeats(staging, nameOf, durationSec),
     ...keys.slice(0,-1).map((key,index) => {

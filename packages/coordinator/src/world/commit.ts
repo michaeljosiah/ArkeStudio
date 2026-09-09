@@ -19,6 +19,7 @@ import {
   carriesStageBlocking,
   carriesStageConstruction,
   carriesStageReferenceFrames,
+  carriesStageSpeed,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -716,6 +717,7 @@ export class Committer {
       landsStageRig ? STAGE_RIG_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
       // Probe metadata is also written by ordinary artifact filing/backfill.
       sidecarBoundary(files),
       landsProseStyle ? PROSE_STYLE_SCHEMA_VERSION : 0,
