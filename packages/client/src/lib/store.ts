@@ -316,7 +316,9 @@ interface StoreState {
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
-  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /* `production` is the scope the refused filing was attempted at, so a surface can tell its
+     own refusals from another's: `null` is the world, absent is a filing that stated no opinion. */
+  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null; production?: string | null }>;
   /** Filed by attaching to a chat, newest last — what the composer shows as chips. */
   attached: Array<{
     worldId: string;
@@ -1564,6 +1566,7 @@ function handleFrame(json: string): void {
           outcome: event.outcome,
           reason: event.reason,
           sizeBytes: event.sizeBytes,
+          ...(event.production !== undefined ? { production: event.production } : {}),
         },
       ];
     }
@@ -3773,9 +3776,19 @@ export function moveTimelineHistory(
   send({ kind: "timeline-history", worldId, productionId, action, baseRevision });
 }
 
-/** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
-export function uploadArtifacts(worldId: string, files?: readonly File[]): { requestId: string | null; reason?: string } {
-  return importEditorMedia(worldId, undefined, files);
+/**
+ * File new artifacts: the host picks, the renderer never sees the bytes (82a).
+ *
+ * The world's shelf unless `production` names one. A production's own artifacts page is the only
+ * surface that scopes what it takes (SPEC-020 R-13, design 134); everywhere else the omission is
+ * the world saying so.
+ */
+export function uploadArtifacts(
+  worldId: string,
+  files?: readonly File[],
+  production?: string,
+): { requestId: string | null; reason?: string } {
+  return importEditorMedia(worldId, undefined, files, production);
 }
 
 export function restoreArtifact(worldId: string, artifactId: string): void {
@@ -3788,14 +3801,17 @@ export function retireArtifact(worldId: string, artifactId: string): void {
 
 export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
-  files?: readonly File[],
+  files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
   const requestId = queueRequest("upload-artifacts");
+  // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
+  // have to carry the same scope or one entrance on a page would file somewhere the other did not.
+  const scope = production !== undefined ? { production } : {};
   const submitted = files
-    ? bridge!.importDroppedMedia!({ worldId, requestId, editor }, files).submitted
-    : send({ kind: "upload-artifacts", worldId, requestId, editor });
+    ? bridge!.importDroppedMedia!({ worldId, requestId, editor, ...scope }, files).submitted
+    : send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope });
   if (!submitted) {
     pendingQueueRequests.delete(requestId);
     return { requestId: null, reason: "The files could not be imported. Check the connection and use Import media." };
@@ -4070,6 +4086,7 @@ export function useArtifactNotices(): Array<{
   outcome: string;
   reason: string;
   sizeBytes: number | null;
+  production?: string | null;
 }> {
   return useStore().artifactNotices;
 }

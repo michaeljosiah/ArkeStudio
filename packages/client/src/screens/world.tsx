@@ -3862,7 +3862,15 @@ export function ArtifactsScreen() {
   const retiredCount = shelfArtifacts.filter(a => a.retiredAt !== undefined).length;
   const artifacts = shelfArtifacts.filter(a => (a.retiredAt !== undefined) === retiredOnly);
   const report = useImportReport();
-  const notices = useArtifactNotices();
+  /*
+   * The world's own refusals, not every surface's (Codex round 1).
+   *
+   * `artifactNotices` is one global list, and a `needs-consent` notice is an offer to retry at a
+   * scope — this one retries at the world's. A production's refusal answered here would file its
+   * bytes as the world's, which is the escape hatch firing where nobody invoked it. A notice
+   * with no scope is a filing that stated no opinion, and the world is what that means.
+   */
+  const notices = useArtifactNotices().filter((n) => (n.production ?? null) === null);
   const [dropActive, setDropActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const upload = (files?: readonly File[]) => {
