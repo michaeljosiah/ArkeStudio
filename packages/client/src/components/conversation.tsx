@@ -809,9 +809,13 @@ export function ProductionConversation({
     /** Names a shot for the report card; the run state carries ids, and only the screen has numbers. */
     shotLabel?: (shotId: string) => string;
     /**
-     * The line under the composer. The default promises that talking changes nothing; a dock
-     * that offers a direct write — the scene's name (SPEC-036 R-38) — must say so instead, or
-     * the promise is false the moment the offer is taken.
+     * The line under the composer, drawn only when there is one.
+     *
+     * There used to be a default here promising that talking changes nothing, under every dock
+     * in the app. That is the rule the docks are built to and it belongs in the rule, not on
+     * nine screens (design turn 69). What is left is the exception: a dock that offers a direct
+     * write — the scene's name (SPEC-036 R-38) — has to say so, because there the promise would
+     * be false the moment the offer was taken.
      */
     note?: string;
   };
@@ -1057,7 +1061,7 @@ export function ProductionConversation({
         value={effectiveLanguageModelId ?? ""}
         onChange={(event) => setLanguageModelId(event.target.value || undefined)}
       >
-        {rememberedLanguageModel === undefined && <option value="">whatever the harness is set to</option>}
+        {rememberedLanguageModel === undefined && <option value="">Default</option>}
         {effectiveLanguageModelId !== undefined && languageModel === undefined && (
           <option value={effectiveLanguageModelId}>{effectiveLanguageModelId} · unavailable</option>
         )}
@@ -1072,7 +1076,7 @@ export function ProductionConversation({
           ? "THIS TURN"
           : rememberedLanguageModel !== undefined
             ? "THIS PRODUCTION"
-            : "HARNESS DEFAULT"}
+            : "DEFAULT"}
       </span>
       {languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && (
         <button
@@ -1245,7 +1249,10 @@ export function ProductionConversation({
             onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
             {...attachProps}
           />
-          <div className="fy-mono">{dock.note ?? "talking changes nothing · a change waits for your yes"}</div>
+          {/* Only a dock that departs from the promise says anything here (issue 1008). The
+              promise itself — talking changes nothing, a change waits for a yes — is the rule
+              the docks are built to, not a sentence repeated under every one of them. */}
+          {dock.note !== undefined && <div className="fy-mono">{dock.note}</div>}
         </div>
       </aside>
     );
@@ -1276,9 +1283,6 @@ export function ProductionConversation({
           onDictate={(text) => setMessage((prev) => (prev ? `${prev} ${text}` : text))}
           {...attachProps}
         />
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          talking changes nothing · wrap-up stages what you keep
-        </div>
         {footer}
       </div>
     </div>

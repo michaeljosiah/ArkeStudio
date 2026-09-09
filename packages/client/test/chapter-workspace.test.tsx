@@ -356,7 +356,9 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /CANON-002/, "and the canon");
     assert.match(text(m), /v1|v2|v3/, "earlier versions are listed for a v4 chapter");
     assert.match(text(m), /Arke · Chapter 02/, "Arke is docked about this chapter");
-    assert.match(text(m), /talking changes nothing here · a draft waits for your yes/);
+    // The dock's line is what is waiting, not a promise about what talking does not do
+    // (issue 1008): the promise is the rule the dock is built to, and it is in the rule.
+    assert.doesNotMatch(text(m), /talking changes nothing/, "the standing promise is off the screen");
   });
 
   it("a draft waiting locks the editor and stands in the prose's place; the decision is on the card", async () => {

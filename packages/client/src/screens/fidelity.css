@@ -352,13 +352,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-polaroid__role { font: 400 11px/15px var(--font-sans); color: var(--muted-foreground); margin: 1px 3px 0; height: 15px; }
 
 .fy-worldcard {
-  width: 306px;
   /*
-   * One number for the real card and the dashed "New world" placeholder beside it, so the two
-   * cannot drift apart. It is the sum of the pinned bands below (frame, name, logline, meta and
-   * the padding), border-box — change a band and this moves with it.
+   * The card is its grid track's width, and every track in a row is the same width, so the
+   * frame is the same height on every card in that row and the pinned bands below it do the
+   * rest. That is what the fixed 306 × 426 pair used to buy, and it now costs nothing at the
+   * widths the fixed pair had no answer for.
    */
-  height: var(--fy-worldcard-h);
+  width: 100%;
+  height: 100%;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
@@ -376,7 +377,15 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * two-line logline. Loglines run from a sentence to a paragraph, so without this the front door
  * was the most ragged screen in the app: 528 / 508 / 450 against that fixed 424.
  */
-.fy-worldcard__frame { width: 256px; height: 286px; }
+.fy-worldcard__frame { width: 100%; aspect-ratio: 256 / 286; }
+/*
+ * The dashed Create tile's frame carries both classes, and `__empty` fills its box — which was
+ * harmless while the card was a fixed height and is not now that the row stretches: a definite
+ * card height made that `height: 100%` resolve against the whole card and swallow the aspect
+ * ratio, so the placeholder's picture ran down through the space a real card gives its logline
+ * and meta. The frame keeps the frame's geometry wherever it is also the empty state.
+ */
+.fy-worldcard__frame.fy-worldcard__empty { height: auto; aspect-ratio: 256 / 286; }
 .fy-worldcard__name {
   margin: 14px 4px 0;
   font: 600 20px/24px var(--font-sans);
@@ -747,6 +756,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-gendialog__close:hover { background: var(--accent); color: var(--foreground); }
 .fy-gendialog__close:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-gendialog__labelrow { margin-top: 8px; }
 .fy-gendialog__label {
   margin-top: 8px;
   font: 500 10px var(--font-mono);
@@ -756,10 +766,12 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 }
 .fy-gendialog__promptbox { position: relative; display: flex; }
 .fy-gendialog__prompt { width: 100%; min-height: 116px; resize: vertical; }
+/* The label and its one action share a row, so neither is drawn over the writing surface. */
+.fy-gendialog__labelrow { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.fy-gendialog__labelrow .fy-gendialog__label { margin-top: 0; min-width: 0; }
 .fy-gendialog__reset {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
+  margin-left: auto;
+  flex: none;
   padding: 4px 9px;
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -772,6 +784,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-gendialog__reset:hover { color: var(--foreground); border-color: var(--ring); }
 .fy-gendialog__reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-gendialog__hint { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+/* One clause on the thing refused: louder than the hint under it, quieter than a callout. */
+.fy-gendialog__dropped { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--warning); }
 .fy-gendialog__reference { display: flex; flex-direction: column; gap: 8px; }
 /* A dashed slot rather than a button that says "browse": the empty state should look like the
    place the picture will be, so what arrives lands where the eye already is. */
@@ -833,8 +847,11 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-sheetspec strong { display: block; font: 600 12.5px var(--font-sans); }
 .fy-sheetspec p { margin: 3px 0 0; font: 400 11px var(--font-sans); color: var(--muted-foreground); }
 
-/* What travels with a generation, on the surfaces that have a choice about it (design 65). */
-.fy-gendialog__refbuttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* What travels with a generation, on the surfaces that have a choice about it (design 65).
+   Three equal columns rather than a wrapping row: the three are one decision, and a 2 + 1
+   break read as two groups, the loose one below (issue 1007). */
+.fy-gendialog__refbuttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.fy-gendialog__refbuttons .ui-btn { width: 100%; justify-content: center; text-align: center; }
 .fy-gendialog__refs { display: flex; gap: 10px; }
 .fy-gendialog__refs > div { position: relative; width: 72px; height: 72px; }
 .fy-gendialog__refs > div.is-dropped { opacity: 0.45; }
@@ -1155,11 +1172,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   flex-direction: column;
   align-items: flex-start;
   justify-content: flex-start;
-  height: var(--fy-worldcard-h);
   text-align: left;
   color: inherit;
 }
-.fy-newworldcard .fy-worldcard__frame { width: 256px; height: 286px; }
 .fy-newworldcard .fy-worldcard__name { display: block; }
 .fy-newworldcard:focus-visible { outline: 2px solid var(--foreground); outline-offset: 4px; }
 
@@ -1167,16 +1182,29 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 /* Home's own head is gone: the lockup and the two destinations it held now live in the one
    chrome every screen draws (.fy-titlebar), which is the whole point of there being one. */
 .fy-home-hero { padding: 34px 88px 0; animation: fy-fade-up 0.7s var(--ease-out) both; }
-/* align-items:flex-start means nothing stretches here — every card is its own height, so the
-   pinned bands are the only thing keeping the row level. --fy-worldcard-h is that height. */
+/*
+ * A column at every width (issue 1007).
+ *
+ * The cards were a fixed 306px in a wrapping row, so the grid stepped from three columns to
+ * seven with nothing in between: at 1440 three cards left about 400px of the front door empty,
+ * and every width from there to 2560 left the same or more. A track that stretches gives four
+ * at 1440, five at 1920, seven at 2560, and cards that stay within a few pixels of the 306 the
+ * fan was drawn at. The frame keeps its drawn proportion instead of its drawn pixels, and the
+ * bands below it are still pinned — which is what keeps a row level now that the row is a grid.
+ */
 .fy-home-cards {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 32px;
   padding: 54px 64px;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  --fy-worldcard-h: 426px;
 }
+/*
+ * Grid items default to min-width:auto, and a nowrap name inside one would otherwise widen its
+ * own track past the share the row gave it. They stretch, and the card fills what it is given,
+ * so the dashed "New world" card — which has a frame and a name and none of the bands under
+ * them — still sits level with the worlds beside it. That is what the fixed 426 used to do.
+ */
+.fy-home-cards > * { min-width: 0; height: 100%; }
 
 /* ============================================================
    Production shell and screens (frames 11a/14a/11b/24a/25a/25b/
@@ -3902,9 +3930,40 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-voicerow--selected { border: 1.5px solid var(--foreground); background: var(--muted); }
 
 /* world art direction (36a) */
+/*
+ * The screen fills what the scroll column has left rather than the viewport minus a constant.
+ * `100vh - 95px` was 28px taller than the room actually there — the pill nav above it is sticky
+ * and so still takes its 53px of flow — and it had no answer at all for a condition banner
+ * above it, which is what put the key art below the fold (issue 1007).
+ */
+.fy-content--fill { display: flex; flex-direction: column; }
+/*
+ * The screen keeps a floor, and past it the column scrolls (codex round five). A world with
+ * enough external edits or unreadable files raises a banner of its own height above these
+ * screens, and a flex item at `min-height: 0` will shrink to nothing to make room for it — so
+ * the very controls this issue was about, Save and the composer, would have had no height at
+ * all. The floor is what art direction needs at its own minimum: 180 of master look, 168 of key
+ * art, the gap between them and the page's padding.
+ */
+.fy-content--fill > .fy-artdirection,
+.fy-content--fill > .fy-gate,
+.fy-content--fill > .fy-chat__wrap { flex: 1 1 auto; height: auto; min-height: 460px; }
+/* And the banner keeps its own height rather than being squashed to make the floor fit: it is
+   a list of files that need attention, and half of one is no use. Past both, the column scrolls. */
+.fy-content--fill > .fy-worldconditions { flex: none; }
+.fy-content--fill > .fy-chat__wrap { display: flex; flex-direction: column; }
+.fy-content--fill > .fy-chat__wrap > .fy-gate { flex: 1 1 auto; min-height: 0; }
 .fy-artdirection {
   height: calc(100vh - 95px);
   min-height: 0;
+  /*
+   * Capped and centred (issue 1007). The row grew with the window, so at 2560 the pictures
+   * column reached 1455px and the *empty* master-look frame — a dashed rectangle with three
+   * words in it — was the largest thing in the app. A page about two pictures does not get
+   * better past about this width; it just gets emptier.
+   */
+  max-width: 1680px;
+  margin-inline: auto;
   padding: 31px 88px 48px;
   display: flex;
   gap: 48px;
@@ -3933,6 +3992,9 @@ select.fy-set__pill { padding-right: 26px; }
   width: 100%;
   flex: 1 1 auto;
   min-height: 180px;
+  /* The band caps rather than taking every pixel a tall window offers: past this the frame
+     stops reading as a picture and starts reading as a wall (issue 1007). */
+  max-height: 620px;
   position: relative;
   border-radius: 18px;
   overflow: hidden;
@@ -3943,8 +4005,6 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-artdirection__master > .fy-portrait,
 .fy-artdirection__master > .fy-portrait--fallback { border-radius: 0; object-fit: cover; }
 .fy-artdirection__master--empty { background: var(--muted); border: 1px dashed var(--neutral-300); box-shadow: none; color: var(--muted-foreground); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; }
-.fy-artdirection__master--empty strong { font: 600 18px var(--font-sans); color: var(--foreground); }
-.fy-artdirection__master--empty p { font: 400 12px var(--font-sans); margin-top: 6px; }
 .fy-artdirection__empty-mark { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; font: 500 9px var(--font-mono); letter-spacing: .12em; }
 .fy-artdirection__master-caption {
   position: absolute;
@@ -4040,11 +4100,6 @@ select.fy-set__pill { padding-right: 26px; }
   align-items: center;
   justify-content: center;
 }
-.fy-artdirection__keyart-note {
-  margin-top: 8px;
-  font: 400 11px/1.6 var(--font-sans);
-  color: var(--muted-foreground);
-}
 /* The column that grows: the look, its history and any offer waiting on it live below the fold on
    a short window, and the screen is a fixed-height flex row, so without this they are unreachable. */
 .fy-artdirection__detail {
@@ -4063,10 +4118,20 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-artdirection__badges { display: flex; gap: 8px; margin-top: 22px; }
 .fy-artdirection__badges span { padding: 5px 11px; border-radius: 999px; background: var(--secondary); font: 400 10.5px var(--font-mono); }
 .fy-artdirection__badges span + span { border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); }
-.fy-artdirection__carries { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); margin-top: 10px; }
-.fy-artdirection__safety,
-.fy-artdirection__derived { font: 400 11px/1.6 var(--font-sans); color: var(--muted-foreground); margin-top: 14px; border-left: 2px solid var(--border); padding-left: 12px; }
-.fy-artdirection__derived { border-color: var(--warning); color: var(--neutral-600); }
+.fy-artdirection__safety {
+  font: 400 11px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  margin-top: 14px;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
+.fy-artdirection__derived {
+  font: 400 11px/1.6 var(--font-mono);
+  color: var(--neutral-600);
+  margin-top: 14px;
+  border-left: 2px solid var(--warning);
+  padding-left: 12px;
+}
 .fy-artdirection__action { margin-top: 28px; }
 .fy-artdirection__action .ui-btn { width: 180px; height: 40px; justify-content: center; }
 /* The one-line notice that previews are waiting; the set itself is answered in the dialog. */
@@ -4739,6 +4804,23 @@ select.fy-set__pill { padding-right: 26px; }
 /* Narrow: one sheet, never a layer on a layer (design 41c). The rail moves below the
    conversation rather than over it, so nothing is hidden behind anything else. */
 @media (max-width: 1100px) {
+  /*
+   * The fill goes with the columns (codex, 2026-09-09). Below this width the gate stacks, and a
+   * stacked gate held to the viewport gives the whole column to the understanding rail — which
+   * is `flex: none` at its own intrinsic height — while the conversation shrinks under its
+   * `overflow: hidden` and takes the transcript and the composer with it. Two columns side by
+   * side each get half the height and scroll; one on top of the other scrolls the page, which
+   * is what it did before issue 1007 and what it does again here. Art direction is a row at
+   * every width above 820 and keeps the fill.
+   */
+  .fy-content--fill > .fy-chat__wrap,
+  .fy-content--fill > .fy-chat__wrap > .fy-gate { flex: 0 0 auto; height: auto; }
+  /* And the released gate keeps the floor its own rule gives it, which the fill had set to
+     nothing: a short conversation should still fill the window rather than stop half way down
+     it. Only the chat wrap is released — it is the only gate that stacks at this width. The
+     edit sheet, the canon thread and the new-entry gate are still two columns here, and two
+     columns that each scroll are exactly what the fill is for. */
+  .fy-content--fill > .fy-chat__wrap > .fy-gate { min-height: calc(100vh - 132px); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }
@@ -8221,3 +8303,50 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-voiceways { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .fy-vsgen { flex-wrap: wrap; }
 }
+
+/* ---- the founding build's completion notice (SPEC-031 §1.9; issue 1007) ----
+   One row, on Overview. It was a callout with a paragraph and a button bar in it, drawn on
+   every tab of the world — 110px of standing chrome on nine screens that size themselves
+   against the window, which is how Save left the foot of the edit sheet, the composer left
+   World Chat and the key art left the fold. The cause keeps its own words and clips rather
+   than wrapping, because a band that can grow is a band that can push a page off screen. */
+.fy-buildnotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--warning);
+  border-radius: 10px;
+  background: var(--card);
+  font: 400 12.5px var(--font-sans);
+}
+.fy-buildnotice__dot { width: 6px; height: 6px; flex: none; border-radius: 999px; background: var(--warning); margin-top: 6px; }
+.fy-buildnotice__title { flex: none; font-weight: 600; }
+/*
+ * The cause wraps, and nothing clips it (codex rounds four and five). R-46 puts the cause on the
+ * notice; one line with a `title` holding the rest was a copy no keyboard or touch screen could
+ * reach, and a two-line clamp was the same failure one line further along. The bound this needed
+ * was never the text — it was the notice's own placement. It draws on Overview, which is a page
+ * that scrolls, so a long provider refusal costs a taller row and nothing else.
+ */
+.fy-buildnotice__cause { min-width: 0; color: var(--muted-foreground); }
+.fy-buildnotice__when { margin-left: auto; flex: none; font: 400 11px var(--font-mono); color: var(--neutral-400); }
+.fy-buildnotice__act {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 400 11.5px var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.fy-buildnotice__act:hover { color: var(--foreground); border-color: var(--ring); }
+.fy-buildnotice__act:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* The sheet editor's prose fields (issue 1007). A section of a character sheet is a paragraph
+   or three; at the shared 112px each one showed four lines behind its own scrollbar. */
+.fy-sheetedit__prose { min-height: 232px; }

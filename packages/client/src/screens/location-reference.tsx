@@ -22,6 +22,7 @@ import { Button, Callout, IconButton, cx } from "../components/ui.js";
 import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
+import { shortDate } from "../lib/format.js";
 import {
   acceptLocationView,
   clearLocationViewUpload,
@@ -247,7 +248,7 @@ export function LocationReferenceScreen() {
               <div className="fy-locref__viewfoot">
                 <h3>{view.name}</h3>
                 <p className="fy-mono">
-                  accepted {new Date(view.acceptedAt).toLocaleDateString()} · sheet v{view.sheetVersion} · look v
+                  accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
                 {index === 0 && (

@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Button, Callout, IconButton } from "../components/ui.js";
 import { Speaker } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { readBibleSection, restoreBible, saveBible, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
@@ -201,10 +201,6 @@ export function BibleScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Bible
         </h1>
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          your thinking about this world, in your words · the Studio reads all of it, every turn ·
-          it may guide creative generation, but it is never canon or evidence
-        </div>
       </div>
 
       <div className="fy-biblegrid">
@@ -260,8 +256,7 @@ export function BibleScreen() {
             <h2 className="fy-bible__paneltitle">In here</h2>
             {outline.sections.length === 0 ? (
               <p className="fy-bible__empty">
-                Headings you write with <code>## </code> show up here, and the Studio can edit them
-                one at a time rather than rewriting everything.
+                Headings you write with <code>## </code> show up here.
               </p>
             ) : (
               <ol className="fy-bible__toc">
@@ -328,15 +323,9 @@ export function BibleScreen() {
           <section className="fy-bible__panel">
             <h2 className="fy-bible__paneltitle">Earlier versions</h2>
             {history.length === 0 ? (
-              <p className="fy-bible__empty">
-                Every save keeps the one before it. Nothing here yet — this is still v
-                {bible?.version ?? 1}.
-              </p>
+              <p className="fy-bible__empty">Nothing here yet — this is still v{bible?.version ?? 1}.</p>
             ) : (
               <>
-                <p className="fy-bible__empty">
-                  Restoring brings a version back as a new one. Nothing in between is lost.
-                </p>
                 <ul className="fy-bible__versions">
                   {history.map((version) => (
                     <li key={version}>
@@ -356,14 +345,6 @@ export function BibleScreen() {
             )}
           </section>
 
-          <section className={cx("fy-bible__panel", "fy-bible__panel--quiet")}>
-            <h2 className="fy-bible__paneltitle">Bible or Canon?</h2>
-            <p className="fy-bible__empty">
-              If changing it should ripple into productions and regenerate references, it is Canon.
-              If it is how you think about the place, it belongs here. The Studio reads both, and
-              says so when they disagree.
-            </p>
-          </section>
         </aside>
       </div>
     </div>

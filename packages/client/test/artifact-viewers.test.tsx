@@ -243,7 +243,7 @@ async function unmount(mounted: Mounted): Promise<void> {
 /** Press the card's open control, the way a pointer or a keyboard would. */
 async function open(mounted: Mounted, subject: ArtifactSidecar): Promise<void> {
   const button = mounted.container.querySelector<HTMLButtonElement>(
-    `button.fy-gridcard__open[aria-label="${artifactOpenLabel(subject)}"]`,
+    `button.fy-gridcard__open[title="${subject.file}"]`,
   );
   assert.ok(button, `no open control for ${subject.file}`);
   await act(async () => button.click());
@@ -298,7 +298,7 @@ describe("the card as an open target", () => {
     const html = renderShelf();
     for (const subject of SHELF) {
       assert.ok(
-        html.includes(`aria-label="${artifactOpenLabel(subject)}"`),
+        html.includes(`aria-label="${artifactOpenLabel(subject, subject === PICTURE ? "The Vigil" : subject.file)}"`),
         `${subject.file} has no open control`,
       );
     }
@@ -306,7 +306,7 @@ describe("the card as an open target", () => {
 
   it("is a real <button>, so Enter and Space come from the element rather than a handler", () => {
     const html = renderShelf([PICTURE]);
-    const at = html.indexOf(`aria-label="${artifactOpenLabel(PICTURE)}"`);
+    const at = html.indexOf('aria-label="Open The Vigil — image"');
     const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
     assert.match(tag, /type="button"/);
     assert.match(tag, /class="fy-gridcard__open"/);
@@ -353,7 +353,8 @@ describe("what opens", () => {
     await open(mounted, PICTURE);
     const frame = panel(mounted);
     assert.ok(frame, "the viewer opened");
-    assert.equal(frame.querySelector("h2")?.textContent, "key-art.png");
+    assert.equal(frame.querySelector("h2")?.textContent, "The Vigil");
+    assert.equal(frame.querySelector("h2")?.getAttribute("title"), "key-art.png");
     const image = frame.querySelector<HTMLImageElement>("img.fy-artview__image");
     assert.ok(image, "at a size, not as a thumbnail");
     assert.match(image.getAttribute("src") ?? "", /\/media\/the-undersong\/artifacts\/key-art\.png/);

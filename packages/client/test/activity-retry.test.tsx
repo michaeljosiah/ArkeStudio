@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import type { ClientState, Job } from "@arke-studio/contracts";
+import { activityJobLabels, computeRunning, orderedShots, type ClientState, type Job } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
 import { ActivityScreen } from "../src/screens/shell.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -60,6 +61,71 @@ function render(jobs: Job[]): string {
 }
 
 describe("a failed job's recovery route on the Activity row (issue 226)", () => {
+  it("names queued prose reads by their authored subject and production", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!, production = world.productions[0]!, scene = production.scenes[0]!;
+    const shot = orderedShots(scene)[0]!;
+    const chapter = { id: "chapter-one", file: "chapters/01.md", order: 1, title: "The last bell", status: "draft", version: 1 };
+    production.chapters.push(chapter);
+    world.series.push({ id: "bell-watch", version: 1, title: "Bell Watch", engine: "The bells answer", seasons: [], created: TODAY, updated: TODAY });
+    const cases = [
+      { id: world.canon[0]!.id, heading: "Canon", name: world.canon[0]!.title },
+      { id: shot.id, heading: "Shot script", name: shot.title, production: true },
+      { id: `${production.meta.id}/treatment`, heading: "Treatment", name: "Treatment", production: true },
+      { id: `${production.meta.id}/question`, heading: "The question it answers", name: "The question it answers", production: true },
+      { id: "bell-watch", heading: "Series engine", name: "Bell Watch" },
+      { id: `${production.meta.id}/chapters/${chapter.id}#0`, heading: "Older chapter title", name: chapter.title, production: true },
+      { id: "bible", heading: "The drowned city", name: "Bible · The drowned city", purpose: "bible-section" },
+    ];
+    for (const item of cases) {
+      const label = activityJobLabels(state, failed({ target: { kind: "voice-preview", id: `${item.id}/elevenlabs/model/voice` },
+        params: { purpose: item.purpose ?? "prose", sectionHeading: item.heading } })).target;
+      assert.ok(label.includes(item.name), label);
+      if (item.production) assert.ok(label.includes(production.meta.title), label);
+    }
+  });
+  it("names work and models consistently without borrowing another world's entities (#1005)", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const production = state.world!.productions[0]!;
+    const model = state.app.manifest!.models[0]!;
+    const sessionId = "sess_01J8F3K2QW9VZX4N7M0RTYB6HZ";
+    state.world!.benchSessions.push({ id: sessionId, title: "A storm over the harbour", mode: "image", updatedAt: TODAY, takeCount: 1, runningCount: 1, failedCount: 0, waitingCount: 0 });
+    const bench = failed({ target: { kind: "bench-take", id: `${sessionId}/tk_opaque` }, provider: model.provider, model: model.id, status: "running" });
+    state.app.jobs = [bench];
+    assert.match(computeRunning(state)[0]!.title, /A storm over the harbour/);
+    assert.match(computeRunning(state)[0]!.detail, new RegExp(model.displayName));
+    const runningTitle = parseHTML(render([bench])).document.querySelector(".fy-activityrow__title")!;
+    assert.ok(runningTitle.getAttribute("title")!.includes(bench.target.id!));
+    assert.ok(runningTitle.getAttribute("title")!.includes(`${model.provider}/${model.id}`));
+    const master = failed({ target: { kind: "master-look", id: FIXTURE_WORLD_ID }, provider: model.provider, model: model.id });
+    const text = parseHTML(render([master])).document.querySelector(".dom-jobrow")!.textContent!;
+    assert.match(text, /Master look · The Undersong/);
+    assert.ok(text.includes(model.displayName));
+    assert.ok(!text.includes(FIXTURE_WORLD_ID));
+    const shot = failed({ productionId: production.meta.id, target: { kind: "shot", id: orderedShots(production.scenes[0]!)[0]!.id } });
+    assert.ok(activityJobLabels(state, shot).target.includes(production.meta.title));
+    assert.ok(activityJobLabels(state, shot).target.includes(state.world!.meta.name));
+    for (const kind of ["scene-pass", "storyboard"] as const) {
+      const scene = production.scenes[0]!;
+      const label = activityJobLabels(state, { ...shot, target: { kind, id: scene.id, coversShots: orderedShots(scene).map((candidate) => candidate.id) } }).target;
+      assert.ok(label.startsWith(scene.title));
+      assert.ok(!label.includes(orderedShots(scene)[0]!.title));
+    }
+    const scene = production.scenes[0]!;
+    const speaker = state.world!.sheets.find((candidate) => candidate.type === "character")!;
+    const performanceTarget = { productionId: production.meta.id, sceneId: scene.id, sceneVersion: scene.version,
+      shotId: orderedShots(scene)[0]!.id, speakerSheetId: speaker.id, authoredTextHash: `sha256:${"a".repeat(64)}` };
+    for (const kind of ["table-read-cache", "performance-generation", "performance-conversion"] as const) {
+      const params = kind === "table-read-cache" ? { tableReadSceneId: scene.id, tableReadSpeakerSheetId: speaker.id }
+        : { [kind === "performance-generation" ? "performanceGeneration" : "performanceConversion"]: { target: performanceTarget } };
+      const label = activityJobLabels(state, { ...shot, target: { kind, id: "pf_opaque" }, params }).target;
+      assert.ok(label.includes(speaker.name), label);
+      assert.ok(label.includes(`Scene ${scene.number}`), label);
+      assert.ok(label.includes(kind === "table-read-cache" ? scene.title : orderedShots(scene)[0]!.title), label);
+    }
+    const other = { ...shot, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" };
+    assert.ok(!activityJobLabels(state, other).target.includes(production.meta.title));
+  });
   it("sends a failed character look to the looks screen, not to a production it does not have", () => {
     const html = render([failed({})]);
     assert.ok(html.includes("run it again from the looks screen"), "the row names where this one came from");

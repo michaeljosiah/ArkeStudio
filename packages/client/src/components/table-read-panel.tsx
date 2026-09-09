@@ -36,7 +36,7 @@ export function TableReadPanel({ world, production, scene, onRecord }: { world: 
       sceneId: scene.id, rehearsalId: sessionId, expectedHash: production.rehearsalHashes?.[sessionId] ?? null, lineId, body })) { setBusy(false); setNotice("The studio is disconnected."); }
   };
   const active = playlist?.items[playlist.index];
-  return <details style={{ padding: 16, borderTop: "1px solid var(--border)" }}><summary>Scene table read · {lines.length} authored lines</summary>
+  return <details style={{ padding: 16, borderTop: "1px solid var(--border)" }}><summary>Table read · {lines.length} line{lines.length === 1 ? "" : "s"}</summary>
     {!lines.length && <p>This scene has no authored spoken lines.</p>}
     <Button disabled={busy} onClick={requestPlan}>Refresh preparation preview</Button>
     {plan && <><p>{plan.items.filter(i => i.route === "existing").length} accepted · {plan.items.filter(i => i.route === "cached").length} cached · {plan.items.filter(i => i.route === "local").length} local missing · {plan.items.filter(i => i.route === "cloud").length} cloud missing · {plan.items.filter(i => i.route === "unavailable").length} unavailable</p>

@@ -12,7 +12,7 @@ export function TakeDialogueFeedbackPanel({ worldId, production, take, shotId }:
   useEffect(() => { if (connection !== "open" && busy) { setBusy(false); setNotice("Disconnected. Check saved feedback before retrying."); } }, [connection, busy]);
   const feedback = production.feedback ?? [];
   const aggregates = aggregateDialogueFeedback(production.takes, feedback);
-  return <details style={{ padding: 12, overflowWrap: "anywhere" }}><summary>Take diagnostics · separate from Accept / Reject</summary>
+  return <details style={{ padding: 12, overflowWrap: "anywhere" }}><summary>Take diagnostics</summary>
     {!allowed.length ? <p>This take has no frozen dialogue assessment.</p> : <>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>{allowed.map(tag => <label key={tag}><input type="checkbox" checked={tags.includes(tag)} onChange={e => setTags(e.target.checked ? [...tags, tag] : tags.filter(t => t !== tag))} />{tag.replaceAll("-", " ")}</label>)}</div>
       <label>Diagnostic note<textarea style={{ width: "100%" }} value={note} maxLength={1000} onChange={e => setNote(e.target.value)} /></label>

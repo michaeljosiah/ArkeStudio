@@ -1439,9 +1439,8 @@ export function ChapterWorkspace({
               ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
               : `About ${chapterLabel}:`,
             ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
-            note: waiting === "passage"
-              ? "talking changes nothing here · a passage waits for your yes"
-              : "talking changes nothing here · a draft waits for your yes",
+            // What is waiting, not what talking does not do (issue 1008).
+            ...(waiting !== null ? { note: waiting === "passage" ? "a passage waits for your yes" : "a draft waits for your yes" } : {}),
           }}
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}

@@ -1,5 +1,5 @@
 import type { FoundingBuildState, Job, ModelManifest } from "@arke-studio/contracts";
-import { humanNumber, usd } from "../lib/format.js";
+import { humanNumber, shortDate, usd } from "../lib/format.js";
 import type { QueueEnqueueResult } from "../lib/store.js";
 
 /**
@@ -345,15 +345,23 @@ export function readyNote(
  * until dismissed or the work it names is no longer outstanding (R-45). A count and a cause,
  * once — fifteen failures from one dead credential is one sentence (R-46). It informs and
  * points; Activity acts (R-47): no retry, no accept, no discard.
+ *
+ * The meta band is when it happened, and nothing else (issue 1007). It used to end "the world
+ * is open and usable", which is the kind of reassurance turn 69 rules off a screen, and it
+ * carried no date at all — so a shortfall from three days ago read exactly like one from a
+ * minute ago, on every tab of the world, for as long as nobody pressed Dismiss.
  */
 export function foundingNote(build: FoundingBuildState): QueueNote | null {
   if (build.status === "running" || build.shortfall === null || build.noticeDismissed) return null;
   const { count, cause } = build.shortfall;
+  // A build recorded before the stamp existed still has a notice to raise; it simply has no
+  // date to put on it, and an em dash where a date should be is worse than no band at all.
+  const when = build.endedAt !== undefined ? shortDate(build.endedAt) : "";
   return {
     id: `build:${build.buildId}`,
     tone: "warning",
     title: `${count} item${count === 1 ? "" : "s"} from the founding build did not land`,
-    meta: build.status === "stopped" ? "stopped by you" : "the world is open and usable",
+    meta: [build.status === "stopped" ? "stopped by you" : "", when].filter((part) => part !== "").join(" · "),
     reason: cause,
     action: { label: "Activity", to: "/activity" },
   };

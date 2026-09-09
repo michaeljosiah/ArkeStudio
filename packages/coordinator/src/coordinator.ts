@@ -6627,12 +6627,15 @@ export class Coordinator {
         }
         try {
           await this.credentials.set(msg.provider, msg.key);
-          this.providerService.setConfigured(msg.provider, true);
+          const fingerprint = this.providerService.setConfigured(msg.provider, true);
+          // Admission reads this shared state; publish invalidation before optional I/O yields.
+          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
           // An LLM key change re-delivers the spawn environment, which restarts the harness
           // — the honest cost of rotation (SPEC-005 D5). Media/voice keys leave it alone.
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
             void this.refreshHarnessEnv();
           }
+          await fingerprint;
           this.emit({
             at: new Date().toISOString(),
             type: "provider.status",
@@ -6651,10 +6654,12 @@ export class Coordinator {
         if (!this.credentials) return;
         try {
           await this.credentials.clear(msg.provider);
-          this.providerService.setConfigured(msg.provider, false);
+          const fingerprint = this.providerService.setConfigured(msg.provider, false);
+          this.emit({ at: new Date().toISOString(), type: "provider.status", providers: this.providerService.list() });
           if ((LLM_ENV_PROVIDERS as readonly string[]).includes(msg.provider)) {
             void this.refreshHarnessEnv();
           }
+          await fingerprint;
           this.emit({
             at: new Date().toISOString(),
             type: "provider.status",

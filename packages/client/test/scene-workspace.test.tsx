@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, orderedShots, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
+import { insertShot, orderedShots, seedStoryPictureTimeline, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   __applyEventForTest,
@@ -141,6 +141,26 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(stagePathPoint(points, 0, 0), [0, 0, 0]);
     assert.deepEqual(stagePathPoint(points, 1, 1), [1, 0, 1]);
     assert.notEqual(stagePathPoint(points, 0, 0.5)[2], 0);
+  });
+
+  /*
+   * The word cut kept the limits (issue 1008, codex round three). The rows above the board are
+   * labels now rather than paragraphs — but a clause that says what a route does NOT promise is
+   * the one explanation turn 69 keeps, and this one stands before a paid dispatch: the plan
+   * under it reads `motion guidance` and labels the reference `performance-sync`, either of
+   * which a person could take for an exact-sync promise the route does not make.
+   */
+  it("keeps the no-sync limit on master playback, and drops the paragraph around it", async () => {
+    // The control only opens on a saved timeline; without one it is its own refusal.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
+    production.timeline = { status: "ready", timeline: seedStoryPictureTimeline(production) };
+    const mounted = await mountState(state);
+    const text = mounted.container.textContent ?? "";
+    assert.match(text, /Master playback/, "the control is named");
+    assert.match(text, /Timing is not guaranteed/, "and says what it does not promise");
+    assert.doesNotMatch(text, /Its exact shot slice guides visible motion/, "without explaining how it works");
+    assert.doesNotMatch(text, /Master playback for performance shots/, "and with a label, not a sentence");
   });
 
   it("mounts the workspace and compact production rail by default", async () => {
@@ -1032,7 +1052,7 @@ describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
 
     const incomplete = await mountState(withEpisode(false), episodePath);
     const incompleteCard = all(incomplete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
-    assert.match(incompleteCard.textContent ?? "", /sc_04 · in progress/);
+    assert.match(incompleteCard.textContent ?? "", /Scene 4 · in progress/);
     await click(incompleteCard.querySelector("button") as HTMLElement);
     assert.ok(q(incomplete, '[data-testid="scene-workspace"]'));
     assert.equal(q(incomplete, ".fy-sw__done"), null, "the incomplete workspace has no Done control");
@@ -1043,7 +1063,7 @@ describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
     await click(done);
     assert.ok(q(complete, '[data-screen="episode-detail"]'), "Done navigates back to the owning episode");
     const completeCard = all(complete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
-    assert.match(completeCard.textContent ?? "", /sc_04 · done/);
+    assert.match(completeCard.textContent ?? "", /Scene 4 · done/);
   });
 });
 

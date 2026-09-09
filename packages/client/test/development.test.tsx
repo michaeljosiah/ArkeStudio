@@ -115,6 +115,16 @@ function renderApp(state: ClientState, path: string): string {
 const SEASON = (prodId: string) => `/w/${FIXTURE_WORLD_ID}/p/${prodId}/season`;
 const ONE = episode("ep_the-missing-night", 1, { promise: { opens: "The page is gone." } });
 
+it("uses a scene number instead of its file id on the episode card (#1005)", () => {
+  const state = withMicrodramaScenes([structuredClone(ONE)], [FIXTURE_STATE.world!.productions[0]!.scenes[0]!]);
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "bell-watch-season-1")!;
+  const scene = production.scenes[0]!;
+  production.episodes[0]!.scenes = [scene.id];
+  const html = render(state, `/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/episodes/${ONE.id}`, <EpisodeDetailScreen />, "/w/:worldId/p/:prodId/episodes/:episodeId");
+  assert.ok(html.includes(`Scene ${scene.number} ·`));
+  assert.ok(!html.includes(`${scene.id} ·`));
+});
+
 it("distinguishes an episode wait from missing episode and production ids (issue 1000)", () => {
   const state = withMicrodrama([ONE]);
   const base = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`;
@@ -801,7 +811,7 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     const html = render(withMicrodrama([ONE]), SEASON(PROD), <StoryScreen />, "/w/:worldId/p/:prodId/season");
     assert.match(html, /Wrap up/, "without it a conversation cannot become anything (turn 92)");
     assert.match(html, /What it understood/, "still reachable, behind a disclosure");
-    assert.match(html, /talking changes nothing/, "and the promise beside the composer survives");
+    assert.doesNotMatch(html, /talking changes nothing/, "and no longer says so beside the composer (issue 1008)");
   });
 });
 

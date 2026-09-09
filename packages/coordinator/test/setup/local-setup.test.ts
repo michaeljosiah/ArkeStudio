@@ -18,6 +18,26 @@ import {
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
 
+it("reports sharing only for the same files at the same destination (#1004)", async () => {
+  const weights = catalogue()[2]!;
+  assert.equal(weights.spec.kind, "files");
+  if (weights.spec.kind !== "files") return;
+  const service = new LocalSetupService(deps(), () => {}, {
+    appRoot: await root(),
+    catalogue: [weights, { ...weights, id: "shared", sizeMb: 2, spec: { ...weights.spec, files: [...weights.spec.files, { ...weights.spec.files[0]!, file: "extra.bin", url: "https://example.test/extra.bin" }] } }, { ...weights, id: "different", spec: { ...weights.spec, dir: "other" } }],
+  });
+  const components = service.status().components;
+  assert.equal(components[0]!.files![0]!.key, components[1]!.files![0]!.key);
+  assert.notEqual(components[0]!.files![0]!.key, components[1]!.files![1]!.key);
+  assert.notEqual(components[0]!.files![0]!.key, components[2]!.files![0]!.key);
+  await mkdir(components[0]!.installLocation!, { recursive: true });
+  await writeFile(join(components[0]!.installLocation!, weights.spec.files[0]!.file), bytes(512));
+  await service.detect();
+  const partial = service.status().components[1]!.files!;
+  assert.equal(partial[0]!.bytesDone, 512, "detects a shared file before reaching this recipe in the queue");
+  assert.equal(partial[1]!.bytesDone, 0);
+});
+
 /** A tiny catalogue: one file download, one installer, one pull that needs the installer. */
 function catalogue(): CatalogueEntry[] {
   return [

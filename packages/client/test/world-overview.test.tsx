@@ -507,19 +507,38 @@ describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
     assert.match(html, /class="fy-worldcard__counts"/);
   });
 
-  it("takes the card height and the New world card's height from one declaration", () => {
-    const card = declarationsFor(".fy-worldcard");
-    const placeholder = declarationsFor(".fy-newworldcard");
-    const varName = /height:\s*var\((--[\w-]+)\)/.exec(card)?.[1];
-    assert.ok(varName, ".fy-worldcard takes its height from a custom property");
-    assert.ok(placeholder.includes(`height: var(${varName})`), "and so does the placeholder");
-    // Defined once, on the row that holds both — so there is exactly one number to change.
-    const definition = new RegExp(`${varName}:\\s*\\d+px`);
-    assert.match(declarationsFor(".fy-home-cards"), definition, `${varName} is defined on .fy-home-cards`);
+  /*
+   * The fixed 306 x 426 pair is gone (issue 1007). It kept the real card level with the dashed
+   * placeholder beside it, at the cost of a grid that stepped from three columns to seven with
+   * nothing in between. A stretching track does the levelling instead: every card is its own
+   * track's width, so the frames in a row are the same height, and the grid item stretches.
+   */
+  it("levels the card and the New world card through the track, not a fixed height", () => {
+    const grid = declarationsFor(".fy-home-cards");
+    assert.match(grid, /display:\s*grid/);
+    assert.match(grid, /minmax\(280px, 1fr\)/, "a column at every width");
+    assert.match(declarationsFor(".fy-home-cards > *"), /height:\s*100%/, "the items stretch");
+    assert.match(declarationsFor(".fy-worldcard"), /height:\s*100%/, "and the card fills what it is given");
+    assert.doesNotMatch(declarationsFor(".fy-worldcard"), /width:\s*306px/, "no fixed card width is left");
+  });
+
+  /*
+   * The dashed Create tile's frame carries both classes, and `__empty` fills its box — harmless
+   * while the card was a fixed height, and not once the row stretches: a definite card height
+   * made that `height: 100%` resolve against the whole card and swallow the aspect ratio, so
+   * the placeholder's picture ran down through the space a real card gives its logline and its
+   * meta (codex round four).
+   */
+  it("keeps the Create tile's frame in the frame's own proportion", () => {
+    const both = declarationsFor(".fy-worldcard__frame.fy-worldcard__empty");
+    assert.match(both, /aspect-ratio:\s*256 \/ 286/, "the same proportion as a real card's frame");
+    assert.match(both, /height:\s*auto/, "and not the height the empty state would fill");
   });
 
   it("pins every band on the card", () => {
-    assert.match(declarationsFor(".fy-worldcard__frame"), /height:\s*286px/);
+    // The frame keeps its drawn proportion rather than its drawn pixels; the bands under it are
+    // still fixed, which is what keeps two cards in a row the same height.
+    assert.match(declarationsFor(".fy-worldcard__frame"), /aspect-ratio:\s*256 \/ 286/);
     const name = declarationsFor(".fy-worldcard__name");
     assert.match(name, /height:\s*24px/);
     assert.match(name, /white-space:\s*nowrap/);

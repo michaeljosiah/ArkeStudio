@@ -24,7 +24,7 @@ import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
-import { shortDateTime } from "../lib/format.js";
+import { relativeDate, shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
@@ -401,11 +401,7 @@ export function FirstRunScreen() {
           <h1 className="fy-hero__title" style={{ fontSize: 56 }}>
             Every world starts as a name.
           </h1>
-          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>
-            Give yours one. Characters, canon and productions grow from there, and stay consistent
-            because they share it. Nothing here requires an account, a key, a download or a network
-            to start.
-          </p>
+          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>Give yours one.</p>
         </div>
         {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
           <div style={{ maxWidth: 560, margin: "18px auto 0", display: "grid", gap: 10 }}>
@@ -500,6 +496,17 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  /*
+   * The ages on the cards are computed at render, and this screen can sit open for hours with
+   * nothing else to re-render it — so a card that said `now` when it was drawn went on saying
+   * `now`, and `59m ago` never became `1h ago` (codex, 2026-09-09). A minute is the coarsest
+   * tick that keeps every step of `relativeDate` honest; the timer is cleared with the screen.
+   */
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
   const sample = useSampleWorld();
@@ -599,7 +606,9 @@ export function WorldPickerScreen() {
                       {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
                       production{w.counts.productions === 1 ? "" : "s"}
                     </span>
-                    <span className="mono">{shortDateTime(w.updated)}</span>
+                    {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
+                        took the room the counts beside it needed (issue 1007). */}
+                    <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
                   </div>
                 </div>
               </div>
@@ -1116,13 +1125,10 @@ export function NewWorldScreen() {
           <div className="fy-gate__body" style={{ gap: 14 }}>
             {genMode === "chat" ? (
               <>
-                {turns.length === 0 && (
-                  <div className="fy-bubble--gate">
-                    Say what the world is — a place, a wrongness, a person standing in it. The studio shapes it with
-                    you and keeps "the world so far" on the right, all proposed, nothing locked.
-                    <div className="fy-bubble__note">everything is drafted from this thread · the world is the record, the chat is scaffolding</div>
-                  </div>
-                )}
+                {/* 12a opens with Arke already talking. It opened here with sixty-six words of
+                    instructions instead — what the screen is, where the draft goes, what is
+                    locked — which is the dv-rule read out loud (design turn 69, issue 1008). */}
+                {turns.length === 0 && <div className="fy-bubble--gate">What is this world?</div>}
                 {turns.map((turn, i) => (
                   <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
                     {/* The author's words are shown exactly as typed; only Arke writes markdown (issue 911). */}
@@ -1398,19 +1404,13 @@ export function NewWorldScreen() {
                 gap: 7,
               }}
             >
-              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
               {/*
-                There was a button here for months that could never be pressed: an image job
-                needs a world folder to land in, and on this screen there is no world yet. A
-                control that can never be enabled is a trap — it reads as broken, and it caught
-                the same person twice. The sentence says where the thing actually happens.
+                A label and nothing else. There was a button here for months that could never be
+                pressed — an image job needs a world folder to land in, and on this screen there
+                is no world yet — and then a sentence in its place saying where key art actually
+                comes from, which is the same explanation with the control removed (issue 1008).
               */}
-              <span
-                className="fy-mono"
-                style={{ fontSize: 9, textAlign: "center", maxWidth: 190, lineHeight: 1.5 }}
-              >
-                key art is made from the logline in the world's hub, once you begin
-              </span>
+              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
             </div>
             <div style={{ padding: "12px 8px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1422,7 +1422,7 @@ export function NewWorldScreen() {
                 </span>
               </div>
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {shownLogline || (genMode === "chat" ? "The logline lands here as you talk." : "The logline lands here as you write it.")}
+                {shownLogline}
               </div>
               {(shownTone || shownGenre) && (
                 <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
@@ -1521,10 +1521,6 @@ export function NewWorldScreen() {
                 Begin seeds the first 4 of each · the rest are let go
               </div>
             )}
-            <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-              One more question — how it should look — then the hub. Everything arrives as sketches:
-              lock what holds, discard what doesn't.
-            </div>
           </div>
         </div>
       </div>
@@ -1900,10 +1896,6 @@ export function SettingsNotificationsScreen() {
           <option value="off">Off</option>
         </Select>
       </div>
-      <div className="fy-set__note">
-        issues include failed or uncertain generations, result preparation, and paused providers ·
-        result notifications contain no world or character names
-      </div>
     </div>
   );
 }
@@ -1915,13 +1907,8 @@ const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; de
 ];
 
 export function SettingsAppearanceScreen() {
-  const { state } = useStore();
   const preference = useThemePreference();
   const resolved = useResolvedTheme();
-  const stored = state?.app.narrator ?? null;
-  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
-  const worldIdForVoices = state?.world?.meta.worldId;
-  const [narratorOpen, setNarratorOpen] = useState(false);
   return (
     <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
       <div className="fy-set__eyebrow">THEME</div>
@@ -1944,52 +1931,6 @@ export function SettingsAppearanceScreen() {
         ))}
       </fieldset>
       <div className="fy-set__note">currently using {resolved}</div>
-      {/*
-       * The narrator arrived here from the Voice group inside Local runtime, and it is the one
-       * thing on that group that was never about a runtime. It is a voice the app speaks in, and
-       * it may be a cloud one — so Local AI is forbidden it (R-2) and Engines is wrong in kind,
-       * because an engine is not a provider (R-72). What is left is how the app presents itself.
-       */}
-      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
-          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
-          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
-          no other preference here spends money on one. */}
-      <div className="fy-rt__keyline">
-        <div className="fy-rt__eyebrow">NARRATOR</div>
-        <div className="fy-set__field">
-          <span className="fy-rt__path" data-testid="narrator-name">
-            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
-            {" · "}
-            {narrator === null || narrator.provider === "kokoro"
-              ? "reads on this machine · free"
-              : "reads in the cloud · billed per character"}
-          </span>
-          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
-            Choose voice
-          </button>
-          {narrator !== null && (
-            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
-              Use the local voice
-            </button>
-          )}
-        </div>
-      </div>
-      <VoicePickerDialog
-        open={narratorOpen}
-        use="narration"
-        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
-        chosenId={narrator?.voiceId}
-        chosenProvider={narrator?.provider}
-        chosenModel={
-          narrator?.model ??
-          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
-        }
-        onClose={() => setNarratorOpen(false)}
-        onPick={(voice: ReadingVoice) => {
-          setNarratorOpen(false);
-          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
-        }}
-      />
       {/*
        * The two themes, side by side. Fixed swatches rather than a live preview of the current
        * one: the point is to show what the choice above would look like, and a card that followed
@@ -2039,7 +1980,7 @@ export function SettingsHarnessScreen() {
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
   const asked = searchParams.get("harness");
-  const current = harnesses.some((h) => h.id === asked) ? asked! : harnesses[0]!.id;
+  const current = harnesses.some((h) => h.id === asked) ? asked! : (harnesses.find((h) => h.id === engine) ?? harnesses[0]!).id;
   const chosen = harnesses.find((h) => h.id === current) ?? harnesses[0]!;
 
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -2241,6 +2182,10 @@ const ROUTED_CAPABILITIES: readonly Capability[] = CAPABILITY_ROWS.flatMap((row)
  */
 export function SettingsGeneralScreen() {
   const { state } = useStore();
+  const stored = state?.app.narrator ?? null;
+  const narrator = stored && supportsVoiceUse(stored, "narration") ? stored : null;
+  const worldIdForVoices = state?.world?.meta.worldId;
+  const [narratorOpen, setNarratorOpen] = useState(false);
   const navigate = useNavigate();
   const manifest = state?.app.manifest ?? null;
   const routing = state?.app.routing ?? { defaults: {}, faults: [] };
@@ -2353,6 +2298,46 @@ export function SettingsGeneralScreen() {
         <span style={{ flex: 1 }} />
       </div>
 
+      {/* Who reads the app's prose aloud. A third role: a character's voice lives on their sheet,
+          a reading voice belongs to one bench take, and this one narrates. It stays on the shipped
+          local voice unless somebody chooses otherwise, because "read aloud" is a passive press and
+          no other preference here spends money on one. */}
+      <div className="fy-rt__keyline">
+        <div className="fy-rt__eyebrow">NARRATOR</div>
+        <div className="fy-set__field">
+          <span className="fy-rt__path" data-testid="narrator-name">
+            {narrator === null ? DEFAULT_NARRATOR.label : `${narrator.label ?? narrator.voiceId} · ${narrator.provider}`}
+            {" · "}
+            {narrator === null || narrator.provider === "kokoro"
+              ? "reads on this machine · free"
+              : "reads in the cloud · billed per character"}
+          </span>
+          <button type="button" className="fy-set__link" onClick={() => setNarratorOpen(true)}>
+            Choose voice
+          </button>
+          {narrator !== null && (
+            <button type="button" className="fy-set__link" data-testid="narrator-reset" onClick={() => setNarrator(null)}>
+              Use the local voice
+            </button>
+          )}
+        </div>
+      </div>
+      <VoicePickerDialog
+        open={narratorOpen}
+        use="narration"
+        {...(worldIdForVoices !== undefined ? { worldId: worldIdForVoices } : {})}
+        chosenId={narrator?.voiceId}
+        chosenProvider={narrator?.provider}
+        chosenModel={
+          narrator?.model ??
+          (narrator ? legacyVoiceModel(narrator.provider, narrator.voiceId) ?? undefined : undefined)
+        }
+        onClose={() => setNarratorOpen(false)}
+        onPick={(voice: ReadingVoice) => {
+          setNarratorOpen(false);
+          setNarrator({ provider: voice.provider, model: voice.model, voiceId: voice.voiceId, label: voice.label });
+        }}
+      />
       {drift.length > 0 && (
         <>
           <div className="fy-set__eyebrow">MANIFEST DRIFT</div>
@@ -2403,16 +2388,8 @@ export function SettingsSampleWorldScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Install a copy</div>
           <div className="fy-set__caps">
-            {available
-              ? "a cast with reference kits, canon, a production under way, and a proposal at the gate"
-              : "this build does not carry it"}
+            {available ? "cast · canon · a production · a proposal" : "not in this build"}
           </div>
-          {available && (
-            <div className="fy-set__note">
-              It lands beside your own worlds as an ordinary folder. Change it, break it, archive
-              it — nothing here is read-only, and installing again gives you a fresh copy.
-            </div>
-          )}
         </div>
         {available && (
           <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
@@ -2702,8 +2679,7 @@ export function ActivityScreen() {
           <div className="fy-h1row">
             <h1 className="fy-h1">Activity</h1>
             <span className="fy-h1row__meta">
-              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you ·
-              everything Arke is doing, and what it costs
+              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you
             </span>
             <span className="fy-h1row__push" />
             <span className="fy-seg">
@@ -2745,7 +2721,7 @@ export function ActivityScreen() {
                 <div key={r.ref} className="fy-activityrow">
                   <span className="fy-dot fy-dot--live" />
                   <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title">{r.title}</div>
+                    <div className="fy-activityrow__title" title={r.diagnostic}>{r.title}</div>
                     <div className="fy-activityrow__sub">
                       {r.kind} · {r.detail}
                     </div>
@@ -2868,7 +2844,7 @@ export function ActivityScreen() {
           {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <JobRow job={job} />
+              <JobRow job={job} state={state} />
               {/* Where this one is re-run from, which is not one place (issue 226). The row used
                   to name the production's dispatch dialog under every failure, including the
                   reference work that belongs to no production and has no such dialog. */}
