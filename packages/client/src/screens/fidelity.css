@@ -8445,3 +8445,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-filmstrip { position: absolute; inset: 0; display: flex; overflow: hidden; pointer-events: none; }
 .fy-filmstrip__frame { flex: none; height: 100%; overflow: hidden; }
 .fy-filmstrip__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Stage reference is DOM chrome; WebGL inspection and export never sample it (#1049). */
+.fy-swstage__plate { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 4; overflow: hidden; }
+.fy-swstage__plate > img, .fy-swstage__plate > video { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.fy-swstage__plate[data-layout="corner"] > img, .fy-swstage__plate[data-layout="corner"] > video { position: absolute; right: 2%; bottom: 2%; width: 30%; height: 30%; }
+[data-stage-capture] .fy-swstage__plate { visibility: hidden; }

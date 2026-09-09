@@ -249,6 +249,7 @@ export function ReferencePickerBody({
   carried,
   world,
   session,
+  sessionLabel = "This session",
   characters,
   onAdd,
   onChoose,
@@ -277,6 +278,7 @@ export function ReferencePickerBody({
   carried: readonly MultimediaReference[];
   world: PickerSource[];
   session: PickerSource[];
+  sessionLabel?: string;
   /** Everything under the world's characters. Absent where the picker has no world to read. */
   characters?: PickerSource[];
   /** Bench: the checked set, committed together and in order — one message, not N races. */
@@ -452,7 +454,7 @@ export function ReferencePickerBody({
           )}
           {offered(session).length > 0 && (
             <button type="button" aria-pressed={lane === "session"} onClick={() => setLane("session")}>
-              {`This session ${offered(session).length}`}
+              {`${sessionLabel} ${offered(session).length}`}
             </button>
           )}
           <button type="button" aria-pressed={false} onClick={onUpload}>

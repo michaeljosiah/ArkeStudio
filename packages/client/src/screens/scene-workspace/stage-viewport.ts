@@ -1184,7 +1184,8 @@ export class StageViewport {
     }
   }
 
-  private hideStaging(hidden: boolean): void {
+  private hideStaging(hidden: boolean, capture = this.recordingAt !== null): void {
+    this.host.parentElement?.toggleAttribute("data-stage-capture", capture);
     this.rigGroup.visible = !hidden;
     for (const aid of this.aids) aid.visible = !hidden;
     this.transformHelper.visible = !hidden && this.transform.object !== undefined;
@@ -1333,7 +1334,7 @@ export class StageViewport {
     try {
       for (const at of samples) {
         this.refresh(at);
-        this.hideStaging(true);
+        this.hideStaging(true, true);
         renderer.render(this.scene, this.shot);
         const observations: string[] = [];
         const eye=this.shot.getWorldPosition(new Vector3());

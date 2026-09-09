@@ -35,6 +35,7 @@ import {
   type StagingSet,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { StageUnderlay } from "./stage-underlay.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -194,6 +195,7 @@ export function SceneStage({
   const [exporting, setExporting] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
   const handledPlayblastActions = useRef(new Set<string>());
@@ -920,7 +922,7 @@ export function SceneStage({
         {draft?.authorship ? <details><summary>AI inspection and assumptions</summary><p>{draft.authorship.assessment}</p><ul>{draft.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{draft.authorship.model} · {draft.authorship.inspectedFrames} views inspected</small></details> : null}
       </div>
       <div className="fy-swstage__work">
-        <div className="fy-swstage__viewport" data-mode={mode}>
+        <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode}>
           {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
           {working === null && !busy ? (
             <div className="fy-swstage__empty">
@@ -1074,6 +1076,10 @@ export function SceneStage({
                 ))}
                 <span className="fy-swstage__quiet">{activeKey?.anchor === undefined ? "fixed in the set" : `rides with ${nameOf(activeKey.anchor)}`}</span>
               </div>
+
+              <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
+                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
+                disabled={frozen} onChoose={() => setMode("camera")} />
 
               {working.cast.length === 0 ? null : (
                 <div className="fy-swstage__block">

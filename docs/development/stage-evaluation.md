@@ -60,3 +60,5 @@ legacy boxes/figures/cameras remain readable. Restoring a scene restores its Sta
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.
 
 First-pass framing (#1047) solves distance from the production-aspect Super 35 vertical FOV and subject height (default 1.8m). Frame-height fractions retain the existing size ranges: extreme close-up 0.3, close-up/MCU 0.55, medium 0.9, wide 1.5 and extreme wide 2.5. The same table and rule are supplied to Stage construction. The camera-angle height table is unchanged; 24, 35 and 85mm lenses now show the same subject-plane height for a given size.
+
+Reference matching (#1049) is local editor chrome: Camera view can show a filed image or clip in ghost/corner mode, with opacity and a playhead offset. Clip segments retain their source in/out bounds. Imported plates use the production artifact import path. Look view, construction inspection and playblast capture exclude the plate; the WebGL canvas never contains its pixels.
