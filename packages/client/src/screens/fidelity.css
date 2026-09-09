@@ -3928,9 +3928,20 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
  * above it, which is what put the key art below the fold (issue 1007).
  */
 .fy-content--fill { display: flex; flex-direction: column; }
+/*
+ * The screen keeps a floor, and past it the column scrolls (codex round five). A world with
+ * enough external edits or unreadable files raises a banner of its own height above these
+ * screens, and a flex item at `min-height: 0` will shrink to nothing to make room for it — so
+ * the very controls this issue was about, Save and the composer, would have had no height at
+ * all. The floor is what art direction needs at its own minimum: 180 of master look, 168 of key
+ * art, the gap between them and the page's padding.
+ */
 .fy-content--fill > .fy-artdirection,
 .fy-content--fill > .fy-gate,
-.fy-content--fill > .fy-chat__wrap { flex: 1 1 auto; height: auto; min-height: 0; }
+.fy-content--fill > .fy-chat__wrap { flex: 1 1 auto; height: auto; min-height: 460px; }
+/* And the banner keeps its own height rather than being squashed to make the floor fit: it is
+   a list of files that need attention, and half of one is no use. Past both, the column scrolls. */
+.fy-content--fill > .fy-worldconditions { flex: none; }
 .fy-content--fill > .fy-chat__wrap { display: flex; flex-direction: column; }
 .fy-content--fill > .fy-chat__wrap > .fy-gate { flex: 1 1 auto; min-height: 0; }
 .fy-artdirection {
@@ -8278,19 +8289,13 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-buildnotice__dot { width: 6px; height: 6px; flex: none; border-radius: 999px; background: var(--warning); margin-top: 6px; }
 .fy-buildnotice__title { flex: none; font-weight: 600; }
 /*
- * The cause wraps to two lines rather than ellipsising to one (codex round four). R-46 puts the
- * cause on the notice, and a `title` is a copy of it that a keyboard or a touch screen cannot
- * reach — so a long provider refusal was, for those readers, not stated at all. Two lines is a
- * bound: the band can grow by one line and no further, which is what keeps it a row.
+ * The cause wraps, and nothing clips it (codex rounds four and five). R-46 puts the cause on the
+ * notice; one line with a `title` holding the rest was a copy no keyboard or touch screen could
+ * reach, and a two-line clamp was the same failure one line further along. The bound this needed
+ * was never the text — it was the notice's own placement. It draws on Overview, which is a page
+ * that scrolls, so a long provider refusal costs a taller row and nothing else.
  */
-.fy-buildnotice__cause {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
+.fy-buildnotice__cause { min-width: 0; color: var(--muted-foreground); }
 .fy-buildnotice__when { margin-left: auto; flex: none; font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-buildnotice__act {
   flex: none;

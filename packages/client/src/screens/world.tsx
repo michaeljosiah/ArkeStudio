@@ -276,7 +276,7 @@ function WorldConditionBanners() {
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+    <div className="fy-worldconditions" style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
       {notice && (
         <div className="fy-buildnotice" role="status">
           <span className="fy-buildnotice__dot" aria-hidden="true" />

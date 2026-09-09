@@ -71,8 +71,37 @@ describe("the world's fixed-frame screens (issue 1007)", () => {
  * shrinks under its `overflow: hidden` and takes the transcript and composer with it. One column
  * on top of another has to scroll the page.
  */
+const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
+
+/*
+ * A banner above a fixed screen costs the column height, not the screen's whole existence
+ * (codex round five). A world with enough external edits or unreadable files raises one of its
+ * own height, and a flex item at `min-height: 0` will shrink to nothing to make room — so Save
+ * and the composer, the controls this issue is about, would have had no height at all.
+ */
+describe("a condition banner cannot take the screen's whole height", () => {
+  it("gives the fixed screens a floor and the banner its own height", () => {
+    const floored = /\.fy-content--fill > \.fy-artdirection,\s*\.fy-content--fill > \.fy-gate,\s*\.fy-content--fill > \.fy-chat__wrap \{ flex: 1 1 auto; height: auto; min-height: 460px; \}/;
+    assert.match(css, floored, "460px is art direction's own minimum: 180 + 14 + 168 and the padding");
+    assert.match(css, /\.fy-content--fill > \.fy-worldconditions \{ flex: none; \}/,
+      "and the banner is not squashed to make that floor fit");
+  });
+
+  /*
+   * R-46 puts the cause on the notice. One line with a `title` holding the rest was a copy no
+   * keyboard or touch screen could reach; a two-line clamp was the same failure one line later.
+   * The notice draws on Overview, which scrolls, so the cause simply wraps.
+   */
+  it("clips the build notice's cause at nothing", () => {
+    const cause = /\.fy-buildnotice__cause \{([^}]*)\}/.exec(css)?.[1] ?? "";
+    assert.ok(cause.length > 0, "the cause has its own rule");
+    assert.doesNotMatch(cause, /line-clamp/, "no clamp");
+    assert.doesNotMatch(cause, /text-overflow/, "no ellipsis");
+    assert.doesNotMatch(cause, /white-space:\s*nowrap/, "and it is allowed to wrap");
+  });
+});
+
 describe("the fill releases the gate when the gate stacks", () => {
-  const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
 
   /**
    * The narrow block that stacks the chat gate. The stylesheet has several `max-width: 1100px`
