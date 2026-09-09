@@ -791,6 +791,16 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       outcome: z.enum(["needs-consent", "refused"]),
       reason: z.string(),
       sizeBytes: z.number().nullable(),
+      /**
+       * The scope the refused filing was attempted at, so a surface can tell its own refusals
+       * from another's.
+       *
+       * A `needs-consent` notice is an offer to retry, and the retry restates a scope. Without
+       * this the notices are one undifferentiated list: a large file refused on the world's shelf
+       * would offer `Copy it anyway` inside a production and re-file the bytes as that
+       * production's. `null` is the world, absent is a filing that stated no opinion.
+       */
+      production: SlugSchema.nullable().optional(),
     })
     .strict(),
 

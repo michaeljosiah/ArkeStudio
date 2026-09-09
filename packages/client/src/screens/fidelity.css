@@ -1213,6 +1213,16 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 .fy-prod { display: flex; flex: 1; min-height: 0; }
 .fy-prodwrap { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+/*
+ * A production screen that scrolls, and the positioning context its own overlays need.
+ *
+ * `.fy-prodwrap` is `overflow: hidden` and takes plain divs as children, so a page taller than
+ * the frame is cut off with nothing to scroll, and an absolutely positioned control inside one
+ * escapes to `.fy-app` — which put the artifacts door on top of the app chrome, 44px above the
+ * column it belongs to. This is the world's `.fy-content` arrangement inside a production: the
+ * page is its own scroll column and its own anchor, and nothing above it changes.
+ */
+.fy-prodscroll { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
 
 .fy-prodrail {
   width: 265px;
@@ -5638,6 +5648,16 @@ select.fy-set__pill { padding-right: 26px; }
 @media (max-width: 1240px) {
   .fy-artifacts-door { position: static; justify-content: flex-end; padding: 12px 24px 0; }
 }
+
+/*
+ * Ownership on a production's artifacts card (design 134).
+ *
+ * The world's shelf and the production's own are one grid, so the difference has to be readable
+ * without reaching for the chips. It is a word in the card's own meta line rather than a badge —
+ * set in the foreground, which is the whole of the emphasis. A world file says nothing, because
+ * on the world's own shelf there would be nothing to say.
+ */
+.fy-artifact-scope { color: var(--foreground); font-weight: 500; }
 
 /* "Lift facts" is an offer in the card's meta register, not the card's headline (68a). */
 .fy-liftfacts {

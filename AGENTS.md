@@ -6,7 +6,7 @@ Arke Studio is a local-first worldbuilding and production app: an npm workspaces
 
 1. Read [CLAUDE.md](CLAUDE.md) for the shared operational rules. Despite its name, those rules apply to all coding agents: worktree isolation, shared stash, cleanup, formatting, transport authentication, world ownership and journal durability. Keep those rules there rather than copying them into other guides.
 2. Use [the developer index](docs/development/README.md) and [code map](docs/development/code-map.md) to locate the implementation and tests for your task.
-3. Read the relevant capability spec under [docs/specifications](docs/specifications) and any linked ADR. Check its status: proposed designs and historical reviews are not implemented guarantees.
+3. Read the relevant capability spec and any linked ADR. Check its status: proposed designs and historical reviews are not implemented guarantees. These are not in the working tree — they live in the private document set, junctioned to `docs/specification.md`, `docs/specifications/` and `docs/decisions/` on machines that hold it. (They remain in git history up to 2026-09-09, so `git log` can still reach them; that is not a supported way to read a spec, because what history holds is frozen and the live document has moved on.) (`docs/architecture/` is public and stays in the repository; only its `character-audio-foundation.md` is private.) **If those paths are absent you do not have the specs.** Work from the issue and the code, and say so plainly rather than inferring the design intent behind a `SPEC-nnn` citation you cannot read.
 4. Follow the scoped AGENTS.md in the package you change. Inspect `git status --short` before editing; concurrent sessions may have unrelated work in this checkout.
 
 ## Placement

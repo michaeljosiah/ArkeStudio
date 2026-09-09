@@ -7,6 +7,61 @@ tour of the architecture. Start with [AGENTS.md](AGENTS.md) and the
 This file is the shared operational reference for all coding agents; keep these rules here
 rather than duplicating them in package guides.
 
+## The specs are not in this repository
+
+The code is public under AGPL. The specification set is not: the master spec, the capability
+specs and the ADRs live in the private document set beside vision and scope, at
+`%USERPROFILE%\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs`.
+
+The line is *design record* versus *explanation of what is built*, not "internal" versus
+"external". `docs/architecture/` is public and stays in the repository — those guides describe
+the shipped product to a reader without a background in code, and the open source is less useful
+without them. Its one exception is `character-audio-foundation.md`, integration and recovery
+notes for a half-built subsystem, which is private and hard-linked like the master spec.
+
+Every spec path in this file and in AGENTS.md still resolves, because those paths are junctions
+into that folder rather than tracked files. They are gitignored, so nothing you do at
+`docs/specifications/` can commit a spec back into the public repository by accident — which is
+the point, and the reason for junctions rather than a second clone somewhere else.
+
+**This removes the specs from the tree, not from history.** Every version up to 2026-09-09 is
+still reachable in a normal clone (`git show <commit>^:docs/specification.md`), and a fork taken
+before that date holds a complete copy that no change here can reclaim. Rewriting 1,766 commits
+would break every clone and all 47 published releases and still would not reach that fork, so
+the history is deliberately left alone. What the arrangement buys is that everything from
+2026-09-09 forward is private — which for documents still being written is where the value is.
+Do not repeat the claim that the specs "were never public"; say they are no longer published.
+
+**A fresh checkout or worktree has no links.** The paths are simply absent, and every spec link
+in this file dead-ends. That is not a broken repository; it is a checkout nobody has linked yet:
+
+```
+node scripts/link-private-docs.mjs           # dry run, as with prune-merged.mjs
+node scripts/link-private-docs.mjs --apply
+```
+
+Run it again whenever a link looks stale — it is idempotent, and re-linking is the repair. Set
+`ARKE_PRIVATE_DOCS` if the document set is not at the OneDrive path above.
+
+Do not hand-roll these four links. Two of the paths are directories and take junctions, two are
+single files and take hard links, and `New-Item -ItemType HardLink` **fails when the destination
+already exists** — so the obvious repair for a stale link errors and leaves you attached to the
+old inode, still reading an obsolete spec while believing you just fixed it. The script deletes
+before re-linking, which is safe because the private copy has its own directory entry: dropping
+the checkout-side name drops one link, never the content.
+
+**It refuses more than it does.** If git still tracks those paths, the change that removes them
+has not merged or this checkout predates it — linking would delete tracked files and any
+uncommitted edit to them, so the script stops. It also refuses a real directory sitting where a
+junction belongs, and refuses a hard-link target whose content differs from the private copy,
+because one side then holds writing the other does not and guessing which to keep discards
+somebody's work. A refusal is the tool working; move the file yourself and re-run.
+
+Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
+of those citations sit in `packages/`, they are the only record of why a great deal of this code
+is shaped as it is, and a confident reconstruction of a spec you cannot read is worse than
+saying you cannot read it.
+
 ## Never hand-roll branch or worktree deletion
 
 Use `/cleanup`, or `node scripts/prune-merged.mjs` directly. Dry run is the default.

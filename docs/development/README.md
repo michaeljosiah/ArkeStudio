@@ -9,16 +9,22 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 | What generates this file or ships this asset? | [Maintenance map](maintenance.md) |
 | How do I add or replace a local generation recipe? | [ComfyUI recipe procedure](comfyui-recipes.md) |
 | What is implemented versus planned? | [Bounded implementation status](status.md), then the relevant spec |
-| Why is the product structured this way? | [Architecture guide](../architecture/index.html) and [master specification](../specification.md) |
+| Why is the product structured this way? | [Architecture guide](../architecture/index.html); for requirements, the master specification in the private document set (see below) |
 | Which disk writes does an operation perform? | [Filesystem operations](../filesystem-operations.md) |
 
 ## How to interpret the documents
 
+Some of these are **not published with the code** — they are the design record rather than an
+explanation of the built product, and they live in the private document set. On a machine that
+holds it they are junctioned back to the paths below, so links to them resolve; in a clone of this
+repository alone, the paths are simply absent. See
+[CLAUDE.md](../../CLAUDE.md#the-specs-are-not-in-this-repository) for how a checkout is linked.
+
 | Collection | Role |
 |---|---|
-| `docs/specification.md`, `docs/specifications/` | Product intent, requirements and capability-specific decisions. Check implementation/status notes before assuming a requirement is delivered. |
-| `docs/decisions/` | Decisions spanning capabilities. Accepted, Proposed and Superseded matter; a decision can accept only a bounded part of a design. |
-| `docs/architecture/` | Explanations derived from source for a broad audience, including persistence, acceptance and generation. |
+| `docs/specification.md`, `docs/specifications/` | *Private.* Product intent, requirements and capability-specific decisions. Check implementation/status notes before assuming a requirement is delivered. |
+| `docs/decisions/` | *Private.* Decisions spanning capabilities. Accepted, Proposed and Superseded matter; a decision can accept only a bounded part of a design. |
+| `docs/architecture/` | Explanations derived from source for a broad audience, including persistence, acceptance and generation. Public — it describes what is built. The one exception is `character-audio-foundation.md`, integration and recovery notes for a half-built subsystem, which is private. |
 | `docs/development/` | Current implementation entry points, test selection and maintenance instructions. |
 | `docs/system/`, `docs/features/`, `design-system/` | Product explanations, feature briefs and design references. A prototype affordance does not establish implementation. |
 | `docs/code-analysis/` | Dated reviews and audits. Recommendations and measurements describe their stated baseline; check subsequent code and decisions. |

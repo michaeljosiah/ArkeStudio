@@ -12105,15 +12105,34 @@ export class Coordinator {
             // it carries audio are true once and true forever.
             ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
             abandoned: () => !this.stillOpen(store) || this.stopping,
-            // The world's shelf, explicitly. An artifact laid over one production's cut is still
-            // the world's, which is what the panel beside the cut is showing.
-            production: null,
+            // Explicit, never inferred. The world's shelf unless the sender says otherwise: an
+            // artifact laid over one production's cut is still the world's, which is what the
+            // panel beside the cut is showing. A production's own artifacts page is the one
+            // surface that says otherwise (SPEC-020 R-13).
+            production: msg.production ?? null,
           }).catch((err: unknown) => ({
             outcome: "refused" as const,
             reason: describeCoordinatorError(err),
           }));
           if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") {
             failures.push({ index, reason: `${basename(sourcePath)}: ${outcome.reason}` });
+            /*
+             * The same notice the attach path raises, so a picked file that is merely large has
+             * somewhere to go. Counted as a failure *and* announced: the count is what the import
+             * report says happened, and the notice is the offer to retry with consent. Without
+             * it the renderer never learns the path — the picker deliberately withholds it — and
+             * a large video simply cannot be filed from either shelf.
+             */
+            this.emit({
+              at: new Date().toISOString(),
+              type: "artifact.notice",
+              worldId: msg.worldId,
+              sourcePath,
+              outcome: outcome.outcome === "needs-consent" ? "needs-consent" : "refused",
+              reason: outcome.reason,
+              sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+              production: msg.production ?? null,
+            });
             continue;
           }
           // Its picture, before the snapshot that lists it (issue 1037); best-effort, like a take's.
@@ -14462,6 +14481,10 @@ export class Coordinator {
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
       // The measurement outlives the gate, so it must not outlive the world it belongs to.
       abandoned: () => !this.stillOpen(store) || this.stopping,
+      // Re-filing under a stated owner is what this path is for (SPEC-020 §2.5): the escape
+      // hatch that brings a production's document back to the world runs through here, and so
+      // does `Copy it anyway`. A plain import does not, and must not re-home what it matched.
+      reownOnDuplicate: true,
       ...opts,
     }).catch((err) => ({
       outcome: "refused" as const,
@@ -14476,6 +14499,9 @@ export class Coordinator {
         outcome: outcome.outcome,
         reason: outcome.reason,
         sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+        // The scope this filing was refused at, so the surface offering the retry is the one
+        // that asked. Without it a world refusal offers `Copy it anyway` inside a production.
+        ...(opts.production !== undefined ? { production: opts.production } : {}),
       });
       return null;
     }
