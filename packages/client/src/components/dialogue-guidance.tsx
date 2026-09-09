@@ -64,7 +64,7 @@ export function DialogueGuidance({ world, production, scene, plan, model, manife
   const surviving = acknowledged.filter(id => valid.includes(id));
   const signature = JSON.stringify(surviving);
   useEffect(() => { if (JSON.stringify(acknowledged) !== signature) onAcknowledge(surviving); }, [signature]);
-  return <details style={{ padding: 12, borderTop: "1px solid var(--border)", overflowWrap: "anywhere" }}><summary>Dialogue guidance and authored visual facts</summary>
+  return <details style={{ padding: 12, borderTop: "1px solid var(--border)", overflowWrap: "anywhere" }}><summary>Dialogue guidance</summary>
     {error && <p role="status">Assessment unavailable: {error}</p>}
     {!error && assessments.length === 0 && <p>No video assessment available.</p>}
     {assessments.map(a => <div key={a.facts.shotId}>

@@ -324,7 +324,7 @@ export function SceneSynopsis({
   return (
     <EditableText
       value={scene.synopsis ?? ""}
-      placeholder="What happens, in a line or two."
+      placeholder="What happens"
       className="fy-sbsynopsis"
       rows={2}
       onCommit={(next) => {

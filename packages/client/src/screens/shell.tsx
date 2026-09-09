@@ -24,7 +24,7 @@ import { Working } from "../components/working.js";
 import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
-import { shortDateTime } from "../lib/format.js";
+import { relativeDate, shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
@@ -401,11 +401,7 @@ export function FirstRunScreen() {
           <h1 className="fy-hero__title" style={{ fontSize: 56 }}>
             Every world starts as a name.
           </h1>
-          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>
-            Give yours one. Characters, canon and productions grow from there, and stay consistent
-            because they share it. Nothing here requires an account, a key, a download or a network
-            to start.
-          </p>
+          <p className="fy-hero__lede" style={{ maxWidth: 460 }}>Give yours one.</p>
         </div>
         {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
           <div style={{ maxWidth: 560, margin: "18px auto 0", display: "grid", gap: 10 }}>
@@ -500,6 +496,17 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  /*
+   * The ages on the cards are computed at render, and this screen can sit open for hours with
+   * nothing else to re-render it — so a card that said `now` when it was drawn went on saying
+   * `now`, and `59m ago` never became `1h ago` (codex, 2026-09-09). A minute is the coarsest
+   * tick that keeps every step of `relativeDate` honest; the timer is cleared with the screen.
+   */
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
   const sample = useSampleWorld();
@@ -599,7 +606,9 @@ export function WorldPickerScreen() {
                       {w.counts.characters} character{w.counts.characters === 1 ? "" : "s"} · {w.counts.productions}{" "}
                       production{w.counts.productions === 1 ? "" : "s"}
                     </span>
-                    <span className="mono">{shortDateTime(w.updated)}</span>
+                    {/* An age, as 1a draws it — `4d ago`, not `Sep 7, 02:22`. The long form
+                        took the room the counts beside it needed (issue 1007). */}
+                    <span className="mono" title={shortDateTime(w.updated)}>{relativeDate(w.updated)}</span>
                   </div>
                 </div>
               </div>
@@ -1116,13 +1125,10 @@ export function NewWorldScreen() {
           <div className="fy-gate__body" style={{ gap: 14 }}>
             {genMode === "chat" ? (
               <>
-                {turns.length === 0 && (
-                  <div className="fy-bubble--gate">
-                    Say what the world is — a place, a wrongness, a person standing in it. The studio shapes it with
-                    you and keeps "the world so far" on the right, all proposed, nothing locked.
-                    <div className="fy-bubble__note">everything is drafted from this thread · the world is the record, the chat is scaffolding</div>
-                  </div>
-                )}
+                {/* 12a opens with Arke already talking. It opened here with sixty-six words of
+                    instructions instead — what the screen is, where the draft goes, what is
+                    locked — which is the dv-rule read out loud (design turn 69, issue 1008). */}
+                {turns.length === 0 && <div className="fy-bubble--gate">What is this world?</div>}
                 {turns.map((turn, i) => (
                   <div key={i} className={turn.role === "user" ? "fy-bubble--user" : "fy-bubble--gate"} style={{ whiteSpace: "pre-wrap" }}>
                     {/* The author's words are shown exactly as typed; only Arke writes markdown (issue 911). */}
@@ -1398,19 +1404,13 @@ export function NewWorldScreen() {
                 gap: 7,
               }}
             >
-              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
               {/*
-                There was a button here for months that could never be pressed: an image job
-                needs a world folder to land in, and on this screen there is no world yet. A
-                control that can never be enabled is a trap — it reads as broken, and it caught
-                the same person twice. The sentence says where the thing actually happens.
+                A label and nothing else. There was a button here for months that could never be
+                pressed — an image job needs a world folder to land in, and on this screen there
+                is no world yet — and then a sentence in its place saying where key art actually
+                comes from, which is the same explanation with the control removed (issue 1008).
               */}
-              <span
-                className="fy-mono"
-                style={{ fontSize: 9, textAlign: "center", maxWidth: 190, lineHeight: 1.5 }}
-              >
-                key art is made from the logline in the world's hub, once you begin
-              </span>
+              <span style={{ font: "400 11px var(--font-sans)", color: "var(--muted-foreground)" }}>No world image yet</span>
             </div>
             <div style={{ padding: "12px 8px 0" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 9 }}>
@@ -1422,7 +1422,7 @@ export function NewWorldScreen() {
                 </span>
               </div>
               <div style={{ font: "400 12.5px/1.55 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 5 }}>
-                {shownLogline || (genMode === "chat" ? "The logline lands here as you talk." : "The logline lands here as you write it.")}
+                {shownLogline}
               </div>
               {(shownTone || shownGenre) && (
                 <div style={{ display: "flex", gap: 7, marginTop: 10, flexWrap: "wrap" }}>
@@ -1521,10 +1521,6 @@ export function NewWorldScreen() {
                 Begin seeds the first 4 of each · the rest are let go
               </div>
             )}
-            <div style={{ font: "400 11px/1.5 var(--font-sans)", color: "var(--muted-foreground)", textAlign: "center" }}>
-              One more question — how it should look — then the hub. Everything arrives as sketches:
-              lock what holds, discard what doesn't.
-            </div>
           </div>
         </div>
       </div>
@@ -1900,10 +1896,6 @@ export function SettingsNotificationsScreen() {
           <option value="issues-only">Issues only</option>
           <option value="off">Off</option>
         </select>
-      </div>
-      <div className="fy-set__note">
-        issues include failed or uncertain generations, result preparation, and paused providers ·
-        result notifications contain no world or character names
       </div>
     </div>
   );
@@ -2397,16 +2389,8 @@ export function SettingsSampleWorldScreen() {
         <div className="fy-set__name fy-set__name--wide">
           <div className="fy-set__title">Install a copy</div>
           <div className="fy-set__caps">
-            {available
-              ? "a cast with reference kits, canon, a production under way, and a proposal at the gate"
-              : "this build does not carry it"}
+            {available ? "cast · canon · a production · a proposal" : "not in this build"}
           </div>
-          {available && (
-            <div className="fy-set__note">
-              It lands beside your own worlds as an ordinary folder. Change it, break it, archive
-              it — nothing here is read-only, and installing again gives you a fresh copy.
-            </div>
-          )}
         </div>
         {available && (
           <Button variant="primary" disabled={installing} onClick={() => installSampleWorld()}>
@@ -2696,8 +2680,7 @@ export function ActivityScreen() {
           <div className="fy-h1row">
             <h1 className="fy-h1">Activity</h1>
             <span className="fy-h1row__meta">
-              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you ·
-              everything Arke is doing, and what it costs
+              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you
             </span>
             <span className="fy-h1row__push" />
             <span className="fy-seg">

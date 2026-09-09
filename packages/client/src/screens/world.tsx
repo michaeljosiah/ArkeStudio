@@ -139,6 +139,14 @@ function limitedFeatureCopy(copy: string): string {
 export function WorldLayout() {
   const { worldId } = useParams();
   const location = useLocation();
+  /*
+   * Every route test on this layout reads this rather than `location.pathname` (codex,
+   * 2026-09-09). A bookmarked or typed address may end in a slash — `/w/<id>/chat/` — and the
+   * router renders the route either way, so a check anchored on the end of the path quietly
+   * says no. That answer decides whether a screen is a fixed frame, and getting it wrong puts
+   * the composer, Save or the key art back below the fold (issue 1007).
+   */
+  const path = location.pathname.replace(/\/+$/, "");
   const world = useOpenWorldGuard(worldId);
   const refusal = useWorldOpenRefusal(worldId);
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
@@ -156,14 +164,14 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
-  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(location.pathname);
+  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(path);
   if (
-    location.pathname.endsWith("/art-direction/propose") ||
-    location.pathname.endsWith("/main-photo") ||
-    location.pathname.endsWith("/model-sheet") ||
+    path.endsWith("/art-direction/propose") ||
+    path.endsWith("/main-photo") ||
+    path.endsWith("/model-sheet") ||
     // The bench is a fixed workspace with its own breadcrumb chrome (design 68b) — the pill
     // nav and hero scroll of the world pages would sit on top of its three columns.
-    location.pathname.includes("/artifacts/bench")
+    path.includes("/artifacts/bench")
   ) {
     return (
       <div className="fy-app">
@@ -182,8 +190,20 @@ export function WorldLayout() {
       </div>
     );
   }
-  const onArtDirection = location.pathname.endsWith("/art-direction");
-  const onCast = location.pathname.endsWith("/cast");
+  const onArtDirection = path.endsWith("/art-direction");
+  const onCast = path.endsWith("/cast");
+  /*
+   * The world screens that are a fixed frame rather than a page that scrolls: art direction's
+   * two picture bands, and the gate screens, whose two columns each scroll inside themselves.
+   * They were sized against the viewport minus a constant, which was 28px optimistic even with
+   * nothing above them and had no answer at all for a banner that was (issue 1007) — so the
+   * edit sheet's Save and World Chat's composer sat below the fold. The column measures the
+   * room it actually has and gives the screen the remainder.
+   */
+  const fixedFrame =
+    onArtDirection ||
+    /\/(chat|edit)(\/[^/]+)?$/.test(path) ||
+    /\/canon\/(new|[^/]+\/thread)$/.test(path);
   return (
     <div className="fy-app">
       <AppChrome
@@ -195,7 +215,11 @@ export function WorldLayout() {
         }
         divided={onArtDirection}
       />
-      <div className={cx("fy-content", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
+      {/* Art direction is the one world screen laid out as a fixed-height row rather than a
+          column that scrolls, so it is the one that has to be told how much room it has. The
+          column measures it instead of subtracting a guessed constant from the viewport: the
+          nav above it is sticky and therefore in flow, and any condition banner is too. */}
+      <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", path.includes("/productions/setup/") && "fy-content--setup")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             slug === "cast" && onSheets ? (
@@ -231,31 +255,41 @@ export function WorldLayout() {
 /** Staleness, closed-world edits and parse failures — stated, never silent. */
 function WorldConditionBanners() {
   const { worldId } = useParams();
+  const location = useLocation();
   const world = useWorld();
   const navigate = useNavigate();
   const clientState = useClientState();
   if (!world || world.meta.worldId !== worldId) return null;
   // The completion notice (SPEC-031 R-44..R-47): persists until dismissed or the work it
   // names is no longer outstanding, and its one action opens the screen that can act.
+  //
+  // On Overview and nowhere else (issue 1007). R-44 raises it on arrival at the world, and
+  // Overview is the arrival; drawing it on all nine tabs made it a permanent 110px band on
+  // top of nine screens laid out against the window, which is what pushed Save off the foot
+  // of the edit sheet, the composer off World Chat and the key art below the fold. It is one
+  // row now — title, cause, date, two presses — rather than a callout with a paragraph in it.
+  // Trailing slashes stripped, for the reason WorldLayout strips them: `/w/<id>/` is the
+  // Overview, and a typed address that ends in one must not be read as some other tab.
+  const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
-  const notice = build ? foundingNote(build) : null;
+  const notice = onOverview && build ? foundingNote(build) : null;
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;
   if (!hasConditions) return null;
   return (
-    <div style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
+    <div className="fy-worldconditions" style={{ display: "grid", gap: "var(--space-3)", padding: "var(--space-4) var(--gutter) 0" }}>
       {notice && (
-        <Callout tone="warning" title={notice.title}>
-          {notice.reason}
-          <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-2)", alignItems: "center" }}>
-            <Button onClick={() => navigate(notice.action!.to)}>{notice.action!.label}</Button>
-            <Button variant="ghost" onClick={() => dismissBuildNotice(worldId!)}>
-              Dismiss
-            </Button>
-            <span className="mono" style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
-              {notice.meta}
-            </span>
-          </div>
-        </Callout>
+        <div className="fy-buildnotice" role="status">
+          <span className="fy-buildnotice__dot" aria-hidden="true" />
+          <span className="fy-buildnotice__title">{notice.title}</span>
+          {notice.reason && <span className="fy-buildnotice__cause">{notice.reason}</span>}
+          {notice.meta !== "" && <span className="fy-buildnotice__when">{notice.meta}</span>}
+          <button type="button" className="fy-buildnotice__act" onClick={() => navigate(notice.action!.to)}>
+            {notice.action!.label}
+          </button>
+          <button type="button" className="fy-buildnotice__act" onClick={() => dismissBuildNotice(worldId!)}>
+            Dismiss
+          </button>
+        </div>
       )}
       {world.externalEdits.length > 0 && (
         <Callout
@@ -1237,9 +1271,6 @@ function SheetGrid({
                 </button>
               ))}
             </div>
-            <p className="fy-footnote">
-              Everything you produce pulls from these sheets: change one here and it changes everywhere.
-            </p>
           </div>
         </div>
       )}
@@ -1254,7 +1285,7 @@ export function CastScreen() {
       kind="character"
       screenId="cast"
       title="Cast"
-      hint="Characters carry essence, appearance, relationships and a voice."
+      hint="Start with a sentence."
       newPath={`/w/${worldId}/cast/new`}
       detailPath={(id) => `/w/${worldId}/cast/${id}`}
     />
@@ -1303,9 +1334,6 @@ export function LocationsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Locations
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 480 }}>
-          Every place is a sheet, look, sound, customs. Scenes inherit them; generations cite them.
-        </p>
       </div>
       <div
         className="fy-cardgrid"
@@ -1375,9 +1403,6 @@ export function FactionsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Factions
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Who wants what, and what they'd never admit. Scenes borrow their pressure.
-        </p>
       </div>
       <div
         className="fy-cardgrid"
@@ -2360,11 +2385,14 @@ export function CharacterEditScreen() {
                     placeholder="Tide-caller"
                     onChange={(e) => setEditedRole(e.target.value)}
                   />
-                  <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
-                    the one line under their name on the world hub — short enough to read at a glance
-                  </span>
                 </div>
               )}
+              {/*
+                A sheet's sections are paragraphs, not a line each, and the shared textarea's
+                112px showed about four lines of them behind an inner scrollbar — two nested
+                scrollers on a page that already scrolls (issue 1007). The editor is the point
+                of this screen, so it gets the room; the column scrolls, as it did.
+              */}
               {sections.map((s, i) => {
                 const isChanged = s.body !== sheet?.sections[i]?.body;
                 return (
@@ -2374,6 +2402,7 @@ export function CharacterEditScreen() {
                       {isChanged && <span className="fy-changedtag">· changed</span>}
                     </div>
                     <Textarea
+                      className="fy-sheetedit__prose"
                       value={s.body}
                       onChange={(e) => setEdited((prev) => ({ ...prev, [s.heading]: e.target.value }))}
                     />
@@ -2384,13 +2413,7 @@ export function CharacterEditScreen() {
           ) : (
             <>
               {transcript.length === 0 && (
-                <div className="fy-bubble--gate">
-                  Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet —
-                  and reads the rest of the world through canon search, never the folder.
-                  <div className="fy-bubble__note">
-                    you accept or discard the result · nothing lands until then
-                  </div>
-                </div>
+                <div className="fy-bubble--gate">What has changed?</div>
               )}
               {transcript.map((turn, i) => (
                 <div
@@ -2518,16 +2541,8 @@ export function CharacterEditScreen() {
             </div>
           ))}
           {changedCount === 0 && (
-            <div className="fy-mono" style={{ marginTop: 12 }}>
-              nothing changed yet — edits preview here before they save
-            </div>
+            <div className="fy-mono" style={{ marginTop: 12 }}>nothing changed yet</div>
           )}
-        </div>
-        <div className="fy-draftcard">
-          <div style={{ font: "600 13px var(--font-sans)" }}>After save</div>
-          <div className="fy-mono" style={{ marginTop: 10 }}>
-            ripples are computed under the world lock · any non-empty result appears here after the edit lands
-          </div>
         </div>
         <div style={{ flex: 1, minHeight: 16 }} />
         <div style={{ display: "grid", gap: 8 }}>
@@ -3158,9 +3173,7 @@ export function CanonScreen() {
       </div>
       {(result || (askId && !result) || serverSearch) && (
         <div style={{ maxWidth: 720, margin: "20px auto 0", padding: "0 24px", display: "grid", gap: 10 }}>
-          {askId && !result && (
-            <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>
-          )}
+          {askId && !result && <Callout title="Asking canon…">{null}</Callout>}
           {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
           {serverSearch && (
             <span className="fy-mono">
@@ -3943,9 +3956,6 @@ export function ArtifactsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Artifacts
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Recordings, documents and references: filed against the world, attachable to any generation.
-        </p>
         <div className="fy-filterrow">
           <button
             type="button"
@@ -4302,10 +4312,6 @@ export function ProductionsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Productions
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 480 }}>
-          {productions.length === 1 ? "One lens" : `${productions.length || "New"} lenses`} over one world.
-          Change a character once and it lands in all of them.
-        </p>
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
         <section aria-label="Production setups" style={{ padding: "0 40px 28px" }}>

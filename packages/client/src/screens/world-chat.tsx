@@ -847,9 +847,7 @@ export function WorldChatScreen() {
               }
             />
             {/* Stop lives on the working line in the transcript now, beside what it would stop. */}
-            <div className="fy-chat__composernote">
-              world author · talking changes nothing until you save
-            </div>
+            <div className="fy-chat__composernote">world author</div>
           </div>
         </div>
 
@@ -861,17 +859,12 @@ export function WorldChatScreen() {
                 {carried} of {points.length} ready
               </div>
             </div>
-            <div className="fy-panel__note">
-              Save writes a line to the world. If one is wrong, say so and it changes — or reject it.
-            </div>
             {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           </div>
 
           <div className="fy-panel__body">
             {points.length === 0 ? (
-              <div className="fy-panel__empty">
-                Nothing understood yet. Say what you know about this world and it lands here.
-              </div>
+              <div className="fy-panel__empty">Nothing understood yet.</div>
             ) : (
               <>
                 {groups.map((group) => (

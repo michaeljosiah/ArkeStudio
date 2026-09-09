@@ -30,8 +30,7 @@ export function PerformanceAudioPicker({ world, production, sceneId, value, onCh
   const performance = records.find(p => p.id === id);
   const asset = prepared ?? performance;
   const warnings = asset ? Object.values(asset.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
-  return <details style={{ overflowWrap: "anywhere" }}><summary>Use accepted performances for this dispatch</summary>
-    <p>Each choice replaces that character's assigned sample in the covered shot. Use the whole accepted clip or explicitly prepare a trim.</p>
+  return <details style={{ overflowWrap: "anywhere" }}><summary>Accepted performances</summary>
     <label>Accepted performance <select value={id} onChange={e => { setId(e.target.value); invalidate(); setNotice(""); setRangeIn("0"); setRangeOut(""); setSingle(false); setNoMusic(false); setWarningsAccepted(false); }}>
       <option value="">Choose a performance…</option>{records.map(p => <option key={p.id} value={p.id}>{p.target.speakerSheetId} · {p.id}</option>)}
     </select></label>

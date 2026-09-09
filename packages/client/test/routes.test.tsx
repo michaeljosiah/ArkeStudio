@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setStateForTest } from "../src/lib/store.js";
 import { SCREENS } from "../src/screens/registry.js";
+import { stagedReferenceKey } from "@arke-studio/contracts";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { legacySceneView } from "@arke-studio/contracts";
 
@@ -496,7 +497,10 @@ describe("screen inventory", () => {
       "Generate character sheet",
       "one composite identity reference",
       "World look · v",
+      // What this generation completes (SPEC-017 R-23) and where the result lands, in the
+      // fewest words that carry both.
       "reference set",
+      "lands here and in Activity",
     ]) {
       assert.ok(generator.includes(copy), `Sheet generator states ${copy}`);
     }
@@ -506,9 +510,17 @@ describe("screen inventory", () => {
     assert.ok(replace.includes("World look · v"));
 
     const looks = renderAt(`${base}/looks`);
-    assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
-    // The note that restated this line under the form is gone (design 54): the lede says it once.
-    assert.ok(!looks.includes("Explorations do not automatically join the identity package."));
+    assert.ok(looks.includes("Explore more looks"), "the page names what it is for");
+    // The word "optional" was on this screen three ways — a heading's subtitle, the dialog's
+    // lede and the empty state — and none of the three is left (issue 1008). The reference
+    // slot still says it, because there it labels the slot rather than arguing for the page.
+    for (const said of [
+      "Optional visual exploration, outside the identity package.",
+      "optional visual exploration, outside the identity package",
+      "Looks remain optional until you accept one.",
+    ]) {
+      assert.ok(!looks.includes(said), `the screen no longer says: ${said}`);
+    }
   });
 
   it("shows the routed image model and the same non-zero batch estimate on every character dialog", () => {
@@ -562,6 +574,61 @@ describe("screen inventory", () => {
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }
+  });
+
+  /*
+   * The one clause the reference slot owes (codex, 2026-09-09). Identity is never displaced:
+   * `withStaged` fills the model's budget with what the surface must carry first, so on a model
+   * with room for one image a staged reference is left behind. That used to be a standing
+   * sentence in the hint, said whether or not it applied; issue 1008 cut it, and cutting it
+   * left the attachment on screen with Generate live and nothing saying it would not be sent.
+   */
+  it("says a staged reference will not ride, and only on a model with no room for it", () => {
+    const roomy = {
+      id: "roomy-image",
+      provider: "fal" as const,
+      capability: "image" as const,
+      displayName: "Roomy Image",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { resolutions: ["1MP"] },
+      pricing: { kind: "perMegapixel" as const, microUsdPerMegapixel: 30000 },
+    };
+    const oneSlot = { ...roomy, id: "one-slot-image", displayName: "One Slot Image",
+      accepts: { referenceImages: 1, referenceRoles: false, startFrame: false, endFrame: false } };
+    const world = FIXTURE_STATE.world!;
+    const staged = {
+      ...world,
+      stagedReferences: {
+        ...world.stagedReferences,
+        [stagedReferenceKey("character-sheet", "maren-kest")]: "artifacts/pose-sheet.png",
+      },
+    };
+    const at = (model: typeof roomy): string => {
+      __setStateForTest({
+        ...FIXTURE_STATE,
+        world: staged,
+        app: {
+          ...FIXTURE_STATE.app,
+          manifest: { ...FIXTURE_STATE.app.manifest!, models: [model, ...FIXTURE_STATE.app.manifest!.models] },
+          routing: { ...FIXTURE_STATE.app.routing, defaults: { ...FIXTURE_STATE.app.routing.defaults, image: model.id } },
+        },
+      });
+      return renderAt(`/w/${world.meta.worldId}/cast/maren-kest/model-sheet`).replace(/<!-- -->/g, "");
+    };
+    try {
+      const tight = at(oneSlot);
+      assert.match(tight, /One Slot Image carries 1 image/, "the model and its budget");
+      assert.match(tight, /this one is not sent/, "and what that means for the staged image");
+      assert.doesNotMatch(at(roomy), /is not sent/, "a model with room says nothing");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
+  /* SPEC-017 R-23: the character-creation path says when a generation completes the set. */
+  it("says the character sheet completes the reference set", () => {
+    const html = renderAt(`/w/${FIXTURE_STATE.world!.meta.worldId}/cast/maren-kest/model-sheet`).replace(/<!-- -->/g, "");
+    assert.match(html, /Completes Maren Kest.{0,12}s reference set/, "R-23, in the waiting copy");
   });
 
   it("blocks identity-dependent generation when the routed model cannot receive the main photo", () => {

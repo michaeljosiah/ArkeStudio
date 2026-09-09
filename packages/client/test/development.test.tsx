@@ -811,7 +811,7 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     const html = render(withMicrodrama([ONE]), SEASON(PROD), <StoryScreen />, "/w/:worldId/p/:prodId/season");
     assert.match(html, /Wrap up/, "without it a conversation cannot become anything (turn 92)");
     assert.match(html, /What it understood/, "still reachable, behind a disclosure");
-    assert.match(html, /talking changes nothing/, "and the promise beside the composer survives");
+    assert.doesNotMatch(html, /talking changes nothing/, "and no longer says so beside the composer (issue 1008)");
   });
 });
 

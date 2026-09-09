@@ -240,10 +240,6 @@ function MasterLookHero({
   return (
     <div className="fy-artdirection__master fy-artdirection__master--empty">
       <div className="fy-artdirection__empty-mark">NO MASTER LOOK</div>
-      <div>
-        <strong>Make the world look concrete.</strong>
-        <p>The description currently comes from tone and genre.</p>
-      </div>
       {controls}
     </div>
   );
@@ -379,11 +375,6 @@ function WorldKeyArtPanel({ world }: { world: WorldBundle }) {
         </div>
         <div className="fy-artdirection__keyartsay">
           <h2>WORLD KEY ART</h2>
-          <p className="fy-artdirection__keyart-note">
-            A picture <i>of</i> the world — the worlds list, the world's own hero, a production
-            with no frame of its own. Nothing sends it to a model, which is why it may carry the
-            faces a master look may not.
-          </p>
         {/*
           The set is answered in the dialog's own preview column now (design 65) — this line only
           says one is waiting, and reopens the dialog to deal with it. Two places to answer the
@@ -655,23 +646,16 @@ export function ArtDirectionScreen() {
           <span>WORLD LOOK · v{direction.version}</span>
           <span>CARRIES AS TEXT TOO</span>
         </div>
-        {/* The heading is a typographic split, and the screen has to say so. Somebody reading a
-            bold line above a grey one reasonably concludes the bold part is the one that counts. */}
-        <p className="fy-artdirection__carries">
-          Every word of this description goes into every new generation. The heading is just where
-          it starts — not a summary of it, and not the part that carries.
-        </p>
-        {direction.derived ? (
-          <div className="fy-artdirection__derived">
-            This direction is derived from the world's tone and genre. No master look is set yet. Make it
-            concrete to author the shared look explicitly.
-          </div>
-        ) : (
-          <div className="fy-artdirection__safety">
-            A master look is carried for its treatment, never its subject. A palette, a lighting study or a
-            place travels more safely than a portrait — a face here can arrive in other characters' work.
-          </div>
-        )}
+        {/* A state, not a case for one: what "derived" means is the dv-rule's to say. */}
+        {direction.derived && <div className="fy-artdirection__derived">derived from tone and genre</div>}
+        {/*
+          The one thing this page owes that is not a label (SPEC-017 §2.5, codex round four):
+          a reference carries its subject as well as its treatment, so a look with a face in it
+          arrives in other characters' work. §2.5 puts that on this surface by name, and it is
+          the surface with Upload on it — the one path that can put a portrait here without a
+          dialog. The paragraph arguing it is the spec's; the clause is the screen's.
+        */}
+        <p className="fy-artdirection__safety">A plate travels safely. A face travels with it.</p>
         {/* The door says what pressing it does (issue 747). Behind it, the person's own commit
             is `Set the look · v2` and lands on the press — nothing is queued and no approvals
             screen sees it — so "Propose a change" set up a review step that never came. The

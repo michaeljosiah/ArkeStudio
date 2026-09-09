@@ -246,6 +246,13 @@ export const FoundingBuildStateSchema = z
       .nullable(),
     /** The notice shows until dismissed or the work it names is no longer outstanding (R-45). */
     noticeDismissed: z.boolean(),
+    /**
+     * When the run ended — the `stopped` or `completed` journal entry's stamp. Absent while it
+     * is still running. The notice carries it because a notice that never ages reads as news
+     * for as long as it is on screen: a build that fell short on Sunday was still announcing
+     * itself on Wednesday with nothing on it to say so (issue 1007).
+     */
+    endedAt: IsoDateTimeSchema.optional(),
     capMicroUsd: z.number().int().min(0),
     estimatedSpendMicroUsd: z.number().int().min(0),
   })
@@ -287,6 +294,7 @@ export function foldFoundingBuild(
   let stopped = false;
   let completed = false;
   let noticeDismissed = false;
+  let endedAt: string | undefined;
   for (const entry of entries) {
     if (entry.kind === "intent") {
       detailByKey.delete(entry.key);
@@ -294,8 +302,13 @@ export function foldFoundingBuild(
     }
     if (entry.kind === "intent" || entry.kind === "terminal") lastByKey.set(entry.key, entry);
     else if (entry.kind === "enqueued") jobIdByKey.set(entry.key, entry.jobId);
-    else if (entry.kind === "stopped") stopped = true;
-    else if (entry.kind === "completed") completed = true;
+    else if (entry.kind === "stopped") {
+      stopped = true;
+      endedAt = entry.at;
+    } else if (entry.kind === "completed") {
+      completed = true;
+      endedAt = entry.at;
+    }
     else if (entry.kind === "notice-dismissed") noticeDismissed = true;
   }
 
@@ -402,6 +415,7 @@ export function foldFoundingBuild(
     items,
     shortfall,
     noticeDismissed,
+    ...(endedAt !== undefined && (completed || stopped) ? { endedAt } : {}),
     capMicroUsd: record.capMicroUsd,
     estimatedSpendMicroUsd,
   };

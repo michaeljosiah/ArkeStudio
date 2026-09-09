@@ -52,8 +52,16 @@ describe("Development authors through its conversation (design turn 86)", () => 
     }
   });
 
-  it("says what talking does and does not do", () => {
-    assert.match(render(FIXTURE_STATE, DEV), /talking changes nothing · wrap-up stages what you keep/);
+  /*
+   * The line under this composer used to promise that talking changes nothing and that wrap-up
+   * stages what is kept — a sentence repeated under every dock in the app. Turn 69: a screen
+   * labels, it does not explain (issue 1008). The behaviour is unchanged; the wrap-up press is
+   * still the only thing that stages anything, which is what the coordinator's tests hold.
+   */
+  it("does not explain itself under the composer", () => {
+    const html = render(FIXTURE_STATE, DEV);
+    assert.doesNotMatch(html, /talking changes nothing/);
+    assert.match(html, /Wrap up/, "the press that does stage something is still there");
   });
 
   it("keeps what the conversation can reach on the screen", () => {
