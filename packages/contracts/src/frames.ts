@@ -1,3 +1,4 @@
+import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
@@ -2388,7 +2389,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /**
    * File the playblast and opening frame the Stage rendered onto its shot. The bytes arrive the
-   * way a pasted picture does — spooled by the host, which appends their paths — and both
+   * way a pasted picture does — spooled by the host, which appends their paths — and all
    * artifacts are pinned through one versioned scene write, so a stale scene refuses them by
    * name rather than pinning a move onto keys that have since changed.
    */
@@ -2409,6 +2410,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2),
     })
     .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
@@ -2431,6 +2433,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1).optional(),
       openingFrameSourcePath: z.string().min(1).optional(),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */

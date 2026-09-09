@@ -14,6 +14,7 @@ import {
   stageWalkSpeed,
   stagingEase,
   stageFrameCount,
+  stageReferenceFrames,
   stagePlayblastIsStale,
   stagingBeats,
   stagingFov,
@@ -309,7 +310,7 @@ describe("the Stage's arithmetic", () => {
     }).success, false);
   });
 
-  it("requires both files in a Stage export", () => {
+  it("requires the opening and additional reference frames in a Stage export", () => {
     const message = {
       kind: "stage-playblast",
       worldId: "01J8G0000000000000000000W1",
@@ -323,6 +324,7 @@ describe("the Stage's arithmetic", () => {
       aspect: "16:9",
       sourcePath: "C:/spool/playblast.mp4",
       openingFrameSourcePath: "C:/spool/opening-frame.png",
+      referenceFrames: stageReferenceFrames([{ t: 0 }, { t: 4 }], 4).map(frame => ({ ...frame, sourcePath: "C:/spool/still.png" })),
     };
     assert.deepEqual(ClientMessageSchema.parse(message), message);
     const { openingFrameSourcePath: _openingFrameSourcePath, ...withoutFrame } = message;
@@ -351,4 +353,10 @@ it("holds before a move, evaluates shot-local turns and sitting, and catches inv
   assert.equal(stageFigureAt(staged.cast[0]!,staged.performances,4,4).pose,"sit");
   assert.deepEqual(stageProblems(staged,4),[]);
   assert.match(stageProblems({...staged,keys:staged.keys.map(k=>({...k,anchor:"missing"}))},4).join(" "),/missing figure/);
+});
+
+it("samples the last encoded time and exact interior camera marks for reference exports", () => {
+  assert.deepEqual(stageReferenceFrames([{ t: 0 }, { t: .021 }, { t: .05 }], .05), [
+    { kind: "last", at: 1 / 30 }, { kind: "key", at: .021 }, { kind: "overview", at: 0 },
+  ]);
 });

@@ -1,5 +1,5 @@
 import { sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion } from "./scene.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -15,6 +15,14 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+/** Ordered for admission: an end-frame route receives the pair before optional key/overview stills. */
+export function stageReferenceFrames(keys: readonly { t: number }[], durationSec: number): StageReferenceFrame[] {
+  return [
+    { kind: "last", at: (stageFrameCount(durationSec) - 1) / STAGE_FRAME_RATE },
+    ...keys.filter(key => key.t > 0 && key.t < durationSec).map(key => ({ kind: "key" as const, at: key.t })),
+    { kind: "overview", at: 0 },
+  ];
+}
 export const MAX_STAGE_WALK_SPEED_MPS = 2.2;
 export const STAGE_RIGS: readonly StageRig[] = ["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"];
 

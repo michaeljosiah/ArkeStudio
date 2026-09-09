@@ -3697,11 +3697,12 @@ export async function stagePlayblast(
   target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
+  referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const host = bridge;
   if (!host?.finishStageExport) return { ok: false, reason: "deterministic playblast export needs the desktop app" };
   try {
-    return await host.finishStageExport(target, jobId, openingFrame);
+    return await host.finishStageExport(target, jobId, openingFrame, referenceFrames);
   } catch {
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };

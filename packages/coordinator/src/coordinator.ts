@@ -8463,6 +8463,7 @@ export class Coordinator {
           stagingVersion: msg.stagingVersion,
           sourcePath: msg.sourcePath,
           openingFrameSourcePath: msg.openingFrameSourcePath,
+          referenceFrames: msg.referenceFrames,
           durationSec: msg.durationSec,
           aspect: msg.aspect,
           ...(msg.lens !== undefined ? { lens: msg.lens } : {}),
