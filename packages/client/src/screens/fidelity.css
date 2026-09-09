@@ -6984,6 +6984,27 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-sw__metrics { padding: 3px 4px; color: var(--neutral-400); font: 400 10px var(--font-mono); }
 /* Capped like .fy-swrow, so the right-hand controls sit on the rows' edge rather than drifting past it. */
 .fy-sw__toolbar { display: flex; align-items: center; gap: 12px; flex: none; max-width: 1080px; padding: 2px 0 10px; }
+/* Full screen (SPEC-044 R-37): the glyph at the row's right end, the pin's weight. */
+.fy-sw__full { flex: none; width: 26px; height: 26px; border: 0; border-radius: 7px; background: transparent; color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fy-sw__full:hover { background: var(--accent); color: var(--foreground); }
+/*
+ * The page steps aside by CSS rather than the view moving (R-38): a view rendered into another
+ * host is a remount, and a remount is Flow's positions and zoom and the Stage's draft gone. The
+ * workspace fills the app frame, the dock and the rail vanish beneath it, and inside the column
+ * only the view and the two overlays stay.
+ */
+.fy-sw[data-full="true"] { position: fixed; inset: 0; z-index: 40; background: var(--background); grid-template-columns: minmax(0, 1fr); }
+.fy-sw[data-full="true"] > :not(.fy-sw__centre) { display: none; }
+.fy-sw[data-full="true"] .fy-sw__centre { position: relative; padding: 0 12px; }
+.fy-sw[data-full="true"] .fy-sw__centre > :not(.fy-swflow):not(.fy-swstage):not(.fy-sw__fullpill):not(.fy-sw__fullexit) { display: none; }
+.fy-sw[data-full="true"] .fy-swflow { padding: 54px 0 12px; }
+.fy-sw[data-full="true"] .fy-swstage { padding-top: 54px; }
+.fy-sw[data-full="true"] .fy-swcanvas { margin: 0 0 12px; }
+.fy-sw__fullpill { position: absolute; left: 14px; top: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-xs); padding: 5px 10px; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
+.fy-sw__fullpill > i { width: 1px; height: 12px; background: var(--border); }
+.fy-sw__fullpill > b { font: 500 10.5px var(--font-sans); color: var(--foreground); }
+.fy-sw__fullexit { position: absolute; right: 12px; top: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-xs); padding: 5px 9px; color: var(--foreground); font: 400 10px var(--font-mono); cursor: pointer; }
+.fy-sw__fullexit > span { color: var(--muted-foreground); }
 .fy-sw__spacer { flex: 1; }
 .fy-sw__tabs { display: inline-flex; align-items: center; gap: 2px; background: var(--secondary); border-radius: 10px; padding: 3px; }
 .fy-sw__tab {
@@ -7320,7 +7341,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 }
 .fy-swrow__refthumb { width: 15px; height: 15px; flex: none; border-radius: 99px; overflow: hidden; }
 /* What the character brings to this shot, and the chip as a door to the dialog (SPEC-044 R-22). */
-.fy-swrow__ref--door { background: transparent; font: inherit; cursor: pointer; }
+.fy-swrow__ref--door { background: transparent; font-family: inherit; line-height: inherit; cursor: pointer; }
 .fy-swrow__ref--door:hover { border-color: var(--neutral-400); color: var(--foreground); }
 .fy-swrow__refwords { margin-left: 3px; font: 400 9px var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
 .fy-swrow__overrides { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -7410,7 +7431,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swnode[data-kind="ref"] .fy-swnode__text { padding: 0; gap: 3px; }
 .fy-swnode__open { position: absolute; right: 9px; top: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 3px 7px; font: 500 9px var(--font-sans); color: var(--foreground); cursor: pointer; }
 .fy-swnode__open:hover { border-color: var(--neutral-400); }
-.fy-swnode[data-kind="ref"] .fy-swnode__meta { font-family: var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
+.fy-swnode[data-kind="ref"] .fy-swnode__meta { font-family: var(--font-mono, ui-monospace, monospace); margin-right: -9px; }
 .fy-swnode__thumb { display: block; flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
 .fy-swnode__name { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-swnode__meta { font-size: 9px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

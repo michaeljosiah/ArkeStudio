@@ -41,7 +41,7 @@ import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast
 import { CharacterDialog } from "./character-dialog.js";
 import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
-import { Pin, Plus } from "../../components/icons.js";
+import { Maximize2, Minimize2, Pin, Plus } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { SceneStage } from "./stage.js";
@@ -78,6 +78,23 @@ export function SceneWorkspace({
   const connection = useStore().connection;
   const digests = useBlockDigests(legacySceneView(scene));
   const [view, setView] = useState<"storyboard" | "flow" | "stage" | "preview">("storyboard");
+  // Full screen (SPEC-044 R-37, R-38): session state like the put-away, never written. The view
+  // stays where it is in the tree and the page around it steps aside by CSS, so Flow's positions
+  // and zoom and the Stage's draft survive the move without a remount.
+  const [full, setFull] = useState(false);
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (event: KeyboardEvent) => {
+      // A dialog above the view owns its own Escape; the page leaves full screen only when nothing does.
+      if (event.key === "Escape" && document.querySelector("dialog[open]") === null) setFull(false);
+    };
+    document.addEventListener("keydown", onKey);
+    // The production rail sits outside this screen and under the overlay: unreachable to the
+    // pointer already, and inert so the keyboard cannot tab into what nobody can see.
+    const rail = document.querySelector(".fy-prodrail");
+    rail?.setAttribute("inert", "");
+    return () => { document.removeEventListener("keydown", onKey); rail?.removeAttribute("inert"); };
+  }, [full]);
   const [showBoards, setShowBoards] = useState(false);
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
@@ -435,8 +452,20 @@ export function SceneWorkspace({
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"}>
+      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"} data-full={full ? "true" : undefined}>
         <main className="fy-sw__centre">
+          {full ? (
+            <>
+              <div className="fy-sw__fullpill" aria-label="Where you are">
+                {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number}
+                <i aria-hidden="true" />
+                <b>{view === "flow" ? "Flow" : "Stage"}</b>
+              </div>
+              <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
+                <Minimize2 size={14} /><span>Esc</span>
+              </button>
+            </>
+          ) : null}
           <header className="fy-sw__head">
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
@@ -556,6 +585,11 @@ export function SceneWorkspace({
                 {shots.length - framed === 0 ? "every shot has a frame" : `${shots.length - framed} of ${shots.length} without a frame`}
               </span>
             )}
+            {view === "flow" || view === "stage" ? (
+              <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
+                <Maximize2 size={14} />
+              </button>
+            ) : null}
             {frameRun === null || frameRun.status === "completed" ? (
               <button
                 type="button"

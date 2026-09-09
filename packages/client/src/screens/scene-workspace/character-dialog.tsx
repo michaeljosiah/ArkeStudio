@@ -8,6 +8,7 @@ import {
   normalizeSpeechText,
   orderedShots,
   resolveCast,
+  shotSpeakers,
   ulid,
   type ClientMessage,
   type PerformanceRecord,
@@ -87,7 +88,9 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
   const lines: SpokenLine[] = deriveRehearsalLines(scene, world.sheets)
     .filter((line) => line.speakerSheetId === sheetId && line.reason === undefined)
     .map((line) => ({ id: line.id, shotId: line.shotId, ...(line.blockId ? { blockId: line.blockId } : {}), number: numberOf(line.shotId), text: line.text }));
-  const speaksIn = [...new Set(lines.map((line) => line.number))];
+  // Who speaks where is the planner's resolution (R-22), not the lines that carry text: a VO
+  // speaker with no written line still speaks there, and the band says so too.
+  const speaksIn = shots.filter((shot) => shotSpeakers(scene, [shot]).speakers.includes(sheetId)).map((shot) => shot.number);
   const seenIn = shots.filter((shot) => resolveCast(shot.description, world.sheets).cast.some((entry) => entry.sheet.id === sheetId)).map((shot) => shot.number);
   const facts = [
     sheet?.billing,

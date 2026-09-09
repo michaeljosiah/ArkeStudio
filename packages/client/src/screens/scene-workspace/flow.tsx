@@ -20,6 +20,7 @@ import {
 import { Divider, Expand, Info, More, Move, PlaySolid, Plus } from "../../components/icons.js";
 import { Button } from "../../components/ui.js";
 import { sheetPortraitPath } from "../../components/portrait.js";
+import { sceneCast } from "./cast-picker.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
 import { shotFramePath } from "./lightbox.js";
@@ -1215,7 +1216,9 @@ export function SceneFlow({
       const sheetId = node.sheetId;
       return (
         <>
-          <span className="fy-swnode__thumb" style={node.thumb === undefined ? undefined : { backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />
+          {node.thumb === undefined
+            ? <span className="fy-swnode__thumb" aria-hidden="true" />
+            : <span className="fy-swnode__thumb" style={{ backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />}
           <span className="fy-swnode__text">
             <span className="fy-swnode__name">{node.name}</span>
             <span className="fy-swnode__meta">{node.meta}</span>
@@ -1225,6 +1228,7 @@ export function SceneFlow({
               type="button"
               className="fy-swnode__open"
               aria-label={`Open ${node.name}`}
+              aria-haspopup="dialog"
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => { event.stopPropagation(); onOpenCharacter(sheetId, event.currentTarget); }}
             >
@@ -1303,16 +1307,13 @@ function buildGraph(input: {
   // then the members added by hand. A location is context, not cast, and draws no node (R-17).
   // The card says what each brings: voice where they speak anywhere in the scene, look where a
   // shot cites them, and how many shots that is — or that no shot has them yet.
-  const cited: string[] = [];
+  const cited = sceneCast(scene, sheets);
   const citedBy = new Map<string, string[]>();
   for (const shot of shots) {
     for (const entry of resolveCast(shot.description, [...sheets]).cast) {
-      if (entry.sheet.type !== "character") continue;
-      if (!cited.includes(entry.sheet.id)) cited.push(entry.sheet.id);
-      citedBy.set(entry.sheet.id, [...(citedBy.get(entry.sheet.id) ?? []), shot.id]);
+      if (entry.sheet.type === "character") citedBy.set(entry.sheet.id, [...(citedBy.get(entry.sheet.id) ?? []), shot.id]);
     }
   }
-  for (const sheetId of Object.keys(scene.cast ?? {})) if (!cited.includes(sheetId)) cited.push(sheetId);
   const speakers = shotSpeakers(scene, shots).speakers;
   const refAt = new Map<string, { x: number; y: number }>();
   cited.forEach((sheetId, index) => {
@@ -1323,7 +1324,7 @@ function buildGraph(input: {
     const meta = [
       speakers.includes(sheetId) ? "voice" : null,
       shotCount > 0 ? "look" : null,
-      shotCount > 0 ? `in ${shotCount} shot${shotCount === 1 ? "" : "s"}` : "in no shot yet",
+      shotCount > 0 ? `in ${shotCount} shot${shotCount === 1 ? "" : "s"}` : speakers.includes(sheetId) ? null : "in no shot yet",
     ].filter((part): part is string => part !== null).join(" · ");
     nodes.push({
       id: `r:${sheetId}`,
@@ -1379,9 +1380,10 @@ function buildGraph(input: {
       ...(frame === undefined ? {} : { thumb: frame }),
     });
   });
-  // A staged shot's blocking, drawn where a reference would go next: it is an input to the shot
-  // the way a sheet is, and the reference grid already keeps things clear of one another.
-  let contextSlot = cited.length;
+  // A staged shot's blocking, drawn below the cast: it is an input to the shot the way a sheet
+  // is. The cast lane is one column of 72-tall cards, so the staging grid starts under its floor.
+  const castFloor = 24 + cited.length * 88;
+  let contextSlot = 0;
   sequence.shots.forEach(({ nodeId, shot }) => {
     if (shot.staging === undefined) return;
     const blocking = effectiveStageBlocking(scene, shot.staging);
@@ -1390,7 +1392,7 @@ function buildGraph(input: {
     const point = at(
       `k:${shot.id}`,
       compact ? 280 : 20 + (slot % 2) * 172,
-      compact ? 24 + slot * 196 : 24 + Math.floor(slot / 2) * 196,
+      compact ? castFloor + slot * 196 : castFloor + Math.floor(slot / 2) * 196,
     );
     nodes.push({
       id: `k:${shot.id}`,
@@ -1504,7 +1506,7 @@ function buildGraph(input: {
 
   // Boards, packed the way the rows pack them, and the clip each renders to.
   if (boardPack.ok) {
-    const contextFloor = compact ? 60 + cited.length * 196 : 0;
+    const contextFloor = compact ? 36 + cited.length * 88 + contextSlot * 196 : 0;
     for (const [boardIndex, board] of boardPack.boards.entries()) {
       const members = board.memberShotIds.flatMap((shotId: string) => {
         const point = shotAt.get(shotId);

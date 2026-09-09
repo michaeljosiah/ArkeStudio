@@ -437,7 +437,20 @@ describe("Flow cards follow the prototype (§11.1)", () => {
     assert.deepEqual(opened, ["odile"]);
   });
 
-  it("a reference card shows the sheet's portrait above its caption", async () => {
+  it("draws a staged shot's blocking below the cast lane, never over a card", async () => {
+    const world = FIXTURE_STATE.world!;
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = structuredClone(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    const first = (scene as unknown as { shots: Array<{ staging?: unknown }> }).shots[0]!;
+    first.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: -1, z: 0 }], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }] };
+    const mounted = await mountFlow({ scene });
+    const card = q(mounted, '.fy-swnode[data-kind="ref"]')!;
+    const block = q(mounted, '.fy-swnode[data-kind="block"]')!;
+    const bottom = parseFloat(card.style.top) + parseFloat(card.style.height);
+    assert.ok(parseFloat(block.style.top) >= bottom, `the staging node (top ${block.style.top}) clears the card (bottom ${bottom})`);
+  });
+
+  it("a reference card shows the sheet's portrait beside its caption", async () => {
     const mounted = await openFlow();
     const ref = all(mounted, '.fy-swnode[data-kind="ref"]').find((node) => node.textContent?.includes("Maren Kest"));
     assert.ok(ref, "the cited character is a reference node");
@@ -445,6 +458,33 @@ describe("Flow cards follow the prototype (§11.1)", () => {
     assert.ok(thumb, "with a portrait");
     assert.match(thumb.getAttribute("style") ?? "", /references\/maren-kest\/head-front\.png/);
     assert.equal(thumb.getAttribute("aria-label"), "Maren Kest");
+  });
+});
+
+describe("full screen keeps the view where it is (SPEC-044 R-38; T-15)", () => {
+  it("enters from the glyph without remounting the canvas, keeps the zoom, and leaves on Escape", async () => {
+    const mounted = await openFlow();
+    const zoomIn = all(mounted, ".fy-swzoom button").find((button) => button.getAttribute("aria-label") === "Zoom in")!;
+    await click(zoomIn);
+    const zoomLabel = () => q(mounted, ".fy-swzoom")?.textContent ?? "";
+    const before = zoomLabel();
+    const node = q(mounted, '.fy-swnode[data-kind="shot"]')!;
+    await click(q(mounted, ".fy-sw__full")!);
+    const workspace = q(mounted, ".fy-sw")!;
+    assert.equal(workspace.getAttribute("data-full"), "true");
+    assert.ok(q(mounted, ".fy-sw__fullpill")?.textContent?.includes("scene 4"));
+    assert.match(q(mounted, ".fy-sw__fullpill")?.textContent ?? "", /Flow$/);
+    assert.equal(q(mounted, '.fy-swnode[data-kind="shot"]'), node, "the same canvas element: nothing remounted");
+    assert.equal(zoomLabel(), before, "the zoom survives the move");
+    assert.ok(q(mounted, ".fy-sw__fullexit"), "the reversed glyph with Esc");
+    await act(async () => {
+      const escape = new dom.window.Event("keydown", { bubbles: true });
+      Object.defineProperty(escape, "key", { value: "Escape" });
+      dom.document.dispatchEvent(escape);
+    });
+    assert.equal(workspace.getAttribute("data-full"), null, "Escape returns");
+    assert.equal(q(mounted, '.fy-swnode[data-kind="shot"]'), node, "and still nothing remounted");
+    assert.equal(zoomLabel(), before);
   });
 });
 
