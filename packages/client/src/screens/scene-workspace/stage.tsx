@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   DEFAULT_SHOT_SEC,
   effectiveStageBlocking,
   effectiveFraming,
   MAX_STAGE_WALK_SPEED_MPS,
+  STAGE_FRAME_RATE,
   STAGE_RIGS,
   orderedShots,
   resolveCast,
@@ -162,6 +163,7 @@ export function SceneStage({
   const promotingBlocking = useRef(false);
   const [at, setAt] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [loop, setLoop] = useState(false);
   const [keyIndex, setKeyIndex] = useState(0);
   const [mode, setMode] = useState<"look" | "camera">("look");
   const [selection, setSelection] = useState<StageSelection>(null);
@@ -267,24 +269,31 @@ export function SceneStage({
 
   // The clock is elapsed from a start timestamp, never accumulated (SPEC-036 R-29).
   useEffect(() => {
-    if (!playing) return;
+    if (!playing || frozen) {
+      setPlaying(false);
+      playStart.current = null;
+      return;
+    }
     let frame = 0;
     const tick = () => {
       const start = playStart.current;
       if (start === null) return;
-      const next = start.from + (Date.now() - start.wall) / 1000;
-      if (next >= durationSec) {
+      const wall = Date.now();
+      const next = start.from + (wall - start.wall) / 1000;
+      if (next >= durationSec && !loop) {
         setAt(durationSec);
         setPlaying(false);
         playStart.current = null;
         return;
       }
-      setAt(next);
+      const time = loop ? next % durationSec : next;
+      if (next >= durationSec) playStart.current = { wall, from: time };
+      setAt(time);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, durationSec]);
+  }, [playing, durationSec, loop, frozen]);
 
   const stop = () => {
     setPlaying(false);
@@ -598,6 +607,7 @@ export function SceneStage({
     setScope(next);
   };
   const toggle = () => {
+    if (frozen) return;
     if (playing) {
       stop();
       return;
@@ -608,9 +618,36 @@ export function SceneStage({
     setPlaying(true);
   };
   const seek = (which: number) => {
+    if (frozen || keys[which] === undefined) return;
     stop();
     setKeyIndex(which);
     setAt(keys[which]?.t ?? 0);
+  };
+  const seekTime = (time: number) => {
+    if (latest.current.frozen) return;
+    stop();
+    setAt(Math.max(0, Math.min(durationSec, time)));
+  };
+  // Shortcuts belong to this Stage, leaving text entry and native button activation alone.
+  const timelineKey = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (frozen || working === null || event.altKey || event.ctrlKey || event.metaKey ||
+      target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if (event.key === " " && target.closest('button, [role="button"]')) return;
+    if (event.key === " ") { if (!event.repeat) toggle(); }
+    else if (event.key === "ArrowLeft") seekTime(at - 1 / STAGE_FRAME_RATE);
+    else if (event.key === "ArrowRight") seekTime(at + 1 / STAGE_FRAME_RATE);
+    else if (event.key === "Home") seekTime(0);
+    else if (event.key === "End") seekTime(durationSec);
+    else if (/^[1-9]$/.test(event.key) && keys[Number(event.key) - 1]) seek(Number(event.key) - 1);
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const scrub = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (latest.current.frozen) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    seekTime((event.clientX - bounds.left) / Math.max(1, bounds.width) * durationSec);
   };
   const addKey = () => {
     if (working === null) return;
@@ -645,6 +682,7 @@ export function SceneStage({
     // time at once, so a nudge or a drag that follows edits the key the panel names.
     setAt(keys[which]!.t);
     const move = (next: MouseEvent) => {
+      if (latest.current.frozen) return;
       const when = round(Math.max(low, Math.min(high, ((next.clientX - bounds.left) / Math.max(1, bounds.width)) * durationSec)));
       patchKey(which, { t: when });
       setAt(when);
@@ -767,7 +805,7 @@ export function SceneStage({
   const ghostable = previous?.staging !== undefined;
   const busy = staging && persisted === null;
   return (
-    <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage">
+    <section className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
       <div className="fy-swstage__head">
         <button
           type="button"
@@ -1105,11 +1143,23 @@ export function SceneStage({
 
       {working === null ? null : (
         <div className="fy-swstage__timeline">
-          <button type="button" className="fy-swstage__play" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
+          <button type="button" className="fy-swstage__play" aria-label={playing ? "Pause" : "Play"} disabled={frozen} onClick={toggle}>
             {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
           </button>
+          <button type="button" className="fy-swstage__loop" aria-pressed={loop} disabled={frozen} onClick={() => { if (!frozen) setLoop(!loop); }}>Loop</button>
           <span className="fy-swstage__time">{Math.min(at, durationSec).toFixed(1)}s / {durationSec.toFixed(1)}s</span>
-          <div className="fy-swstage__track" data-key-track="1">
+          <div className="fy-swstage__track" data-key-track="1" role="slider" tabIndex={0}
+            aria-label="Stage playhead" aria-valuemin={0} aria-valuemax={durationSec} aria-valuenow={at} aria-valuetext={`${at.toFixed(2)} seconds`} aria-disabled={frozen}
+            onPointerDown={event => {
+              if (event.button !== 0 || frozen) return;
+              event.preventDefault();
+              event.currentTarget.focus();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              scrub(event);
+            }}
+            onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event); }}
+            onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+          >
             <span className="fy-swstage__rail" aria-hidden="true" />
             <span className="fy-swstage__head-fill" style={{ width: `${((Math.min(at, durationSec) / Math.max(0.01, durationSec)) * 100).toFixed(1)}%` }} aria-hidden="true" />
             {keys.map((key, position) => {
@@ -1124,7 +1174,10 @@ export function SceneStage({
                   data-mid={!first && !last ? "true" : undefined}
                   style={first ? { left: 0 } : last ? { right: 0 } : { left, transform: "translateX(-50%)" }}
                   title={`${keyName(position, keys.length)} · ${key.t.toFixed(1)}s${first || last ? "" : " · drag to retime"}`}
+                  onPointerDown={event => event.stopPropagation()}
                   onMouseDown={(event) => {
+                    if (frozen) return;
+                    event.currentTarget.closest<HTMLElement>("[data-key-track]")?.focus();
                     if (first || last) {
                       event.stopPropagation();
                       seek(position);
