@@ -12098,6 +12098,23 @@ export class Coordinator {
           }));
           if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") {
             failures.push({ index, reason: `${basename(sourcePath)}: ${outcome.reason}` });
+            /*
+             * The same notice the attach path raises, so a picked file that is merely large has
+             * somewhere to go. Counted as a failure *and* announced: the count is what the import
+             * report says happened, and the notice is the offer to retry with consent. Without
+             * it the renderer never learns the path — the picker deliberately withholds it — and
+             * a large video simply cannot be filed from either shelf.
+             */
+            this.emit({
+              at: new Date().toISOString(),
+              type: "artifact.notice",
+              worldId: msg.worldId,
+              sourcePath,
+              outcome: outcome.outcome === "needs-consent" ? "needs-consent" : "refused",
+              reason: outcome.reason,
+              sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+              production: msg.production ?? null,
+            });
           }
         }
         // Filing completes locally. The counts tell the client whether to report success, a mixed
@@ -14347,6 +14364,10 @@ export class Coordinator {
       ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
       // The measurement outlives the gate, so it must not outlive the world it belongs to.
       abandoned: () => !this.stillOpen(store) || this.stopping,
+      // Re-filing under a stated owner is what this path is for (SPEC-020 §2.5): the escape
+      // hatch that brings a production's document back to the world runs through here, and so
+      // does `Copy it anyway`. A plain import does not, and must not re-home what it matched.
+      reownOnDuplicate: true,
       ...opts,
     }).catch((err) => ({
       outcome: "refused" as const,
@@ -14361,6 +14382,9 @@ export class Coordinator {
         outcome: outcome.outcome,
         reason: outcome.reason,
         sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
+        // The scope this filing was refused at, so the surface offering the retry is the one
+        // that asked. Without it a world refusal offers `Copy it anyway` inside a production.
+        ...(opts.production !== undefined ? { production: opts.production } : {}),
       });
       return null;
     }

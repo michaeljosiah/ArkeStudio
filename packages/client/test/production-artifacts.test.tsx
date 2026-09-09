@@ -154,6 +154,56 @@ describe("the rail row that used to leave the production", () => {
   });
 });
 
+describe("the actions this page offers have somewhere to land", () => {
+  it("reviews the candidates Lift facts produced, on the page that offered it", () => {
+    /*
+     * The world's shelf reviews candidates for the world's artifacts and filters to those, so an
+     * owned document's pending candidates were reachable from nowhere: the page offered the press
+     * and had no screen for its result (Codex round 1).
+     */
+    const lifted: ArtifactSidecar = artifact({
+      id: "ar_mine_lifted",
+      file: "verse-notes.md",
+      production: "saltlight",
+      extraction: {
+        pending: [
+          {
+            hash: "c1",
+            kind: "character",
+            name: "The night bellman",
+            body: "Rings the hour from the Vigil, and has never once been early.",
+            quote: "the bellman has never once been early",
+            line: 12,
+          },
+        ],
+        droppedCount: 2,
+      },
+    } as Partial<ArtifactSidecar> & Pick<ArtifactSidecar, "id" | "file">);
+    __setStateForTest(withArtifacts([ARTIFACTS[0]!, lifted]));
+    const html = renderAt(`${P}/artifacts`);
+
+    assert.ok(html.includes("Extracted from verse-notes.md"));
+    assert.ok(html.includes("The night bellman"));
+    assert.ok(html.includes("Accept") && html.includes("Reject"));
+    assert.ok(html.includes("quotes did not verify"), "what was thrown away is counted, never hidden");
+  });
+
+  it("offers Copy it anyway only for a refusal this page asked for", () => {
+    const state = withArtifacts();
+    const large = { sourcePath: "C:/in/harbour-4k.mp4", outcome: "needs-consent", reason: "412 MB", sizeBytes: 1 };
+
+    // A refusal from the world's shelf: visible there, and never retried at this production's scope.
+    __setStateForTest(state, { artifactNotices: [{ ...large, production: null }] });
+    assert.ok(!renderAt(`${P}/artifacts`).includes("Copy it anyway"));
+    assert.ok(renderAt(`${W}/artifacts`).includes("Copy it anyway"), "the world answers its own");
+
+    // And this production's own refusal is answerable here, and nowhere else.
+    __setStateForTest(state, { artifactNotices: [{ ...large, production: "saltlight" }] });
+    assert.ok(renderAt(`${P}/artifacts`).includes("Copy it anyway"));
+    assert.ok(!renderAt(`${W}/artifacts`).includes("Copy it anyway"));
+  });
+});
+
 describe("the lenses, once the page is live", () => {
   it("drops the add-files cell under the world lens, because it cannot add there", async () => {
     __setStateForTest(withArtifacts());
@@ -180,6 +230,49 @@ describe("the lenses, once the page is live", () => {
     await act(async () => { (chip("Only here") as HTMLElement).click(); });
     assert.ok(addCell(), "and back where it does");
     assert.ok(!host.textContent?.includes("harbour-bells.wav"), "the world's are out of this lens");
+
+    await act(async () => { root.unmount(); });
+    host.remove();
+  });
+
+  it("counts Made here inside the open lens, as the kind chips do", async () => {
+    // One generated file each side of the ownership line: a shelf-wide count would advertise
+    // two under a lens that can only show one (Codex round 1).
+    // "Made here" is origin `system` plus a generation record — either alone is not enough.
+    const generated = (over: Partial<ArtifactSidecar> & Pick<ArtifactSidecar, "id" | "file">) =>
+      artifact({
+        kind: "image",
+        origin: { by: "system" },
+        generation: { source: "bench", sourceFile: "x.png" },
+        ...over,
+      } as never);
+    __setStateForTest(
+      withArtifacts([
+        generated({ id: "ar_w_made", file: "world-made.png" }),
+        generated({ id: "ar_p_made", file: "prod-made.png", production: "saltlight" }),
+        ARTIFACTS[0]!,
+      ]),
+    );
+    const host = dom.document.createElement("div");
+    dom.document.body.append(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={[`${P}/artifacts`]}>
+          <App />
+        </MemoryRouter>,
+      );
+    });
+    const chipText = () =>
+      [...host.querySelectorAll("button.fy-filterchip")].map((b) => b.textContent ?? "");
+
+    assert.ok(chipText().some((t) => t.startsWith("Made here 2")), "both, under All");
+    const press = (label: string) =>
+      [...host.querySelectorAll("button.fy-filterchip")].find((b) => b.textContent?.startsWith(label));
+    await act(async () => { (press("Only here") as HTMLElement).click(); });
+    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "one, under Only here");
+    await act(async () => { (press("From the world") as HTMLElement).click(); });
+    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "and one under From the world");
 
     await act(async () => { root.unmount(); });
     host.remove();

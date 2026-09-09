@@ -316,7 +316,9 @@ interface StoreState {
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
-  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /* `production` is the scope the refused filing was attempted at, so a surface can tell its
+     own refusals from another's: `null` is the world, absent is a filing that stated no opinion. */
+  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null; production?: string | null }>;
   /** Filed by attaching to a chat, newest last — what the composer shows as chips. */
   attached: Array<{
     worldId: string;
@@ -1564,6 +1566,7 @@ function handleFrame(json: string): void {
           outcome: event.outcome,
           reason: event.reason,
           sizeBytes: event.sizeBytes,
+          ...(event.production !== undefined ? { production: event.production } : {}),
         },
       ];
     }
@@ -4083,6 +4086,7 @@ export function useArtifactNotices(): Array<{
   outcome: string;
   reason: string;
   sizeBytes: number | null;
+  production?: string | null;
 }> {
   return useStore().artifactNotices;
 }

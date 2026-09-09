@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useParams } from "react-router";
 import { formatSeconds, isGeneratedArtifact, orderedShots, type ArtifactSidecar } from "@arke-studio/contracts";
-import { EmptyState, Screen } from "../components/layout.js";
+import { EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, cx } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
 import { EditorDialog } from "../components/editor-dialog.js";
@@ -20,6 +20,7 @@ import {
 import {
   extractArtifact,
   fileArtifactMsg,
+  resolveExtraction,
   restoreArtifact,
   retireArtifact,
   uploadArtifacts,
@@ -92,9 +93,24 @@ export function ProductionArtifactsScreen() {
     (a) => scope === "all" || (scope === "owned" ? owns(a) : !owns(a)),
   );
   const kinds = [...new Set(inScope.map((a) => a.kind))];
+  // Counted inside the open lens, as the kind chips are. Counting the whole shelf here made the
+  // chip advertise files the lens beside it had already filtered out (Codex round 1).
+  const madeHereInScope = inScope.filter(madeHere).length;
   const visible = inScope.filter(
     (a) => (kindFilter === null || a.kind === kindFilter) && (!madeHereOnly || madeHere(a)),
   );
+  /*
+   * Only this page's own refusals (Codex round 1).
+   *
+   * `artifactNotices` is one global list across every surface, world and production, and a
+   * `needs-consent` notice is an offer to retry at a scope. Rendering another surface's here
+   * would offer `Copy it anyway` on a file the world refused, and the retry restates *this*
+   * production — filing, or on the dedup path re-homing, bytes nobody asked to move.
+   */
+  const ourNotices = notices.filter((n) => n.production === productionId);
+  // Candidates wait on the artifact that produced them, and only an owned one can have any:
+  // `Lift facts` is offered nowhere else on this page.
+  const batches = scoped.filter((a) => owns(a) && (a.extraction?.pending.length ?? 0) > 0);
 
   const upload = (files?: readonly File[]) => {
     // Scoped, at both entrances. This page shows what the production owns, so what it takes is
@@ -181,14 +197,13 @@ export function ProductionArtifactsScreen() {
               () => setKindFilter(kindFilter === k ? null : k),
             ),
           )}
-          {madeHereCount > 0 &&
-            scope !== "retired" &&
-            chip(`Made here ${madeHereCount}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
+          {madeHereInScope > 0 &&
+            chip(`Made here ${madeHereInScope}`, madeHereOnly, () => setMadeHereOnly((v) => !v))}
         </div>
       </div>
       <div style={{ maxWidth: 860, margin: "0 auto", padding: "12px 24px 0", display: "grid", gap: 10 }}>
         {uploadError && <Callout tone="warning" title="Import unavailable">{uploadError}</Callout>}
-        {notices.map((n, i) => (
+        {ourNotices.map((n, i) => (
           <Callout
             key={`${n.sourcePath}-${i}`}
             tone="warning"
@@ -225,6 +240,67 @@ export function ProductionArtifactsScreen() {
             )}
           </Callout>
         )}
+        {/*
+          * What `Lift facts` produced (Codex round 1).
+          *
+          * The world's shelf reviews candidates for the world's artifacts and filters to those,
+          * so an owned document's pending candidates were reachable from nowhere: the page
+          * offered the press and had no screen for its result. They are guests here, never canon
+          * (SPEC-020 R-12), which is why this list belongs to the production and not the world.
+          */}
+        {batches.map((artifact) => (
+          <Section
+            key={artifact.id}
+            title={`Extracted from ${artifact.file}`}
+            aside={
+              <span>
+                {artifact.extraction!.pending.length} candidate
+                {artifact.extraction!.pending.length === 1 ? "" : "s"} for {production.meta.title}
+                {artifact.extraction!.droppedCount > 0
+                  ? ` · ${artifact.extraction!.droppedCount} dropped — quotes did not verify`
+                  : ""}
+              </span>
+            }
+          >
+            <div className="scr-sectionlist">
+              {artifact.extraction!.pending.map((candidate) => (
+                <div key={candidate.hash} className="scr-sheetsection">
+                  <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                    <Badge tone="outline">{candidate.kind}</Badge>
+                    <strong style={{ font: "var(--type-ui)" }}>{candidate.name}</strong>
+                    {candidate.section && (
+                      <span style={{ font: "var(--type-label)", color: "var(--muted-foreground)" }}>
+                        → {candidate.section}
+                      </span>
+                    )}
+                  </div>
+                  <span>{candidate.body}</span>
+                  <span className="scr-field__hint">
+                    “{candidate.quote}”{candidate.line !== undefined ? ` — line ${candidate.line}` : ""} ·
+                    verified against the source
+                  </span>
+                  <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                    <Button
+                      onClick={() => {
+                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "accept");
+                      }}
+                    >
+                      Accept — commits on its own
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      onClick={() => {
+                        if (worldId) resolveExtraction(worldId, artifact.id, candidate.hash, "reject");
+                      }}
+                    >
+                      Reject — leaves no trace
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Section>
+        ))}
       </div>
       <div
         className="fy-cardgrid"

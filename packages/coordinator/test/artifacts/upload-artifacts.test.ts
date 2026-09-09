@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { mkdir, open, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
+import { LARGE_FILE_BYTES } from "../../src/artifacts/filing.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { pngBytes } from "../queue/fake-provider.js";
 import { tempDir } from "../tmp.js";
@@ -123,6 +124,66 @@ describe("filing artifacts from the panel (82a)", () => {
       assert.equal(shelf.find((a) => a.file === "scoped-plate.png")?.production, "saltlight",
         "and a scoped one belongs to the production that asked");
     } finally { await provider.close(); }
+  });
+
+  it("answers a duplicate with the owner it already has, never a silent transfer", async () => {
+    /*
+     * Dedup is by content hash across the whole world, so an import from a production of bytes
+     * the world already holds matched the world's artifact — and passing the new scope down took
+     * that artifact off the world's shelf as a side effect of adding it here. Nobody asked for a
+     * transfer; they asked for a copy, and the answer is "already held" (Codex round 1). The
+     * deliberate re-file is a different gesture and keeps its transfer, below.
+     */
+    const bytes = distinctPng(31);
+    const first = await sourceFile("shared-bells.png", bytes);
+    const again = await sourceFile("shared-bells-copy.png", bytes);
+    let picked: readonly string[] = [first];
+    const { provider, send } = await harness(() => picked);
+    try {
+      await send(upload);
+      const filed = provider.openStore()!.getBundle().artifacts.find((a) => a.file === "shared-bells.png")!;
+      assert.equal(filed.production, undefined, "it starts as the world's");
+
+      picked = [again];
+      await send({ ...upload, requestId: "01J8E1000000000000000000V4", production: "saltlight" } as ClientMessage);
+      const after = provider.openStore()!.getBundle().artifacts.find((a) => a.id === filed.id)!;
+      assert.equal(after.production, undefined, "and an import from a production leaves it there");
+
+      // The escape hatch (SPEC-020 §2.5) is the gesture that does move it, and still does.
+      await send({ kind: "file-artifact", worldId: WORLD_ID, sourcePath: again, production: "saltlight" } as ClientMessage);
+      assert.equal(
+        provider.openStore()!.getBundle().artifacts.find((a) => a.id === filed.id)?.production,
+        "saltlight",
+        "an explicit re-file re-owns it, which is what that path is for",
+      );
+    } finally { await provider.close(); }
+  });
+
+  it("offers consent for a large picked file, at the scope it was picked for", async () => {
+    /*
+     * The picker withholds the path from the renderer, so without this notice a file that is
+     * merely large cannot be filed from either shelf: the failure names it and nothing can act
+     * on it. The scope rides along because the retry restates one — a world refusal answered
+     * inside a production would file the bytes as that production's (Codex round 1).
+     */
+    const dir = await tempDir("upload-src");
+    await mkdir(dir, { recursive: true });
+    const big = join(dir, "harbour-plate-4k.mp4");
+    const handle = await open(big, "w");
+    try { await handle.truncate(LARGE_FILE_BYTES + 1); } finally { await handle.close(); }
+
+    const { provider, events, send } = await harness(() => [big]);
+    try {
+      await send({ ...upload, production: "saltlight" } as ClientMessage);
+      const notices = events.filter((e) => e.type === "artifact.notice") as Array<Record<string, unknown>>;
+      assert.equal(notices.length, 1);
+      assert.equal(notices[0]?.["outcome"], "needs-consent");
+      assert.equal(notices[0]?.["sourcePath"], big, "the path the retry needs");
+      assert.equal(notices[0]?.["production"], "saltlight", "and the scope it was refused at");
+      // Still counted as a failure: the report says what happened, the notice offers the retry.
+      const failures = results(events)[0]?.["failures"] as Array<{ reason: string }>;
+      assert.match(failures[0]?.reason ?? "", /harbour-plate-4k\.mp4:/);
+    } finally { await provider.close(); await rm(big, { force: true }); }
   });
 
   it("says nothing when the dialog is closed — that is not a failure", async () => {
