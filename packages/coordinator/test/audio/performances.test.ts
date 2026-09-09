@@ -1,4 +1,4 @@
-import { resolvePerformanceAudioReferences, readCharacterAudioInputs, preparePerformanceAudioRange } from "../../src/audio/reference-inputs.js";
+import { resolvePerformanceAudioReferences, readCharacterAudioInputs, preparePerformanceAudioRange, resolveCastVoices } from "../../src/audio/reference-inputs.js";
 import { planCharacterAudio, characterAudioInstructions } from "@arke-studio/contracts";
 import { FalClient } from "../../../providers/src/clients/fal.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
@@ -312,4 +312,56 @@ it("keep selects: accepts, selects the line and makes the read the character's v
   const stale = await keepPerformanceRecording(store, tools, spool, { ...request, requestId: ulid(), spoolId: "00000000-0000-4000-8000-000000000002", expectedSceneVersion: after.version });
   await assert.rejects(selectKeptPerformance(store, stale, { ...request, requestId: ulid(), expectedSceneVersion: scene.version }), /version|moved/i);
   assert.equal(store.getBundle().productions.find(p => p.meta.id === production.meta.id)!.scenes.find(s => s.id === scene.id)!.cast?.[record.target.speakerSheetId]?.voice?.kind, "performance");
+});
+
+it("the scene's cast resolves into voice references that ride wherever the character speaks (SPEC-044 R-26, R-27, R-28)", async t => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const bundle = store.getBundle(), production = bundle.productions[0]!;
+  const scene = production.scenes.find(scene => orderedShots(scene).some(s => resolvePerformanceLine(scene, s.id).ok))!;
+  const shot = orderedShots(scene).find(s => resolvePerformanceLine(scene, s.id).ok)!;
+  const bytes = wav(Array.from({ length: 48000 }, (_, i) => Math.round(Math.sin(i / 7) * 3000)));
+  const source = join(dir, "capture-cast.webm"); await writeFile(source, bytes);
+  const spool = { async claim() { return { absolutePath: source, contentType: "audio/webm", sizeBytes: bytes.length }; }, async discard() {} };
+  const tools = createAudioMediaTools({ async run(tool, args) {
+    let stdout = "";
+    if (tool === "ffprobe") stdout = JSON.stringify({ format: { duration: "1", format_name: "wav" }, streams: [{ codec_type: "audio",
+      codec_name: "pcm_s16le", sample_fmt: "s16", sample_rate: "48000", channels: 1, bits_per_sample: 16 }] });
+    else if (args[0] === "-version") stdout = "ffmpeg version test\n";
+    else await writeFile(args.at(-1)!, bytes);
+    return { code: 0, stdout: Buffer.from(stdout), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false };
+  } });
+  const request = { kind: "keep-performance-recording" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, spoolId: "00000000-0000-4000-8000-000000000003",
+    captureBasis: "self" as const, select: true, attestations: ["single-speaker" as const, "no-music" as const], cloudBasis: "self" as const };
+  const record = await keepPerformanceRecording(store, tools, spool, request);
+  await selectKeptPerformance(store, record, request);
+  const after = store.getBundle();
+  const currentProduction = after.productions.find(p => p.meta.id === production.meta.id)!;
+  const currentScene = currentProduction.scenes.find(s => s.id === scene.id)!;
+  const resolved = await resolveCastVoices(store, currentProduction, currentScene, ulid());
+  assert.deepEqual(resolved.notSent, []);
+  assert.equal(resolved.references.length, 1);
+  assert.equal(resolved.references[0]!.source, "scene-cast");
+  assert.equal(resolved.references[0]!.performance.id, record.id);
+  // The read rides in a pass where the character speaks, even one that is not the shot it was recorded against.
+  const model = SHIPPED_MANIFEST.models.find(m => m.id === "seedance-2.0")!;
+  const speaker = record.target.speakerSheetId;
+  const speaking = orderedShots(currentScene).filter(s => { const line = resolvePerformanceLine(currentScene, s.id); return line.ok && line.speakerSheetId === speaker; });
+  const silent = orderedShots(currentScene).filter(s => !speaking.includes(s));
+  const rides = planCharacterAudio({ scene: currentScene, shots: speaking, sheets: after.sheets, kits: after.referenceKits, model, imageCount: 1,
+    performanceReferences: resolved.references });
+  assert.ok(rides.references.some(r => "performance" in r && r.performance.id === record.id), "the chosen read rides where its character speaks");
+  if (silent.length) {
+    const quiet = planCharacterAudio({ scene: currentScene, shots: silent.slice(0, 1), sheets: after.sheets, kits: after.referenceKits, model, imageCount: 1,
+      performanceReferences: resolved.references });
+    assert.ok(!quiet.references.some(r => "performance" in r && r.performance.id === record.id), "and not where nobody speaks");
+    assert.ok(!quiet.problems.some(p => p.includes("does not match")), "without calling that a problem");
+  }
+  // A stale choice becomes a clause, never a refusal (R-10, R-28).
+  const stale = { ...currentScene, cast: { [speaker]: { voice: { kind: "performance" as const, performanceId: record.id, hash: `sha256:${"f".repeat(64)}` } } } };
+  const missing = await resolveCastVoices(store, currentProduction, stale, ulid());
+  assert.deepEqual(missing.references, []);
+  assert.equal(missing.notSent[0]?.sheetId, speaker);
+  assert.match(missing.notSent[0]!.reason, /sample rides/);
 });

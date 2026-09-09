@@ -103,6 +103,8 @@ export async function listPlans(store: WorldStore, productionId: string): Promis
 export interface CreatePlanInput {
   manifest?: import("@arke-studio/contracts").ModelManifest;
   acknowledgedRecommendationIds?: string[];
+  /** Scene-cast voices that did not resolve, for the plan card's clause (SPEC-044 R-28). */
+  castNotSent?: DispatchPlan["castNotSent"];
   worldId: string;
   productionId: string;
   scene: SceneRecord;
@@ -170,6 +172,7 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
       dependsOn: dependencies[passIndex]!,
       compiled: pass,
     })),
+    ...(input.castNotSent?.length ? { castNotSent: input.castNotSent } : {}),
     createdAt: input.clock(),
   });
   /*

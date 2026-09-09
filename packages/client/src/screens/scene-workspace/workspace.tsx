@@ -413,14 +413,15 @@ export function SceneWorkspace({
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
     if (videoPlan?.timingProblems?.length) { setPlanError(videoPlan.timingProblems.join(" ")); return; }
     if (videoAudioProblems.length) { setPlanError(videoAudioProblems.join(" ")); return; }
+    // The scene page chooses nothing per dispatch (SPEC-044 R-26): the coordinator resolves the
+    // scene's cast into references when it plans, and the Bench keeps the one per-dispatch off.
     pendingPlan.current = dispatchScenePlanned(
       world.meta.worldId,
       production.meta.id,
       sceneFile,
       "whole-scene",
       videoModel.id,
-      "review-gated", undefined, undefined, audioReferencesDisabled, audioReferencesDisabled ? [] : performanceAudio.map(({ preview: _preview, ...request }) => request),
-      audioReferencesDisabled ? [] : masterAudio.map(({ preview: _preview, ...request }) => request), dialogueAcknowledgements,
+      "review-gated",
     );
     setPlanError(null);
   };

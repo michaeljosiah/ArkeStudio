@@ -30,6 +30,8 @@ export const PerformanceAudioRequestSchema = z.object({
   performanceId: PerformanceIdSchema, hash: FullSha256Schema, acceptedReviewAt: IsoDateTimeSchema,
   intent: z.enum(["voice-reference", "performance-sync"]), warningCodes: z.array(z.string()),
   singleSpeaker: z.literal(true), noMusic: z.literal(true), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+  /** Where the choice was made: per dispatch (the Bench), or once on the scene's cast (SPEC-044 R-26). */
+  source: z.enum(["explicit", "scene-cast"]).optional(),
 }).strict();
 export type PerformanceAudioRequest = z.infer<typeof PerformanceAudioRequestSchema>;
 export const PreparedPerformanceAudioReviewSchema = z.object({
@@ -44,6 +46,7 @@ export const FrozenPerformanceAudioSchema = z.object({
   prepared: PreparedReferenceAudioSchema.optional(),
   label: z.string().regex(/^@Audio[1-3]$/), performance: PerformanceRecordSchema, acceptedReviewAt: IsoDateTimeSchema,
   warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema), acknowledgementId: z.string().min(1),
+  source: z.enum(["explicit", "scene-cast"]).optional(),
 }).strict();
 export type FrozenPerformanceAudio = z.infer<typeof FrozenPerformanceAudioSchema>;
 export const MasterAudioBindingSchema = z.object({
@@ -140,7 +143,11 @@ export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly 
     if (!route) plan.problems.push("This route cannot carry master performance playback.");
     plan.references.push({ ...ref, label: `@Audio${plan.references.length + 1}` });
   }
-  const explicit = (input.performanceReferences ?? []).filter(ref => input.shots.some(shot => shot.id === ref.performance.target.shotId));
+  // A read chosen on the scene's cast rides in every pass where its character speaks (SPEC-044
+  // R-27); one chosen per dispatch stays bound to the shot it was recorded against.
+  const explicit = (input.performanceReferences ?? []).filter(ref => ref.source === "scene-cast"
+    ? speakers.includes(ref.sheetId)
+    : input.shots.some(shot => shot.id === ref.performance.target.shotId));
   for (const ref of explicit) {
     if (!route) plan.problems.push("This route cannot carry the selected performance audio.");
     if (masters.some(master => master.master.shotId === ref.performance.target.shotId)) plan.problems.push("Choose a master slice or character performances for a shot, not both.");
@@ -180,9 +187,31 @@ export function characterAudioInstructions(plan: CharacterAudioPlan): string {
     : `${r.characterName} uses ${r.label} as voice guidance. Speak the scene's authored dialogue; do not repeat the audio reference's words.`).join("\n");
 }
 
+/**
+ * The reads the scene's cast has chosen for the speakers in a subject (SPEC-044 R-29, R-31),
+ * as the Bench names them beside the plan: the renderer cannot freeze a read — rights are
+ * acknowledged on the coordinator — but it can say which read will be asked for.
+ */
+export function castVoiceSummary(world: WorldBundle, subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }):
+  { sheetId: string; name: string; line: string }[] {
+  const production = world.productions.find(p => p.meta.id === subject.productionId);
+  const scene = production?.scenes.find(s => s.id === subject.sceneId);
+  if (!production || !scene) return [];
+  const shots = orderedShots(scene);
+  return Object.entries(scene.cast ?? {}).flatMap(([sheetId, member]) => {
+    const voice = member.voice;
+    if (voice?.kind !== "performance") return [];
+    const record = production.performances.find(p => p.id === voice.performanceId && p.provenance.outputHash === voice.hash);
+    const sheet = world.sheets.find(s => s.id === sheetId);
+    if (!record || !sheet) return [];
+    const number = shots.find(s => s.id === record.target.shotId)?.number;
+    return [{ sheetId, name: sheet.name, line: number === undefined ? "read" : `read · shot ${number}` }];
+  });
+}
+
 export function planSubjectCharacterAudio(input: { world: WorldBundle; subject: { productionId: string; sceneId: string;
   kind: string; shotId?: string; members?: readonly { shotId: string }[] }; model: ManifestModel;
-  imageCount: number; taskMode?: string; disabled?: boolean }): CharacterAudioPlan {
+  imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[] }): CharacterAudioPlan {
   const production = input.world.productions.find(p => p.meta.id === input.subject.productionId);
   const scene = production?.scenes.find(s => s.id === input.subject.sceneId);
   if (!scene) return { version: 1, disabled: input.disabled === true, route: null, references: [], problems: ["The scene is no longer available."] };

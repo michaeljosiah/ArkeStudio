@@ -172,6 +172,13 @@ export const DispatchPlanSchema = z
       })
       .strict(),
     passes: z.array(PlanPassSchema).min(1),
+    /**
+     * A scene-cast voice that could not ride, and why, said once at planning (SPEC-044 R-28):
+     * the sample rode instead, and the plan card owes the clause.
+     */
+    castNotSent: z
+      .array(z.object({ sheetId: SlugSchema, name: z.string().min(1), reason: z.string().min(1) }).strict())
+      .optional(),
     createdAt: IsoDateTimeSchema,
   })
   .strict();

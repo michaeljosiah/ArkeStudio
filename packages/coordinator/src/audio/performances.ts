@@ -31,8 +31,19 @@ export function performanceTarget(store: WorldStore, input: { productionId: stri
     ...(line.blockId ? { blockId: line.blockId } : {}), authoredTextHash: audioHash(Buffer.from(line.text)) });
   return { target, text: line.text, sheet };
 }
+/**
+ * A read is current while the same line — same shot, speaker, block and wording — is still
+ * there to speak. The scene version is Keep's fence, not the line's identity: choosing a read
+ * for the scene's cast bumps the version itself (SPEC-044 R-15), and an unrelated edit to a
+ * different shot must not silence every read in the scene (R-16 reads staleness off the
+ * authored text hash alone).
+ */
 export function currentPerformanceTarget(store: WorldStore, target: PerformanceTarget): boolean {
-  try { return JSON.stringify(performanceTarget(store, target).target) === JSON.stringify(target); } catch { return false; }
+  try {
+    const { sceneVersion: _now, ...now } = performanceTarget(store, target).target;
+    const { sceneVersion: _then, ...then } = target;
+    return JSON.stringify(now) === JSON.stringify(then);
+  } catch { return false; }
 }
 
 export async function keepPerformanceRecording(store: WorldStore, tools: AudioMediaTools, spool: PerformanceSpool,

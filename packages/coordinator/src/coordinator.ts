@@ -23,7 +23,7 @@ import { preparePerformanceGeneration, readPerformanceGenerationQuote, validateP
 import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -7798,10 +7798,14 @@ export class Coordinator {
           fail("The scene or selected model is no longer available.");
           return;
         }
+        // The scene chooses nothing per dispatch (SPEC-044 R-26): its cast's voices are resolved
+        // here, each on its own, so a read that cannot ride becomes a clause and the sample
+        // rides (R-28) rather than the whole plan refusing.
+        const castVoices = msg.audioReferencesDisabled ? { references: [], notSent: [] } : await resolveCastVoices(store, production, scene, msg.requestId);
         let performanceReferences, masterReferences;
         try {
-          if (msg.audioReferencesDisabled && (msg.performanceAudio?.length || msg.masterAudio?.length)) throw new Error("Disabled references cannot carry selected performances.");
-          performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+          if (msg.audioReferencesDisabled && msg.masterAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          performanceReferences = castVoices.references;
           masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
           fail(describeCoordinatorError(error));
@@ -7852,6 +7856,7 @@ export class Coordinator {
         try {
           const aggregate = await createDispatchPlan(store, {
             manifest: this.opts.manifest, acknowledgedRecommendationIds: msg.acknowledgedRecommendationIds,
+            castNotSent: castVoices.notSent,
             worldId: msg.worldId,
             productionId: production.meta.id,
             scene,
@@ -9940,9 +9945,12 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
           return;
         }
+        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29).
+        const castVoices = await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId);
         const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
           worldId: msg.worldId,
           requestId: msg.requestId,
+          performanceReferences: castVoices.references,
           at: this.nowIso(),
           fromTake,
           // A bench take of a local recipe records which version made it (R-13), and the
@@ -14926,9 +14934,12 @@ export class Coordinator {
       },
     };
     const revision = (await bench.store.read()).length;
+    // A quote acknowledges nothing new: the session id keeps repeated quotes on one rights entry.
+    const castVoices = await resolveSubjectCastVoices(store, session.subject, `quote-${session.id}`);
     const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
       worldId: store.worldId,
       requestId: `quote-${createdAt}`,
+      performanceReferences: castVoices.references,
       at: createdAt,
       recipeVersionOf: (modelId) => this.opts.comfyui?.service.identityFor(modelId)?.recipe.version,
     });

@@ -308,7 +308,7 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
+  const references = matchingOptions ? quoteReferences(quote, scene, world, production.meta.id) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -464,7 +464,7 @@ function GenerateFramesDialogOpen({
                       ? "rides"
                       : reference.ridingSteps === 0
                         ? "citation only"
-                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}</span>
+                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}{reference.detail === null ? "" : ` · ${reference.detail}`}</span>
                   </span>
                 </article>
               ))}
@@ -586,14 +586,24 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
     .filter((value): value is string => value !== null);
 }
 
-function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
+  // What rides beside the sheet (SPEC-044 R-30): a look chosen for this scene on a character's
+  // row, the plate on the location's. Voice never applies to stills and is not said here.
+  const detailFor = (sheetId: string): string | null => {
+    const sheet = sheetById.get(sheetId);
+    if (sheet?.type === "location") return "plate";
+    const look = world.referenceKits.find((kit) => kit.sheetId === sheetId)?.looks
+      ?.find((candidate) => candidate.attachedTo?.kind === "scene" && candidate.attachedTo.productionId === productionId && candidate.attachedTo.sceneId === scene.id);
+    return look === undefined ? null : `look · ${lookName(look.prompt)}`;
+  };
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
     path: string | null;
     citedSteps: number;
     ridingSteps: number;
+    detail: string | null;
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
@@ -614,6 +624,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
         path: previous?.path ?? riding?.path ?? null,
         citedSteps: (previous?.citedSteps ?? 0) + 1,
         ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
+        detail: previous?.detail ?? detailFor(sheetId),
       });
     }
   }
@@ -623,6 +634,12 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       ? locationPortraitPath(world, entry.sheet.id)
       : characterPortraitPath(world, entry.sheet.id)),
   }));
+}
+
+/** A look is named by its prompt's first clause — the words a person typed to make it. */
+function lookName(prompt: string): string {
+  const first = prompt.split(/[,.;\n]/)[0]?.trim() ?? prompt.trim();
+  return first.length > 28 ? `${first.slice(0, 27).trimEnd()}…` : first;
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {
