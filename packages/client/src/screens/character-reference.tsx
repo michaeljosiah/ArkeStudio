@@ -516,11 +516,10 @@ export function GenerateCharacterSheetScreen() {
         onPrompt={setStyle}
         onResetPrompt={() => setStyle(null)}
         resetTitle="Back to the world look"
-        promptHint="Inherited from this world. Edit it and this one generation is made under your words instead — the look itself does not change."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? null}
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("character-sheet", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? ""]?.worldName }}
-        referenceHint="Optional. A layout, a pose sheet or a style plate to work from. It rides after the main photo, so it is dropped when the model has room for only one image."
+        referenceHint="Optional. A layout, a pose sheet, a style plate."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
         worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
@@ -559,7 +558,7 @@ export function GenerateCharacterSheetScreen() {
         }}
         previews={preview}
         generating={requested && generatedTake === null && dispatchError === null}
-        waitingHint={`Completes ${sheet.name}'s reference set. You can close this — it lands here and in Activity.`}
+        waitingHint="Lands here and in Activity."
         // One composite, so there is nothing to choose between: the take that came back is the
         // selection. Making somebody click a single tile before they may answer it would be a
         // step that exists only because the column can hold four.
@@ -784,11 +783,10 @@ export function ReplaceMainPhotoScreen() {
         onPrompt={setPrompt}
         onResetPrompt={() => setPrompt(mainPhotoPromptFor(sheet))}
         resetTitle="Reset from character sheet"
-        promptHint="Written from the character sheet. Whatever is here is what the model is asked for."
         worldSlug={world.meta.slug}
         reference={world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? null}
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("main-photo", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? ""]?.worldName }}
-        referenceHint="Optional. A lighting study, a costume plate, a photograph to match. Identity goes first, so this rides only where the model has room for a second image."
+        referenceHint="Optional. A lighting study, a costume plate, a photograph."
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
         worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
@@ -814,7 +812,6 @@ export function ReplaceMainPhotoScreen() {
           label: `Candidate ${index + 1}`,
         }))}
         generating={generating}
-        waitingHint="The selected world look carries as treatment, never subject."
         selected={selected}
         onSelect={setSelected}
         commit={{
@@ -978,23 +975,19 @@ export function CharacterLooksScreen() {
         <section className="fy-looks-composer">
           <div>
             <h2>Explore more looks</h2>
-            <p>Optional visual exploration, outside the identity package.</p>
           </div>
           <Button ref={exploreRef} variant="primary" onClick={() => setExploring(true)}>
             Explore more looks
           </Button>
-          <p className="fy-looks-composer__note">
-            {photo
-              ? "Anchored to the accepted main photo, so an exploration is still this character."
-              : `${sheet.name} has no accepted main photo yet — a look is explored from one.`}
-          </p>
+          {/* Only the refusal. What the anchor does for a look is the rule's to say. */}
+          {!photo && <p className="fy-looks-composer__note">{sheet.name} has no accepted main photo yet</p>}
         </section>
         <GenerationDialog
           open={exploring}
           onClose={() => setExploring(false)}
           returnFocus={exploreRef}
           title="Explore more looks"
-          lede={`${sheet.name} · optional visual exploration, outside the identity package`}
+          lede={sheet.name}
           promptLabel="Describe the look"
           prompt={prompt}
           onPrompt={setPrompt}
@@ -1005,11 +998,10 @@ export function CharacterLooksScreen() {
                 ? "Mid-laugh, guard up, lost in thought…"
                 : "Years later, soaked through, after the fight…"
           }
-          promptHint="The main photo rides along, so what comes back is still this character wearing your words."
           worldSlug={world.meta.slug}
           reference={world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? null}
           referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("look", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? ""]?.worldName }}
-          referenceHint="Optional. A garment, a pose, a photograph to work from. The main photo goes first, so this rides only where the model has room for a second image."
+          referenceHint="Optional. A garment, a pose, a photograph."
           onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
           worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId), file) }}
           onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
@@ -1078,8 +1070,7 @@ export function CharacterLooksScreen() {
           {images.length === 0 ? (
             <div className="fy-mainphoto-dialog__empty">
               <strong>Explore to promote a result</strong>
-              <span>Looks remain optional until you accept one.</span>
-            </div>
+              </div>
           ) : (
             <>
               <div className="fy-looks-results__grid" ref={resultsRef}>

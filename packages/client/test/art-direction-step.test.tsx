@@ -90,9 +90,16 @@ describe("the art-direction step of genesis", () => {
     assert.ok(html.includes("Begin in this world"));
   });
 
-  it("promises the step rather than springing it, so Begin is not a surprise", () => {
+  /*
+   * The door used to promise the look step in a sentence under Begin. Turn 69: a screen labels,
+   * it does not explain (issue 1008). The step itself is unchanged — Begin still opens it, which
+   * is what the tests below hold — and the rail's own heading is what names it.
+   */
+  it("does not narrate the step it is about to open", () => {
     __setStateForTest(FIXTURE_STATE);
-    assert.ok(render().includes("One more question"));
+    const html = render();
+    assert.ok(!html.includes("One more question"));
+    assert.ok(html.includes("Begin in this world"), "the press that opens it is still there");
   });
 });
 
@@ -523,9 +530,16 @@ describe("key art on the art-direction page (design 64)", () => {
     assert.match(html.slice(to), /world-art\.png/);
   });
 
-  it("says which of the two it is, and that this one is never sent to a model", () => {
+  /*
+   * The distinction between the two pictures is the page's whole structure, and it used to be
+   * argued for in a paragraph as well — about a hundred words of rationale on a screen whose
+   * subject is two frames (issue 1008). The frames are labelled; the argument is the dv-rule's.
+   */
+  it("names each of the two pictures, and argues for neither", () => {
     const html = renderArtDirection({ keyArt: "world-art.png" });
-    assert.match(html, /Nothing sends it to a model/i, "the distinction that governs everything else");
+    assert.match(html, /WORLD KEY ART/, "the second picture is named");
+    assert.match(html, /Master look|NO MASTER LOOK/, "and so is the first");
+    assert.doesNotMatch(html, /Nothing sends it to a model/i, "without the paragraph explaining why");
   });
 
   /*

@@ -161,7 +161,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-runtime",
     engine: "ollama",
     displayName: "Ollama",
-    purpose: "Runs language models here — choose one in Settings · Providers",
+    purpose: "Runs language models here",
     sizeMb: 750,
     spec: {
       kind: "installer",
@@ -175,7 +175,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: VOXA_SETUP_COMPONENT_IDS.kokoro,
     engine: "voxa",
     displayName: "Kokoro 82M · voice",
-    purpose: "Speaks lines on this machine, in the six preset voices",
+    purpose: "Speaks lines · six preset voices",
     sizeMb: 400,
     provides: ["kokoro-82m"],
     spec: {
@@ -198,7 +198,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: VOXA_SETUP_COMPONENT_IDS.whisper,
     engine: "voxa",
     displayName: "Whisper base.en · dictation",
-    purpose: "Turns your speech into text, without the audio leaving this machine",
+    purpose: "Speech to text · on this machine",
     // The manifest's dictation row keeps `whisper-large-v3` as its id because that string is a
     // persisted routing key, and this is the component that satisfies it.
     provides: ["whisper-large-v3"],
@@ -224,7 +224,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "higgsfield-cli",
     provider: "higgsfield",
     displayName: "Higgsfield CLI",
-    purpose: "Generates images and video through your Higgsfield account — sign in from Providers",
+    purpose: "Images and video · Higgsfield account",
     sizeMb: 7,
     optional: true,
     spec: {
@@ -258,7 +258,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "comfyui-runtime",
     engine: "comfyui",
     displayName: "ComfyUI",
-    purpose: "Runs image and video recipes — install managed, or explicitly reuse another engine",
+    purpose: "Runs image and video recipes",
     sizeMb: 2034,
     // ~6 GB extracted, and the archive is still on disk while it extracts, so the peak is both
     // at once. Almost none of it is ComfyUI: the tree is an embedded Python plus torch and the
@@ -287,7 +287,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-gemma4-e2b-it-qat",
     engine: "ollama",
     displayName: "Gemma 4 · E2B (quantised)",
-    purpose: "The small Gemma 4 — the one to try first on a modest graphics card",
+    purpose: "The small one",
     sizeMb: 4300,
     optional: true,
     requires: ["ollama-runtime"],
@@ -298,7 +298,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-gemma4-12b",
     engine: "ollama",
     displayName: "Gemma 4 · 12B",
-    purpose: "Reads images and holds a 256K context — the one worth having if it fits",
+    purpose: "Reads images · 256K context",
     sizeMb: 7600,
     optional: true,
     requires: ["ollama-runtime"],
@@ -309,7 +309,7 @@ export const SETUP_CATALOGUE: readonly CatalogueEntry[] = [
     id: "ollama-gemma4-26b",
     engine: "ollama",
     displayName: "Gemma 4 · 26B",
-    purpose: "The large one, for a machine with the memory to hold it",
+    purpose: "The large one",
     sizeMb: 18000,
     optional: true,
     requires: ["ollama-runtime"],

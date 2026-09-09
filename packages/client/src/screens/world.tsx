@@ -1261,9 +1261,6 @@ function SheetGrid({
                 </button>
               ))}
             </div>
-            <p className="fy-footnote">
-              Everything you produce pulls from these sheets: change one here and it changes everywhere.
-            </p>
           </div>
         </div>
       )}
@@ -1278,7 +1275,7 @@ export function CastScreen() {
       kind="character"
       screenId="cast"
       title="Cast"
-      hint="Characters carry essence, appearance, relationships and a voice."
+      hint="Start with a sentence."
       newPath={`/w/${worldId}/cast/new`}
       detailPath={(id) => `/w/${worldId}/cast/${id}`}
     />
@@ -1327,9 +1324,6 @@ export function LocationsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Locations
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 480 }}>
-          Every place is a sheet, look, sound, customs. Scenes inherit them; generations cite them.
-        </p>
       </div>
       <div
         className="fy-cardgrid"
@@ -1399,9 +1393,6 @@ export function FactionsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Factions
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Who wants what, and what they'd never admit. Scenes borrow their pressure.
-        </p>
       </div>
       <div
         className="fy-cardgrid"
@@ -2384,9 +2375,6 @@ export function CharacterEditScreen() {
                     placeholder="Tide-caller"
                     onChange={(e) => setEditedRole(e.target.value)}
                   />
-                  <span className="fy-mono" style={{ display: "block", marginTop: 6 }}>
-                    the one line under their name on the world hub — short enough to read at a glance
-                  </span>
                 </div>
               )}
               {/*
@@ -2415,13 +2403,7 @@ export function CharacterEditScreen() {
           ) : (
             <>
               {transcript.length === 0 && (
-                <div className="fy-bubble--gate">
-                  Tell the studio what has changed. It drafts inside a proposal — its own copy of this sheet —
-                  and reads the rest of the world through canon search, never the folder.
-                  <div className="fy-bubble__note">
-                    you accept or discard the result · nothing lands until then
-                  </div>
-                </div>
+                <div className="fy-bubble--gate">What has changed?</div>
               )}
               {transcript.map((turn, i) => (
                 <div
@@ -2549,16 +2531,8 @@ export function CharacterEditScreen() {
             </div>
           ))}
           {changedCount === 0 && (
-            <div className="fy-mono" style={{ marginTop: 12 }}>
-              nothing changed yet — edits preview here before they save
-            </div>
+            <div className="fy-mono" style={{ marginTop: 12 }}>nothing changed yet</div>
           )}
-        </div>
-        <div className="fy-draftcard">
-          <div style={{ font: "600 13px var(--font-sans)" }}>After save</div>
-          <div className="fy-mono" style={{ marginTop: 10 }}>
-            ripples are computed under the world lock · any non-empty result appears here after the edit lands
-          </div>
         </div>
         <div style={{ flex: 1, minHeight: 16 }} />
         <div style={{ display: "grid", gap: 8 }}>
@@ -3189,9 +3163,7 @@ export function CanonScreen() {
       </div>
       {(result || (askId && !result) || serverSearch) && (
         <div style={{ maxWidth: 720, margin: "20px auto 0", padding: "0 24px", display: "grid", gap: 10 }}>
-          {askId && !result && (
-            <Callout title="Asking canon…">Retrieval first, then a grounded read of the candidates.</Callout>
-          )}
+          {askId && !result && <Callout title="Asking canon…">{null}</Callout>}
           {result && worldId && <AskOutcome worldId={worldId} question={askedQuestion} result={result} />}
           {serverSearch && (
             <span className="fy-mono">
@@ -3960,9 +3932,6 @@ export function ArtifactsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Artifacts
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 460 }}>
-          Recordings, documents and references: filed against the world, attachable to any generation.
-        </p>
         <div className="fy-filterrow">
           <button
             type="button"
@@ -4318,10 +4287,6 @@ export function ProductionsScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Productions
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 16, maxWidth: 480 }}>
-          {productions.length === 1 ? "One lens" : `${productions.length || "New"} lenses`} over one world.
-          Change a character once and it lands in all of them.
-        </p>
       </div>
       {world?.conversations.some(conversation => conversation.entryContext?.kind === "production-setup") && (
         <section aria-label="Production setups" style={{ padding: "0 40px 28px" }}>

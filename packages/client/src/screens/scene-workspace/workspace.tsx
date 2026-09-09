@@ -494,7 +494,8 @@ export function SceneWorkspace({
                   ))}
               </div>
             ) : null}
-            {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>Timeline content: {videoPlan.pack.totalSec.toFixed(3)}s in {videoPlan.pack.passes.length} passes. Provider step padding stays outside these picture slots.</p>}
+            {/* The measurement, not the note about what the provider does with it (issue 1008). */}
+            {videoPlan?.pack.ok && videoPlan.shots.some(s=>s.slot) && <p>{videoPlan.pack.totalSec.toFixed(3)}s · {videoPlan.pack.passes.length} pass{videoPlan.pack.passes.length === 1 ? "" : "es"}</p>}
             {(world.referenceKits.some(k => k.designatedVoiceSample) || performanceAudio.length > 0 || masterAudio.length > 0 || videoAudioProblems.length > 0) && <div aria-label="Scene character audio references">
               <label><input type="checkbox" checked={!audioReferencesDisabled} onChange={e => setAudioReferencesDisabled(!e.target.checked)} /> Use audio references for this dispatch</label>
               {videoAudioPlans.flatMap((p, i) => p.references.map(r => <p key={`${i}/${r.label}`}>Pass {i + 1}: {r.characterName} · {r.label} · {r.intent === "performance-sync" ? "motion guidance; generated audio off; external final audio" : "voice guidance with new scene dialogue"}</p>))}

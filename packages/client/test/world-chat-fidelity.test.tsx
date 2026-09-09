@@ -486,11 +486,14 @@ describe("the understanding panel", () => {
    * truth when it was. It now writes to the world, and saying otherwise over a Save button would
    * be the screen contradicting the button on it.
    */
-  it("says what the rail now does, rather than that it decides nothing", () => {
+  it("names what the rail holds, and claims nothing about it", () => {
     const html = renderConversation();
-    assert.ok(html.includes("Save writes a line to the world"), "the rail says what saving does");
-    assert.ok(!html.includes("There is nothing to approve here."), "and no longer claims otherwise");
-    assert.ok(html.includes("talking changes nothing until you save"), "talking is still safe, and says so");
+    assert.match(html, /What I(?:&#x27;|&rsquo;|’)?ve understood/, "the rail is named");
+    assert.ok(!html.includes("There is nothing to approve here."), "it does not claim it decides nothing");
+    // Both of the sentences that used to sit under that title are gone (issue 1008): what
+    // saving does is the Save button's, and the promise is the rule's.
+    assert.ok(!html.includes("Save writes a line to the world"), "and does not narrate its own button");
+    assert.ok(!html.includes("talking changes nothing"), "nor repeat the standing promise");
   });
 
   it("groups points under the thing they are about, with what that thing is", () => {

@@ -29,8 +29,7 @@ export function MasterAudioPicker({ world, production, sceneId, value, onChange 
   const music = timeline.tracks.flatMap(t => AUDIO_TRACK_KINDS.has(t.kind) ? t.clips.filter(c => c.source.kind === "artifact") : []);
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   const stale = review && review.binding.timelineHash !== state.hash;
-  return <details style={{ overflowWrap: "anywhere" }}><summary>Master playback for performance shots</summary>
-    <p>Choose an audio clip already placed on the timeline. Its exact shot slice guides visible motion; generated audio is off. The external soundtrack stays final, and synchronization is not guaranteed.</p>
+  return <details style={{ overflowWrap: "anywhere" }}><summary>Master playback</summary>
     {!music.length && <p>Place the soundtrack artifact on an audio track in the editor first.</p>}
     {pictures.map(clip => {
       if (clip.source.kind !== "shot") return null;

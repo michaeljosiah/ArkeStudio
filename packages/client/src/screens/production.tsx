@@ -1332,10 +1332,6 @@ export function ProductionCastScreen() {
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
           Cast
         </h1>
-        <p className="fy-hero__lede" style={{ fontSize: 15, maxWidth: 520 }}>
-          Guests belong to this production alone. The world's cast is shared with everything else{" "}
-          {world.meta.name} holds — change one and every production sees it.
-        </p>
         <Button
           variant="primary"
           style={{ marginTop: 16 }}
@@ -3490,11 +3486,12 @@ function TakesView({
           >
             Reject
           </Button>
-          <span className="fy-mono fy-takes__explanation">
-            {acceptedHidden
-              ? "accepted take holds no preview — accepting a visible one replaces it"
-              : "accepting locks it into the cut · rejections teach the shot"}
-          </span>
+          {/* A state when there is one; what accepting does is the rule's, not the row's. */}
+          {acceptedHidden && (
+            <span className="fy-mono fy-takes__explanation">
+              accepted take holds no preview — accepting a visible one replaces it
+            </span>
+          )}
           <span className="fy-takes__links">
             <button type="button" className="fy-linkbtn" onClick={() => onContact(shotId)}>
               Contact sheet
@@ -3910,7 +3907,6 @@ export function GenerateScreen() {
                 Reject · cite the sheet
               </Button>
               <span className="fy-h1row__push" />
-              <span className="fy-mono">rejections teach the shot · accepts lock the clip into the cut</span>
             </div>
           </>
         ) : (
@@ -7732,11 +7728,11 @@ function ContactSheet({
           <span className="fy-seg__item fy-seg__item--active">Contact sheet</span>
         </span>
         <span className="fy-h1row__meta">
-          {stills.length} frame{stills.length === 1 ? "" : "s"} — judged as a set, accepted one at a time
+          {stills.length} frame{stills.length === 1 ? "" : "s"}
         </span>
       </div>
       {stills.length === 0 ? (
-        <EmptyState title="No stills yet" hint="Frames and stills land here as they are generated." />
+        <EmptyState title="No stills yet" />
       ) : (
         <div
           style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 14 }}

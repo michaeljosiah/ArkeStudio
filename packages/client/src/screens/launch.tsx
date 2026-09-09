@@ -62,11 +62,6 @@ export function LaunchScreen() {
             <Monitor size={56} />
           </span>
           <h2 className="fy-launch__title">Launch Locally</h2>
-          <p className="fy-launch__body">
-            Work on your worlds offline with
-            <br />
-            full power and privacy.
-          </p>
           <button
             type="button"
             className="fy-launch__action"
@@ -86,11 +81,6 @@ export function LaunchScreen() {
             <Cloud size={56} />
           </span>
           <h2 className="fy-launch__title">Arke Studio Cloud</h2>
-          <p className="fy-launch__body">
-            Access your worlds anywhere.
-            <br />
-            Sync, collaborate, create.
-          </p>
           {/*
             Named, not offered. The card stays — the choice is the point of the screen — and the
             action carries the reason it cannot be taken rather than a tooltip that has to be

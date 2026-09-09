@@ -496,7 +496,8 @@ describe("screen inventory", () => {
       "Generate character sheet",
       "one composite identity reference",
       "World look · v",
-      "reference set",
+      // Where the result lands, in the fewest words that carry it (issue 1008).
+      "Lands here and in Activity.",
     ]) {
       assert.ok(generator.includes(copy), `Sheet generator states ${copy}`);
     }
@@ -506,9 +507,17 @@ describe("screen inventory", () => {
     assert.ok(replace.includes("World look · v"));
 
     const looks = renderAt(`${base}/looks`);
-    assert.ok(looks.includes("Optional visual exploration, outside the identity package."));
-    // The note that restated this line under the form is gone (design 54): the lede says it once.
-    assert.ok(!looks.includes("Explorations do not automatically join the identity package."));
+    assert.ok(looks.includes("Explore more looks"), "the page names what it is for");
+    // The word "optional" was on this screen three ways — a heading's subtitle, the dialog's
+    // lede and the empty state — and none of the three is left (issue 1008). The reference
+    // slot still says it, because there it labels the slot rather than arguing for the page.
+    for (const said of [
+      "Optional visual exploration, outside the identity package.",
+      "optional visual exploration, outside the identity package",
+      "Looks remain optional until you accept one.",
+    ]) {
+      assert.ok(!looks.includes(said), `the screen no longer says: ${said}`);
+    }
   });
 
   it("shows the routed image model and the same non-zero batch estimate on every character dialog", () => {
