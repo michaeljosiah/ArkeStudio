@@ -1,3 +1,4 @@
+import { stageReferenceFrames } from "@arke-studio/contracts";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1842,6 +1843,7 @@ describe("World Chat authority adapters", () => {
       aspect: "16:9",
       sourcePath,
       openingFrameSourcePath,
+      referenceFrames: stageReferenceFrames(stagedShot.staging!.keys, stagedShot.durationSec ?? 4).map(frame => ({ ...frame, sourcePath: openingFrameSourcePath })),
     };
     const adapter = w.adapters.find((candidate) => candidate.actionKind === card.actionKind)!;
     assert.equal((await adapter.completeHost!(card, payload)).status, "completed");

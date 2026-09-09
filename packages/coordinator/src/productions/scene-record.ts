@@ -338,6 +338,12 @@ export function carriesStageRig(raw: string): boolean {
   }
 }
 
+/** The expanded playblast pin is strict; older readers must refuse instead of dropping the scene. */
+export function carriesStageReferenceFrames(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.referenceFrames !== undefined); }
+  catch { return false; }
+}
+
 /** Expanded Stage geometry, shot-local performance and camera lens/roll need schema 10. */
 export function carriesStageConstruction(raw: string): boolean {
   try {

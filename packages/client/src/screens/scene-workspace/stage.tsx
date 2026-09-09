@@ -459,7 +459,7 @@ export function SceneStage({
     setNote(null);
     setExporting(0);
     try {
-      const { jobId, openingFrame } = await view.record({
+      const { jobId, openingFrame, referenceFrames } = await view.record({
         start: beginStageExport,
         write: writeStageExportFrame,
         cancel: cancelStageExport,
@@ -498,7 +498,8 @@ export function SceneStage({
             ...common,
           }
         : { kind: "stage-playblast" as const, ...common };
-      const outcome = await stagePlayblast(target, jobId, new Uint8Array(await openingFrame.arrayBuffer()));
+      const frames = await Promise.all(referenceFrames.map(async ({ png, ...frame }) => ({ ...frame, bytes: new Uint8Array(await png.arrayBuffer()) })));
+      const outcome = await stagePlayblast(target, jobId, new Uint8Array(await openingFrame.arrayBuffer()), frames);
       if (!outcome.ok) fail(outcome.reason);
     } catch (error) {
       fail(error instanceof Error ? error.message : "the playblast could not be recorded");

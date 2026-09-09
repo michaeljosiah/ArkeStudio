@@ -1,4 +1,4 @@
-import { sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame } from "@arke-studio/contracts";
+import { sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
   BoxGeometry,
   CylinderGeometry,
@@ -1263,6 +1263,57 @@ export class StageViewport {
     this.gizmo.renderer.render(this.gizmo.scene, this.gizmo.camera);
   }
 
+  /** A stable plan view, independent of the person's orbit camera and current selection. */
+  private overview(renderer: WebGLRenderer): HTMLCanvasElement {
+    this.refresh(0);
+    this.hideStaging(false);
+    this.transformHelper.visible = false;
+    this.scene.updateMatrixWorld(true);
+    const bounds = new Box3();
+    for (const object of [...this.setMeshes, ...this.walkers]) bounds.expandByObject(object);
+    const path = Array.from({ length: PATH_POINTS }, (_, index) => {
+      const at = index / (PATH_POINTS - 1) * this.data.durationSec;
+      const point = this.sampleCam(at, at);
+      bounds.expandByPoint(point);
+      return point;
+    });
+    if (bounds.isEmpty()) bounds.set(new Vector3(-2, 0, -2), new Vector3(2, 2, 2));
+    const center = bounds.getCenter(new Vector3());
+    const size = bounds.getSize(new Vector3());
+    const aspect = renderer.domElement.width / renderer.domElement.height;
+    const halfHeight = Math.max(2, size.z / 2 + 1, (size.x / 2 + 1) / aspect);
+    const camera = new OrthographicCamera(-halfHeight * aspect, halfHeight * aspect, halfHeight, -halfHeight, .1, size.y + 100);
+    camera.position.set(center.x, bounds.max.y + 50, center.z);
+    camera.up.set(0, 0, -1);
+    camera.lookAt(center);
+    camera.updateMatrixWorld(true);
+    renderer.render(this.scene, camera);
+    // Canvas strokes remain legible at any scene scale and cannot disappear behind set geometry.
+    const canvas = document.createElement("canvas");
+    canvas.width = renderer.domElement.width;
+    canvas.height = renderer.domElement.height;
+    const context = canvas.getContext("2d")!;
+    context.drawImage(renderer.domElement, 0, 0);
+    const project = (point: Vector3) => {
+      const screen = point.clone().project(camera);
+      return [(screen.x + 1) * canvas.width / 2, (1 - screen.y) * canvas.height / 2] as const;
+    };
+    context.strokeStyle = "#385d87";
+    context.lineWidth = Math.max(3, canvas.width / 320);
+    context.beginPath();
+    path.forEach((point, index) => { const [x, y] = project(point); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
+    context.stroke();
+    context.font = `${Math.max(12, canvas.width / 80)}px sans-serif`;
+    for (const walker of this.walkers) {
+      const [x, y] = project(walker.getWorldPosition(new Vector3()));
+      context.fillStyle = "#fff";
+      context.beginPath(); context.arc(x, y, 7, 0, Math.PI * 2); context.fill(); context.stroke();
+      context.fillStyle = "#263849";
+      context.fillText(String(walker.userData["name"]), x + 11, y - 9);
+    }
+    return canvas;
+  }
+
   /** Samples the actual lens and an overview for the constructing model, without filing media. */
   async inspectFrames(requested: readonly number[] = []): Promise<StageInspectionFrame[]> {
     const canvas = document.createElement("canvas");
@@ -1311,9 +1362,8 @@ export class StageViewport {
         for(const mesh of this.setMeshes) if(new Box3().setFromObject(mesh).containsPoint(eye)) observations.push(`Camera intersects the bounds of ${mesh.userData["label"]}; inspect for intentional placement or clipping.`);
         result.push({ at, view: "camera", observations:observations.slice(0,40), png: canvas.toDataURL("image/png").split(",")[1]! });
       }
-      this.refresh(0);
-      renderer.render(this.scene, this.view);
-      result.push({ at: 0, view: "overview", png: canvas.toDataURL("image/png").split(",")[1]! });
+      const overview = this.overview(renderer);
+      result.push({ at: 0, view: "overview", png: overview.toDataURL("image/png").split(",")[1]! });
       return result;
     } finally {
       this.hideStaging(this.data.mode === "camera");
@@ -1324,11 +1374,10 @@ export class StageViewport {
   }
 
   /**
-   * The playblast and its exact opening frame. A second renderer draws the same scene off screen
-   * at the production aspect so both files are the lens and nothing else — no gizmo, no path,
-   * no labels — while the on-screen view plays along so the person can see what is being written.
+   * Render the playblast and lens stills at export resolution, then a plan view with staging aids.
+   * PNG capture stays outside the fixed-frame encoder loop (SPEC-036 R-35; issue 1043).
    */
-  async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob }> {
+  async record(sink: StageFrameSink, onProgress: (fraction: number) => void): Promise<{ jobId: string; openingFrame: Blob; referenceFrames: Array<StageReferenceFrame & { png: Blob }> }> {
     const width = 1280;
     const height = Math.max(2, Math.round((width / this.data.aspect) / 2) * 2);
     const frameCount = stageFrameCount(this.data.durationSec);
@@ -1361,13 +1410,11 @@ export class StageViewport {
           this.hideStaging(this.data.mode === "camera");
         }
       };
-      renderAt(0);
-      const openingFrame = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob((blob) => {
-          if (blob === null) reject(new Error("the opening frame could not be captured"));
-          else resolve(blob);
-        }, "image/png");
+      const capture = (source: HTMLCanvasElement) => new Promise<Blob>((resolve, reject) => {
+        source.toBlob(blob => blob ? resolve(blob) : reject(new Error("the Stage frame could not be captured")), "image/png");
       });
+      renderAt(0);
+      const openingFrame = await capture(canvas);
       const gl = renderer.getContext();
       const pixels = new Uint8Array(width * height * 4);
       for (let index = 0; index < frameCount; index += 1) {
@@ -1377,10 +1424,18 @@ export class StageViewport {
         await sink.write(jobId, index, pixels.slice());
         onProgress((index + 1) / frameCount);
       }
+      const referenceFrames: Array<StageReferenceFrame & { png: Blob }> = [];
+      for (const frame of stageReferenceFrames(this.data.keys, this.data.durationSec)) {
+        if (this.disposed) throw new Error("export stopped — the shot changed");
+        renderAt(frame.at);
+        const source = frame.kind === "overview" ? this.overview(renderer) : canvas;
+        referenceFrames.push({ ...frame, png: await capture(source) });
+      }
       complete = true;
-      return { jobId, openingFrame };
+      return { jobId, openingFrame, referenceFrames };
     } finally {
       this.recordingAt = null;
+      this.hideStaging(this.data.mode === "camera");
       if (jobId !== null && !complete) await sink.cancel(jobId).catch(() => {});
       const pending = this.pendingData;
       this.pendingData = null;

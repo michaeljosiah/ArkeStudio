@@ -208,6 +208,13 @@ export const ShotStageEditSchema = z
   });
 export type ShotStageEdit = z.infer<typeof ShotStageEditSchema>;
 
+/** Additional views filed with a playblast (issue 1043); opening remains its structural frame. */
+export const StageReferenceFrameSchema = z.object({
+  kind: z.enum(["last", "key", "overview"]),
+  at: z.number().finite().nonnegative(),
+}).strict();
+export type StageReferenceFrame = z.infer<typeof StageReferenceFrameSchema>;
+
 export const ShotStagingSchema = z
   .object({
     /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
@@ -216,7 +223,7 @@ export const ShotStagingSchema = z
     ...ShotRigShape,
     keys: z.array(StagingKeySchema),
     /**
-      * The playblast and opening frame filed from this staging, and what they were rendered from:
+      * The playblast and reference images filed from this staging, and what they were rendered from:
       * the staging version and the shot length, lens and aspect. A pin that disagrees with any of
       * them is stale — the files still exist, they just no longer show this shot.
      */
@@ -225,6 +232,7 @@ export const ShotStagingSchema = z
         sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         artifactId: ArtifactIdSchema,
         openingFrameArtifactId: ArtifactIdSchema.optional(),
+        referenceFrames: z.array(StageReferenceFrameSchema.extend({ artifactId: ArtifactIdSchema })).optional(),
         version: z.number().int().min(1),
         durationSec: z.number().positive().optional(),
         aspect: z.string().min(1).optional(),

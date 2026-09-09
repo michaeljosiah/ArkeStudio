@@ -110,7 +110,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Sixteen adds the dramatic question and ending to the strict story overview (issue 889).
 // Seventeen persists chapter subjects on retriable conversation turns (issue 890).
 // Eighteen adds artifact retirement to strict sidecars (issue 957).
-export const SUPPORTED_SCHEMA_VERSION = 19;
+// Twenty adds the last/key/overview images to the strict Stage playblast pin (issue 1043).
+export const SUPPORTED_SCHEMA_VERSION = 20;
 
 export class WorldOpenError extends Error {
   constructor(
