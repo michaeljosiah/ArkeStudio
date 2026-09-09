@@ -17,6 +17,7 @@ import {
   stagePlayblastIsStale,
   stagingBeats,
   stagingFov,
+  stagingMotionWord,
   stagingMoveWord,
   stagingPromptClause,
   stagingRetimed,
@@ -122,8 +123,15 @@ describe("the Stage's arithmetic", () => {
     assert.equal(stagingMoveWord(orbit.keys), "orbit");
     const crane = stageShot(shot({ framing: { movement: "Crane up" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
     assert.equal(stagingMoveWord(crane.keys), "crane");
-    const truck = stageShot(shot({ framing: { movement: "Tracking" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
+    // A truck is lateral travel; a tracking shot rides its subject at a held offset (issue 886).
+    // The two shared one branch and "Tracking" came out as a truck that also drifted with the walker.
+    const truck = stageShot(shot({ framing: { movement: "Truck right" } }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
     assert.equal(stagingMoveWord(truck.keys), "truck");
+    assert.equal(truck.keys[0]?.anchor, undefined, "a truck does not ride");
+    const tracking = stageShot(shot({ framing: { movement: "Tracking" }, description: "@maren-kest walks to the door." }), { cast: ["maren-kest"], sets: [], durationSec: 5 });
+    assert.equal(tracking.keys[0]?.anchor, "maren-kest", "a tracking shot rides");
+    assert.deepEqual(tracking.keys[0]?.p, tracking.keys[1]?.p, "at a held offset");
+    assert.match(stagingMotionWord(tracking, 5), /tracking/);
   });
 
   it("derives an unclamped lens cone from a Super 35 gate cropped to the production aspect", () => {
