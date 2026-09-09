@@ -6900,6 +6900,35 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-sw__head textarea.ui-input:focus-visible { border-color: transparent; box-shadow: none; }
 .fy-sw__context { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 .fy-sw__context > span:not(.fy-sw__metrics) { padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font: 400 10px var(--font-mono); }
+/* The place chip and the dashed door (SPEC-044 R-2): the first chip is a press, with its plate. */
+.fy-sw__context > button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--muted-foreground); font: 400 10px var(--font-mono); cursor: pointer; }
+.fy-sw__context > button:hover { border-color: var(--neutral-400); color: var(--foreground); }
+.fy-sw__context > .fy-sw__place { padding: 2px 9px 2px 3px; }
+.fy-sw__context > .fy-sw__door { gap: 5px; padding: 2px 9px 2px 6px; border-style: dashed; border-color: var(--neutral-300); color: var(--neutral-400); }
+.fy-sw__plate { position: relative; flex: none; width: 16px; height: 16px; border-radius: 5px; overflow: hidden; background: var(--muted); color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; font: 500 9px var(--font-sans); }
+.fy-sw__plate > img, .fy-sw__tile > img, .fy-castpicker__portrait > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+/* The cast row (R-1): tiles in first-appearance order, closed by the dashed door. */
+.fy-sw__cast { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.fy-sw__tile { position: relative; box-sizing: border-box; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--muted); color: var(--neutral-400); font: 500 13px var(--font-sans); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.fy-sw__tile:hover { border-color: var(--neutral-400); }
+.fy-sw__tile--add { border-style: dashed; border-color: var(--neutral-300); background: transparent; }
+/* The picker (R-4), a dialog on the app frame like the lightbox. */
+.fy-castpicker { border: 0; padding: 0; background: transparent; max-width: none; max-height: none; }
+.fy-castpicker::backdrop { background: rgba(10, 10, 10, .42); }
+.fy-castpicker__panel { box-sizing: border-box; width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 68px); overflow-y: auto; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-xl); padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 16px; animation: fy-swlightbox-in 0.16s var(--ease-out) both; }
+.fy-castpicker__head { display: flex; align-items: center; gap: 10px; }
+.fy-castpicker__title { flex: 1; font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-castpicker__close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fy-castpicker__close:hover { background: var(--accent); color: var(--foreground); }
+.fy-castpicker__section { display: flex; flex-direction: column; gap: 8px; }
+.fy-castpicker__label { font: 500 9px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--neutral-400); }
+.fy-castpicker__cards { display: flex; flex-wrap: wrap; gap: 14px; }
+.fy-castpicker__card { box-sizing: border-box; width: 104px; display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--foreground); text-align: left; font: inherit; cursor: pointer; }
+.fy-castpicker__card:disabled { color: var(--neutral-400); cursor: default; }
+.fy-castpicker__portrait { position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--muted); color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; font: 500 20px var(--font-sans); }
+.fy-castpicker__name { font: 600 11.5px var(--font-sans); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-castpicker__meta { margin-top: -4px; font: 400 9px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+.fy-castpicker__empty { font: 400 11px var(--font-mono); color: var(--neutral-400); }
 /* The view tabs are one segmented control on a recessed pill, the way the prototype draws them:
    the chosen mode lifts out on the page colour with a hairline shadow, the rest sit in the well. */
 .fy-sw__metrics { padding: 3px 4px; color: var(--neutral-400); font: 400 10px var(--font-mono); }

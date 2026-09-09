@@ -3290,3 +3290,86 @@ it("reports the empty Cut's runtime in the production rail (#930)", async () => 
   assert.ok(link);
   assert.match(link.textContent ?? "", /Cut0s/);
 });
+
+describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2, T-13)", () => {
+  const sheetLike = (id: string, name: string, extra: Record<string, unknown> = {}) =>
+    ({ id, type: "character", name, version: 2, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [], ...extra });
+  const withSheets = (extra: Array<Record<string, unknown>>, edit?: (scene: SceneRecord) => void): ClientState => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.sheets.push(...(extra as never[]));
+    const scene = state.world!.productions.find((production) => production.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    edit?.(scene);
+    return state;
+  };
+  const BRAY = sheetLike("bray-half-hitch", "Bray Half-Hitch");
+  const ODILE = sheetLike("odile", "Odile");
+
+  it("draws the cited characters as tiles by first appearance, then the members added by hand, and writes nothing by looking (T-1, T-2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([BRAY, ODILE], (scene) => {
+      orderedShots(scene)[1]!.description += " @bray-half-hitch on the stair";
+      scene.cast = { odile: { added: "2026-09-09T10:00:00.000Z" } };
+    }));
+    const row = q(mounted, '[aria-label="Cast"]')!;
+    assert.deepEqual(
+      [...row.querySelectorAll("button")].map((tile) => tile.getAttribute("aria-label")),
+      ["Maren Kest", "Bray Half-Hitch", "Odile", "Add a character"],
+    );
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false);
+  });
+
+  it("keeps the header to the breadcrumb, the title, two actions, the synopsis, the chips, the count and the cast (T-13)", async () => {
+    const mounted = await mountState(FIXTURE_STATE);
+    const header = q(mounted, "header.fy-sw__head")!;
+    assert.ok(header.querySelector(".fy-sw__breadcrumb") && header.querySelector("h1") && header.querySelector(".fy-sbsynopsis, textarea"));
+    assert.equal(header.querySelectorAll(".fy-sw__actions button").length, 2);
+    assert.ok(header.querySelector(".fy-sw__context") && header.querySelector(".fy-sw__metrics") && header.querySelector('[aria-label="Cast"]'));
+    assert.equal(header.querySelector("input[type=checkbox]"), null, "no checkbox computed for a dispatch");
+    assert.doesNotMatch(header.textContent ?? "", /sh_\d+|Generation|Dialogue guidance|Master playback|Table read/);
+    assert.doesNotMatch(q(mounted, ".fy-sw__centre")?.textContent ?? "", /Table read · |Recorded performance/, "the panels under the header are gone (R-3)");
+    const place = header.querySelector(".fy-sw__place")!;
+    assert.equal(place.getAttribute("title"), "The Vigil");
+    assert.match(place.textContent ?? "", /The Vigil$/);
+    assert.ok(place.querySelector(".fy-sw__plate img"), "the place chip carries its plate (R-2)");
+    assert.equal(place.getAttribute("aria-haspopup"), "dialog");
+  });
+
+  it("offers a dashed door when the scene has no location, and that door's picker lists locations only (R-2, R-20)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([BRAY], (scene) => { scene.inherits = { timeOfDay: "night" }; }));
+    assert.equal(q(mounted, ".fy-sw__place"), null);
+    const door = q(mounted, ".fy-sw__door")!;
+    assert.equal(door.textContent?.trim(), "Add a location");
+    await click(door);
+    const picker = q(mounted, ".fy-castpicker")!;
+    assert.equal(picker.getAttribute("aria-label"), "Add a location");
+    assert.deepEqual([...picker.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil"]);
+    await click(picker.querySelector(".fy-castpicker__card") as HTMLElement);
+    const command = sent.find((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command");
+    assert.deepEqual(command.command, { kind: "edit-scene", inherits: { location: "the-vigil" } });
+    assert.equal(q(mounted, ".fy-castpicker"), null, "a press adds and closes");
+  });
+
+  it("adds a character from the dashed box through one edit-scene, and a member already here is inert (R-4)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([ODILE]));
+    await click(q(mounted, '[aria-label="Add a character"]')!);
+    const picker = q(mounted, ".fy-castpicker")!;
+    assert.equal(picker.getAttribute("aria-label"), "Add a character · scene 4");
+    assert.deepEqual([...picker.querySelectorAll(".fy-castpicker__label")].map((label) => label.textContent), ["In Saltlight", "From the world"]);
+    const maren = picker.querySelector('[aria-label="Maren Kest · in the scene"]') as HTMLButtonElement;
+    assert.equal(maren.disabled, true);
+    await click(maren);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "in the scene, and inert");
+    await click(picker.querySelector('[aria-label="Odile"]') as HTMLElement);
+    const command = sent.find((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command" && command.command.kind === "edit-scene");
+    const added = (command.command as { cast?: Record<string, { added?: string }> }).cast?.["odile"]?.added ?? "";
+    assert.match(added, /^\d{4}-\d{2}-\d{2}T/, "the member carries the time it was added (R-6)");
+    assert.equal(q(mounted, ".fy-castpicker"), null);
+  });
+});

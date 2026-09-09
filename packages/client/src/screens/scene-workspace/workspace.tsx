@@ -1,5 +1,3 @@
-import { TableReadPanel } from "../../components/table-read-panel.js";
-import { PerformancePanel } from "../../components/performance-panel.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -17,7 +15,7 @@ import {
   type WorldChatSubject,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
-import { seconds } from "../../lib/format.js";
+import { initials, seconds } from "../../lib/format.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
@@ -39,8 +37,9 @@ import { SelectionProvider, selectedShotId, subjectMatchesBoard, type WorkspaceS
 import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
+import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
 import { Button } from "../../components/ui.js";
-import { Pin } from "../../components/icons.js";
+import { Pin, Plus } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { SceneStage } from "./stage.js";
@@ -90,6 +89,11 @@ export function SceneWorkspace({
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  // The header's two doors (SPEC-044 R-1, R-2): the picker adds, the tiles and the place chip
+  // open their dialogs. Session state, like the lightbox — a door is not an address.
+  const [picker, setPicker] = useState<CastPickerMode | null>(null);
+  const [openMember, setOpenMember] = useState<string | null>(null);
+  const [placeOpen, setPlaceOpen] = useState(false);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
@@ -232,9 +236,10 @@ export function SceneWorkspace({
     : boardPack.boards.find((board) => subjectMatchesBoard(subject, board.memberShotIds)) ?? null;
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
   const complete = sceneIsComplete(scene, production, artifacts, digests);
-  const locationName = scene.inherits?.location === undefined
-    ? null
-    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
+  const locationSheet = scene.inherits?.location === undefined
+    ? undefined
+    : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
+  const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
   const write = (command: Command): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
@@ -452,18 +457,48 @@ export function SceneWorkspace({
               onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
             />
             <div className="fy-sw__context" aria-label="Scene context" title="Every shot inherits these unless it overrides them">
-              {locationName === null ? null : <span>{locationName}</span>}
+              {locationName === null ? (
+                <button type="button" className="fy-sw__door" aria-haspopup="dialog" onClick={() => setPicker("location")}>
+                  <Plus size={10} />Add a location
+                </button>
+              ) : (
+                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={placeOpen} onClick={() => setPlaceOpen(true)}>
+                  {locationSheet === undefined ? null : <span className="fy-sw__plate" aria-hidden="true"><SheetPicture world={world} sheet={locationSheet} /></span>}
+                  {locationName}
+                </button>
+              )}
               {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
               {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
               <span>{aspect}</span>
               <span className="fy-sw__metrics">{shots.length} shot{shots.length === 1 ? "" : "s"} · {seconds(totalSec)} · {framed} frame{framed === 1 ? "" : "s"} filed</span>
             </div>
+            <div className="fy-sw__cast" aria-label="Cast">
+              {sceneCast(scene, world.sheets).map((sheetId) => {
+                const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
+                const name = sheet?.name ?? sheetId;
+                return (
+                  <button
+                    type="button"
+                    key={sheetId}
+                    className="fy-sw__tile"
+                    title={name}
+                    aria-label={name}
+                    aria-haspopup="dialog"
+                    aria-expanded={openMember === sheetId}
+                    onClick={() => setOpenMember(sheetId)}
+                  >
+                    {sheet === undefined ? <span aria-hidden="true">{initials(name).slice(0, 1)}</span> : <SheetPicture world={world} sheet={sheet} />}
+                  </button>
+                );
+              })}
+              <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" onClick={() => setPicker("character")}>
+                <Plus size={12} />
+              </button>
+            </div>
             {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
             {generatorError === null ? null : <p role="alert" className="fy-swboards__refusal">{generatorError}</p>}
           </header>
-          <TableReadPanel key={`${world.meta.worldId}/${scene.id}/${scene.version}`} world={world} production={production} scene={scene} onRecord={shotId => setSubject({ kind: "shot", shotId: shotId as never })} />
-          {focus && <PerformancePanel key={`${world.meta.worldId}/${scene.id}/${scene.version}/${focus}`} world={world} production={production} scene={scene} shotId={focus} />}
 
           {/*
             Tabs are a mode of working, not a rendering of the same thing — so they are a
@@ -719,6 +754,22 @@ export function SceneWorkspace({
           onClose={() => setGenerateTarget(null)}
           onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
         />
+        {picker === null ? null : (
+          <CastPicker
+            world={world}
+            production={production}
+            scene={scene}
+            mode={picker}
+            onPick={(sheetId) => {
+              // A press adds and closes (R-4): a member with the time it was added, or the place.
+              write(picker === "character"
+                ? { kind: "edit-scene", cast: { [sheetId]: { added: new Date().toISOString() } } }
+                : { kind: "edit-scene", inherits: { location: sheetId } });
+              setPicker(null);
+            }}
+            onClose={() => setPicker(null)}
+          />
+        )}
         <ShotLightbox
           scene={scene}
           production={production}
