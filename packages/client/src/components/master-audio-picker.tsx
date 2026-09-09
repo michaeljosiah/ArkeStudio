@@ -30,6 +30,15 @@ export function MasterAudioPicker({ world, production, sceneId, value, onChange 
   const warnings = review ? Object.values(review.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code) : [];
   const stale = review && review.binding.timelineHash !== state.hash;
   return <details style={{ overflowWrap: "anywhere" }}><summary>Master playback</summary>
+    {/*
+      The limit, without the paragraph that explained how it works (issue 1008, codex round
+      three). How the slice guides motion and where the final audio comes from is the rule's to
+      say; that timing is not promised is this control's, because the plan under it reads
+      `motion guidance` and labels the reference `performance-sync`, and a person about to pay
+      for a dispatch could take either for an exact-sync promise. The route does not declare one
+      (SPEC-036, and the H3 note in the character-audio foundation).
+    */}
+    <p>Timing is not guaranteed.</p>
     {!music.length && <p>Place the soundtrack artifact on an audio track in the editor first.</p>}
     {pictures.map(clip => {
       if (clip.source.kind !== "shot") return null;
