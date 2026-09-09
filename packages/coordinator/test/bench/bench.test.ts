@@ -72,6 +72,40 @@ it("local H3 bench references freeze multimedia identities and use native ordere
   assert.equal(plan.reserved[0]!.request.brief, "Use @Image 1 for color, @Video 1 for motion and @Audio 1 for sound.");
 });
 
+it("Krea 2 bench references arrive under the rebalance node's picture labels (issue 1083)", async () => {
+  const { dir, store } = await open();
+  const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-krea2-image")!;
+  await store.ownedWrite(async () => {
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    for (const file of ["coat.png", "ada.png"]) {
+      const bytes = Buffer.from(`fixture ${file}`);
+      await writeFile(join(dir, "artifacts", file), bytes);
+      await writeFile(join(dir, "artifacts", `${file}.json`), JSON.stringify({ id: newId("ar"), kind: "image", file,
+        hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, origin: { by: "user" }, links: [], created: CLOCK() }));
+    }
+  });
+  const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
+  assert.ok(opened);
+  for (const file of ["coat.png", "ada.png"]) {
+    const artifact = store.getBundle().artifacts.find(row => row.file === file)!;
+    const outcome = await addBenchReference((await refolded(opened))!, store.getBundle(), model,
+      { source: { source: "artifact", artifactId: artifact.id }, requestId: `attach-${file}`, at: CLOCK() });
+    assert.notEqual(outcome.outcome, "refused", JSON.stringify(outcome));
+  }
+  await opened.store.append({ type: "composer-set", mode: "image", provider: "comfyui", model: model.id,
+    params: { kind: "image", count: 1 }, brief: "@Image 2 wears the coat from @Image 1, in the rain." }, { at: CLOCK() });
+  const plan = planBenchDispatch((await opened.store.fold())!, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "dispatch", at: CLOCK() });
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  if (!plan.ok) return;
+  const params = plan.inputs[0]!.params;
+  // The words point where the bytes go: reference1 is the first picture, which the encoder
+  // labels "Picture 1" — and the snapshot keeps the author's own tokens for a re-run.
+  assert.equal(params.prompt, "Picture 2 wears the coat from Picture 1, in the rain.");
+  assert.deepEqual(params.references, ["artifacts/coat.png", "artifacts/ada.png"]);
+  assert.equal(plan.reserved[0]!.request.brief, "@Image 2 wears the coat from @Image 1, in the rain.");
+});
+
 const IMAGE_MODEL: ManifestModel = {
   id: "test-image",
   provider: "fal",
