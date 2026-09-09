@@ -496,6 +496,17 @@ export function WorldPickerScreen() {
   const { state } = useStore();
   const navigate = useNavigate();
   const worlds = state?.worlds ?? [];
+  /*
+   * The ages on the cards are computed at render, and this screen can sit open for hours with
+   * nothing else to re-render it — so a card that said `now` when it was drawn went on saying
+   * `now`, and `59m ago` never became `1h ago` (codex, 2026-09-09). A minute is the coarsest
+   * tick that keeps every step of `relativeDate` honest; the timer is cleared with the screen.
+   */
+  const [, setMinute] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setMinute((n) => n + 1), 60_000);
+    return () => clearInterval(timer);
+  }, []);
   const [confirming, setConfirming] = useState<string | null>(null);
   const archiveNote = useArchiveNote();
   const sample = useSampleWorld();

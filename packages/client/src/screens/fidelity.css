@@ -776,6 +776,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-gendialog__reset:hover { color: var(--foreground); border-color: var(--ring); }
 .fy-gendialog__reset:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .fy-gendialog__hint { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
+/* One clause on the thing refused: louder than the hint under it, quieter than a callout. */
+.fy-gendialog__dropped { margin: 0; font: 400 10.5px/1.6 var(--font-sans); color: var(--warning); }
 .fy-gendialog__reference { display: flex; flex-direction: column; gap: 8px; }
 /* A dashed slot rather than a button that says "browse": the empty state should look like the
    place the picture will be, so what arrives lands where the eye already is. */
@@ -4756,6 +4758,23 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 /* Narrow: one sheet, never a layer on a layer (design 41c). The rail moves below the
    conversation rather than over it, so nothing is hidden behind anything else. */
 @media (max-width: 1100px) {
+  /*
+   * The fill goes with the columns (codex, 2026-09-09). Below this width the gate stacks, and a
+   * stacked gate held to the viewport gives the whole column to the understanding rail — which
+   * is `flex: none` at its own intrinsic height — while the conversation shrinks under its
+   * `overflow: hidden` and takes the transcript and the composer with it. Two columns side by
+   * side each get half the height and scroll; one on top of the other scrolls the page, which
+   * is what it did before issue 1007 and what it does again here. Art direction is a row at
+   * every width above 820 and keeps the fill.
+   */
+  .fy-content--fill > .fy-chat__wrap,
+  .fy-content--fill > .fy-chat__wrap > .fy-gate { flex: 0 0 auto; height: auto; }
+  /* And the released gate keeps the floor its own rule gives it, which the fill had set to
+     nothing: a short conversation should still fill the window rather than stop half way down
+     it. Only the chat wrap is released — it is the only gate that stacks at this width. The
+     edit sheet, the canon thread and the new-entry gate are still two columns here, and two
+     columns that each scroll are exactly what the fill is for. */
+  .fy-content--fill > .fy-chat__wrap > .fy-gate { min-height: calc(100vh - 132px); }
   .fy-chat__wrap .fy-gate { flex-direction: column; }
   .fy-chat__wrap .fy-gate__main { border-right: none; border-bottom: 1px solid var(--border); }
   .fy-chat__wrap .fy-gate__side { width: auto; }

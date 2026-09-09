@@ -73,6 +73,7 @@ export function GenerationDialog({
   reference,
   referenceLabel = "Reference image",
   referenceHint,
+  referenceDropped,
   onAttachReference,
   worldReferences,
   onClearReference,
@@ -157,6 +158,11 @@ export function GenerationDialog({
   reference?: string | null;
   referenceLabel?: string;
   referenceHint?: ReactNode;
+  /**
+   * Why the staged reference will not ride, when it will not. Absent means it rides — this is a
+   * refusal, so it is present only when there is one (design turn 69).
+   */
+  referenceDropped?: string;
   onAttachReference?: () => void;
   worldReferences?: { world: WorldBundle; model: ManifestModel | null; onChoose: (file: string) => void };
   onClearReference?: () => void;
@@ -405,6 +411,16 @@ export function GenerationDialog({
                     Remove
                   </button>
                 </div>
+              )}
+              {/*
+                The one clause this slot owes, on the slot itself and only when it is true
+                (design turn 69, issue 1008 and the codex round after it): identity is never
+                displaced, so on a model with room for one image the staged reference does not
+                ride. It used to be a standing sentence in the hint, said whether or not it
+                applied; a refusal that is always on screen is not read when it is.
+              */}
+              {reference !== null && referenceDropped && (
+                <p className="fy-gendialog__dropped" role="status">{referenceDropped}</p>
               )}
               {referenceHint && <p className="fy-gendialog__hint">{referenceHint}</p>}
             </div>

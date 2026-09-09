@@ -163,7 +163,27 @@ function shownImageModel(state: ReturnType<typeof useStore>["state"], chosenId?:
  * a model that carries nothing must be refused here, not discovered at dispatch.
  */
 function carriesIdentity(model: ManifestModel | null): boolean {
-  return model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
+  return referenceBudget(model) > 0;
+}
+
+/**
+ * How many images this model will actually carry — the coordinator's `referenceBudgetFor`, read
+ * on this side so the dialog can say what the request would drop.
+ *
+ * Identity is never displaced (`withStaged`): what a surface must carry goes first, and a staged
+ * reference rides only in the room left after it. On a one-slot model that room is nobody's, and
+ * the screen owes that clause before the press rather than after the spend.
+ */
+function referenceBudget(model: ManifestModel | null): number {
+  return model === null || model.unverified === true ? 0 : model.accepts.referenceImages;
+}
+
+/** The refusal for a staged reference the request will leave behind, or undefined when it rides. */
+function droppedReference(model: ManifestModel | null, carried: number): string | undefined {
+  if (model === null) return undefined;
+  return carried < referenceBudget(model)
+    ? undefined
+    : `${model.displayName} carries ${referenceBudget(model)} image${referenceBudget(model) === 1 ? "" : "s"} — this one is not sent`;
 }
 
 /**
@@ -520,6 +540,7 @@ export function GenerateCharacterSheetScreen() {
         reference={world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? null}
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("character-sheet", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("character-sheet", sheetId)] ?? ""]?.worldName }}
         referenceHint="Optional. A layout, a pose sheet, a style plate."
+        {...(droppedReference(chosenModel, 1) !== undefined ? { referenceDropped: droppedReference(chosenModel, 1)! } : {})}
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
         worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("character-sheet", sheetId))}
@@ -558,7 +579,8 @@ export function GenerateCharacterSheetScreen() {
         }}
         previews={preview}
         generating={requested && generatedTake === null && dispatchError === null}
-        waitingHint="Lands here and in Activity."
+        // R-23: the character-creation path says when a generation completes the set.
+        waitingHint={`Completes ${sheet.name}'s reference set · lands here and in Activity`}
         // One composite, so there is nothing to choose between: the take that came back is the
         // selection. Making somebody click a single tile before they may answer it would be a
         // step that exists only because the column can hold four.
@@ -787,6 +809,9 @@ export function ReplaceMainPhotoScreen() {
         reference={world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? null}
         referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("main-photo", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("main-photo", sheetId)] ?? ""]?.worldName }}
         referenceHint="Optional. A lighting study, a costume plate, a photograph."
+        {...(droppedReference(model, refs.length) !== undefined
+          ? { referenceDropped: droppedReference(model, refs.length)! }
+          : {})}
         onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
         worldReferences={{ world, model, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId), file) }}
         onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("main-photo", sheetId))}
@@ -1002,6 +1027,7 @@ export function CharacterLooksScreen() {
           reference={world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? null}
           referenceTarget={{ worldId: world.meta.worldId, key: stagedReferenceKey("look", sheetId), origin: world.stagedReferenceOrigins[world.stagedReferences[stagedReferenceKey("look", sheetId)] ?? ""]?.worldName }}
           referenceHint="Optional. A garment, a pose, a photograph."
+          {...(droppedReference(chosenModel, 1) !== undefined ? { referenceDropped: droppedReference(chosenModel, 1)! } : {})}
           onAttachReference={() => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}
           worldReferences={{ world, model: chosenModel, onChoose: (file) => pickStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId), file) }}
           onClearReference={() => clearStagedReference(world.meta.worldId, stagedReferenceKey("look", sheetId))}

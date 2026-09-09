@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -47,5 +48,45 @@ describe("the world's fixed-frame screens (issue 1007)", () => {
     for (const path of [W, `${W}/cast`, `${W}/canon`, `${W}/artifacts`, `${W}/productions`, `${W}/bible`]) {
       assert.doesNotMatch(at(path), /fy-content--fill/, path);
     }
+  });
+});
+
+/*
+ * The fill and the columns go together (codex, 2026-09-09).
+ *
+ * Below 1100px the gate stacks, and a stacked gate held to the viewport gives the whole column
+ * to the understanding rail — `flex: none` at its own intrinsic height — while the conversation
+ * shrinks under its `overflow: hidden` and takes the transcript and composer with it. One column
+ * on top of another has to scroll the page.
+ */
+describe("the fill releases the gate when the gate stacks", () => {
+  const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
+
+  /**
+   * The narrow block that stacks the chat gate. The stylesheet has several `max-width: 1100px`
+   * blocks, so this one is found by the rule that stacks the gate and read back to its own
+   * `@media` — which is the whole point of the assertion below: the release has to be in the
+   * same block as the stack, not merely somewhere in the file.
+   */
+  function narrowBlock(): string {
+    const stack = css.indexOf(".fy-chat__wrap .fy-gate { flex-direction: column; }");
+    assert.ok(stack > 0, "the gate stacks somewhere");
+    const at = css.lastIndexOf("@media (max-width: 1100px) {", stack);
+    assert.ok(at > 0, "inside a max-width: 1100px block");
+    const close = css.indexOf("\n}", at);
+    assert.ok(close > stack, "and that block closes after it");
+    return css.slice(at, close);
+  }
+
+  it("stacks the gate and releases it in the same block", () => {
+    const block = narrowBlock();
+    assert.match(block, /\.fy-chat__wrap \.fy-gate \{ flex-direction: column; \}/, "the gate stacks here");
+    assert.match(block, /\.fy-content--fill > \.fy-chat__wrap > \.fy-gate \{ flex: 0 0 auto; height: auto; \}/,
+      "and the fill lets go of it here");
+    assert.doesNotMatch(block, /fy-artdirection/, "art direction is a row at this width and keeps the fill");
+    // And only the gate that stacks is released. The edit sheet, the canon thread and the
+    // new-entry gate are still two columns here, and two columns that each scroll are exactly
+    // what the fill is for — releasing them would put Save back below the fold.
+    assert.doesNotMatch(block, /fy-content--fill > \.fy-gate/, "the gates that stay rows keep the fill");
   });
 });
