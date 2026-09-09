@@ -1,4 +1,3 @@
-import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
 import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
@@ -3543,12 +3542,11 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
-  audioReferencesDisabled?: boolean,
-  performanceAudio?: PerformanceAudioRequest[],
-  masterAudio?: MasterAudioRequest[],
-  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
+  // The scene page chooses nothing per dispatch (SPEC-044 R-26, R-29, R-34): the coordinator
+  // resolves the scene's cast when it plans, and dialogue guidance is not drawn, so no
+  // recommendation can have been acknowledged.
   send({
     kind: "dispatch-scene-planned",
     requestId,
@@ -3558,12 +3556,9 @@ export function dispatchScenePlanned(
     mode,
     modelId,
     policy,
-    ...(performanceAudio?.length ? { performanceAudio } : {}),
-    ...(masterAudio?.length ? { masterAudio } : {}),
-    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
+    acknowledgedRecommendationIds: [],
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
-    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
