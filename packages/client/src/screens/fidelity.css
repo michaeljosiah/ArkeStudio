@@ -3380,6 +3380,11 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-activityrow__title { font: 600 13px var(--font-sans); }
 .fy-activityrow__sub { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
 .fy-activityrow__main { flex: 1; min-width: 0; }
+.fy-activityrow__summary { display: flex; align-items: center; gap: 12px; }
+.fy-activityrow__summary > .dom-jobrow { flex: 1; min-width: 0; border-bottom: 0; }
+.fy-activityrow__summary .dom-jobrow__target,
+.fy-activityrow__summary .dom-jobrow__model { min-width: 0; overflow-wrap: anywhere; }
+.fy-activityrow__actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .fy-activityrow__meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
 .fy-spendtotal { font: 650 30px/1 var(--font-sans); letter-spacing: -0.02em; margin-top: 10px; }
 .fy-spendbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }

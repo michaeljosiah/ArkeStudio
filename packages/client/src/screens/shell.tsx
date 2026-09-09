@@ -1001,9 +1001,9 @@ export function NewWorldScreen() {
                   </p>
                 </div>
                 <div className="fy-artstep__aside">
-                  <div className="fy-artstep__asidehead">SAME HARBOUR, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
                   <div className="fy-artstep__asidenote">
-                    Each preview is one scene rendered each way, so you compare the treatment and
+                    Each preview shows the same forms, so you compare the treatment and
                     not the subject.
                   </div>
                 </div>
@@ -2844,7 +2844,15 @@ export function ActivityScreen() {
           {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <JobRow job={job} state={state} />
+              <div className="fy-activityrow__summary">
+                <JobRow job={job} state={state} />
+                <span className="fy-activityrow__actions">
+                  <IconButton label="Provider calls" onClick={() => setInspectedJobId(job.id)}><FileText /></IconButton>
+                  {jobActions(job).includes("delete") && confirmingDelete !== job.id && (
+                    <IconButton label="Delete" onClick={() => setConfirmingDelete(job.id)}><Trash /></IconButton>
+                  )}
+                </span>
+              </div>
               {/* Where this one is re-run from, which is not one place (issue 226). The row used
                   to name the production's dispatch dialog under every failure, including the
                   reference work that belongs to no production and has no such dialog. */}
@@ -2875,12 +2883,6 @@ export function ActivityScreen() {
                     <span className="scr-field__hint">failed — run it again from wherever you started it</span>
                   );
                 })()}
-              {/* Both of these repeat on every row of the history, which is what made them a band
-                  of words rather than a row of work (issue 1010, U1). The glyph carries the verb
-                  and the tooltip carries the word. */}
-              <IconButton label="Provider calls" onClick={() => setInspectedJobId(job.id)}>
-                <FileText />
-              </IconButton>
               {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
                   and the words say what survives it — so the consent stays a text button even
                   though the offer is a glyph. Offered only where the state permits it (R-13) —
@@ -2905,11 +2907,7 @@ export function ActivityScreen() {
                       Keep
                     </Button>
                   </>
-                ) : (
-                  <IconButton label="Delete" onClick={() => setConfirmingDelete(job.id)}>
-                    <Trash />
-                  </IconButton>
-                ))}
+                ) : null)}
             </div>
           ))}
           {(inspectedJobId || inspectAllCalls) && (
