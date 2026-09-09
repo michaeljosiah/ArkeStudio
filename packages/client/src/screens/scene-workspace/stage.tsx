@@ -39,7 +39,7 @@ import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X 
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type MotionLane = { kind: "performance" | "object"; id: string };
-type MotionMark = MotionLane & { index: number };
+type MotionMark = MotionLane & { index: number; keyCount: number };
 
 function aspectNumber(aspect: string): number {
   const [wide, high] = aspect.split(":").map(Number);
@@ -286,6 +286,20 @@ export function SceneStage({
   useEffect(() => {
     keyDrag.current = null;
   }, [frozen, durationSec, resolvedPersisted]);
+  useEffect(() => {
+    setMotionMark(null);
+    setSelection(null);
+  }, [resolvedPersisted]);
+  useEffect(() => {
+    if (motionMark === null) return;
+    const marks = motionMark.kind === "performance"
+      ? working?.performances?.find(track => track.sheetId === motionMark.id)?.keys
+      : working?.objectMotions?.find(track => track.group === motionMark.id)?.keys;
+    if (marks?.length !== motionMark.keyCount) {
+      setMotionMark(null);
+      setSelection(null);
+    }
+  }, [working, motionMark]);
   useEffect(() => {
     if (motionMark === null) return;
     const mark = stageRoot.current?.querySelector<HTMLElement>('[data-motion-mark="selected"]');
@@ -704,7 +718,7 @@ export function SceneStage({
     const key = motionKeys(working, lane)[which];
     if (!key) return;
     seekTime(key.t);
-    setMotionMark({ ...lane, index: which });
+    setMotionMark({ ...lane, index: which, keyCount: motionKeys(working, lane).length });
     const selected: StageSelection = lane.kind === "performance" ? { kind: "cast", sheetId: lane.id } : null;
     setSelection(selected);
     viewport.current?.select(selected);
@@ -1213,7 +1227,8 @@ export function SceneStage({
           <button type="button" className="fy-swstage__loop" aria-pressed={loop} disabled={frozen} onClick={() => { if (!frozen) setLoop(!loop); }}>Loop</button>
           <span className="fy-swstage__time">{Math.min(at, durationSec).toFixed(1)}s / {durationSec.toFixed(1)}s</span>
           </div>
-          <div className="fy-swstage__track" data-key-track="1" role="slider" tabIndex={0}
+          <div className="fy-swstage__track" data-key-track="1">
+            <div className="fy-swstage__scrubber" role="slider" tabIndex={0}
             aria-label="Stage playhead" aria-valuemin={0} aria-valuemax={durationSec} aria-valuenow={at} aria-valuetext={`${at.toFixed(2)} seconds`} aria-disabled={frozen}
             onPointerDown={event => {
               if (event.button !== 0 || frozen) return;
@@ -1224,7 +1239,7 @@ export function SceneStage({
             }}
             onPointerMove={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) scrub(event); }}
             onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
-          >
+            />
             <span className="fy-swstage__rail" aria-hidden="true" />
             <span className="fy-swstage__head-fill" style={{ width: `${((Math.min(at, durationSec) / Math.max(0.01, durationSec)) * 100).toFixed(1)}%` }} aria-hidden="true" />
             {keys.slice(1).map((key, i) => {

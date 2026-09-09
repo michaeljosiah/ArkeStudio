@@ -7527,9 +7527,10 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__loop { border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); font: 500 10px var(--font-mono); padding: 5px; cursor: pointer; }
 .fy-swstage__loop[aria-pressed="true"] { background: var(--accent); color: var(--foreground); }
 .fy-swstage__loop:disabled, .fy-swstage__play:disabled { opacity: .35; cursor: default; }
-.fy-swstage__track:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
-.fy-swstage__rail { position: absolute; left: 0; right: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--secondary); }
-.fy-swstage__head-fill { position: absolute; left: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--foreground); transition: width .1s linear; }
+.fy-swstage__scrubber { position: absolute; inset: 0; }
+.fy-swstage__scrubber:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; }
+.fy-swstage__rail { position: absolute; left: 0; right: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--secondary); pointer-events: none; }
+.fy-swstage__head-fill { position: absolute; left: 0; top: 6px; height: 3px; border-radius: 99px; background: var(--foreground); transition: width .1s linear; pointer-events: none; }
 .fy-swstage__hold { position: absolute; top: 4px; height: 7px; background: color-mix(in srgb, var(--foreground) 35%, var(--background)); border-radius: 2px; pointer-events: none; }
 .fy-swstage__hold > span { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: var(--muted-foreground); font: 400 9px var(--font-mono); }
 .fy-swstage__hold-end { position: absolute; right: -4px; top: -3px; width: 8px; height: 15px; border: 0; border-radius: 2px; padding: 0; background: var(--foreground); opacity: .7; cursor: ew-resize; touch-action: none; pointer-events: auto; z-index: 4; }

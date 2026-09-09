@@ -79,6 +79,8 @@ const tick = async () => {
 it("scrubs with pointer capture, pauses playback and clamps at the shot boundaries (#1040)", async () => {
   const { q } = await mount();
   const track = q('[aria-label="Stage playhead"]');
+  assert.equal(track.querySelector("button"), null, "key buttons are not flattened under the slider role");
+  assert.equal(q('[aria-label="Camera start at 0.00 seconds"]').closest('[role="slider"]'), null);
   capturePointer(track);
   await click(q('[aria-label="Play"]'));
   await pointer(track, "pointerdown", 200);
@@ -253,7 +255,7 @@ it("edits camera easing through Keep and preserves duplicate-key holds when thei
   await setEase("Ease out", "0.75");
   const track = q('[aria-label="Stage playhead"]');
   const edge = q('[aria-label="Retime hold ending at 2.00 seconds"]');
-  capturePointer(track);
+  capturePointer(track.parentElement!);
   capturePointer(edge);
   await pointer(edge, "pointerdown", 300);
   await pointer(edge, "pointermove", 350);
@@ -282,4 +284,19 @@ it("distinguishes equal coordinates in different anchor spaces and pins a termin
   assert.equal((q('[aria-label="Retime hold ending at 4.00 seconds"]') as HTMLButtonElement).disabled, true);
   await render(true);
   assert.equal((q('[aria-label="Ease in"]') as HTMLInputElement).disabled, true);
+});
+
+it("clears a motion selection when its mark is removed or an earlier mark is inserted", async () => {
+  const { q } = await mount(movingShot);
+  await click(q('[aria-label="Maren Kest mark 2 at 3.00 seconds"]'));
+  const selected = q('[data-motion-mark="selected"]');
+  await click([...selected.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Remove mark")!);
+  assert.equal(q('[data-motion-mark="selected"]'), null);
+  assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
+  await click(q('[aria-label="cart mark 2 at 2.00 seconds"]'));
+  const details = q('[data-motion-mark="selected"]').closest("details")!;
+  await key(q('[aria-label="Stage playhead"]'), "Home");
+  await click([...details.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Mark motion here")!);
+  assert.equal(q('[data-motion-mark="selected"]'), null);
+  assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
 });
