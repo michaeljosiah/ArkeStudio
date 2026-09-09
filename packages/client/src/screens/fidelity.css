@@ -4269,7 +4269,7 @@ select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; c
 .fy-reference-card__foot .ui-btn { height: 32px; }
 /* Only the first button takes the slack, so a second one sits beside it rather than having the
    leftover space split between them — which is what an auto margin on every button does. */
-.fy-reference-card__foot .ui-btn:first-of-type { margin-left: auto; }
+.fy-reference-card__foot :is(.ui-btn, .ui-iconbtn):first-of-type { margin-left: auto; }
 .fy-reference-card__dispatch { margin-top: auto; border-top: 1px solid var(--border); min-height: 58px; padding: 10px 15px; display: flex; align-items: center; gap: 12px; }
 .fy-reference-card__dispatch > span { font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
 .fy-reference-card__dispatch .ui-btn { margin-left: auto; }

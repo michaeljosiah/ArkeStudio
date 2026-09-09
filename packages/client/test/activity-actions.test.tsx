@@ -25,7 +25,8 @@ it("keeps inspection and the two-step deletion behind the compact job actions", 
   };
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {},
     send(json: string) { sent.push(JSON.parse(json)); } });
-  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, jobs: [job] } });
+  const running: Job = { ...job, id: "jb_01J8E0000000000000000000L2", status: "running" };
+  __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, jobs: [running, job] } });
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container);
   try {
@@ -35,7 +36,11 @@ it("keeps inspection and the two-step deletion behind the compact job actions", 
         .find(b => b.getAttribute("aria-label") === label || b.textContent?.trim() === label);
       assert.ok(found, label); return found;
     };
-    const inspect = button("Provider calls");
+    const inspections = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label="Provider calls"]')];
+    assert.equal(inspections.length, 2, "running and completed jobs offer the same action");
+    await act(async () => inspections[0]!.click());
+    assert.ok(sent.some(m => m.kind === "list-provider-calls" && m.jobId === running.id));
+    const inspect = inspections[1]!;
     assert.equal(inspect.title, "Provider calls");
     assert.ok(inspect.closest(".fy-activityrow__summary"));
     await act(async () => inspect.click());

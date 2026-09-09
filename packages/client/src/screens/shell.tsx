@@ -1001,9 +1001,9 @@ export function NewWorldScreen() {
                   </p>
                 </div>
                 <div className="fy-artstep__aside">
-                  <div className="fy-artstep__asidehead">SAME HARBOUR, NINE TREATMENTS</div>
+                  <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
                   <div className="fy-artstep__asidenote">
-                    Each preview is one scene rendered each way, so you compare the treatment and
+                    Each preview shows the same forms, so you compare the treatment and
                     not the subject.
                   </div>
                 </div>
@@ -2733,7 +2733,7 @@ export function ActivityScreen() {
                       Cancel
                     </Button>
                   )}
-                  {r.kind === "job" && <Button variant="ghost" onClick={() => setInspectedJobId(r.ref)}>Calls</Button>}
+                  {r.kind === "job" && <IconButton type="button" label="Provider calls" onClick={() => setInspectedJobId(r.ref)}><ActivityIcon /></IconButton>}
                   {r.cancellable && r.kind === "export" && activeWorldId && (
                     <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
                       Cancel
