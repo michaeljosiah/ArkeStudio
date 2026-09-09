@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearch
 import { useEffect, useRef } from "react";
 import { ProductionSetupScreen } from "./screens/production-setup.js";
 import { ProductionNarrativeScreen } from "./screens/production-narrative.js";
+import { ProductionArtifactsScreen } from "./screens/production-artifacts.js";
 import { SettingsDownloadsScreen } from "./screens/settings-downloads.js";
 import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import { SettingsModelsScreen } from "./screens/settings-models.js";
@@ -267,6 +268,10 @@ export function App() {
         <Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}>
           <Route index element={<ProductionHomeScreen />} />
           <Route path="cast" element={<ProductionCastScreen />} />
+          {/* The production's own shelf (design 134, SPEC-020 R-13). The rail row used to address
+              the world's `/artifacts`, which is the one surface that excludes what a production
+              owns; this is inside the production, so pressing it keeps the rail and the crumb. */}
+          <Route path="artifacts" element={<ProductionArtifactsScreen />} />
           {/* Talking and looking are two screens (turn 88): `story` is the conversation that sets
               the foundations up, and the details it produced are read next door — `season` for an
               episodic production, `overview` for one without a season. */}

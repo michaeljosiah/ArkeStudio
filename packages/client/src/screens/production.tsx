@@ -152,6 +152,7 @@ import { clock } from "../components/player.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds, usd } from "../lib/format.js";
+import { artifactsForProduction, productionShelf } from "../lib/artifact-view.js";
 import {
   acceptedTakeId,
   isDayOne,
@@ -244,18 +245,6 @@ import { continuityRows, continuityRowStamp, rememberChaptersView, rememberedCha
 /** Production screens (§2.9), composed to the prototype frames 11a/14a/11b/24a/25a/25b/10b. */
 
 // ---- small shared pieces ---------------------------------------------------
-
-/**
- * The artifacts a production may see (SPEC-020 R-13): the world's own, plus the ones it owns.
- * Another production's scoped material is absent — selecting audio by kind alone would put one
- * production's scratch takes in every other production's Audio screen.
- */
-function artifactsFor<T extends { production?: string }>(
-  artifacts: readonly T[],
-  productionId: string | undefined,
-): T[] {
-  return artifacts.filter((a) => a.production === undefined || a.production === productionId);
-}
 
 /** Render @mentions the way the prototype does: quiet mono chips inside prose. */
 export function Mentions({ text }: { text: string }) {
@@ -670,7 +659,12 @@ export function ProductionLayout() {
       filmSec = planned.ok ? planned.plan.totalSec : 0;
     } else filmSec = placedFilmSec(production.cut.overlays, world?.artifacts ?? []);
   }
-  const artifactCount = (world?.artifacts ?? []).filter((artifact) => artifact.production === undefined).length;
+  /*
+   * The row's count is its own page's set (design 134): the world's shelf plus what this
+   * production owns. It used to count `production === undefined` — the world's number, on a
+   * production row, pointing at a world screen that could not have shown the difference.
+   */
+  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
   const guestCount = prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length
     : 0;
@@ -985,15 +979,7 @@ export function ProductionLayout() {
                 `${base}/generate`,
                 takesActive,
               )}
-              {item(
-                "artifacts",
-                "Artifacts",
-                String(artifactCount),
-                false,
-                false,
-                false,
-                `/w/${worldId}/artifacts`,
-              )}
+              {item("artifacts", "Artifacts", String(artifactCount))}
               {item(
                 "generate",
                 "Generate",
@@ -1018,6 +1004,8 @@ export function ProductionLayout() {
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
                   {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  <span className="fy-prodrail__section-divider" aria-hidden="true" />
+                  {item("artifacts", "Artifacts", String(artifactCount))}
                 </>
               ) : (
                 <>
@@ -1035,6 +1023,9 @@ export function ProductionLayout() {
                   {/* A press, not a destination (SPEC-036 R-37): it makes the scene and opens it. */}
                   {newSceneItem}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
+                  {/* Every format files references, recordings and documents, so the row is on
+                      every rail rather than the episodic one alone (design 134). */}
+                  {item("artifacts", "Artifacts", String(artifactCount))}
                   {/* Stills is a lens on Generate now (design 55a), not a rail destination. */}
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
                   {item("cut", "Cut", cut ? railFigure : "0:00")}
@@ -1291,8 +1282,6 @@ export function ProductionCastScreen() {
   const pendingGuests = (["character", "location", "faction"] as const).flatMap((kind) =>
     pendingGuestsOf(pendingSheets(world.proposals, kind, world.conversations), production.meta.id),
   );
-  // Owned artifacts are off the world's shelf (R-13), so this is the only place they appear.
-  const owned = world.artifacts.filter((a) => a.production === production.meta.id && a.retiredAt === undefined);
   const kindLabel = (sheet: Sheet) =>
     sheet.type === "character" ? "character" : sheet.type === "location" ? "location" : "faction";
 
@@ -1485,33 +1474,6 @@ export function ProductionCastScreen() {
         production={production}
         characters={[...guests, ...fromWorld].filter((sheet) => sheet.type === "character")}
       />
-
-      {owned.length > 0 && (
-        <>
-          <div className="fy-eyebrow-sm" style={{ padding: "10px 90px 0" }}>
-            FILED HERE · ONLY IN {production.meta.title.toUpperCase()} · {owned.length}
-          </div>
-          <div style={{ padding: "8px 90px 30px", display: "grid", gap: 8 }}>
-            {owned.map((artifact) => (
-              <div
-                key={artifact.id}
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: 10,
-                  padding: "9px 4px",
-                  borderBottom: "1px solid var(--border)",
-                }}
-              >
-                <span style={{ flex: 1, font: "400 13px var(--font-sans)" }}>{artifact.file}</span>
-                <span className="fy-mono" style={{ color: "var(--muted-foreground)" }}>
-                  {artifact.kind}
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -6231,7 +6193,7 @@ function AddToLibraryDialog({
   const scenes = production?.scenes ?? [];
   const scene = scenes.find((candidate) => candidate.id === sceneId) ?? scenes[0] ?? null;
   const shots = scene ? orderedShots(scene) : [];
-  const pickable = new Set(pickableArtifacts(artifactsFor(artifacts, production?.meta.id ?? "")).map(artifact => artifact.id));
+  const pickable = new Set(pickableArtifacts(artifactsForProduction(artifacts, production?.meta.id ?? "")).map(artifact => artifact.id));
   const placeable = artifacts.filter(artifact => present.has(`artifact:${artifact.id}`) ||
     (pickable.has(artifact.id) && resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "").ok && ["audio", "video", "image", "board"].includes(artifact.kind)));
   const missing = library.filter((item): item is Extract<TimelineLibraryItem, { kind: "artifact" }> => item.kind === "artifact" && !artifacts.some(artifact => artifact.id === item.artifactId));
@@ -6500,7 +6462,7 @@ export function CutScreen() {
    * would let a document stretched to 60s claim a film that encodes as five seconds.
    */
   // The production's own view of the world's files (SPEC-020 R-13): another production's scoped media stays out of this Library and picker.
-  const artifacts = artifactsFor(world?.artifacts ?? [], prodId);
+  const artifacts = artifactsForProduction(world?.artifacts ?? [], prodId);
   const placedPicture = mediaOnly ? exportOverlays(overlays, artifacts) : [];
   const placedSound = mediaOnly ? exportAudioClips(overlays, artifacts) : [];
   /*

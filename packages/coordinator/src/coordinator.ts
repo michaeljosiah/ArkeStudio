@@ -12087,9 +12087,11 @@ export class Coordinator {
             // it carries audio are true once and true forever.
             ...(this.opts.mediaProbe !== undefined ? { mediaProbe: this.opts.mediaProbe } : {}),
             abandoned: () => !this.stillOpen(store) || this.stopping,
-            // The world's shelf, explicitly. An artifact laid over one production's cut is still
-            // the world's, which is what the panel beside the cut is showing.
-            production: null,
+            // Explicit, never inferred. The world's shelf unless the sender says otherwise: an
+            // artifact laid over one production's cut is still the world's, which is what the
+            // panel beside the cut is showing. A production's own artifacts page is the one
+            // surface that says otherwise (SPEC-020 R-13).
+            production: msg.production ?? null,
           }).catch((err: unknown) => ({
             outcome: "refused" as const,
             reason: describeCoordinatorError(err),

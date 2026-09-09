@@ -100,6 +100,31 @@ describe("filing artifacts from the panel (82a)", () => {
     }
   });
 
+  it("files onto the world's shelf unless the sender scopes it, and never infers a scope", async () => {
+    /*
+     * A production's own artifacts page files into that production (SPEC-020 R-13, design 134),
+     * and it is the only surface that does. The default has to stay the world's shelf explicitly
+     * rather than by omission: an artifact laid over one production's cut is still the world's,
+     * and a scope inferred from anything but the sender's own word would file the panel beside
+     * the Cut into whichever production happened to be open.
+     */
+    const shared = await sourceFile("shared-plate.png", distinctPng(21));
+    const mine = await sourceFile("scoped-plate.png", distinctPng(22));
+    let picked: readonly string[] = [shared];
+    const { provider, send } = await harness(() => picked);
+    try {
+      await send(upload);
+      picked = [mine];
+      await send({ ...upload, requestId: "01J8E1000000000000000000V3", production: "saltlight" } as ClientMessage);
+
+      const shelf = provider.openStore()!.getBundle().artifacts;
+      assert.equal(shelf.find((a) => a.file === "shared-plate.png")?.production, undefined,
+        "an unscoped upload is the world's, as it has always been");
+      assert.equal(shelf.find((a) => a.file === "scoped-plate.png")?.production, "saltlight",
+        "and a scoped one belongs to the production that asked");
+    } finally { await provider.close(); }
+  });
+
   it("says nothing when the dialog is closed — that is not a failure", async () => {
     const { provider, events, send } = await harness(() => []);
     try {

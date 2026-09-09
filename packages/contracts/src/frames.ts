@@ -2519,13 +2519,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * 82a: file new artifacts into the world from the artifact panel.
    *
    * The host opens the picker and the renderer never sees the bytes, the same arrangement key art
-   * has. They land on the **world's** shelf, not the production's: an artifact laid over one cut
-   * is still the world's, and the panel says so by being the world's.
+   * has. They land on the **world's** shelf by default, not the production's: an artifact laid
+   * over one cut is still the world's, and the panel beside the cut says so by being the world's.
+   *
+   * `production` is the exception, and the only one (design 134): a production's own artifacts
+   * page files into that production, because it is the page that shows what a production owns and
+   * a surface that shows a scope has to be able to add to it. Absent means the world, so every
+   * existing caller is unchanged; the three states are `file-artifact`'s.
    */
   z.object({
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
     // Null preserves the original position of a dropped File without a native path.
     sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
+    production: SlugSchema.nullable().optional(),
     editor: z.object({
       productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
       sourceFingerprint: TimelineSourceFingerprintSchema,
