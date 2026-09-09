@@ -41,18 +41,11 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
     if (options.abandoned()) throw new Error("The world closed during import");
     if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
     try {
-      /*
-       * Filed on the world's shelf, and a file the world already holds under a production's name
-       * is brought back to the shelf (SPEC-020 §2.5): the Cut's refusal for a scoped file says
-       * "Import the file into this production", and this import is that recovery (#895). A plain
-       * dedup leaves ownership alone (#1039); here the re-file is the transfer asked for.
-       */
-      const filing = { sourcePath, production: null, reownOnDuplicate: true, ...options };
-      let result = await fileArtifact(store, filing);
+      let result = await fileArtifact(store, { sourcePath, production: null, ...options });
       if (result.outcome === "needs-consent" && options.confirmLarge &&
           await options.confirmLarge({ name: basename(sourcePath), sizeBytes: result.sizeBytes })) {
         if (options.abandoned()) throw new Error("The world closed during import");
-        result = await fileArtifact(store, { ...filing, allowLarge: true });
+        result = await fileArtifact(store, { sourcePath, production: null, ...options, allowLarge: true });
       }
       if (result.outcome === "filed" || result.outcome === "deduplicated") {
         // Filing measures after its first commit; the return value predates that sidecar update.
