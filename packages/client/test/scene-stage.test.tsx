@@ -211,7 +211,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...command.staging!, version: 2 }), 4), [], "Keep passes the coordinator's write-boundary validation");
 });
 
-it("scales every lane with the shot and stops an active key drag when frozen (#1041)", async () => {
+it("scales every lane and stops a drag when duration or editability changes (#1041)", async () => {
   const { q, shot, render } = await mount(movingShot);
   shot.durationSec = 8;
   await render();
@@ -222,9 +222,14 @@ it("scales every lane with the shot and stops an active key drag when frozen (#1
   capturePointer(track);
   capturePointer(mark);
   await pointer(mark, "pointerdown", 150);
+  shot.durationSec = 4;
+  await render();
+  await pointer(mark, "pointermove", 400);
+  assert.equal(q('[data-testid="stage-moved"]'), null, "old drag bounds cannot edit a retimed track");
+  await pointer(mark, "pointerdown", 150);
   await render(true);
   await pointer(mark, "pointermove", 400);
-  assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
+  assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "0.5");
   assert.equal(q('[data-testid="stage-moved"]'), null);
 });
 

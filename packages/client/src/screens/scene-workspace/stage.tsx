@@ -284,8 +284,8 @@ export function SceneStage({
     playStart.current = null;
   }, [shot?.id]);
   useEffect(() => {
-    if (frozen) keyDrag.current = null;
-  }, [frozen]);
+    keyDrag.current = null;
+  }, [frozen, durationSec, resolvedPersisted]);
   useEffect(() => {
     if (motionMark === null) return;
     const mark = stageRoot.current?.querySelector<HTMLElement>('[data-motion-mark="selected"]');
