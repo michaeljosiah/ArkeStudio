@@ -289,95 +289,163 @@ export function stageShot(
   }));
   const sets = [...locations, ...blocked.flatMap(({ prop }) => prop === null ? [] : [prop])];
   const subject = cast[0]?.sheetId ?? null;
-  // Anchored keys are offsets from the subject; an unanchored scene stands where the subject
-  // would have been, so a castless shot still has a camera somewhere sensible.
   const distance = distanceFor(framing?.size, shot.camera);
   const height = heightFor(framing?.angle);
-  const aim: [number, number, number] = [0, subject === null ? 1.1 : 1.25, 0];
+  const aimHeight = subject === null ? 1.1 : 1.25;
   const dur = Math.max(0.5, input.durationSec);
-  const move = `${framing?.movement ?? ""} ${shot.camera ?? ""}`.toLowerCase();
-  const keys: StagingKey[] =
-    /\bpan\b/.test(move)
-      ? [key(0, [0, height, distance], [-1.5, aim[1], 0], null), key(dur, [0, height, distance], [1.5, aim[1], 0], null)]
-      : /\btilt\b/.test(move)
-        ? [key(0, [0, height, distance], [0, 0.3, 0], null), key(dur, [0, height, distance], [0, 2.5, 0], null)]
-        : /push|dolly in|move in|track in/.test(move)
-      ? [key(0, [0, height, distance], aim, subject), key(dur, [0, height, Math.max(1, distance * 0.55)], aim, subject)]
-      : /pull|dolly out|move out|track out/.test(move)
-        ? [key(0, [0, height, distance], aim, subject), key(dur, [0, height, distance * 1.6], aim, subject)]
-        : /orbit|arc|circle/.test(move)
-          ? [
-              key(0, [-distance * 0.7, height, distance * 0.7], aim, subject),
-              key(dur / 2, [0, height, distance], aim, subject),
-              key(dur, [distance * 0.7, height, distance * 0.7], aim, subject),
-            ]
-          : /crane|rise|boom/.test(move)
-            ? [key(0, [0, Math.max(0.6, height - 0.6), distance], aim, subject), key(dur, [0, height + 1.4, distance * 0.9], aim, subject)]
-            : /truck|track|follow|lateral/.test(move)
-              ? [key(0, [-distance * 0.35, height, distance], aim, subject), key(dur, [distance * 0.35, height, distance], aim, subject)]
-              : [key(0, [0, height, distance], aim, subject), key(dur, [0, height, distance], aim, subject)];
-  if (/pan.*left|tilt.*down|truck.*left|crane.*down|boom.*down|lower|descend/.test(move)) {
-    const poses = keys.map(({ p, l }) => ({ p, l })).reverse();
-    keys.forEach((k, i) => Object.assign(k, poses[i]));
+  const move = readCameraMove(`${framing?.movement ?? ""} ${shot.camera ?? ""}`);
+
+  // The position path and the aim path are composed independently, each from its own clause,
+  // so "push-in with a pan right" pushes AND pans, and the direction word beside one component
+  // never flips another (issue 886). Start on the axis: the camera stands `distance` back at
+  // `height`, and what follows moves one coordinate at a time.
+  const from: [number, number, number] = [0, height, distance];
+  const to: [number, number, number] = [0, height, distance];
+  if (move.dolly !== null) to[2] = Math.max(1, distance * move.dolly);
+  if (move.crane !== null) {
+    const low = Math.max(0.6, height - 0.6);
+    const high = height + 1.4;
+    from[1] = move.crane === "up" ? low : high;
+    to[1] = move.crane === "up" ? high : low;
+    to[2] = Math.max(1, to[2] * 0.9);
   }
-  // Only an explicit follow/tracking instruction rides with a subject. Fixed and rotational
-  // moves retain their world position while the performer crosses the frame.
-  if (!/track|follow/.test(move)) {
-    const figure = cast[0];
-    for (const k of keys) {
-      if (figure) {
-        k.p = [k.p[0] + figure.x, k.p[1], k.p[2] + figure.z];
-        k.l = [k.l[0] + figure.x, k.l[1], k.l[2] + figure.z];
-      }
-      delete k.anchor;
-      delete k.track;
+  if (move.truck !== null) {
+    // The camera looks down -Z, so +X is its right.
+    const reach = distance * 0.35;
+    from[0] = move.truck === "right" ? -reach : reach;
+    to[0] = -from[0];
+  }
+  const aimFrom: [number, number, number] = [0, aimHeight, 0];
+  const aimTo: [number, number, number] = [0, aimHeight, 0];
+  if (move.pan !== null) {
+    aimFrom[0] = move.pan === "right" ? -1.5 : 1.5;
+    aimTo[0] = -aimFrom[0];
+  }
+  if (move.tilt !== null) {
+    aimFrom[1] = move.tilt === "up" ? 0.3 : 2.5;
+    aimTo[1] = move.tilt === "up" ? 2.5 : 0.3;
+  }
+  const turns = move.pan !== null || move.tilt !== null;
+  // An orbit is the whole position path, and it is defined by looking at its subject.
+  const keys: StagingKey[] = move.orbit
+    ? [
+        key(0, [-distance * 0.7, height, distance * 0.7], [0, aimHeight, 0], null),
+        key(dur / 2, [0, height, distance], [0, aimHeight, 0], null),
+        key(dur, [distance * 0.7, height, distance * 0.7], [0, aimHeight, 0], null),
+      ]
+    : [key(0, from, aimFrom, null), key(dur, to, aimTo, null)];
+  // Only a tracking or follow instruction rides with a subject: its keys are offsets, and the
+  // aim follows the figure live unless the move deliberately turns away (a pan or tilt is an
+  // offset aim that sweeps). Everything else is world-locked — the camera stands where the
+  // subject was blocked and stays there while the performer crosses the frame.
+  const figure = cast[0];
+  for (const k of keys) {
+    if (move.rides && subject !== null) {
+      k.anchor = subject;
+      if (!turns && !move.orbit) k.track = subject;
+      else if (move.orbit) k.track = subject;
+    } else if (figure) {
+      k.p = [round(k.p[0] + figure.x), k.p[1], round(k.p[2] + figure.z)];
+      k.l = [round(k.l[0] + figure.x), k.l[1], round(k.l[2] + figure.z)];
     }
   }
-  if (/slow|gentle|soft|smooth/.test(move) && keys.length > 1) {
+  if (move.slow && keys.length > 1) {
     keys[0] = { ...keys[0]!, easeOut: 0.25 };
     keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
   }
-  const rig: StageRig = /handheld|hand-held|shoulder/.test(move)
+  return { version: 1, cast, sets, keys, rig: move.rig, seed: stageRigSeed(shot.id), rigIntensity: 1 };
+}
+
+/** What the framing words ask the camera to do, one component per clause. */
+export interface CameraMove {
+  /** The camera holds its offset from the subject (track, follow). */
+  rides: boolean;
+  /** End distance as a fraction of the start: a push ends nearer, a pull further. */
+  dolly: number | null;
+  crane: "up" | "down" | null;
+  /** Lateral travel, in the camera's own left and right. */
+  truck: "left" | "right" | null;
+  orbit: boolean;
+  /** Aim sweeps sideways from a held position. */
+  pan: "left" | "right" | null;
+  /** Aim sweeps vertically from a held position. */
+  tilt: "up" | "down" | null;
+  slow: boolean;
+  rig: StageRig;
+}
+
+/**
+ * Read a movement phrase as independent components.
+ *
+ * Each clause names one thing the camera does and, beside it, which way. "Crane up, tilting
+ * down" is a crane that rises while the aim drops; read as one string with one direction it
+ * became a crane that fell. A clause is split on punctuation and the joining words a person
+ * uses to add a second move, and a direction word counts only for the component in its clause.
+ */
+export function readCameraMove(words: string): CameraMove {
+  const text = words.toLowerCase();
+  const move: CameraMove = { rides: false, dolly: null, crane: null, truck: null, orbit: false, pan: null, tilt: null, slow: false, rig: "sticks" };
+  for (const clause of text.split(/[,;·]|\b(?:and|with|while|then|into|as|plus)\b/)) {
+    const left = /\bleft\b/.test(clause);
+    const down = /\bdown(?:ward)?\b|\blower(?:s|ing)?\b|\bdescend(?:s|ing)?\b/.test(clause);
+    if (/\bpan(?:s|ned|ning)?\b/.test(clause)) move.pan = left ? "left" : "right";
+    if (/\btilt(?:s|ed|ing)?\b/.test(clause)) move.tilt = down ? "down" : "up";
+    if (/\bpush(?:es|ed|ing)?(?:[- ]in)?\b|\b(?:dolly|dollies|move|moves|moving|track|tracks|tracking|creep|creeps|creeping)[- ]in\b/.test(clause)) move.dolly = 0.55;
+    else if (/\bpull(?:s|ed|ing)?(?:[- ](?:out|back))?\b|\b(?:dolly|dollies|move|moves|moving|track|tracks|tracking)[- ](?:out|back)\b/.test(clause)) move.dolly = 1.6;
+    if (/\bcrane|\bboom|\bjib|\brise|\brising|\brises|\blower|\bdescend/.test(clause)) move.crane = down ? "down" : "up";
+    if (/\btruck|\blateral|\bslide|\bslides|\bsliding|\bcrab/.test(clause)) move.truck = left ? "left" : "right";
+    if (/\borbit|\barc\b|\barcs\b|\barcing\b|\bcircle|\bcircling|\bround\b/.test(clause)) move.orbit = true;
+    if (/\b(?:track|tracks|tracking|follow|follows|following)\b/.test(clause) && !/\b(?:track|tracks|tracking)[- ](?:in|out|back)\b/.test(clause)) move.rides = true;
+  }
+  move.slow = /slow|gentle|soft|smooth/.test(text);
+  move.rig = /handheld|hand-held|shoulder/.test(text)
     ? "handheld"
-    : /steadicam|gimbal/.test(move)
+    : /steadicam|gimbal/.test(text)
       ? "steadicam"
-      : /crane|boom/.test(move)
+      : /crane|boom|jib/.test(text)
         ? "crane"
-        : /drone|aerial/.test(move)
+        : /drone|aerial/.test(text)
           ? "drone"
-          : /car mount|vehicle mount/.test(move)
+          : /car mount|vehicle mount/.test(text)
             ? "car-mount"
-            : /push|pull|dolly|track|truck/.test(move)
+            : move.dolly !== null || move.truck !== null || move.rides || /\bdolly\b/.test(text)
               ? "dolly"
               : "sticks";
-  return { version: 1, cast, sets, keys, rig, seed: stageRigSeed(shot.id), rigIntensity: 1 };
+  return move;
 }
 
 /** The move in one word, read off what the keys actually do. */
 export function stagingMoveWord(keys: readonly StagingKey[], cast: readonly StagingFigure[] = [], rig?: StageRig): string {
-  const withRig = (move: string) => rig === undefined || rig === "sticks" || rig === move ? move : `${rig.replace("-", " ")} ${move}`;
+  const withRig = (move: string) => rig === undefined || rig === "sticks" || move.startsWith(rig) ? move : `${rig.replace("-", " ")} ${move}`;
   if (keys.length < 2) return withRig("static");
   const first = keys[0]!;
   const last = keys[keys.length - 1]!;
   const dx = Math.abs(last.p[0] - first.p[0]);
   const dy = Math.abs(last.p[1] - first.p[1]);
   const dz = Math.abs(last.p[2] - first.p[2]);
+  // What the aim does, read off the aim itself: a pan or tilt is the lens turning while the
+  // position it turns from holds — or moves, in which case both are named (issue 886). A
+  // tracked aim is held on its subject by definition, so its travel in world space is the
+  // subject walking, not the lens turning; only a free aim's travel is a turn.
+  const free = keys.filter(k => k.track === undefined);
+  const aimX = free.length < 2 ? 0 : Math.max(...free.map(k => k.l[0])) - Math.min(...free.map(k => k.l[0]));
+  const aimY = free.length < 2 ? 0 : Math.max(...free.map(k => k.l[1])) - Math.min(...free.map(k => k.l[1]));
+  const turn = aimX > 0.05 || aimY > 0.05 ? (aimX > 0.05 && aimY > 0.05 ? "pan and tilt" : aimX > aimY ? "pan" : "tilt") : null;
   if (dx < 0.15 && dy < 0.15 && dz < 0.15) {
-    const aimX = Math.max(...keys.map(k => k.l[0])) - Math.min(...keys.map(k => k.l[0]));
-    const aimY = Math.max(...keys.map(k => k.l[1])) - Math.min(...keys.map(k => k.l[1]));
     const excursion = keys.some(k => Math.hypot(k.p[0] - first.p[0], k.p[1] - first.p[1], k.p[2] - first.p[2]) >= 0.15);
     if (excursion) return withRig(sweep(keys) > 50 ? "orbit" : "out and back");
-    if (aimX > 0.05 || aimY > 0.05) return withRig(aimX > 0.05 && aimY > 0.05 ? "pan and tilt" : aimX > aimY ? "pan" : "tilt");
+    if (turn !== null) return withRig(turn);
     if (keys.length > 2 && sweep(keys) > 50) return withRig("orbit");
     // The same offset from a figure who walks is a camera that walks with them: it holds its
     // frame and crosses the set, which is a tracking shot and not a static one.
     const rides = keys.every((key) => key.anchor !== undefined && cast.find((figure) => figure.sheetId === key.anchor)?.to !== undefined);
     return withRig(rides ? "tracking" : "static");
   }
-  if (sweep(keys) > 50) return withRig("orbit");
-  if (dy >= dx && dy >= dz) return withRig("crane");
-  if (dx > dz) return withRig("truck");
-  return withRig("dolly");
+  // An orbit is the camera revolving around an aim it holds. The same angular sweep with the
+  // aim itself swinging is a pan on a moving camera, and used to be named an orbit too.
+  if (turn === null && sweep(keys) > 50) return withRig("orbit");
+  const travel = dy >= dx && dy >= dz ? "crane" : dx > dz ? "truck" : "dolly";
+  return withRig(turn === null ? travel : `${travel} with ${turn}`);
 }
 
 /** Total angular travel around the aim, including intermediate keys and full revolutions. */
