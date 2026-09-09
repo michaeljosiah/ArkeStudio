@@ -960,6 +960,12 @@ describe("scene detail owns the workspace", () => {
     assert.equal(create.sceneFile, "04-the-verse-rises");
     assert.equal(create.mode, "whole-scene");
     assert.equal(create.policy, "review-gated");
+    // Nothing chosen per dispatch (SPEC-044 R-34): no read, no master slice, no audio switch, and
+    // no acknowledgement, since no guidance was drawn to acknowledge.
+    assert.deepEqual(create.acknowledgedRecommendationIds, []);
+    assert.equal("performanceAudio" in create, false);
+    assert.equal("masterAudio" in create, false);
+    assert.equal("audioReferencesDisabled" in create, false);
     await apply({
       at: "2026-08-31T12:00:00Z",
       type: "production.plan-state",
