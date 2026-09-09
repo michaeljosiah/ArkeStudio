@@ -6929,6 +6929,56 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-castpicker__name { font: 600 11.5px var(--font-sans); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-castpicker__meta { margin-top: -4px; font: 400 9px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
 .fy-castpicker__empty { font: 400 11px var(--font-mono); color: var(--neutral-400); }
+/* The character dialog (SPEC-044 R-11): the picture on the left, three rows of cards on the right. */
+.fy-chardialog { border: 0; padding: 0; background: transparent; max-width: none; max-height: none; }
+.fy-chardialog::backdrop { background: var(--media-overlay-bg); opacity: .42; }
+.fy-chardialog__panel { position: relative; box-sizing: border-box; width: min(820px, calc(100vw - 48px)); max-height: calc(100vh - 68px); background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-xl); overflow: hidden; display: flex; align-items: stretch; animation: fy-swlightbox-in 0.16s var(--ease-out) both; }
+.fy-chardialog__picture { position: relative; flex: none; width: 300px; min-height: 420px; background: var(--muted); }
+.fy-chardialog__picture > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-chardialog__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px; padding: 22px 24px 20px; overflow-y: auto; }
+.fy-chardialog__head { display: flex; align-items: flex-start; gap: 10px; }
+.fy-chardialog__title { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 0; }
+.fy-chardialog__name { font: 650 22px var(--font-sans); letter-spacing: -0.025em; }
+.fy-chardialog__facts { font: 400 9.5px var(--font-mono); color: var(--muted-foreground); }
+.fy-chardialog__close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fy-chardialog__close:hover { background: var(--accent); color: var(--foreground); }
+.fy-chardialog__row { display: flex; flex-direction: column; gap: 6px; }
+.fy-chardialog__label { font: 500 9px var(--font-mono); letter-spacing: .1em; text-transform: uppercase; color: var(--neutral-400); }
+.fy-chardialog__cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.fy-chardialog__card { box-sizing: border-box; flex: 1 1 140px; min-width: 0; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; background: var(--background); color: var(--foreground); text-align: left; font: inherit; cursor: pointer; }
+.fy-chardialog__card--on { border: 1.5px solid var(--foreground); padding: 8.5px 9.5px; }
+.fy-chardialog__card--door { border-style: dashed; }
+.fy-chardialog__card--door .fy-chardialog__cardname { color: var(--muted-foreground); }
+.fy-chardialog__card:disabled { cursor: default; }
+.fy-chardialog__cardtext { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fy-chardialog__cardname { font: 600 11.5px var(--font-sans); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-chardialog__cardsub { font: 400 9.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+.fy-chardialog__thumb { position: relative; flex: none; width: 22px; height: 22px; border-radius: 5px; overflow: hidden; background: var(--muted); }
+.fy-chardialog__thumb--round { border-radius: 999px; }
+.fy-chardialog__thumb > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-chardialog__dot { flex: none; width: 22px; height: 22px; border-radius: 999px; background: var(--neutral-300); }
+.fy-chardialog__dot--read { background: var(--foreground); }
+.fy-chardialog__line { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 9px 11px; }
+.fy-chardialog__lineshot { flex: none; font: 400 9.5px var(--font-mono); color: var(--neutral-400); }
+.fy-chardialog__linetext { flex: 1; min-width: 0; font: 400 12px/1.5 var(--font-sans); }
+.fy-chardialog__lineread { flex: none; font: 400 9.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
+.fy-chardialog__play { flex: none; width: 22px; height: 22px; border: 0; border-radius: 999px; background: var(--foreground); cursor: pointer; }
+.fy-chardialog__none { margin: 0; font: 400 11px var(--font-mono); color: var(--neutral-400); }
+.fy-chardialog__spacer { flex: 1; }
+.fy-chardialog__foot { display: flex; align-items: center; gap: 8px; }
+/* The two doors (R-14): a sheet over the dialog's body, closed by Escape before the dialog is. */
+.fy-linedoor { position: absolute; inset: 0; left: 300px; display: flex; flex-direction: column; gap: 12px; padding: 22px 24px 20px; background: var(--background); overflow-y: auto; }
+.fy-linedoor__head { display: flex; align-items: center; gap: 10px; font: 650 17px var(--font-sans); letter-spacing: -0.02em; }
+.fy-linedoor__head > span { flex: 1; }
+.fy-linedoor__close { flex: none; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--neutral-400); font: 400 16px var(--font-sans); cursor: pointer; }
+.fy-linedoor__line { display: flex; align-items: center; gap: 8px; font: 400 11px var(--font-mono); color: var(--muted-foreground); }
+.fy-linedoor__line > select { flex: 1; min-width: 0; }
+.fy-linedoor__text { margin: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; font: 400 12px/1.5 var(--font-sans); }
+.fy-linedoor__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.fy-linedoor__note { margin: 0; font: 400 10px var(--font-mono); color: var(--neutral-400); }
+.fy-linedoor__keep { display: flex; flex-direction: column; gap: 8px; font: 400 11.5px var(--font-sans); }
+.fy-linedoor__keep > label { display: flex; align-items: center; gap: 8px; }
+.fy-linedoor__wording { margin: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 11px var(--font-mono); }
 /* The view tabs are one segmented control on a recessed pill, the way the prototype draws them:
    the chosen mode lifts out on the page colour with a hairline shadow, the rest sit in the well. */
 .fy-sw__metrics { padding: 3px 4px; color: var(--neutral-400); font: 400 10px var(--font-mono); }

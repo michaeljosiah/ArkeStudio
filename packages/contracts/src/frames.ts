@@ -1510,7 +1510,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, lineKey: z.string().min(1).max(300), expectedSelectionHash: z.string().nullable() }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
-    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),
+    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable(),
+    // An accept from the character dialog also chooses the read for the scene (SPEC-044 R-15):
+    // a generated line arrives unreviewed and one press accepts, selects and chooses.
+    select: z.boolean().optional(), expectedSceneVersion: z.number().int().positive().optional() }).strict(),
   z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
   z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,

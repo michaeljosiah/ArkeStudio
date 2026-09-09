@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -975,6 +975,15 @@ export function CharacterLooksScreen() {
   const [exploring, setExploring] = useState(false);
   const resultsRef = useRef<HTMLDivElement>(null);
   const exploreRef = useRef<HTMLButtonElement>(null);
+  // The scene dialog's `Add a look` door lands here with the scene named (SPEC-044 R-12): one
+  // press attaches the chosen look to it, so nobody hunts through the select for the scene
+  // they just came from.
+  const [searchParams] = useSearchParams();
+  const preset = (() => {
+    const [scope, productionId, sceneId] = (searchParams.get("attach") ?? "").split(":");
+    const scene = scope === "scene" ? world?.productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId) : undefined;
+    return scene !== undefined && productionId !== undefined && sceneId !== undefined ? { productionId, sceneId, number: scene.number } : null;
+  })();
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
@@ -1215,6 +1224,15 @@ export function CharacterLooksScreen() {
                     ))}
                   </select>
                 </label>
+                {preset !== null && (selectedLook.attachedTo?.kind !== "scene" || selectedLook.attachedTo.sceneId !== preset.sceneId) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => attachCharacterLook(world.meta.worldId, sheetId, selectedLook.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                  >
+                    Use in scene {preset.number}
+                  </Button>
+                ) : null}
                 <Button
                   variant="ghost"
                   onClick={() => promoteCharacterLook(world.meta.worldId, sheetId, selectedLook.id)}

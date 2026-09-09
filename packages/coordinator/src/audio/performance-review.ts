@@ -12,10 +12,11 @@ import { audioHash } from "./qc.js";
  * Keep selects (SPEC-044 R-15): after a recording is kept, accept it, select it for its line and
  * make it the character's voice for the scene, in that order under Keep's request id. A step
  * that fails leaves what landed before it — the record is never removed, nothing is retried
- * against a version that moved — and names itself to the caller.
+ * against a version that moved — and names itself to the caller. A generated line takes the
+ * same road from the dialog's accept, under the review's request id (`choosePerformance`).
  */
 export async function selectKeptPerformance(store: WorldStore, record: PerformanceRecord,
-  request: Extract<ClientMessage, { kind: "keep-performance-recording" }>): Promise<void> {
+  request: { requestId: string; worldId: string; productionId: string; sceneId: string; expectedSceneVersion: number }): Promise<void> {
   const production = store.getBundle().productions.find(p => p.meta.id === request.productionId);
   const sceneFile = production?.sceneFiles[request.sceneId];
   const scene = production?.scenes.find(s => s.id === request.sceneId);
@@ -38,6 +39,12 @@ export async function selectKeptPerformance(store: WorldStore, record: Performan
 /** Review and line selection share one existing commit transaction; neither edits picture selection. */
 export async function reviewPerformance(store: WorldStore, request: Extract<ClientMessage, { kind: "review-performance" }>) {
   return review(store, request, true);
+}
+
+/** After an accept that asked to choose (SPEC-044 R-15): the read becomes the character's voice for its scene. */
+export async function choosePerformance(store: WorldStore, request: Extract<ClientMessage, { kind: "review-performance" }> & { expectedSceneVersion: number }) {
+  const record = await readPerformance(store, request.productionId, request.performanceId);
+  return selectKeptPerformance(store, record, { ...request, sceneId: record.target.sceneId });
 }
 
 /**

@@ -15,7 +15,7 @@ import { writeFile, readFile, rename, lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { orderedShots, resolvePerformanceLine, performanceLineKey, ulid } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
-import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "../../src/audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, choosePerformance } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
 import { keepPerformanceRecording, currentPerformanceTarget } from "../../src/audio/performances.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -318,6 +318,39 @@ it("keep selects: accepts, selects the line and makes the read the character's v
   assert.deepEqual(held.performanceReview.reviews.filter(r => r.performanceId === stale.id), [], "a refused choice leaves the read kept but unaccepted (T-6)");
   assert.equal(held.performanceReview.selections[performanceLineKey(record.target)]?.performanceId, record.id, "and the line still names the chosen read");
   assert.deepEqual(held.scenes.find(s => s.id === scene.id)!.cast?.[record.target.speakerSheetId]?.voice, { kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
+});
+
+it("an accept that asks to choose makes the read the character's voice, once, however often it is delivered (SPEC-044 R-15)", async t => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); t.after(() => store.close());
+  const bundle = store.getBundle(), production = bundle.productions[0]!;
+  const scene = production.scenes.find(scene => orderedShots(scene).some(s => resolvePerformanceLine(scene, s.id).ok))!;
+  const shot = orderedShots(scene).find(s => resolvePerformanceLine(scene, s.id).ok)!;
+  const bytes = wav(Array.from({ length: 48000 }, (_, i) => Math.round(Math.sin(i / 9) * 3000)));
+  const source = join(dir, "capture-choose.webm"); await writeFile(source, bytes);
+  const spool = { async claim() { return { absolutePath: source, contentType: "audio/webm", sizeBytes: bytes.length }; }, async discard() {} };
+  const tools = createAudioMediaTools({ async run(tool, args) {
+    let stdout = "";
+    if (tool === "ffprobe") stdout = JSON.stringify({ format: { duration: "1", format_name: "wav" }, streams: [{ codec_type: "audio",
+      codec_name: "pcm_s16le", sample_fmt: "s16", sample_rate: "48000", channels: 1, bits_per_sample: 16 }] });
+    else if (args[0] === "-version") stdout = "ffmpeg version test\n";
+    else await writeFile(args.at(-1)!, bytes);
+    return { code: 0, stdout: Buffer.from(stdout), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false };
+  } });
+  // Kept without choosing — the shape a generated line arrives in — then accepted from the dialog.
+  const record = await keepPerformanceRecording(store, tools, spool, { kind: "keep-performance-recording", requestId: ulid(), worldId: store.worldId, productionId: production.meta.id,
+    sceneId: scene.id, shotId: shot.id, expectedSceneVersion: scene.version, spoolId: "00000000-0000-4000-8000-000000000004", captureBasis: "self" });
+  const review = { kind: "review-performance" as const, requestId: ulid(), worldId: store.worldId, productionId: production.meta.id, performanceId: record.id,
+    decision: "accept" as const, expectedReviewHash: null, expectedSelectionHash: null, select: true, expectedSceneVersion: scene.version };
+  await reviewPerformance(store, review);
+  await choosePerformance(store, review);
+  await choosePerformance(store, review);
+  const after = store.getBundle().productions.find(p => p.meta.id === production.meta.id)!;
+  assert.equal(after.performanceReview.reviews.length, 1);
+  assert.equal(after.performanceReview.selections[performanceLineKey(record.target)]?.performanceId, record.id);
+  const current = after.scenes.find(s => s.id === scene.id)!;
+  assert.deepEqual(current.cast?.[record.target.speakerSheetId]?.voice, { kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
+  assert.equal(current.version, scene.version + 1, "one cast write, however often the accept is delivered");
 });
 
 it("the scene's cast resolves into voice references that ride wherever the character speaks (SPEC-044 R-26, R-27, R-28)", async t => {

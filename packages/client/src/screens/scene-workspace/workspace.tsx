@@ -38,6 +38,7 @@ import { boardsForScene, shotHasFrame } from "./boards.js";
 import { FrameRunBar, FrameRunBoardFailures, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
 import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
+import { CharacterDialog } from "./character-dialog.js";
 import { Button } from "../../components/ui.js";
 import { Pin, Plus } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
@@ -94,6 +95,10 @@ export function SceneWorkspace({
   const [picker, setPicker] = useState<CastPickerMode | null>(null);
   const [openMember, setOpenMember] = useState<string | null>(null);
   const [placeOpen, setPlaceOpen] = useState(false);
+  // A closed picker or dialog is unmounted, and a removed modal drops focus on the body; the
+  // door that opened it takes focus back, as the Generate frames dialog's does.
+  const doorFocus = useRef<HTMLElement | null>(null);
+  const closeDoor = () => { setPicker(null); setOpenMember(null); doorFocus.current?.focus(); };
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
@@ -240,6 +245,8 @@ export function SceneWorkspace({
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
   const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
+  // What the title editor already knows: a staged proposal or a command in flight refuses a write.
+  const locked = staged !== undefined || sceneFile === undefined || commandPending;
   const write = (command: Command): boolean => {
     if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
     const sent = sceneCommand({
@@ -458,7 +465,7 @@ export function SceneWorkspace({
             />
             <div className="fy-sw__context" aria-label="Scene context" title="Every shot inherits these unless it overrides them">
               {locationName === null ? (
-                <button type="button" className="fy-sw__door" aria-haspopup="dialog" onClick={() => setPicker("location")}>
+                <button type="button" className="fy-sw__door" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("location"); }}>
                   <Plus size={10} />Add a location
                 </button>
               ) : (
@@ -485,13 +492,13 @@ export function SceneWorkspace({
                     aria-label={name}
                     aria-haspopup="dialog"
                     aria-expanded={openMember === sheetId}
-                    onClick={() => setOpenMember(sheetId)}
+                    onClick={(event) => { doorFocus.current = event.currentTarget; setOpenMember(sheetId); }}
                   >
                     {sheet === undefined ? <span aria-hidden="true">{initials(name).slice(0, 1)}</span> : <SheetPicture world={world} sheet={sheet} />}
                   </button>
                 );
               })}
-              <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" onClick={() => setPicker("character")}>
+              <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("character"); }}>
                 <Plus size={12} />
               </button>
             </div>
@@ -754,6 +761,17 @@ export function SceneWorkspace({
           onClose={() => setGenerateTarget(null)}
           onStarted={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`)}
         />
+        {openMember === null ? null : (
+          <CharacterDialog
+            key={openMember}
+            world={world}
+            production={production}
+            scene={scene}
+            sheetId={openMember}
+            onClose={closeDoor}
+            onWrite={write}
+          />
+        )}
         {picker === null ? null : (
           <CastPicker
             world={world}
@@ -762,12 +780,14 @@ export function SceneWorkspace({
             mode={picker}
             onPick={(sheetId) => {
               // A press adds and closes (R-4): a member with the time it was added, or the place.
-              write(picker === "character"
+              // A write the page refuses — a proposal staged, a command in flight — leaves the
+              // picker open rather than closing on nothing.
+              const sent = write(picker === "character"
                 ? { kind: "edit-scene", cast: { [sheetId]: { added: new Date().toISOString() } } }
                 : { kind: "edit-scene", inherits: { location: sheetId } });
-              setPicker(null);
+              if (sent) closeDoor();
             }}
-            onClose={() => setPicker(null)}
+            onClose={closeDoor}
           />
         )}
         <ShotLightbox

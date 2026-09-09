@@ -20,7 +20,7 @@ import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
   finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
-import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance } from "./audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, choosePerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
@@ -13448,9 +13448,16 @@ export class Coordinator {
           if (!store || store.worldId !== msg.worldId) throw new Error("Open the performance world first.");
           if (msg.kind === "clear-performance-selection") await clearPerformanceSelection(store, msg);
           else await reviewPerformance(store, msg);
+          // The dialog's accept also chooses the read for the scene (SPEC-044 R-15). A choice that
+          // fails after the accept landed names itself; the accept stays.
+          let chosen: string | undefined;
+          if (msg.kind === "review-performance" && msg.select && msg.decision === "accept" && msg.expectedSceneVersion !== undefined) {
+            try { await choosePerformance(store, { ...msg, expectedSceneVersion: msg.expectedSceneVersion }); }
+            catch (error) { chosen = `Accepted, but not chosen: ${describeCoordinatorError(error)}`; }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "reviewed", reason: msg.kind === "clear-performance-selection" ? "Performance selection cleared. Existing timeline audio is unchanged." : msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged." });
+            productionId: msg.productionId, status: "reviewed", reason: chosen ?? (msg.kind === "clear-performance-selection" ? "Performance selection cleared. Existing timeline audio is unchanged." : msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged.") });
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: msg.kind === "clear-performance-selection" ? "Clearing refused. Refresh the current performance selection." : "Review refused. Refresh the line, voice assignment and selection; verify the performance audio." });

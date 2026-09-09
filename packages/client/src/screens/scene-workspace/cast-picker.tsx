@@ -48,6 +48,9 @@ export function SheetPicture({ world, sheet }: { world: WorldBundle; sheet: Shee
     <>
       <span aria-hidden="true">{initials(sheet.name).slice(0, 1)}</span>
       <img
+        // Keyed by its path: a picture that failed and was then replaced on the kit is a new
+        // element, not a hidden one that never comes back.
+        key={path}
         src={mediaUrl(world.meta.slug, path)}
         alt=""
         draggable={false}
@@ -87,11 +90,13 @@ export function CastPicker({
   }, []);
   const type = mode === "character" ? "character" : "location";
   const offered = pickableSheets(world.sheets, production.meta.id).filter((sheet) => sheet.type === type && sheet.retired !== true);
-  // The production's own: what its scenes cite or stand in, plus its guests — the Cast screen's
-  // two bands, in the order the world keeps them.
+  // The production's own: every scene's cast as R-6 defines it — cited by a shot or added by
+  // hand — and its place, plus the production's guests; the rest of the world follows, in the
+  // order the world keeps them.
   const cited = new Set(
     production.scenes.flatMap((candidate) => [
       ...(candidate.inherits?.location === undefined ? [] : [candidate.inherits.location]),
+      ...Object.keys(candidate.cast ?? {}),
       ...shotsOf(candidate).flatMap((shot) => resolveCast(shot.description, world.sheets).cast.map((entry) => entry.sheet.id)),
     ]),
   );

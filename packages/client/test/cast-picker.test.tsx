@@ -87,6 +87,22 @@ describe("the cast picker (SPEC-044 R-4)", () => {
     assert.equal(closes.count, 1);
   });
 
+  it("counts a member added by hand to any scene as the production's own, and closes on Escape and on the backdrop", async () => {
+    const bundle = world([sheet("odile", "Odile"), sheet("ilo", "Ilo")]);
+    const other = bundle.productions.find((production) => production.meta.id === "saltlight")!.scenes[0]!;
+    other.cast = { ilo: { added: "2026-09-09T10:00:00.000Z" } };
+    const picks: string[] = [], closes = { count: 0 };
+    const container = await mount(bundle, "character", picks, closes);
+    assert.deepEqual(cards(container), [
+      ["In Saltlight", ["Maren Kest · in the scene", "Ilo · in the scene"]],
+      ["From the world", ["Odile"]],
+    ]);
+    const dialog = container.querySelector(".fy-castpicker")!;
+    await act(async () => { dialog.dispatchEvent(new dom.window.Event("cancel", { cancelable: true })); });
+    await click(dialog);
+    assert.equal(closes.count, 2, "Escape and a press on the backdrop both close");
+  });
+
   it("lists locations only behind the place doors, with the scene's own place inert under Change location", async () => {
     const bundle = world([sheet("the-weigh-house", "The Weigh House", { type: "location" })]);
     const picks: string[] = [], closes = { count: 0 };
