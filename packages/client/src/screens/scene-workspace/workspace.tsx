@@ -82,19 +82,27 @@ export function SceneWorkspace({
   // stays where it is in the tree and the page around it steps aside by CSS, so Flow's positions
   // and zoom and the Stage's draft survive the move without a remount.
   const [full, setFull] = useState(false);
+  // Full screen belongs to Flow and the Stage (R-37): a Flow menu entry that moves the view to
+  // Storyboard takes the page out of it, since the rows it lands on are not a view that fills.
+  const fullscreen = full && (view === "flow" || view === "stage");
   useEffect(() => {
-    if (!full) return;
+    if (!fullscreen) return;
     const onKey = (event: KeyboardEvent) => {
-      // A dialog above the view owns its own Escape; the page leaves full screen only when nothing does.
-      if (event.key === "Escape" && document.querySelector("dialog[open]") === null) setFull(false);
+      // A dialog above the view, or the Flow's own menu, owns its Escape; the page leaves full
+      // screen only when nothing does. The menu listens on window, after this document listener.
+      if (event.key === "Escape" && document.querySelector("dialog[open], .fy-swcanvas__menu") === null) setFull(false);
     };
     document.addEventListener("keydown", onKey);
-    // The production rail sits outside this screen and under the overlay: unreachable to the
-    // pointer already, and inert so the keyboard cannot tab into what nobody can see.
-    const rail = document.querySelector(".fy-prodrail");
-    rail?.setAttribute("inert", "");
-    return () => { document.removeEventListener("keydown", onKey); rail?.removeAttribute("inert"); };
-  }, [full]);
+    // The production rail and the title bar sit outside this screen and under the overlay:
+    // unreachable to the pointer already, and inert so the keyboard cannot tab into what nobody
+    // can see.
+    const chrome = [...document.querySelectorAll(".fy-prodrail, .fy-titlebar")];
+    for (const element of chrome) element.setAttribute("inert", "");
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      for (const element of chrome) element.removeAttribute("inert");
+    };
+  }, [fullscreen]);
   const [showBoards, setShowBoards] = useState(false);
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
@@ -223,6 +231,8 @@ export function SceneWorkspace({
     return shot === undefined ? shotId : `shot ${shot.number}`;
   };
   const talkToArke = () => {
+    // The dock sits beneath full screen; a pinned dock nobody can see is nothing.
+    setFull(false);
     setDock(true);
     requestAnimationFrame(() => {
       (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
@@ -452,11 +462,11 @@ export function SceneWorkspace({
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"} data-full={full ? "true" : undefined}>
+      <div className="fy-sw" data-screen="scene-detail" data-testid="scene-workspace" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined}>
         <main className="fy-sw__centre">
-          {full ? (
+          {fullscreen ? (
             <>
-              <div className="fy-sw__fullpill" aria-label="Where you are">
+              <div className="fy-sw__fullpill">
                 {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number}
                 <i aria-hidden="true" />
                 <b>{view === "flow" ? "Flow" : "Stage"}</b>
@@ -585,11 +595,6 @@ export function SceneWorkspace({
                 {shots.length - framed === 0 ? "every shot has a frame" : `${shots.length - framed} of ${shots.length} without a frame`}
               </span>
             )}
-            {view === "flow" || view === "stage" ? (
-              <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
-                <Maximize2 size={14} />
-              </button>
-            ) : null}
             {frameRun === null || frameRun.status === "completed" ? (
               <button
                 type="button"
@@ -599,6 +604,11 @@ export function SceneWorkspace({
                 onClick={() => setShowBoards((shown) => !shown)}
               >
                 {showBoards ? "Boards on" : "Show boards"}
+              </button>
+            ) : null}
+            {view === "flow" || view === "stage" ? (
+              <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
+                <Maximize2 size={14} />
               </button>
             ) : null}
           </div>
@@ -676,6 +686,7 @@ export function SceneWorkspace({
                 setBoardSheetKey(JSON.stringify(memberShotIds));
               }}
               onShowBoards={() => {
+                setFull(false);
                 setShowBoards(true);
                 setView("storyboard");
               }}

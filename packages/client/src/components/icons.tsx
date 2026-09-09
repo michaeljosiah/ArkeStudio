@@ -234,8 +234,7 @@ export const Lock = icon(
     <path d="M7 11V7a5 5 0 0 1 10 0v4" />
   </>,
 );
-// The Arke dock's unpin control and its collapsed rail (SPEC-036): the assistant is pinned beside
-// the work rather than toggled from the toolbar, so the glyph is a pin, not an eye.
+// Full screen on Flow and the Stage (SPEC-044 R-37): the glyph, and the same one reversed to leave.
 export const Maximize2 = icon(
   <>
     <polyline points="15 3 21 3 21 9" />
@@ -254,6 +253,8 @@ export const Minimize2 = icon(
   </>,
 );
 
+// The Arke dock's unpin control and its collapsed rail (SPEC-036): the assistant is pinned beside
+// the work rather than toggled from the toolbar, so the glyph is a pin, not an eye.
 export const Pin = icon(
   <>
     <path d="M12 17v5" />

@@ -474,7 +474,7 @@ describe("full screen keeps the view where it is (SPEC-044 R-38; T-15)", () => {
     assert.equal(workspace.getAttribute("data-full"), "true");
     assert.ok(q(mounted, ".fy-sw__fullpill")?.textContent?.includes("scene 4"));
     assert.match(q(mounted, ".fy-sw__fullpill")?.textContent ?? "", /Flow$/);
-    assert.equal(q(mounted, '.fy-swnode[data-kind="shot"]'), node, "the same canvas element: nothing remounted");
+    assert.ok(q(mounted, '.fy-swnode[data-kind="shot"]') === node, "the same canvas element: nothing remounted");
     assert.equal(zoomLabel(), before, "the zoom survives the move");
     assert.ok(q(mounted, ".fy-sw__fullexit"), "the reversed glyph with Esc");
     await act(async () => {
@@ -483,8 +483,42 @@ describe("full screen keeps the view where it is (SPEC-044 R-38; T-15)", () => {
       dom.document.dispatchEvent(escape);
     });
     assert.equal(workspace.getAttribute("data-full"), null, "Escape returns");
-    assert.equal(q(mounted, '.fy-swnode[data-kind="shot"]'), node, "and still nothing remounted");
+    assert.ok(q(mounted, '.fy-swnode[data-kind="shot"]') === node, "and still nothing remounted");
     assert.equal(zoomLabel(), before);
+  });
+
+  it("leaves Escape to a dialog or the menu above the view, and leaves with a menu entry that changes the view", async () => {
+    const mounted = await openFlow();
+    const workspace = q(mounted, ".fy-sw")!;
+    const escape = async () => {
+      await act(async () => {
+        const event = new dom.window.Event("keydown", { bubbles: true });
+        Object.defineProperty(event, "key", { value: "Escape" });
+        dom.document.dispatchEvent(event);
+      });
+    };
+    await click(q(mounted, ".fy-sw__full")!);
+    // A character's dialog opens from the card (R-23), an inline sibling of the view.
+    await click(q(mounted, '.fy-swnode[data-kind="ref"] .fy-swnode__open')!);
+    assert.ok(q(mounted, "dialog[open].fy-chardialog") !== null, "the dialog is open over full screen");
+    await escape();
+    assert.equal(workspace.getAttribute("data-full"), "true", "Escape with a dialog open is the dialog's");
+    await click(all(mounted, "dialog[open] button").find((button) => button.textContent === "Done")!);
+    assert.ok(q(mounted, "dialog[open]") === null, "Done closes the dialog");
+    // The Flow's own menu takes the next Escape too.
+    await act(async () => q(mounted, '.fy-swnode[data-kind="shot"]')!.dispatchEvent(contextMenu()));
+    assert.ok(menuOpen(mounted), "the menu opened");
+    await act(async () => menu(mounted)!.dispatchEvent(key("Escape")));
+    assert.equal(menuOpen(mounted), false, "Escape closes the menu");
+    assert.equal(workspace.getAttribute("data-full"), "true", "and that press was the menu's");
+    await escape();
+    assert.equal(workspace.getAttribute("data-full"), null, "the next Escape returns");
+    // Show boards moves the view to Storyboard, which never fills: the page comes back with it.
+    await click(q(mounted, ".fy-sw__full")!);
+    await act(async () => all(mounted, '.fy-swnode[data-kind="board"]')[0]!.dispatchEvent(contextMenu()));
+    await click(item(mounted, "Show boards"));
+    assert.equal(workspace.getAttribute("data-full"), null, "Storyboard is not a full-screen view");
+    assert.ok(q(mounted, ".fy-swrows") !== null, "and the rows are on screen");
   });
 });
 

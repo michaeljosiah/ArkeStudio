@@ -6994,12 +6994,14 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
  * only the view and the two overlays stay.
  */
 .fy-sw[data-full="true"] { position: fixed; inset: 0; z-index: 40; background: var(--background); grid-template-columns: minmax(0, 1fr); }
-.fy-sw[data-full="true"] > :not(.fy-sw__centre) { display: none; }
-.fy-sw[data-full="true"] .fy-sw__centre { position: relative; padding: 0 12px; }
-.fy-sw[data-full="true"] .fy-sw__centre > :not(.fy-swflow):not(.fy-swstage):not(.fy-sw__fullpill):not(.fy-sw__fullexit) { display: none; }
-.fy-sw[data-full="true"] .fy-swflow { padding: 54px 0 12px; }
-.fy-sw[data-full="true"] .fy-swstage { padding-top: 54px; }
-.fy-sw[data-full="true"] .fy-swcanvas { margin: 0 0 12px; }
+/* The dialogs are inline siblings of the column, not portals: hidden here, a door out of full screen would open a modal nobody can see. */
+.fy-sw[data-full="true"] > :not(.fy-sw__centre):not(dialog) { display: none; }
+.fy-sw[data-full="true"] .fy-sw__centre { position: relative; padding: 0; }
+/* A linear scene's Flow is the canvas itself; .fy-swflow is the container an invalid graph gets. */
+.fy-sw[data-full="true"] .fy-sw__centre > :not(.fy-swcanvas):not(.fy-swflow):not(.fy-swstage):not(.fy-sw__fullpill):not(.fy-sw__fullexit) { display: none; }
+.fy-sw[data-full="true"] .fy-swcanvas { margin: 0; border: 0; border-radius: 0; }
+.fy-sw[data-full="true"] .fy-swflow { padding: 54px 12px 12px; }
+.fy-sw[data-full="true"] .fy-swstage { padding: 54px 12px 18px; }
 .fy-sw__fullpill { position: absolute; left: 14px; top: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); box-shadow: var(--shadow-xs); padding: 5px 10px; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 .fy-sw__fullpill > i { width: 1px; height: 12px; background: var(--border); }
 .fy-sw__fullpill > b { font: 500 10.5px var(--font-sans); color: var(--foreground); }
