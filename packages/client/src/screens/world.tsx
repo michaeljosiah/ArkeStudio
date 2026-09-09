@@ -4438,20 +4438,22 @@ export function ArtifactsScreen() {
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
   // Resolve names from this world's existing records; unknown links retain their spelling.
-  const linkName = (link: string): string => {
+  const linkName = (link: string, links: readonly string[] = []): string => {
     const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
     if (name) return name;
-    for (const production of world?.productions ?? []) {
+    const owning = world?.productions.filter((production) => links.includes(production.meta.id)) ?? [];
+    const names: string[] = [];
+    for (const production of owning.length ? owning : world?.productions ?? []) {
       if (production.meta.id === link) return production.meta.title;
       const episode = production.episodes.find((candidate) => candidate.id === link);
-      if (episode) return episode.title;
+      if (episode) names.push(episode.title);
       for (const scene of production.scenes) {
-        if (scene.id === link) return scene.title;
+        if (scene.id === link) names.push(scene.title);
         const shot = orderedShots(scene).find((candidate) => candidate.id === link);
-        if (shot) return `Shot ${shot.number} · ${shot.title}`;
+        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
       }
     }
-    return link;
+    return names.length === 1 ? names[0]! : link;
   };
   const kindLabel: Record<string, string> = {
     image: "Images",
@@ -4656,7 +4658,7 @@ export function ArtifactsScreen() {
             filename.includes(".") ? filename.split(".").pop() : a.kind,
             ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
-            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
+            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map((link) => linkName(link, a.links)).join(", ")}`] : []),
           ].join(" · ");
           return (
             <div

@@ -113,8 +113,8 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
 };
 
 /** Linked names title the shelf and its viewer; the file remains the download identity (issue 1005). */
-export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string) => string): string {
-  const names = artifact.links.map(linkName).filter((name, index) => name !== artifact.links[index]);
+export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string, links?: readonly string[]) => string): string {
+  const names = artifact.links.map((link) => linkName(link, artifact.links)).filter((name, index) => name !== artifact.links[index]);
   return [...new Set(names)].slice(0, 2).join(" · ") || artifact.file.split("/").pop() || artifact.file;
 }
 

@@ -121,7 +121,7 @@ const LANGUAGE_ROW = "/settings/models?half=local&kind=llm";
 
 it("states shared weights once and gives a URL-based engine its address (#1004)", () => {
   const ids = ["h3", "h3-768", "h3-reference"];
-  const weights = ids.map((id) => component({ id, displayName: id, sizeMb: 42_400, state: "present", sharedWith: ids.filter((other) => other !== id) }));
+  const weights = ids.map((id) => component({ id, displayName: id, sizeMb: 42_400, state: "present", files: [{ key: "same-files", sizeMb: 42_400, bytesDone: 0 }] }));
   const state = stateWith([component({ id: "comfyui-runtime", state: "present", installLocation: null }), ...weights]);
   state.app.comfyui = { engine: { source: "user-url", state: "ready", locality: "local", location: "http://127.0.0.1:8188", version: null, instanceId: "test", detail: null, detected: [] }, recipes: [], checkedAt: "2026-09-09T00:00:00Z" };
   const text = plain(render("/settings/downloads", state));
@@ -132,6 +132,18 @@ it("states shared weights once and gives a URL-based engine its address (#1004)"
   weights.forEach((entry) => { entry.state = "queued"; });
   const queued = plain(render("/settings/downloads", state));
   assert.match(queued, /41\.4 GB to go/);
+});
+
+it("counts partially shared files once and subtracts their observed progress", () => {
+  const common = { key: "common", sizeMb: 1024, bytesDone: 0 };
+  const first = component({ id: "first", displayName: "H3 Video", state: "queued", sizeMb: 1536, files: [common, { key: "video", sizeMb: 512, bytesDone: 0 }] });
+  const second = component({ id: "second", displayName: "H3 Reference", state: "queued", sizeMb: 1280, files: [{ ...common }, { key: "reference", sizeMb: 256, bytesDone: 0 }] });
+  const state = stateWith([first, second]);
+  const text = plain(render("/settings/downloads", state));
+  assert.match(text, /1\.8 GB to go/);
+  assert.match(text, /256 MB additional · shared weights with H3 Video/);
+  common.bytesDone = 512 * 1024 * 1024;
+  assert.match(plain(render("/settings/downloads", state)), /1\.3 GB to go/);
 });
 
 describe("the row states the whole chain's size, and only the count of the rest (R-40, R-41)", () => {

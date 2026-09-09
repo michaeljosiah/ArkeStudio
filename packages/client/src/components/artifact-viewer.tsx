@@ -45,7 +45,7 @@ export function ArtifactViewer({
   artifacts: readonly ArtifactSidecar[];
   worldSlug: string | undefined;
   /** Names a link the way the cards do — "The Vigil", never "the-vigil". */
-  linkName: (link: string) => string;
+  linkName: (link: string, links?: readonly string[]) => string;
   onClose: () => void;
   onRetire?: (artifactId: string) => void;
 }) {
@@ -103,7 +103,7 @@ function ArtifactPanel({
   artifact: ArtifactSidecar;
   artifacts: readonly ArtifactSidecar[];
   worldSlug: string | undefined;
-  linkName: (link: string) => string;
+  linkName: (link: string, links?: readonly string[]) => string;
   titleId: string;
   onClose: () => void;
   onRetire?: (artifactId: string) => void;
@@ -370,7 +370,7 @@ function ArtifactMeta({
 }: {
   artifact: ArtifactSidecar;
   artifacts: readonly ArtifactSidecar[];
-  linkName: (link: string) => string;
+  linkName: (link: string, links?: readonly string[]) => string;
 }) {
   const replacement = artifacts.find((a) => a.supersedes === artifact.id);
   const generation = artifact.generation;
@@ -387,14 +387,14 @@ function ArtifactMeta({
       </Row>
       <Row label="created">{shortDateTime(artifact.created)}</Row>
       <Row label="hash">{`${artifact.hash.slice(0, 19)}…`}</Row>
-      <Row label="links">{artifact.links.length > 0 ? artifact.links.map(linkName).join(", ") : "—"}</Row>
+      <Row label="links">{artifact.links.length > 0 ? artifact.links.map((link) => linkName(link, artifact.links)).join(", ") : "—"}</Row>
       {artifact.production !== undefined && <Row label="production">{artifact.production}</Row>}
       {generation !== undefined && <Row label="model">{`${generation.provider} · ${generation.model}`}</Row>}
       {generation !== undefined && generation.source === "bench" && (
         <Row label="from">{`take ${generation.takeNumber} · ${generation.sessionId}`}</Row>
       )}
       {generation !== undefined && generation.source === "character-reference" && (
-        <Row label="from">{`${generation.workflow} · ${linkName(generation.sheetId)}`}</Row>
+        <Row label="from">{`${generation.workflow} · ${linkName(generation.sheetId, artifact.links)}`}</Row>
       )}
       {artifact.boundaryExtraction !== undefined && (
         <Row label="cut from">{artifact.boundaryExtraction.sourceTakeId}</Row>

@@ -61,6 +61,29 @@ function render(jobs: Job[]): string {
 }
 
 describe("a failed job's recovery route on the Activity row (issue 226)", () => {
+  it("names queued prose reads by their authored subject and production", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!, production = world.productions[0]!, scene = production.scenes[0]!;
+    const shot = orderedShots(scene)[0]!;
+    const chapter = { id: "chapter-one", file: "chapters/01.md", order: 1, title: "The last bell", status: "draft", version: 1 };
+    production.chapters.push(chapter);
+    world.series.push({ id: "bell-watch", version: 1, title: "Bell Watch", engine: "The bells answer", seasons: [], created: TODAY, updated: TODAY });
+    const cases = [
+      { id: world.canon[0]!.id, heading: "Canon", name: world.canon[0]!.title },
+      { id: shot.id, heading: "Shot script", name: shot.title, production: true },
+      { id: `${production.meta.id}/treatment`, heading: "Treatment", name: "Treatment", production: true },
+      { id: `${production.meta.id}/question`, heading: "The question it answers", name: "The question it answers", production: true },
+      { id: "bell-watch", heading: "Series engine", name: "Bell Watch" },
+      { id: `${production.meta.id}/chapters/${chapter.id}#0`, heading: "Older chapter title", name: chapter.title, production: true },
+      { id: "bible", heading: "The drowned city", name: "Bible · The drowned city", purpose: "bible-section" },
+    ];
+    for (const item of cases) {
+      const label = activityJobLabels(state, failed({ target: { kind: "voice-preview", id: `${item.id}/elevenlabs/model/voice` },
+        params: { purpose: item.purpose ?? "prose", sectionHeading: item.heading } })).target;
+      assert.ok(label.includes(item.name), label);
+      if (item.production) assert.ok(label.includes(production.meta.title), label);
+    }
+  });
   it("names work and models consistently without borrowing another world's entities (#1005)", () => {
     const state = structuredClone(FIXTURE_STATE);
     const production = state.world!.productions[0]!;

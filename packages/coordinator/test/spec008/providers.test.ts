@@ -45,6 +45,33 @@ async function makeService(probes: CapabilityProbe[] | Error) {
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("completes testing and fingerprint refresh in either order for the same saved key", { timeout: 10_000 }, async () => {
+    for (const metadataFirst of [true, false]) {
+      const dir = await tempDir("arke-provider-concurrent-test-");
+      const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+      await credentials.set("fal", "same-saved-key");
+      let finishMetadata!: (value: string) => void;
+      let finishKey!: (value: string) => void;
+      let finishProbe!: (value: CapabilityProbe[]) => void;
+      let entered!: () => void;
+      const probing = new Promise<void>((resolve) => { entered = resolve; });
+      const probe = new Promise<CapabilityProbe[]>((resolve) => { finishProbe = resolve; });
+      const service = new ProviderService(credentials, { fal: { validateKey: async () => { entered(); return probe; } } }, null);
+      await service.init();
+      credentials.fingerprint = () => new Promise((resolve) => { finishMetadata = resolve; });
+      credentials.get = () => new Promise((resolve) => { finishKey = resolve; });
+      const configuring = service.setConfigured("fal", true);
+      const validating = service.validate("fal");
+      if (metadataFirst) { finishMetadata("1234ABCD"); await configuring; }
+      finishKey("same-saved-key");
+      await probing;
+      if (!metadataFirst) { finishMetadata("1234ABCD"); await configuring; }
+      finishProbe([{ capability: "image", available: true }]);
+      const status = await validating;
+      assert.equal(status.validation, "valid");
+      assert.equal(status.credentialFingerprint, "1234ABCD");
+    }
+  });
   it("refreshes credential fingerprints and discards validation of a replaced key (#1004)", async () => {
     const dir = await tempDir("arke-provider-identity-");
     const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});

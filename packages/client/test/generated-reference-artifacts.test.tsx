@@ -69,6 +69,23 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the Artifacts shelf holds what a character generated", () => {
+  it("resolves reused scene and shot ids inside the artifact's linked production", () => {
+    const original = FIXTURE_STATE.world!.productions[0]!;
+    const later = structuredClone(original);
+    later.meta.id = "later-production";
+    later.meta.title = "Later production";
+    const scene = later.scenes[0]!;
+    scene.title = "Later scene";
+    const shot = orderedShots(scene)[0]!;
+    shot.title = "Later shot";
+    for (const [id, title] of [[scene.id, scene.title], [shot.id, `Shot ${shot.number} · ${shot.title}`]]) {
+      const state = withArtifact(generatedReference({ links: [later.meta.id, id!] }));
+      state.world = { ...state.world!, productions: [...state.world!.productions, later] };
+      const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, state);
+      const opener = parseHTML(html).document.querySelector('[title="maren-kest-main-photo-candidate.png"]')!;
+      assert.equal(opener.getAttribute("aria-label"), `Open Later production · ${title} — image`);
+    }
+  });
   it("names production, scene and shot links from the current world", () => {
     const production = FIXTURE_STATE.world!.productions[0]!;
     const scene = production.scenes[0]!;

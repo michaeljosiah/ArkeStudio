@@ -12,8 +12,11 @@ import { PerformanceTargetSchema } from "./performance.js";
 export function activityJobLabels(state: ClientState | null | undefined, job: Job): { target: string; model: string } {
   const world = state?.world?.meta.worldId === job.worldId ? state.world : null;
   const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
-  const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId);
-  const targetId = job.target.id?.split("/")[0];
+  const targetParts = job.target.id?.split("/") ?? [];
+  const targetId = targetParts[0];
+  const prose = job.target.kind === "voice-preview" && job.params.purpose === "prose";
+  const proseProductions = prose ? world?.productions.filter((candidate) => candidate.meta.id === targetId || candidate.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === targetId))) ?? [] : [];
+  const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId) ?? (proseProductions.length === 1 ? proseProductions[0] : undefined);
   const performanceInput = (job.target.kind === "performance-generation" ? job.params.performanceGeneration : job.target.kind === "performance-conversion" ? job.params.performanceConversion : undefined) as { target?: unknown } | undefined;
   const parsedTarget = PerformanceTargetSchema.safeParse(performanceInput?.target);
   const performance = parsedTarget.success && parsedTarget.data.productionId === job.productionId ? parsedTarget.data : undefined;
@@ -28,7 +31,13 @@ export function activityJobLabels(state: ClientState | null | undefined, job: Jo
   const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
   const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
   const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
-  const subject = [speaker?.name, sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
+  const proseName = prose ? world?.canon.find((candidate) => candidate.id === targetId)?.title
+    ?? world?.series.find((candidate) => candidate.id === targetId)?.title
+    ?? (production && !shot && typeof job.params.sectionHeading === "string" ? job.params.sectionHeading : undefined) : undefined;
+  const bible = job.target.kind === "voice-preview" && job.params.purpose === "bible-section";
+  const chapterName = prose && targetParts[1] === "chapters" ? production?.chapters.find((chapter) => chapter.id === targetParts[2]?.split("#")[0])?.title : undefined;
+  const subject = [speaker?.name, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
+    ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
   const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
   const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
   return { target, model };

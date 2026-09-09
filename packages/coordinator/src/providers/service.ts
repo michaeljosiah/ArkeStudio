@@ -21,6 +21,8 @@ export interface KeyValidator {
 
 export class ProviderService {
   private readonly statuses = new Map<ProviderId, ProviderStatus>();
+  private readonly credentialGenerations = new Map<ProviderId, number>();
+  private readonly validationGenerations = new Map<ProviderId, number>();
 
   constructor(
     private readonly credentials: CredentialStore | null,
@@ -69,10 +71,12 @@ export class ProviderService {
 
   /** A credential landed or was cleared; validation resets to untested. */
   async setConfigured(id: ProviderId, configured: boolean): Promise<void> {
-    const reset = this.patch(id, { configured, credentialFingerprint: undefined, validation: "untested", probes: [], lastValidated: undefined, fault: null });
+    const generation = (this.credentialGenerations.get(id) ?? 0) + 1;
+    this.credentialGenerations.set(id, generation);
+    this.patch(id, { configured, credentialFingerprint: undefined, validation: "untested", probes: [], lastValidated: undefined, fault: null });
     // Optional display metadata cannot delay invalidation or make a durable save look failed.
     const credentialFingerprint = configured ? await this.credentials?.fingerprint(id).catch(() => undefined) : undefined;
-    if (this.statuses.get(id) === reset) this.patch(id, { credentialFingerprint });
+    if (this.credentialGenerations.get(id) === generation) this.patch(id, { credentialFingerprint });
   }
 
   /**
@@ -80,7 +84,10 @@ export class ProviderService {
    * unlocked; the probes themselves are the real answer either way.
    */
   async validate(id: ProviderId): Promise<ProviderStatus> {
-    const before = this.statuses.get(id);
+    const credentialGeneration = this.credentialGenerations.get(id);
+    const validationGeneration = (this.validationGenerations.get(id) ?? 0) + 1;
+    this.validationGenerations.set(id, validationGeneration);
+    const current = () => this.credentialGenerations.get(id) === credentialGeneration && this.validationGenerations.get(id) === validationGeneration;
     const validator = this.validators[id];
     if (!validator) {
       // A local provider whose runtime was never wired has no client to ask, so there is nothing
@@ -99,7 +106,7 @@ export class ProviderService {
     // runtime needs none, and the external tool holds its own.
     const external = PROVIDERS[id].credential === "external";
     const key = PROVIDERS[id].credential === "in-app" ? ((await this.credentials?.get(id)) ?? null) : "";
-    if (this.statuses.get(id) !== before) return this.statuses.get(id)!;
+    if (!current()) return this.statuses.get(id)!;
     if (key === null) {
       return this.patch(id, {
         validation: "invalid",
@@ -110,10 +117,10 @@ export class ProviderService {
         })),
       });
     }
-    const testing = this.patch(id, { validation: "testing" });
+    this.patch(id, { validation: "testing" });
     try {
       const probes = await validator.validateKey(key);
-      if (this.statuses.get(id) !== testing) return this.statuses.get(id)!;
+      if (!current()) return this.statuses.get(id)!;
       const anyAvailable = probes.some((p) => p.available);
       void this.log?.append({ kind: "provider.validated", provider: id, probes });
       return this.patch(id, {
@@ -126,7 +133,7 @@ export class ProviderService {
         ...(external ? { configured: anyAvailable } : {}),
       });
     } catch (err) {
-      if (this.statuses.get(id) !== testing) return this.statuses.get(id)!;
+      if (!current()) return this.statuses.get(id)!;
       const message = err instanceof Error ? err.message : String(err);
       void this.log?.append({ kind: "provider.validation-failed", provider: id, message });
       return this.patch(id, {
@@ -140,6 +147,7 @@ export class ProviderService {
 
   /** A credential failed mid-session — a provider fault naming the provider, never a work failure (R-4). */
   markFault(id: ProviderId, message: string): ProviderStatus {
+    this.validationGenerations.set(id, (this.validationGenerations.get(id) ?? 0) + 1);
     // The category rides the record (SPEC-032 R-20.9): the fault correlation must not offer a
     // key row for a quota that a replaced key would not refill, and stamping at the producer is
     // what keeps that a fact of the record rather than a re-reading of its sentence.
