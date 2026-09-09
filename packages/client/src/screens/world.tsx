@@ -139,6 +139,14 @@ function limitedFeatureCopy(copy: string): string {
 export function WorldLayout() {
   const { worldId } = useParams();
   const location = useLocation();
+  /*
+   * Every route test on this layout reads this rather than `location.pathname` (codex,
+   * 2026-09-09). A bookmarked or typed address may end in a slash — `/w/<id>/chat/` — and the
+   * router renders the route either way, so a check anchored on the end of the path quietly
+   * says no. That answer decides whether a screen is a fixed frame, and getting it wrong puts
+   * the composer, Save or the key art back below the fold (issue 1007).
+   */
+  const path = location.pathname.replace(/\/+$/, "");
   const world = useOpenWorldGuard(worldId);
   const refusal = useWorldOpenRefusal(worldId);
   // One Cast tab for the world's three kinds of sheet (design 54c). The ledgers keep their
@@ -156,14 +164,14 @@ export function WorldLayout() {
     ["artifacts", "Artifacts"],
     ["productions", "Productions"],
   ] as const;
-  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(location.pathname);
+  const onSheets = /\/(cast|locations|factions|props)(\/|$)/.test(path);
   if (
-    location.pathname.endsWith("/art-direction/propose") ||
-    location.pathname.endsWith("/main-photo") ||
-    location.pathname.endsWith("/model-sheet") ||
+    path.endsWith("/art-direction/propose") ||
+    path.endsWith("/main-photo") ||
+    path.endsWith("/model-sheet") ||
     // The bench is a fixed workspace with its own breadcrumb chrome (design 68b) — the pill
     // nav and hero scroll of the world pages would sit on top of its three columns.
-    location.pathname.includes("/artifacts/bench")
+    path.includes("/artifacts/bench")
   ) {
     return (
       <div className="fy-app">
@@ -182,8 +190,8 @@ export function WorldLayout() {
       </div>
     );
   }
-  const onArtDirection = location.pathname.endsWith("/art-direction");
-  const onCast = location.pathname.endsWith("/cast");
+  const onArtDirection = path.endsWith("/art-direction");
+  const onCast = path.endsWith("/cast");
   /*
    * The world screens that are a fixed frame rather than a page that scrolls: art direction's
    * two picture bands, and the gate screens, whose two columns each scroll inside themselves.
@@ -194,8 +202,8 @@ export function WorldLayout() {
    */
   const fixedFrame =
     onArtDirection ||
-    /\/(chat|edit)(\/[^/]+)?$/.test(location.pathname) ||
-    /\/canon\/(new|[^/]+\/thread)$/.test(location.pathname);
+    /\/(chat|edit)(\/[^/]+)?$/.test(path) ||
+    /\/canon\/(new|[^/]+\/thread)$/.test(path);
   return (
     <div className="fy-app">
       <AppChrome
@@ -211,7 +219,7 @@ export function WorldLayout() {
           column that scrolls, so it is the one that has to be told how much room it has. The
           column measures it instead of subtracting a guessed constant from the viewport: the
           nav above it is sticky and therefore in flow, and any condition banner is too. */}
-      <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", location.pathname.includes("/productions/setup/") && "fy-content--setup")}>
+      <div className={cx("fy-content", fixedFrame && "fy-content--fill", onCast && "fy-content--cast", path.includes("/productions/setup/") && "fy-content--setup")}>
         <nav className="fy-pillnav">
           {nav.map(([slug, label]) => (
             slug === "cast" && onSheets ? (
@@ -260,7 +268,9 @@ function WorldConditionBanners() {
   // top of nine screens laid out against the window, which is what pushed Save off the foot
   // of the edit sheet, the composer off World Chat and the key art below the fold. It is one
   // row now — title, cause, date, two presses — rather than a callout with a paragraph in it.
-  const onOverview = location.pathname.replace(/\/$/, "") === `/w/${worldId}`;
+  // Trailing slashes stripped, for the reason WorldLayout strips them: `/w/<id>/` is the
+  // Overview, and a typed address that ends in one must not be read as some other tab.
+  const onOverview = location.pathname.replace(/\/+$/, "") === `/w/${worldId}`;
   const build = clientState?.app.builds.find((candidate) => candidate.worldId === worldId) ?? null;
   const notice = onOverview && build ? foundingNote(build) : null;
   const hasConditions = world.externalEdits.length > 0 || world.problems.length > 0 || notice !== null;

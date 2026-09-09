@@ -44,6 +44,18 @@ describe("the world's fixed-frame screens (issue 1007)", () => {
     }
   });
 
+  /*
+   * A bookmarked or typed address may end in a slash, and the router renders the route either
+   * way (codex, 2026-09-09). A check anchored on the end of the path quietly said no to those,
+   * which took the fill off and put the composer, Save or the key art back below the fold.
+   */
+  it("reads a trailing slash as the same route", () => {
+    for (const path of [`${W}/art-direction`, `${W}/chat`, `${W}/cast/maren-kest/edit`]) {
+      assert.match(at(`${path}/`), /fy-content fy-content--fill/, `${path}/ is still a fixed frame`);
+    }
+    assert.match(at(`${W}/`), /did not land|fy-app/, "and /w/<id>/ still renders the world");
+  });
+
   it("leaves the pages that scroll alone", () => {
     for (const path of [W, `${W}/cast`, `${W}/canon`, `${W}/artifacts`, `${W}/productions`, `${W}/bible`]) {
       assert.doesNotMatch(at(path), /fy-content--fill/, path);
