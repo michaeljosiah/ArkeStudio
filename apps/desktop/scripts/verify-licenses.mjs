@@ -46,8 +46,13 @@ for (const [what, path, holds, optional] of selfClaims) {
   let text;
   try {
     text = readFileSync(join(repoRoot, path), "utf8");
-  } catch {
-    if (!optional) failures.push(`${what}: ${path} could not be read to verify Arke's own licence`);
+  } catch (error) {
+    // Optional means "may legitimately be absent", not "may fail to read". A private spec that
+    // is present but unreadable — a link pointing at a directory, OneDrive denying access mid-sync
+    // — would otherwise pass the gate silently while the comment above promises it was verified,
+    // which is the failure this whole check exists to prevent.
+    if (optional && error?.code === "ENOENT") continue;
+    failures.push(`${what}: ${path} could not be read to verify Arke's own licence (${error?.code ?? error})`);
     continue;
   }
   let ok = false;
