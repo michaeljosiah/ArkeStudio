@@ -378,6 +378,14 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
  * was the most ragged screen in the app: 528 / 508 / 450 against that fixed 424.
  */
 .fy-worldcard__frame { width: 100%; aspect-ratio: 256 / 286; }
+/*
+ * The dashed Create tile's frame carries both classes, and `__empty` fills its box — which was
+ * harmless while the card was a fixed height and is not now that the row stretches: a definite
+ * card height made that `height: 100%` resolve against the whole card and swallow the aspect
+ * ratio, so the placeholder's picture ran down through the space a real card gives its logline
+ * and meta. The frame keeps the frame's geometry wherever it is also the empty state.
+ */
+.fy-worldcard__frame.fy-worldcard__empty { height: auto; aspect-ratio: 256 / 286; }
 .fy-worldcard__name {
   margin: 14px 4px 0;
   font: 600 20px/24px var(--font-sans);
@@ -4090,6 +4098,13 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-artdirection__badges { display: flex; gap: 8px; margin-top: 22px; }
 .fy-artdirection__badges span { padding: 5px 11px; border-radius: 999px; background: var(--secondary); font: 400 10.5px var(--font-mono); }
 .fy-artdirection__badges span + span { border: 1px solid var(--border); background: var(--background); color: var(--muted-foreground); }
+.fy-artdirection__safety {
+  font: 400 11px/1.6 var(--font-sans);
+  color: var(--muted-foreground);
+  margin-top: 14px;
+  border-left: 2px solid var(--border);
+  padding-left: 12px;
+}
 .fy-artdirection__derived {
   font: 400 11px/1.6 var(--font-mono);
   color: var(--neutral-600);
@@ -8250,7 +8265,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
    than wrapping, because a band that can grow is a band that can push a page off screen. */
 .fy-buildnotice {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
   min-width: 0;
   padding: 8px 14px;
@@ -8260,14 +8275,21 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   background: var(--card);
   font: 400 12.5px var(--font-sans);
 }
-.fy-buildnotice__dot { width: 6px; height: 6px; flex: none; border-radius: 999px; background: var(--warning); }
+.fy-buildnotice__dot { width: 6px; height: 6px; flex: none; border-radius: 999px; background: var(--warning); margin-top: 6px; }
 .fy-buildnotice__title { flex: none; font-weight: 600; }
+/*
+ * The cause wraps to two lines rather than ellipsising to one (codex round four). R-46 puts the
+ * cause on the notice, and a `title` is a copy of it that a keyboard or a touch screen cannot
+ * reach — so a long provider refusal was, for those readers, not stated at all. Two lines is a
+ * bound: the band can grow by one line and no further, which is what keeps it a row.
+ */
 .fy-buildnotice__cause {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   color: var(--muted-foreground);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .fy-buildnotice__when { margin-left: auto; flex: none; font: 400 11px var(--font-mono); color: var(--neutral-400); }
 .fy-buildnotice__act {

@@ -174,6 +174,18 @@ describe("where the completion notice draws (issue 1007)", () => {
     assert.match(html, /Dismiss/, "and the press that ends it (R-45)");
     assert.match(html, /Activity/, "and the one that acts (R-47)");
   });
+
+  /*
+   * R-46 puts the cause on the notice, and it has to be on the notice for everyone (codex round
+   * four). The cause was clipped to one line with a `title` holding the rest — a copy a keyboard
+   * or a touch screen cannot reach, which for those readers is the cause not being stated at all.
+   */
+  it("states the cause on the row itself, not in a tooltip", () => {
+    const html = at(`/w/${FIXTURE_WORLD_ID}`);
+    const row = /<div class="fy-buildnotice"[\s\S]*?<\/div>/.exec(html)?.[0] ?? "";
+    assert.ok(row.includes("openai: image generation failed"), "the row carries it");
+    assert.doesNotMatch(row, /title="openai/, "and does not hide the rest behind a hover");
+  });
 });
 
 describe("Activity derives rows from the build record (SPEC-031 R-48)", () => {

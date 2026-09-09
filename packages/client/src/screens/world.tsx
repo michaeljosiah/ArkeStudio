@@ -281,7 +281,7 @@ function WorldConditionBanners() {
         <div className="fy-buildnotice" role="status">
           <span className="fy-buildnotice__dot" aria-hidden="true" />
           <span className="fy-buildnotice__title">{notice.title}</span>
-          {notice.reason && <span className="fy-buildnotice__cause" title={notice.reason}>{notice.reason}</span>}
+          {notice.reason && <span className="fy-buildnotice__cause">{notice.reason}</span>}
           {notice.meta !== "" && <span className="fy-buildnotice__when">{notice.meta}</span>}
           <button type="button" className="fy-buildnotice__act" onClick={() => navigate(notice.action!.to)}>
             {notice.action!.label}

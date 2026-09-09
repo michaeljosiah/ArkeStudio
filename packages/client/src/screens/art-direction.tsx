@@ -648,6 +648,14 @@ export function ArtDirectionScreen() {
         </div>
         {/* A state, not a case for one: what "derived" means is the dv-rule's to say. */}
         {direction.derived && <div className="fy-artdirection__derived">derived from tone and genre</div>}
+        {/*
+          The one thing this page owes that is not a label (SPEC-017 §2.5, codex round four):
+          a reference carries its subject as well as its treatment, so a look with a face in it
+          arrives in other characters' work. §2.5 puts that on this surface by name, and it is
+          the surface with Upload on it — the one path that can put a portrait here without a
+          dialog. The paragraph arguing it is the spec's; the clause is the screen's.
+        */}
+        <p className="fy-artdirection__safety">A plate travels safely. A face travels with it.</p>
         {/* The door says what pressing it does (issue 747). Behind it, the person's own commit
             is `Set the look · v2` and lands on the press — nothing is queued and no approvals
             screen sees it — so "Propose a change" set up a review step that never came. The

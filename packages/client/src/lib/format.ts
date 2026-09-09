@@ -32,6 +32,13 @@ export function relativeDate(iso: string | undefined, now: Date = new Date()): s
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   const minutes = Math.floor((now.getTime() - d.getTime()) / 60000);
+  /*
+   * A stamp in the future is not `now` (codex, 2026-09-09). A world folder is portable, so it
+   * can arrive saved by a machine whose clock is ahead — or this one's can be put back — and a
+   * negative age satisfies every branch below, which would report a save made tomorrow as this
+   * minute's. The date says what the age cannot, and shows the discrepancy rather than hiding it.
+   */
+  if (minutes < 0) return shortDate(iso);
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.floor(minutes / 60);

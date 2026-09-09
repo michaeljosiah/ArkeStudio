@@ -522,6 +522,19 @@ describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
     assert.doesNotMatch(declarationsFor(".fy-worldcard"), /width:\s*306px/, "no fixed card width is left");
   });
 
+  /*
+   * The dashed Create tile's frame carries both classes, and `__empty` fills its box — harmless
+   * while the card was a fixed height, and not once the row stretches: a definite card height
+   * made that `height: 100%` resolve against the whole card and swallow the aspect ratio, so
+   * the placeholder's picture ran down through the space a real card gives its logline and its
+   * meta (codex round four).
+   */
+  it("keeps the Create tile's frame in the frame's own proportion", () => {
+    const both = declarationsFor(".fy-worldcard__frame.fy-worldcard__empty");
+    assert.match(both, /aspect-ratio:\s*256 \/ 286/, "the same proportion as a real card's frame");
+    assert.match(both, /height:\s*auto/, "and not the height the empty state would fill");
+  });
+
   it("pins every band on the card", () => {
     // The frame keeps its drawn proportion rather than its drawn pixels; the bands under it are
     // still fixed, which is what keeps two cards in a row the same height.

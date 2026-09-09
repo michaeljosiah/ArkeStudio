@@ -543,6 +543,22 @@ describe("key art on the art-direction page (design 64)", () => {
   });
 
   /*
+   * The one thing this page owes that is not a label (SPEC-017 §2.5, codex round four). A
+   * reference carries its subject as well as its treatment, so a look with a face in it arrives
+   * in other characters' work — and §2.5 puts that on this surface by name, because this is the
+   * surface with Upload on it, the one path that can put a portrait here without a dialog.
+   */
+  it("says a plate is safer than a portrait, whether or not the look is derived", () => {
+    for (const bundle of [
+      { keyArt: "world-art.png" },
+      { keyArt: "world-art.png", artDirection: { ...WORLD.artDirection, derived: true } },
+    ]) {
+      const html = renderArtDirection(bundle);
+      assert.match(html, /A plate travels safely\. A face travels with it\./, "SPEC-017 §2.5");
+    }
+  });
+
+  /*
    * The other half of "nothing happens" (issue 291's sequel): an upload lands the new picture
    * under the same name, the URL never changes, and the <img> the browser already holds is never
    * asked for again — so the frame under the Upload button goes on showing what was replaced.

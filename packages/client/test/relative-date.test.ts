@@ -34,6 +34,18 @@ describe("how long ago, in the fewest characters that carry it", () => {
     assert.equal(relativeDate(old, AT), shortDate(old));
   });
 
+  /*
+   * A world folder is portable, so it can arrive saved by a machine whose clock is ahead — or
+   * this one's can be put back. A negative age satisfies every step above, which reported a save
+   * made tomorrow as this minute's; the date shows the discrepancy instead (codex round four).
+   */
+  it("does not call a stamp from the future now", () => {
+    const ahead = new Date(AT.getTime() + 90 * 60_000).toISOString();
+    assert.equal(relativeDate(ahead, AT), shortDate(ahead));
+    const tomorrow = new Date(AT.getTime() + 86_400_000).toISOString();
+    assert.equal(relativeDate(tomorrow, AT), shortDate(tomorrow));
+  });
+
   it("says nothing it cannot know", () => {
     assert.equal(relativeDate(undefined), "—");
     assert.equal(relativeDate("not a date"), "not a date", "an unparseable stamp is shown as it is");
