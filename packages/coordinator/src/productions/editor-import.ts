@@ -13,6 +13,14 @@ import { applyTimelineCommand } from "./timeline.js";
 
 export type EditorImport = NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>;
 
+/**
+ * How long one import spends drawing posters, all files together. The maker allows fifteen
+ * seconds a file, and the import's answer — and with it every Cut command — waits for the loop;
+ * sixteen videos ffmpeg cannot read would have held both for four minutes over a derived cache
+ * the next open backfills anyway.
+ */
+const IMPORT_POSTER_BUDGET_MS = 20_000;
+
 /** Filing survives a stale edit; only placement and Library membership form the timeline transaction. */
 export async function importEditorMedia(store: WorldStore, sources: readonly (string | null)[], editor: EditorImport, options: {
   mediaProbe?: MediaProbe;
@@ -37,6 +45,7 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   const lane = typeof destination === "object" && "trackId" in destination
     ? timeline.tracks.find(track => track.id === destination.trackId) ?? null : null;
   const artifacts: ArtifactSidecar[] = [], failures: Array<{ index: number; reason: string }> = [];
+  const posterDeadline = Date.now() + IMPORT_POSTER_BUDGET_MS;
   for (const [index, sourcePath] of sources.entries()) {
     if (options.abandoned()) throw new Error("The world closed during import");
     if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
@@ -52,8 +61,10 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
         const id = result.artifact.id;
         const artifact = store.getBundle().artifacts.find(artifact => artifact.id === id) ?? result.artifact;
         // Before the snapshot that carries the artifact, so the Library's first row already has
-        // its picture; a poster that could not be drawn leaves the row as it was before posters.
-        await writeArtifactPoster(store, artifact, options.poster, (reason) => options.onPosterUnavailable?.(artifact.id, reason));
+        // its picture; a poster that could not be drawn leaves the row as it was before posters,
+        // and one the batch has no time left for is the next open's to draw.
+        const posterMs = posterDeadline - Date.now();
+        if (posterMs > 0) await writeArtifactPoster(store, artifact, options.poster, (reason) => options.onPosterUnavailable?.(artifact.id, reason), { timeoutMs: posterMs });
         const laneRefused = lane === null ? null : laneRefusal(artifact, AUDIO_TRACK_KINDS.has(lane.kind));
         /*
          * Dedup is by bytes across the world and keeps the owner (PR 1039): a file — or a borrow

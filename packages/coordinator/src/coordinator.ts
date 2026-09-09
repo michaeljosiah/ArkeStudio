@@ -12367,11 +12367,13 @@ export class Coordinator {
             });
             for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
           }
-          await this.refreshWorldSnapshot(msg.worldId);
+          // The destination store itself, not a reload by id: a world opened since the copy
+          // began would be closed and this one reopened underneath it (`refreshIfStillOpen`).
+          this.refreshIfStillOpen(store);
           this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
         } catch (error) {
           this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
-          if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
+          this.refreshIfStillOpen(store);
         }
         return;
       }

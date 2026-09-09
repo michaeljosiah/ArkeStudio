@@ -235,6 +235,20 @@ describe("queue notification", () => {
     assert.equal(note?.action, undefined);
   });
 
+  it("reads a borrow from another world as an import, and its refusal without an Activity to go to", () => {
+    const copied = enqueueNote(result({ command: "borrow-artifacts", disposition: "not-queued", requestedCount: 1, acceptedJobIds: [] }), [], manifest);
+    assert.equal(copied?.title, "1 file imported");
+    assert.equal(copied?.action, undefined);
+    const refused = enqueueNote(
+      result({ command: "borrow-artifacts", disposition: "rejected", requestedCount: 0, acceptedJobIds: [], failures: [{ index: 0, reason: "That world is unavailable." }] }),
+      [],
+      manifest,
+    );
+    assert.ok(refused, "the refusal is said");
+    assert.equal(refused.action, undefined, "nothing was queued, so no Activity row to go to");
+    assert.match(refused.reason ?? "", /That world is unavailable/);
+  });
+
   it("names failed files when only part of a Library upload lands", () => {
     const note = enqueueNote(
       result({

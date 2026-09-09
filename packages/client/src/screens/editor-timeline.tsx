@@ -313,8 +313,12 @@ export function PictureTrack({
       totalFrames: span,
       clip,
       gesture,
-      // The clip's own edges are left out, or a small move would stick where it started.
-      snapFrames: snapFrames === null ? null : snapFrames(clipId),
+      // The clip's own edges are left out, or a small move would stick where it started. A move
+      // on this lane sends an order, not a frame: the relay puts the clip at its ordinal slot,
+      // which need not share an edge the ghost snapped to on another lane, and the clip would
+      // jump off the advertised snap on release. So a sequence move offers no snap; the slot
+      // drawn during the drag is where it lands. Trims snap as before.
+      snapFrames: snapFrames === null || gesture === "move" ? null : snapFrames(clipId),
       onUpdate: (update) => {
         if (gesture === "move") {
           setDrag(update);

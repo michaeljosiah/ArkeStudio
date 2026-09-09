@@ -4380,6 +4380,14 @@ function ArtifactPanel({
   // Scene controls exist only where there are shots to frame by (issue 1033): an artifact-only
   // cut has no scene to select and no scene to add.
   const hasShots = (production?.scenes ?? []).some((scene) => orderedShots(scene).length > 0);
+  // The panel outlives a production change. A shot-only filter chosen for the last production
+  // has no control left on one without shots, and would empty the list with nothing pressed to
+  // say why; it falls back to everything.
+  useEffect(() => {
+    if (hasShots) return;
+    if (filter === "needs-take") setFilter("all");
+    if (kindFilter === "shots") setKindFilter("all");
+  }, [hasShots, production?.meta.id, filter, kindFilter]);
   // The panel can outlive a production change (the router keeps the screen); a scene of the last
   // production is no filter here. Nor is any scene while another world's shelf is shown: its
   // files belong to no scene of this production, so the control goes and the scope is every row.

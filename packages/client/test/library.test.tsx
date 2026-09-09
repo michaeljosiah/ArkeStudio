@@ -316,6 +316,24 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("drops a shot-only filter when the production shown has no shots", async () => {
+    const state = stateWithBells();
+    const screen = await mount(state);
+    try {
+      const chip = (label: string) => [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === label)!;
+      await act(async () => chip("Needs a take").click());
+      assert.ok(rows(screen).every((key) => key.startsWith("shot:")), "shots only");
+      // The same panel, a production with no shots under it: the filter has no control left and no meaning.
+      const without = structuredClone(state) as ClientState;
+      without.world!.productions[0]!.scenes = [];
+      await act(async () => __setStateForTest(without));
+      assert.equal(chip("All").getAttribute("aria-pressed"), "true", "back to everything");
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`), "and the files are listed again");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("opens on the audio filter when the Audio route lands here (R-1)", async () => {
     const screen = await mount(stateWithBells(), "?library=audio");
     try {

@@ -186,6 +186,7 @@ describe("a move on the sequence (issue 1034)", () => {
       assert.notEqual(second.style.left, restingLeft, "by sliding, not swapping");
       assert.ok(screen.container.querySelector("[data-testid='drag-chip']")?.textContent?.includes(formatFrames(144, 24)), "the chip states where the slot begins: sh_13's tail, less sh_12's length");
       assert.equal(commandsSent(screen).length, 0, "the record is untouched until release");
+      assert.equal(screen.container.querySelector("[data-testid='snap-line']"), null, "a sequence move offers no snap: the order it sends could not honour one");
       await act(async () => pointer(first, "pointerup", { clientX: 100 + px(150, span) }));
       assert.deepEqual(commandsSent(screen).map((message) => message.commands), [[{ kind: "move-to-order", clipId: "cl_sh-12", index: 1 }]]);
       assert.equal(first.classList.contains("fy-pictclip--ghost"), false);

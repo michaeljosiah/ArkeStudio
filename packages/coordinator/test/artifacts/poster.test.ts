@@ -24,13 +24,16 @@ import type { MediaProbe } from "../../src/media/probe.js";
  * imported, drawn later for the ones that were filed before, and never a failed import.
  */
 
-function maker(): { maker: TakePosterMaker; written: string[] } {
+function maker(): { maker: TakePosterMaker; written: string[]; budgets: Array<number | undefined> } {
   const written: string[] = [];
+  const budgets: Array<number | undefined> = [];
   return {
     written,
+    budgets,
     maker: {
-      write: async (_input, output) => {
+      write: async (_input, output, options) => {
         written.push(output);
+        budgets.push(options?.timeoutMs);
         await writeFile(output, "png");
         return { ok: true };
       },
@@ -68,6 +71,8 @@ describe("drawing the picture", () => {
     assert.equal(posters.written.length, 1, "one poster asked for");
     assert.ok(posters.written[0]!.endsWith(join(".index", "posters", `${artifact.id}.png`)), "named by the artifact's id under the derived index");
     assert.equal(await readFile(join(dir, ".index", "posters", `${artifact.id}.png`), "utf8"), "png");
+    // Drawn within the import's own budget, shared across the batch, not the maker's per-file limit.
+    assert.ok(posters.budgets[0]! > 0 && posters.budgets[0]! <= 20_000, `given the batch's remaining budget (${posters.budgets[0]})`);
   });
 
   it("reports a maker that cannot draw and files the artifact anyway", async (t) => {

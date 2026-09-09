@@ -79,7 +79,8 @@ interface Source {
 }
 
 const frames = new Map<string, string>();
-const listeners = new Set<() => void>();
+/** The strips to wake when a source decodes a frame, by source; a frame of one clip is nothing to the others. */
+const listeners = new Map<string, Set<() => void>>();
 const sources = new Map<string, Source>();
 /** The frames some mounted strip still wants, by key, with how many want them. A decode nobody wants any more is skipped. */
 const wanted = new Map<string, number>();
@@ -100,8 +101,10 @@ function frameKey(src: string, timeSec: number, heightPx: number): string {
   return `${src}#${timeSec.toFixed(2)}#${heightPx}`;
 }
 
-function notify(): void {
-  for (const listener of listeners) listener();
+function notify(src: string): void {
+  // Only the strips over this source: on a cut with many clips, waking every strip for every
+  // frame made the first load cost clips times frames in renders, most of them for nothing.
+  for (const listener of listeners.get(src) ?? []) listener();
 }
 
 /**
@@ -190,13 +193,13 @@ async function drain(src: string, source: Source): Promise<void> {
       context.drawImage(source.video, 0, 0, canvas.width, canvas.height);
       frames.set(next.key, canvas.toDataURL("image/jpeg", JPEG_QUALITY));
       if (frames.size > MAX_FRAMES) evictFrames(frames, (candidate) => wanted.has(candidate));
-      notify();
+      notify(src);
     }
   } catch {
     // A source that cannot be read stays on its poster; asking again would only fail again.
     source.failed = true;
     source.queue.length = 0;
-    notify();
+    notify(src);
   } finally {
     source.busy = false;
     admitPending();
@@ -276,10 +279,16 @@ export function useFilmstrip(args: {
     if (src === null || keys.length === 0) return;
     for (const key of keys) wanted.set(key, (wanted.get(key) ?? 0) + 1);
     const listener = () => bump((n) => n + 1);
-    listeners.add(listener);
+    let waking = listeners.get(src);
+    if (waking === undefined) {
+      waking = new Set();
+      listeners.set(src, waking);
+    }
+    waking.add(listener);
     times.forEach((timeSec) => filmstripFrame(src, timeSec, heightPx));
     return () => {
-      listeners.delete(listener);
+      waking.delete(listener);
+      if (waking.size === 0) listeners.delete(src);
       for (const key of keys) {
         const count = wanted.get(key) ?? 0;
         if (count <= 1) wanted.delete(key);
