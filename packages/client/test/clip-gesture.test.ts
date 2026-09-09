@@ -51,6 +51,17 @@ describe("the slot a reorder lands in", () => {
     assert.equal(preview.slotStartFrame, 48, "where b stood");
   });
 
+  it("keeps every hole at its ordinal, the way the saved reorder relays the sequence", () => {
+    // a 0–48, a 12-frame hole, b 60–108, c 108–156. Moving c to the front (its centre, 132,
+    // taken 120 frames back, lands before a's at 24): the hole stays before whichever clip is
+    // second, so a lands at 60 and b at 108.
+    const holed = [clip("a", 0, 48), clip("b", 60, 48), clip("c", 108, 48)];
+    const preview = reorderPreview(holed, "cl_c" as TimelineClip["id"], -120)!;
+    assert.equal(preview.index, 0);
+    assert.equal(preview.slotStartFrame, 0);
+    assert.deepEqual([...preview.shifts.entries()], [["cl_a", 60], ["cl_b", 48]]);
+  });
+
   it("knows nothing about a clip that is not on the track", () => {
     assert.equal(reorderPreview(sequence, "cl_zz" as TimelineClip["id"], 5), null);
   });
@@ -85,6 +96,8 @@ describe("auto-scroll", () => {
     assert.ok(autoScrollStep(990, 0, 1000) > autoScrollStep(975, 0, 1000) && autoScrollStep(975, 0, 1000) > 0);
     assert.ok(autoScrollStep(5, 0, 1000) < 0);
     assert.equal(autoScrollStep(10, 0, 40), 0, "a canvas too narrow for two bands never scrolls");
+    assert.equal(autoScrollStep(1500, 0, 1000), 18, "capped once the captured pointer leaves the canvas");
+    assert.equal(autoScrollStep(-500, 0, 1000), -18);
   });
 });
 

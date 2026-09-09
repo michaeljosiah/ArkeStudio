@@ -12307,16 +12307,8 @@ export class Coordinator {
        */
       case "browse-world-artifacts": {
         try {
-          const world = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === msg.slug);
-          if (!world) throw new Error("That world is unavailable.");
-          const open = this.opts.provider.openStore?.();
-          const source = open && open.worldId === world.worldId
-            ? { bundle: open.getBundle(), dir: open.dir }
-            : await (async () => {
-                if (!this.opts.provider.worldDir) throw new Error("Browsing another world is unavailable.");
-                const dir = await this.opts.provider.worldDir(world.worldId);
-                return { bundle: (await scanWorld(dir)).bundle, dir };
-              })();
+          const source = await this.borrowSource(msg.slug);
+          if (source === null) throw new Error("That world is unavailable.");
           const artifacts = await listBorrowableArtifacts(source.bundle, source.dir);
           this.emit({ at: this.nowIso(), type: "world.artifacts", requestId: msg.requestId, slug: msg.slug, artifacts });
         } catch (error) {
@@ -12338,18 +12330,21 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
           return;
         }
-        const source = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === msg.slug);
-        if (!source || source.worldId === msg.worldId || !this.opts.provider.serveMedia) {
+        const source = await this.borrowSource(msg.slug);
+        if (source === null || source.world.worldId === msg.worldId || !this.opts.provider.serveMedia) {
           this.rejectEnqueue(msg.requestId, msg.kind, "That world is unavailable.");
           return;
         }
+        // Checked against the shelf as it is now, not as it was browsed: a file retired or
+        // scoped to a production since then is no longer offered, whatever the row still says.
+        const offered = new Set((await listBorrowableArtifacts(source.bundle, source.dir)).map((row) => row.file));
         const failures: Array<{ index: number; reason: string }> = [];
         const sources: string[] = [];
         const origins: number[] = [];
         for (const [index, file] of msg.files.entries()) {
-          const media = basename(file) === file && file !== ".." ? await this.opts.provider.serveMedia(msg.slug, `artifacts/${file}`) : null;
+          const media = offered.has(file) ? await this.opts.provider.serveMedia(msg.slug, `artifacts/${file}`) : null;
           if (media === null) {
-            failures.push({ index, reason: `${file}: not in ${source.name} any more` });
+            failures.push({ index, reason: `${file}: no longer offered by ${source.world.name}` });
             continue;
           }
           sources.push(media.path);
@@ -14361,6 +14356,21 @@ export class Coordinator {
    * what it can and the rest next time, which is self-healing and never a session that will not
    * open; and once drawn, every later open finds them all and does nothing at all.
    */
+  /**
+   * A world's shelf as the Library borrows from it (issue 1033): the open store's own bundle for
+   * its world, a scan of the directory for any other. Null when the world is not registered or
+   * cannot be reached without opening it.
+   */
+  private async borrowSource(slug: string) {
+    const world = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === slug);
+    if (!world) return null;
+    const open = this.opts.provider.openStore?.();
+    if (open && open.worldId === world.worldId) return { world, bundle: open.getBundle(), dir: open.dir };
+    if (!this.opts.provider.worldDir) return null;
+    const dir = await this.opts.provider.worldDir(world.worldId);
+    return { world, bundle: (await scanWorld(dir)).bundle, dir };
+  }
+
   /** The artifact shelf's pictures, on the same terms as the bench's (issue 1037). */
   private async backfillArtifactPosters(store: WorldStore): Promise<void> {
     if (this.opts.takePosterMaker === undefined) return;

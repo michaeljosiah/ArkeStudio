@@ -96,15 +96,25 @@ export function reorderPreview(clips: readonly TimelineClip[], clipId: TimelineC
   const index = others.filter((candidate) => candidate.startFrame + candidate.durationFrames / 2 < centre).length;
   const shifts = new Map<TimelineClipId, number>();
   if (index === from) return { index, from, slotStartFrame: clip.startFrame, shifts };
-  if (index > from) {
-    // Later: the clips between slide left into the hole the clip leaves; the slot opens after the last of them.
-    for (let ordinal = from; ordinal < index; ordinal += 1) shifts.set(others[ordinal]!.id, -clip.durationFrames);
-    const last = others[index - 1]!;
-    return { index, from, slotStartFrame: last.startFrame + last.durationFrames - clip.durationFrames, shifts };
-  }
-  // Earlier: the clips between slide right; the slot opens where the first of them stood.
-  for (let ordinal = index; ordinal < from; ordinal += 1) shifts.set(others[ordinal]!.id, clip.durationFrames);
-  return { index, from, slotStartFrame: others[index]!.startFrame, shifts };
+  /*
+   * The relay the command performs (contracts `relayPreservingHoles`): a hole belongs to its
+   * ordinal, so the empty second before the third clip stays before whichever clip is third after
+   * the move. Drawing the neighbours by the dragged clip's length alone disagreed with that
+   * wherever the sequence had a hole, and the preview then jumped on release.
+   */
+  const holes = ordered.map((candidate, ordinal) =>
+    candidate.startFrame - (ordinal === 0 ? 0 : ordered[ordinal - 1]!.startFrame + ordered[ordinal - 1]!.durationFrames));
+  const reordered = [...others];
+  reordered.splice(index, 0, clip);
+  let cursor = 0;
+  let slotStartFrame = clip.startFrame;
+  reordered.forEach((candidate, ordinal) => {
+    const startFrame = cursor + (holes[ordinal] ?? 0);
+    cursor = startFrame + candidate.durationFrames;
+    if (candidate.id === clipId) slotStartFrame = startFrame;
+    else if (startFrame !== candidate.startFrame) shifts.set(candidate.id, startFrame - candidate.startFrame);
+  });
+  return { index, from, slotStartFrame, shifts };
 }
 
 /**
@@ -113,8 +123,10 @@ export function reorderPreview(clips: readonly TimelineClip[], clipId: TimelineC
  */
 export function autoScrollStep(pointerX: number, left: number, right: number, edgePx = 28, maxPx = 18): number {
   if (right - left <= edgePx * 2) return 0;
-  if (pointerX < left + edgePx) return -Math.ceil(((left + edgePx - pointerX) / edgePx) * maxPx);
-  if (pointerX > right - edgePx) return Math.ceil(((pointerX - (right - edgePx)) / edgePx) * maxPx);
+  // Capture lets the pointer leave the canvas altogether; the cap holds there too, or the
+  // timeline outruns the hand the further out it goes.
+  if (pointerX < left + edgePx) return -Math.min(maxPx, Math.ceil(((left + edgePx - pointerX) / edgePx) * maxPx));
+  if (pointerX > right - edgePx) return Math.min(maxPx, Math.ceil(((pointerX - (right - edgePx)) / edgePx) * maxPx));
   return 0;
 }
 

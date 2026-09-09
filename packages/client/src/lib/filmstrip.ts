@@ -24,6 +24,8 @@ const JPEG_QUALITY = 0.72;
 const MAX_SOURCES = 6;
 /** How many frames the cache keeps; past this the oldest quarter goes, insertion order being age. */
 const MAX_FRAMES = 2000;
+/** How many decodes one source may have waiting; a live trim asks for new times faster than they decode. */
+const MAX_QUEUE = 24;
 
 /** How many frames fit across `widthPx` at `heightPx`; at least one when there is any width. */
 export function filmstripFrameCount(widthPx: number, heightPx: number, aspect = DEFAULT_ASPECT): number {
@@ -50,6 +52,8 @@ interface Source {
 const frames = new Map<string, string>();
 const listeners = new Set<() => void>();
 const sources = new Map<string, Source>();
+/** The frames some mounted strip still wants, by key, with how many want them. A decode nobody wants any more is skipped. */
+const wanted = new Map<string, number>();
 
 function supported(): boolean {
   if (typeof document === "undefined" || typeof HTMLVideoElement === "undefined") return false;
@@ -122,7 +126,9 @@ async function drain(src: string, source: Source): Promise<void> {
     await source.ready;
     while (source.queue.length > 0) {
       const next = source.queue.shift()!;
-      if (frames.has(next.key)) continue;
+      // A time a strip asked for and has since moved past — the head of a clip under a live trim
+      // asks for a new one at every pointer update — is not worth a seek.
+      if (frames.has(next.key) || !wanted.has(next.key)) continue;
       await seekTo(source.video, next.timeSec);
       const canvas = document.createElement("canvas");
       const aspect = source.video.videoWidth > 0 && source.video.videoHeight > 0 ? source.video.videoWidth / source.video.videoHeight : DEFAULT_ASPECT;
@@ -155,7 +161,10 @@ export function filmstripFrame(src: string, timeSec: number, heightPx: number): 
   if (!supported()) return null;
   const source = sourceFor(src);
   if (source.failed) return null;
-  if (!source.queue.some((entry) => entry.key === key)) source.queue.push({ key, timeSec, heightPx });
+  if (!source.queue.some((entry) => entry.key === key)) {
+    source.queue.push({ key, timeSec, heightPx });
+    if (source.queue.length > MAX_QUEUE) source.queue.splice(0, source.queue.length - MAX_QUEUE);
+  }
   void drain(src, source);
   return null;
 }
@@ -164,6 +173,7 @@ export function filmstripFrame(src: string, timeSec: number, heightPx: number): 
 export function resetFilmstrips(): void {
   frames.clear();
   sources.clear();
+  wanted.clear();
 }
 
 /**
@@ -183,12 +193,27 @@ export function useFilmstrip(args: {
   const [, bump] = useState(0);
   const count = src === null || !supported() ? 0 : filmstripFrameCount(widthPx, heightPx);
   const times = filmstripTimes(inSec, durationSec, count);
+  const keys = src === null ? [] : times.map((timeSec) => frameKey(src, timeSec, heightPx));
+  const signature = keys.join("|");
+  // The render reads the cache and nothing more; the asking happens in the effect, after the
+  // strip has said which frames it wants, so a decode is never queued for a frame that is
+  // unwanted by the time it runs.
   useEffect(() => {
-    if (times.length === 0) return;
+    if (src === null || keys.length === 0) return;
+    for (const key of keys) wanted.set(key, (wanted.get(key) ?? 0) + 1);
     const listener = () => bump((n) => n + 1);
     listeners.add(listener);
-    return () => { listeners.delete(listener); };
-  }, [times.length]);
-  if (src === null || times.length === 0) return [];
-  return times.map((timeSec) => filmstripFrame(src, timeSec, heightPx));
+    times.forEach((timeSec) => filmstripFrame(src, timeSec, heightPx));
+    return () => {
+      listeners.delete(listener);
+      for (const key of keys) {
+        const count = wanted.get(key) ?? 0;
+        if (count <= 1) wanted.delete(key);
+        else wanted.set(key, count - 1);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src, heightPx, signature]);
+  if (src === null || keys.length === 0) return [];
+  return keys.map((key) => frames.get(key) ?? null);
 }

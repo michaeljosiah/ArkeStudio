@@ -90,8 +90,11 @@ export function pictureClipViews(
         : artifact ? nameOf(artifact) : clip.source.label,
       // A placed file's picture is its poster or itself (issue 1037); a take's is the frame beside it.
       poster: artifact ? artifactPicturePath(artifact) : mediaPath ? posterize(mediaPath) : null,
+      // The resolver's in-point already carries the clip's own source offset (contracts
+      // `resolvePictureTimeline`); only the legacy derivation, which knows shots and not clips,
+      // leaves the offset to be added here.
       footage: mediaPath && !still
-        ? { path: mediaPath, inSec: (entry?.media?.inSec ?? 0) + clip.sourceInFrames / frameRate }
+        ? { path: mediaPath, inSec: entry?.media?.inSec ?? clip.sourceInFrames / frameRate }
         : null,
       gap: !mediaPath,
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
@@ -221,8 +224,8 @@ export function PictureTrack({
   mintClipId: () => TimelineClipId;
   /** Measured source lengths, so a tail drag stops where the source does. */
   sourceLength: SourceLengthFrames;
-  /** Frames an edge snaps onto while Snap is on; null when it is off. */
-  snapFrames?: readonly number[] | null;
+  /** Frames an edge may snap onto while Snap is on, for the clip in hand; null when Snap is off. */
+  snapFrames?: ((except: TimelineClipId) => readonly number[]) | null;
   /** What desktop files are over the window right now, for the lane to say what a drop will do. */
   fileKinds?: readonly DroppedKind[] | null;
   /** A drop that is being imported: its slot is drawn until the clip is real. */
@@ -306,7 +309,8 @@ export function PictureTrack({
       totalFrames: span,
       clip,
       gesture,
-      snapFrames,
+      // The clip's own edges are left out, or a small move would stick where it started.
+      snapFrames: snapFrames === null ? null : snapFrames(clipId),
       onUpdate: (update) => {
         if (gesture === "move") {
           setDrag(update);
@@ -330,11 +334,13 @@ export function PictureTrack({
           if (move !== null && previewTimeline(timeline, [move], sourceLength) !== null) onCommands([move], "Move clip");
           return;
         }
-        // A click that only selected sends nothing: a write with no change is not an edit.
-        if (command !== null && previewTimeline(timeline, [command], sourceLength) !== null) {
-          onCommands([command], `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
+        // From the release itself, not the last move: the pointer can land elsewhere between
+        // the two, and Alt can change what snaps. A click that only selected sends nothing.
+        const trim = pictureDragCommand(clips, clipId, gesture, final.deltaFrames, sourceLength);
+        if (trim !== null && previewTimeline(timeline, [trim], sourceLength) !== null) {
+          onCommands([trim], `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
           // Parked on the edge the cut now has, where the reference leaves it.
-          const delta = command.kind === "trim" ? command.deltaFrames : 0;
+          const delta = trim.kind === "trim" ? trim.deltaFrames : 0;
           onScrub?.(gesture === "trim-start" ? clip.startFrame + delta : Math.max(clip.startFrame, clip.startFrame + clip.durationFrames + delta - 1));
         }
       },

@@ -226,6 +226,24 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("keeps a retired file the record still names, with its refusal and a way off the Library", async () => {
+    const state = stateWithBells();
+    const board = state.world!.artifacts.find((artifact) => artifact.id === BOARD)!;
+    (board as { retiredAt?: string }).retiredAt = "2026-09-08T12:00:00Z";
+    const screen = await mount(state);
+    try {
+      const row = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${BOARD}"]`);
+      assert.ok(row, "a retired file the Library names stays a row");
+      assert.match(row.textContent ?? "", /retired from the shelf/);
+      assert.equal(row.getAttribute("draggable"), "false");
+      await act(async () => rowButton(screen, `artifact:${BOARD}`).click());
+      assert.ok(action(screen, "Remove from library"), "its membership can come off from the row");
+      assert.equal(action(screen, "Append to timeline"), null, "and nothing offers to place it");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("browses another world's shelf read-only and copies a file in with its provenance (issue 1033, #972)", async () => {
     const state = stateWithBells();
     state.worlds.push({ worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ", slug: "the-other-one", name: "The Other One", counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 }, updated: "2026-09-01T12:00:00Z" } as (typeof state.worlds)[number]);

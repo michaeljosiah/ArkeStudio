@@ -227,6 +227,24 @@ describe("where a drop lands", () => {
     }
   });
 
+  it("keeps only the files that did not land after a partial failure", async () => {
+    const screen = await mount(lanesState());
+    try {
+      const overlay = screen.container.querySelector<HTMLElement>("[data-track-id='tr_overlay-1'] .fy-track__lane")!;
+      await act(async () => reactProps(overlay)["onDrop"]!(dragEvent([video(), still()], 50)));
+      const [request] = uploads(screen);
+      assert.equal(screen.container.querySelectorAll("[data-testid='pending-import']").length, 2);
+      await act(async () => __applyEventForTest({ type: "queue.enqueue-result", at: "2026-09-09T12:00:00Z", command: "upload-artifacts", requestId: request!.requestId,
+        disposition: "partial", requestedCount: 2, acceptedJobIds: [], failures: [{ index: 1, reason: "plate.png: saved, but has no sound; Overlay 1 takes picture" }] }));
+      const rows = [...screen.container.querySelectorAll<HTMLElement>("[data-testid='pending-import']")];
+      assert.equal(rows.length, 1, "the file that landed is a real row now");
+      assert.match(rows[0]!.textContent ?? "", /plate\.png/);
+      assert.doesNotMatch(rows[0]!.textContent ?? "", /clip\.mp4/);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("clears the row when every file landed", async () => {
     const screen = await mount(lanesState());
     try {

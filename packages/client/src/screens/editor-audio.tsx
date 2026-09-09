@@ -162,8 +162,8 @@ export function TypedTrackRows({
   onFileDrop?: (files: File[], trackId: TimelineTrackId, frame: number) => void;
   /** What desktop files are over the window right now. */
   fileKinds?: readonly DroppedKind[] | null;
-  /** Frames an edge snaps onto while Snap is on; null when it is off. */
-  snapFrames?: readonly number[] | null;
+  /** Frames an edge may snap onto while Snap is on, for the clip in hand; null when Snap is off. */
+  snapFrames?: ((except: TimelineClipId) => readonly number[]) | null;
   /** Drops being imported, drawn as slots until their clips are real. */
   pendingSlots?: ReadonlyArray<{ trackId: TimelineTrackId; frame: number; label: string }>;
   playheadFrame: number;
@@ -228,7 +228,7 @@ export function TypedTrackRows({
       totalFrames: span,
       clip,
       gesture,
-      snapFrames,
+      snapFrames: snapFrames === null ? null : snapFrames(clipId),
       onUpdate: (update) => {
         command = trackDragCommand(clips, clipId, gesture, update.deltaFrames, sourceLength);
         const preview = command === null ? timeline : previewTimeline(timeline, [command], sourceLength);

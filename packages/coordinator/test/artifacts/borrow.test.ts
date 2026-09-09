@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storyTimelineFingerprint } from "@arke-studio/contracts";
 import { listBorrowableArtifacts } from "../../src/artifacts/borrow.js";
-import { fileArtifact } from "../../src/artifacts/filing.js";
+import { fileArtifact, retireArtifact } from "../../src/artifacts/filing.js";
 import { importEditorMedia } from "../../src/productions/editor-import.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -53,6 +53,9 @@ describe("what a world offers", () => {
     await writeFile(join(dir, ".index", "posters", `${clip.id}.png`), "poster");
     const again = await listBorrowableArtifacts(store.getBundle(), dir);
     assert.equal(again.find((row) => row.id === clip.id)!.picture, `.index/posters/${clip.id}.png`, "the poster once it exists");
+    // Retired since it was browsed: the shelf no longer offers it, which is what a borrow is checked against.
+    await retireArtifact(store, clip.id);
+    assert.equal((await listBorrowableArtifacts(store.getBundle(), dir)).some((row) => row.id === clip.id), false);
   });
 });
 

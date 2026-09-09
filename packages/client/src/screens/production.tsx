@@ -4446,18 +4446,22 @@ function ArtifactPanel({
     };
   });
   // Every placeable file the production can see (SPEC-020 R-13), newest first, plus whatever
-  // the record's Library still names — a document (R-12) or a file the world has lost.
+  // the record's Library still names — a document (R-12), a file the world has lost, or one
+  // retired or replaced since it was placed: its row is the one place its uses can be found
+  // and its membership taken off.
   const placeableKinds = new Set<ArtifactSidecar["kind"]>(["audio", "video", "image", "board"]);
   const visible = new Set(artifactsForProduction(artifacts, production?.meta.id).map((artifact) => artifact.id));
-  const shelf = pickableArtifacts([...artifacts])
-    .filter((artifact) => (placeableKinds.has(artifact.kind) && visible.has(artifact.id)) || inLibrary.has(`artifact:${artifact.id}`))
+  const onShelf = new Set(pickableArtifacts([...artifacts]).map((artifact) => artifact.id));
+  const shelf = artifacts
+    .filter((artifact) => (onShelf.has(artifact.id) && placeableKinds.has(artifact.kind) && visible.has(artifact.id)) || inLibrary.has(`artifact:${artifact.id}`))
     .sort((a, b) => b.created.localeCompare(a.created));
   const artifactItems: LibraryItem[] = shelf.map((artifact) => {
     const lane = laneOf(artifact);
     const file = artifact.file.split("/").pop() ?? artifact.file;
     const name = artifactDisplayName(artifact, linkName);
     const access = resolveProductionArtifact(artifacts, artifact.id, production?.meta.id ?? "");
-    const why = access.ok ? null : access.reason;
+    const gone = onShelf.has(artifact.id) ? null : artifact.retiredAt !== undefined ? "retired from the shelf" : "replaced by a newer file";
+    const why = access.ok ? gone : access.reason;
     const duration = artifact.mediaInfo?.durationSec;
     const still = artifact.kind === "image" || artifact.kind === "board";
     const glyph = artifact.kind === "audio" ? <Wave seed={artifact.file} width={34} height={12} /> : artifact.kind === "video" ? <VideoMark size={12} /> : still ? <Film size={12} /> : <Scroll size={12} />;
@@ -6640,9 +6644,19 @@ export function CutScreen() {
   useEffect(() => {
     importRequest.current = null; setImporting(false); setPendingImports([]);
     return subscribeQueueResults(result => {
-      // A file that landed is a row of its own now; one that did not keeps its row and its reason.
-      setPendingImports(current => current.flatMap(pending => pending.requestId !== result.requestId ? [pending]
-        : result.failures.length === 0 ? [] : [{ ...pending, failures: result.failures.map(failure => ({ index: failure.index, reason: failure.reason })) }]));
+      // A file that landed is a row of its own now; only the ones that did not keep their rows
+      // and their reasons. A refusal of the whole request names every file.
+      setPendingImports(current => current.flatMap(pending => {
+        if (pending.requestId !== result.requestId) return [pending];
+        if (result.failures.length === 0) return [];
+        const whole = result.disposition === "rejected" && result.failures.length === 1 && pending.files.length > 1;
+        if (whole) return [{ ...pending, failures: pending.files.map((_, index) => ({ index, reason: result.failures[0]!.reason })) }];
+        const kept = result.failures.flatMap(failure => {
+          const file = pending.files[failure.index];
+          return file === undefined ? [] : [{ file, reason: failure.reason }];
+        });
+        return kept.length === 0 ? [] : [{ ...pending, files: kept.map(entry => entry.file), failures: kept.map((entry, index) => ({ index, reason: entry.reason })) }];
+      }));
       if (result.requestId !== importRequest.current) return;
       importRequest.current = null; setImporting(false);
       setTimelineCommandError(result.failures.length ? result.failures.map(failure => failure.reason).join(" ") : null);
@@ -7120,7 +7134,7 @@ export function CutScreen() {
   const mintClipId = (): TimelineClipId => `cl_${ulid()}`;
   const playheadFrame = secondsToFrames(Math.max(0, Math.min(transport.time, totalSec)), frameRate);
   /** Every edge a drag can land against while Snap is on (issue 1034): clip edges on every lane, the playhead, zero. */
-  const snapFrames = snap && shownTimeline ? snapCandidates(shownTimeline.tracks, playheadFrame) : null;
+  const snapFrames = snap && shownTimeline ? (except: TimelineClipId) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
   /** The viewer follows an edge in hand (issue 1036): one seek per frame the edge crosses. */
   const scrubTo = (frame: number) => transport.seek(frame / frameRate);
   const canUndo = !commandsDisabled && timelineRevision !== null && timelineUndo > 0;
@@ -7437,8 +7451,17 @@ export function CutScreen() {
 
   return (
     <div className="fy-cutcols" data-screen="cut"
-      onDragOver={event => { if (Array.from(event.dataTransfer.types).includes("Files")) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; } }}
-      onDrop={event => { if (event.dataTransfer.files?.length) { event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files)); } }}>
+      // A lane or the Library that took or refused the drag has spoken (issue 1035): its
+      // dropEffect stands. What is left is a file over the chrome, which appends — while the
+      // record can take it; otherwise the cursor must not promise a copy nothing will make.
+      onDragOver={event => {
+        if (event.defaultPrevented || commandsDisabled || !Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault(); event.dataTransfer.dropEffect = "copy";
+      }}
+      onDrop={event => {
+        if (event.defaultPrevented || commandsDisabled || !event.dataTransfer.files?.length) return;
+        event.preventDefault(); importMedia("append", Array.from(event.dataTransfer.files));
+      }}>
       <ArtifactPanel
         worldId={worldId}
         artifacts={world?.artifacts ?? []}
