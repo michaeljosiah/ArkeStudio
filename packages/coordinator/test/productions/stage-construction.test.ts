@@ -24,6 +24,10 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     const scene = production.scenes.find((s) => s.id === "sc_04")!;
     const shot = orderedShots(scene).find((s) => s.id === "sh_12")!;
     const fresh = stageShot(shot, { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    const second = store.getBundle().sheets.find(sheet => sheet.id !== "maren-kest")!.id;
+    fresh.cast = [{ sheetId: "maren-kest", x: -1, z: 0 }, { sheetId: second, x: 1, z: 0 }];
+    fresh.keys = [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }];
+    scene.blocking = { version: 1, cast: fresh.cast, sets: [] };
     const { version: _v, cast, sets, ...staging } = fresh;
     const draft: StageConstructionDraft = {
       staging,
@@ -114,6 +118,7 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     assert.match(prompts[0]!, /head tilted/);
     assert.match(prompts[0]!, /verse, under the water/);
     assert.match(prompts[1]!, /round-1-0-camera.png/);
+    assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
     assert.equal(
       store
         .getBundle()

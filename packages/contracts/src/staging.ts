@@ -1,4 +1,7 @@
-import { sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import { PerspectiveCamera, Vector3 } from "three";
+import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
+import { orderedShots } from "./scene-flow.js";
+import { stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
 import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
@@ -737,4 +740,70 @@ export function stageProblems(staging: ResolvedShotStaging, durationSec: number)
     if (!ids.has(performance.sheetId) || !ordered(performance.keys)) problems.push("Performance keys must name a figure and increase within the shot.");
   }
   return [...new Set(problems)];
+}
+
+export interface StageLineFinding {
+  kind: "within-shot" | "across-coverage";
+  shotIds: string[];
+  pair: [string, string];
+  at: number;
+  message: string;
+}
+
+/** Advisory screen direction at authored camera marks; never a write-boundary refusal (#1045). */
+export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: { shotId: string; staging: ResolvedShotStaging }): StageLineFinding[] {
+  const findings: StageLineFinding[] = [];
+  const coverage: Array<{ shot: Shot; blocking: string; pair: [string, string]; sides: Array<{ at: number; side: number }> }> = [];
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  for (const shot of orderedShots(scene)) {
+    const staging = draft?.shotId === shot.id ? draft.staging : shot.staging && resolvedShotStaging(scene, shot.staging);
+    if (!staging || staging.cast.length < 2 || !staging.keys.length) continue;
+    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+    const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
+    const camera = new PerspectiveCamera(fov, ratio, .1, 200);
+    const cast = [...staging.cast].sort((a, b) => a.sheetId.localeCompare(b.sheetId));
+    // Shared blocking naturally has the same value. Identical private copies cover the same
+    // action too; a deliberately changed private layout must not be compared with the scene.
+    const blocking = JSON.stringify([cast, staging.sets]);
+    const samples = staging.keys.map(key => {
+      const pose = sampleStageCamera(staging, key.t, duration);
+      const lens = stageCameraKeyAt(staging, key.t, duration, fov, ratio);
+      camera.fov = lens.focalMm === undefined ? fov : stagingFov(`${lens.focalMm}mm`, aspect);
+      camera.updateProjectionMatrix();
+      camera.position.set(...pose.p);
+      camera.lookAt(new Vector3(...pose.l));
+      camera.rotateZ((lens.roll ?? 0) * Math.PI / 180);
+      camera.updateMatrixWorld(true);
+      return { at: key.t, camera: pose.p, figures: cast.map(figure => {
+        const state = stageFigureAt(figure, staging.performances, key.t, duration, staging.objectMotions);
+        const point = new Vector3(state.x, state.y + (figure.height ?? 1.8) * (state.pose === "lie" ? .1 : state.pose === "sit" ? .5 : .65), state.z).project(camera);
+        return { ...state, visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1 };
+      }) };
+    });
+    for (let a = 0; a < cast.length - 1; a++) for (let b = a + 1; b < cast.length; b++) {
+      if (!samples.some(sample => sample.figures[a]!.visible && sample.figures[b]!.visible)) continue;
+      const pair: [string, string] = [cast[a]!.sheetId, cast[b]!.sheetId];
+      const sides = samples.flatMap(sample => {
+        const first = sample.figures[a]!, second = sample.figures[b]!;
+        const dx = second.x - first.x, dz = second.z - first.z;
+        const length = Math.hypot(dx, dz);
+        if (length < .05) return [];
+        const distance = (dx * (sample.camera[2] - first.z) - dz * (sample.camera[0] - first.x)) / length;
+        return Math.abs(distance) < .05 ? [] : [{ at: sample.at, side: Math.sign(distance) }];
+      });
+      for (let i = 1; i < sides.length; i++) if (sides[i]!.side !== sides[i - 1]!.side) {
+        const at = sides[i]!.at;
+        findings.push({ kind: "within-shot", shotIds: [shot.id], pair, at,
+          message: `180° line: Shot ${shot.number} crosses between ${pair.join(" / ")} by ${at.toFixed(2)}s.` });
+      }
+      for (const previous of coverage) {
+        if (previous.blocking !== blocking || previous.pair[0] !== pair[0] || previous.pair[1] !== pair[1]) continue;
+        const opposite = sides.find(side => previous.sides.some(other => other.side !== side.side));
+        if (opposite) findings.push({ kind: "across-coverage", shotIds: [previous.shot.id, shot.id], pair, at: opposite.at,
+          message: `180° line: Shots ${previous.shot.number} and ${shot.number} cover ${pair.join(" / ")} from opposite sides.` });
+      }
+      coverage.push({ shot, blocking, pair, sides });
+    }
+  }
+  return findings;
 }

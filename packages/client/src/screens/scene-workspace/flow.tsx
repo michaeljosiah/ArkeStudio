@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
+  stageLineCrossings,
+  productionAspect,
   effectiveFraming,
   linearizeSceneFlow,
   resolveCast,
@@ -168,6 +170,7 @@ export function SceneFlow({
   onShowBoards?: () => void;
 }) {
   const sequence = useMemo(() => linearizeSceneFlow(scene), [scene]);
+  const lineFindings = useMemo(() => stageLineCrossings(scene, productionAspect(production.meta)), [scene, production.meta]);
   const { subject, select } = useWorkspaceSelection();
   const canvas = useRef<HTMLDivElement | null>(null);
   const nodeControls = useRef(new Map<string, HTMLDivElement>());
@@ -1159,6 +1162,7 @@ export function SceneFlow({
             <span className="fy-swnode__text">
               <span className="fy-swnode__name">{node.name}</span>
               <span className="fy-swnode__meta">{node.meta}</span>
+              {lineFindings.some(finding => finding.shotIds.includes(shotId)) ? <span className="fy-swnode__meta" title={lineFindings.filter(finding => finding.shotIds.includes(shotId)).map(finding => finding.message).join("\n")}>180° line</span> : null}
               {staged}
             </span>
             <button
