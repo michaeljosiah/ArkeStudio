@@ -121,17 +121,20 @@ For a first code-reading session, start with [AGENTS.md](AGENTS.md) and the
 [developer index](docs/development/README.md): package relationships, workflow traces,
 test selection and generated-file ownership.
 
-Arke is specified before it is written. [`docs/specification.md`](docs/specification.md) is
-the master product spec; [`docs/specifications/`](docs/specifications) breaks it into
-capability specs, each with its requirements, its design reasoning and its decision log.
+Arke is specified before it is written. A behaviour is decided in a capability spec — with its
+requirements, its design reasoning and its decision log — and only then built.
 
-Where a spec and the code disagree, that is a bug in one of them, and the specs say plainly
-what is designed but not yet built.
+The specification set is not published with the code. It is the design record rather than the
+product, and it stays private. That is worth knowing before you read far, because the code cites
+it constantly: `SPEC-014 §3` in a comment or a test name is a real reference to a real document,
+just not one in this repository. Read those as markers of where a decision was made, not as
+dead links.
 
-Two references are read off the source rather than the specs.
+Two references are read off the source rather than off the specs, and both are here.
 [`docs/architecture/`](docs/architecture/index.html) is an illustrated guide to how Arke is built —
 the files on disk, the model behind worlds and productions, the accept gate, generation and spend,
-and the program itself — written to be readable without a background in code.
+and the program itself — written to be readable without a background in code. It explains the
+product that exists, which is why it stays public while the specs do not.
 [`docs/filesystem-operations.md`](docs/filesystem-operations.md) is the exact list of what each
 operation creates, replaces, appends, moves or removes.
 
@@ -161,9 +164,8 @@ Cloud — access your worlds anywhere. Sync, collaborate, create" but integratio
 implementation, but do not yet establish a complete season-production and audience-publishing
 workflow. See the [implementation status notes](docs/development/status.md) for evidence and limits.
 
-This repository holds the code, the specifications and the design system. For the product's
-direction and requirements, see the [master specification](docs/specification.md) and its linked
-capability specifications.
+This repository holds the code and the design system. The product's direction and requirements
+live in the specification set, which is not published.
 
 ## Contributing
 
