@@ -4,7 +4,7 @@ import { withLocalGpu } from "./harness/local-gpu.js";
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
-import { recoverProductionSetups } from "./productions/setup.js";
+import { productionSetups, recoverProductionSetups } from "./productions/setup.js";
 import { productionSetupBrief } from "./productions/setup-brief.js";
 import { saveProductionNarrative } from "./productions/narrative.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
@@ -5522,7 +5522,10 @@ export class Coordinator {
       case "world-chat-cancel": {
         const store = this.opts.provider.openStore?.();
         if (!store) return;
-        this.worldChatRunner(store, msg.conversationId).cancel(msg.conversationId);
+        const loaded = await store.ownedWrite(() => new WorldChatService(store.dir).load(msg.conversationId));
+        if (this.worldChatRunner(store, msg.conversationId).cancel(msg.conversationId) && loaded?.entryContext?.kind === "production-setup") {
+          await productionSetups(store).stop(msg.conversationId);
+        }
         return;
       }
       case "world-chat-create": {

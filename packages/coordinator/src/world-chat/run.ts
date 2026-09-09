@@ -587,18 +587,21 @@ export class WorldChatRunner {
     }
     // The user's words are durable before the model is asked. Whatever happens next, they said it.
     // On a retry they already are, so only the new run is recorded.
+    if (this.deps.closingSignal?.aborted) {
+      return { status: "unavailable", reason: "The world closed before this message could be sent. Reopen the conversation to continue." };
+    }
     await store.append(
       existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
       { at },
     );
+    if (controller.signal.aborted) {
+      await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
+      return { status: "cancelled" };
+    }
     if (modelChoice.reason !== undefined) {
       const reason = `rejected: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);
       return { status: "failed", reason };
-    }
-    if (controller.signal.aborted) {
-      await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
-      return { status: "cancelled" };
     }
 
     const linked = attachmentIds as readonly ChatAttachmentId[];

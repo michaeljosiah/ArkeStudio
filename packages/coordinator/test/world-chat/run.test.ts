@@ -211,6 +211,22 @@ describe("taking a turn", () => {
     assert.equal((await runner.send(store, conversationId, "Try again")).status, "completed");
   });
 
+  it("Stop wins over a model-selection refusal returned after cancellation (#1030)", async () => {
+    let selecting!: () => void;
+    let selected!: (choice: { reason: string }) => void;
+    const started = new Promise<void>(resolve => { selecting = resolve; });
+    const choice = new Promise<{ reason: string }>(resolve => { selected = resolve; });
+    const h = await setup(fakeAdapter([]), { resolveLanguageModel: () => { selecting(); return choice; } });
+    const running = h.runner.send(h.store, h.conversationId, "Find a direction");
+    await started;
+    h.runner.cancel(h.conversationId);
+    selected({ reason: "That writing model is unavailable." });
+    assert.equal((await running).status, "cancelled");
+    assert.equal((await h.view()).lastFailedRun, null);
+    const finished = (await h.store.read()).events.find(({ event }) => event.type === "run.finished")!.event;
+    assert.equal(finished.type === "run.finished" && finished.run.status, "cancelled");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");

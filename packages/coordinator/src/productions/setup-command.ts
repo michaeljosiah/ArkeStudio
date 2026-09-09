@@ -22,8 +22,7 @@ export async function handleProductionSetupCommand(
     case "create": return service.create(id, action.expectedRevision, action.reviewId);
     case "discard": return service.discard(id);
     case "cancel":
-      runner().cancel(id);
-      return service.resume(id);
+      return runner().cancel(id) ? service.stop(id) : service.resume(id);
     case "send":
     case "retry": {
       const state = await service.resume(id);
@@ -37,7 +36,10 @@ export async function handleProductionSetupCommand(
       const [outcome] = await Promise.allSettled([running, publish(id)]);
       // Closing fences setup writes. Recovery records the interrupted run on the next open;
       // a result from the old store must neither update the draft nor expose an internal error.
-      if (world.isClosed()) throw new Error("The world closed before Arke finished. Your setup is saved; reopen it to retry the turn.");
+      if (world.isClosed()) {
+        if (outcome.status === "fulfilled" && outcome.value.status === "unavailable") throw new Error(outcome.value.reason);
+        throw new Error("The world closed. Reopen this setup to check the saved conversation before continuing.");
+      }
       await publish(id);
       if (outcome.status === "rejected") throw outcome.reason;
       const result = outcome.value;
