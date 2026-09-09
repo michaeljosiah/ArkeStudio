@@ -6,7 +6,7 @@ The intended experience is a lightweight video editor: start with no scenes, imp
 
 ## Specification
 
-SPEC-043: `docs/specifications/043.independent-video-editing.md` (included in the implementation PR). Amends the editor workflow in SPEC-037/038/039 while retaining world-owned immutable media, frame-based commands, shared preview/export planning and durable undo.
+SPEC-043, "Independent video editing", in the private document set (not included in the implementation PR). Amends the editor workflow in SPEC-037/038/039 while retaining world-owned immutable media, frame-based commands, shared preview/export planning and durable undo.
 
 ## Acceptance criteria
 

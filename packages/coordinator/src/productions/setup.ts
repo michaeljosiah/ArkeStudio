@@ -99,6 +99,18 @@ export class ProductionSetupService {
     });
   }
 
+  stop(id: ConversationId): Promise<ProductionSetupState> {
+    // Admit the terminal write synchronously after Stop, ahead of a following world close.
+    // Waiting on the per-setup queue first would let close fence out the user's decision.
+    return this.world.ownedWrite(async () => {
+      const view = await this.read(id);
+      if (view.activeRun) await this.log(id).append({ type: "run.finished", run: {
+        ...view.activeRun, status: "cancelled", endedAt: this.world.now(), safeDetail: "stopped by the user",
+      } }, { at: this.world.now() });
+      return view.productionSetup!;
+    });
+  }
+
   async update(id: ConversationId, update: ProductionSetupUpdate): Promise<ProductionSetupState> {
     return this.serial(id, () => this.world.ownedWrite(async () => {
       const view = await this.read(id);
