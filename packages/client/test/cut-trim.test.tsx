@@ -240,7 +240,7 @@ describe("the Cut on the song clock (80a)", () => {
       assert.doesNotMatch(html, /fy-cutseg--black/, "black belongs to the song clock");
       // The scene keeps its grouping in the band; the lane carries the unit of work.
       assert.doesNotMatch(html, /fy-scenes__band/, "scene labels start hidden");
-      await act(async () => [...screen.container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Scene labels")!.click());
+      await act(async () => screen.container.querySelector<HTMLButtonElement>('button[aria-label="Scene labels"]')!.click());
       assert.ok(screen.container.querySelector(".fy-scenes__band"), "scene context remains available on request");
       assert.match(html, /fy-cutseg--pick/, "and shots, not scenes, are the cells");
       /*

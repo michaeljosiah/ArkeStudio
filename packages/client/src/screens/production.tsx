@@ -94,8 +94,9 @@ import {
   legacySceneView,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen } from "../components/layout.js";
-import { Badge, Button, Card, Input, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
 import {
+  Archive,
   Book,
   ChevronDown,
   ChevronLeft,
@@ -109,6 +110,8 @@ import {
   Folder,
   Hand,
   Home,
+  Info,
+  MusicMark,
   ListOrdered,
   Locate,
   Message,
@@ -1308,14 +1311,10 @@ export function ProductionCastScreen() {
       <div className="fy-gridcard__pad">
         <div className="fy-gridcard__title">
           <span className="fy-gridcard__name">{sheet.name}</span>
-          <span
-            className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`}
-            style={{ width: 6, height: 6 }}
-          />
         </div>
         <div className="fy-gridcard__body">{sheet.role ?? sheet.region ?? kindLabel(sheet)}</div>
         <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
-          {guest ? `guest · v${sheet.version}` : `${kindLabel(sheet)} · v${sheet.version}`}
+          {guest ? "guest" : kindLabel(sheet)} · {sheet.status === "locked" ? "locked" : "sketch"} · v{sheet.version}
         </div>
       </div>
     </button>
@@ -2573,7 +2572,7 @@ export function ChapterTreeScreen() {
               onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(c.id)}`)} />
             <Button aria-label={`Move ${c.title} up`} disabled={index === 0} onClick={() => move(c, -1)}>↑</Button>
             <Button aria-label={`Move ${c.title} down`} disabled={index === chapters.length - 1} onClick={() => move(c, 1)}>↓</Button>
-            <Button aria-label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}>Retire</Button>
+            <IconButton type="button" label={`Retire ${c.title}`} onClick={() => worldId && prodId && setChapterRetired(worldId, prodId, c.file, true)}><Archive /></IconButton>
             </div>
             );
           })}
@@ -7251,8 +7250,8 @@ export function CutScreen() {
                 <RotateCw size={12} />
               </button>
             </span>
-            <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(placementTimeline ?? editableTimeline)], "Add audio track")}>Add audio track</button>
-            <button type="button" className="fy-tlbtn fy-tlbtn--text" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}>Scene labels</button>
+            <button type="button" className="fy-tlbtn fy-tip" data-tip="Add audio track" aria-label="Add audio track" disabled={commandsDisabled} onClick={() => editableTimeline && sendCommands([newAudioTrack(placementTimeline ?? editableTimeline)], "Add audio track")}><MusicMark size={12} /></button>
+            <button type="button" className="fy-tlbtn fy-tip" data-tip="Scene labels" aria-label="Scene labels" aria-pressed={showScenes} onClick={() => setShowScenes(value => !value)}><ListOrdered size={12} /></button>
             <span className="fy-timeline__group" role="group" aria-label="Order">
               <button
                 type="button"
@@ -7296,14 +7295,13 @@ export function CutScreen() {
               <span className="fy-timeline__group" role="group" aria-label="Edit">
                 <button
                   type="button"
-                  className="fy-tlbtn fy-tlbtn--text fy-tip"
+                  className="fy-tlbtn fy-tip"
                   data-tip={playheadInsideSelected ? "Split at the playhead · S" : "Move the playhead over the selected clip to split it"}
                   aria-label="Split"
                   disabled={commandsDisabled || !playheadInsideSelected}
                   onClick={() => selectedAction("split")}
                 >
                   <Scissors size={12} />
-                  Split
                 </button>
                 <button type="button" className="fy-tlbtn fy-tip" data-tip="Duplicate · D" aria-label="Duplicate" disabled={commandsDisabled || !selectedAny} onClick={() => selectedAction("duplicate")}>
                   <Copy size={12} />
@@ -7316,26 +7314,24 @@ export function CutScreen() {
                 </button>
               </span>
             )}
-            <button type="button" className="fy-tlbtn fy-tlbtn--text fy-tlbtn--toggle fy-tip" data-tip="Snap to clip boundaries" aria-label="Snap" aria-pressed={snap} onClick={() => setSnap((on) => !on)}>
-              <Snap size={10} />
-              snap
+            <button type="button" className="fy-tlbtn fy-tlbtn--toggle fy-tip" data-tip="Snap to clip boundaries" aria-label="Snap" aria-pressed={snap} onClick={() => setSnap((on) => !on)}>
+              <Snap size={12} />
             </button>
             {editableTimeline !== null && (
               <button
                 type="button"
-                className="fy-tlbtn fy-tlbtn--text fy-tlbtn--toggle fy-tip"
-                data-tip="Music and Ambience roles lower under Voice clips"
+                className="fy-tlbtn fy-tlbtn--toggle fy-tip"
+                data-tip="Duck · lower Music and Ambience under Voice clips"
                 aria-label="Duck"
                 aria-pressed={editableTimeline.mix.speechFirst}
                 disabled={commandsDisabled}
                 onClick={() => sendCommands([{ kind: "set-mix", mix: { speechFirst: !editableTimeline.mix.speechFirst } }], editableTimeline.mix.speechFirst ? "Duck off" : "Duck on")}
               >
-                <Duck size={10} />
-                duck
+                <Duck size={12} />
               </button>
             )}
-            <button type="button" className="fy-tlbtn fy-tlbtn--help fy-tip" data-tip="Keyboard shortcuts · ?" aria-label="Keyboard shortcuts" aria-pressed={keysOpen} onClick={() => setKeysOpen((open) => !open)}>
-              ?
+            <button type="button" className="fy-tlbtn fy-tip" data-tip="Keyboard shortcuts · ?" aria-label="Keyboard shortcuts" aria-pressed={keysOpen} onClick={() => setKeysOpen((open) => !open)}>
+              <Info size={12} />
             </button>
             <span className="fy-timeline__zoom" role="group" aria-label="Zoom">
               <button type="button" className="fy-tlbtn fy-tip" data-tip="Zoom out · −" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-0.5)}>

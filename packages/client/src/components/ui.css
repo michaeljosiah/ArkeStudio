@@ -72,12 +72,15 @@
   border-radius: var(--radius-control);
   border: var(--border-1) solid transparent;
   background: transparent;
+  color: var(--foreground);
   cursor: pointer;
   transition: var(--transition-control);
 }
 .ui-iconbtn:hover {
   background: var(--accent);
 }
+.ui-iconbtn:disabled { opacity: 0.5; cursor: default; }
+.ui-iconbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 
 /* ---- Inputs ------------------------------------------------ */
 .ui-input {

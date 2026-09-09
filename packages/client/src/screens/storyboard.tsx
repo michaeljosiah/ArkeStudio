@@ -849,10 +849,11 @@ export function ShotSheetScreen() {
                   </span>
                   <select
                     className="fy-sheetselect"
+                    aria-label={field.label}
                     value={own ?? ""}
                     onChange={(e) => framingSet(field.key, e.target.value === "" ? undefined : e.target.value)}
                   >
-                    <option value="">{inherited !== undefined ? `${inherited} · from scene` : "—"}</option>
+                    <option value="">{inherited !== undefined ? `${inherited} · from scene` : "Not set"}</option>
                     {field.options.map((o) => (
                       <option key={o} value={o}>
                         {o}
@@ -867,7 +868,8 @@ export function ShotSheetScreen() {
               <input
                 className="fy-sheetselect"
                 defaultValue={shot.framing?.grade ?? ""}
-                placeholder={scene.defaults?.grade ?? "—"}
+                aria-label="grade"
+                placeholder={scene.defaults?.grade ?? "Not set"}
                 onBlur={(e) => {
                   const next = e.target.value.trim();
                   if (next === (shot.framing?.grade ?? "")) return;

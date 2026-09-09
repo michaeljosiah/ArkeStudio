@@ -30,8 +30,8 @@ import {
   sortScenes,
 } from "@arke-studio/contracts";
 import { DegradedBanner, EmptyState, Screen, Section } from "../components/layout.js";
-import { Badge, Button, Callout, Card, Input, Textarea, cx } from "../components/ui.js";
-import { ChevronRight, Plus, Search } from "../components/icons.js";
+import { Badge, Button, Callout, Card, IconButton, Input, Textarea, cx } from "../components/ui.js";
+import { Archive, ChevronRight, Copy, Pencil, Plus, Search } from "../components/icons.js";
 import { AppChrome } from "../components/chrome.js";
 import { Loading } from "../components/loading.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
@@ -1256,11 +1256,7 @@ function SheetGrid({
                   <div style={{ minWidth: 0 }}>
                     <div className="fy-row__name">
                       {sheet.name}
-                      <span
-                        className={cx("fy-dot", sheet.status === "locked" ? "fy-dot--ok" : "fy-dot--sketch")}
-                        style={{ width: 6, height: 6 }}
-                        aria-hidden="true"
-                      />
+                      <span className="fy-sheet-state">{sheet.status === "locked" ? "Locked" : "Sketch"}</span>
                     </div>
                     <div className="fy-row__sub">{roleOf(sheet)}</div>
                   </div>
@@ -1362,10 +1358,6 @@ export function LocationsScreen() {
             <div className="fy-gridcard__pad">
               <div className="fy-gridcard__title">
                 <span className="fy-gridcard__name">{s.name}</span>
-                <span
-                  className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                  style={{ width: 6, height: 6 }}
-                />
               </div>
               <div className="fy-gridcard__body">{sheetLede(s)}</div>
               <div className="fy-gridcard__foot" style={{ marginTop: 9 }}>
@@ -1432,10 +1424,6 @@ export function FactionsScreen() {
               <div className="fy-gridcard__pad" style={{ padding: "2px 8px 0" }}>
                 <div className="fy-gridcard__title">
                   <span className="fy-gridcard__name">{s.name}</span>
-                  <span
-                    className={`fy-dot fy-dot--${s.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 6, height: 6 }}
-                  />
                 </div>
                 <div className="fy-gridcard__body">{sheetLede(s)}</div>
                 {/*
@@ -1947,15 +1935,16 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         />
       )}
       <div className="fy-sheet__quiet">
-        <Button variant="ghost" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
-          Rename
-        </Button>
-        <Button
-          variant="ghost"
+        <IconButton type="button" label="Rename" onClick={() => setRenaming(renaming === null ? sheet.name : null)}>
+          <Pencil />
+        </IconButton>
+        <IconButton
+          type="button"
+          label="Duplicate"
           onClick={() => setDuplicating(duplicating === null ? `${sheet.name} (copy)` : null)}
         >
-          Duplicate
-        </Button>
+          <Copy />
+        </IconButton>
         {/* One way only (SPEC-020 R-15, D7): a sheet promoted by mistake is retired, because
               demotion would either break the citations outside the production or need an
               exception for widely-cited guests. */}
@@ -1968,14 +1957,15 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             Promote to the world
           </Button>
         )}
-        <Button
-          variant="ghost"
+        <IconButton
+          type="button"
+          label="Retire"
           disabled={sheet.retired === true}
           onClick={() => worldId && retireEntity(worldId, sheetPath)}
-          title="Stays resolvable for existing citations; leaves pickers for new work"
+          title="Retire · stays resolvable for existing citations; leaves pickers for new work"
         >
-          Retire
-        </Button>
+          <Archive />
+        </IconButton>
       </div>
       {renaming !== null && (
         <Card className="scr-form">
@@ -2046,12 +2036,6 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
             <div key={s.heading}>
               <div className="fy-sheet__sechead" style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {s.heading}
-                {!isCharacter && (
-                  <span
-                    className={`fy-dot fy-dot--${sheet.status === "locked" ? "ok" : "sketch"}`}
-                    style={{ width: 5, height: 5 }}
-                  />
-                )}
               </div>
               {readable ? readableProse(s.heading, s.body, body) : body}
             </div>

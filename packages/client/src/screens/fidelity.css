@@ -1149,6 +1149,7 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 
 .fy-sheet__actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .fy-sheet__quiet { display: flex; gap: 4px; flex-wrap: wrap; }
+.fy-sheet-state { margin-left: 8px; font: 400 10px var(--font-mono); color: var(--muted-foreground); }
 /* The tabs flow beside the name, wrapping below it when needed, and below world notices. */
 .fy-sheet__heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 20px; margin-bottom: 10px; }
 .fy-sheet__heading > .fy-sheet__name { margin-bottom: 0; margin-right: auto; }
@@ -3263,8 +3264,39 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
   cursor: pointer;
   transition: var(--transition-control);
 }
-.fy-set__pill:hover { background: var(--accent); }
+.fy-set__pill:hover { background-color: var(--accent); }
 .fy-set__pill:disabled { opacity: 0.5; cursor: default; }
+/* Keep the browser's keyboard and option semantics while drawing the closed controls with
+   the same type, border and chevron as the rest of the studio (issue 1010). */
+.fy-set__select {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 7px 12px;
+  font: 500 11.5px var(--font-sans);
+  background: var(--background);
+  color: var(--foreground);
+}
+select.fy-set__select, select.fy-set__pill, select.fy-sheetselect {
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+select.fy-set__select:focus-visible, select.fy-set__pill:focus-visible, .fy-sheetselect:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+select.fy-set__select:disabled, select.fy-sheetselect:disabled { opacity: 0.5; cursor: default; }
+@media (forced-colors: active) {
+  select.fy-set__select, select.fy-set__pill, select.fy-sheetselect { appearance: auto; background-image: none; }
+}
 /* Turn 124: a pane of rows keeps a 760px reading column. Native selects must shrink
    independently of their longest option; the state stays readable below the same control. */
 .fy-set--general { grid-template-columns: minmax(0, 760px); }
@@ -3371,6 +3403,11 @@ button.fy-emptycard:hover { background: var(--accent); border-color: var(--neutr
 .fy-activityrow__title { font: 600 13px var(--font-sans); }
 .fy-activityrow__sub { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
 .fy-activityrow__main { flex: 1; min-width: 0; }
+.fy-activityrow__summary { display: flex; align-items: center; gap: 12px; }
+.fy-activityrow__summary > .dom-jobrow { flex: 1; min-width: 0; border-bottom: 0; }
+.fy-activityrow__summary .dom-jobrow__target,
+.fy-activityrow__summary .dom-jobrow__model { min-width: 0; overflow-wrap: anywhere; }
+.fy-activityrow__actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .fy-activityrow__meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
 .fy-spendtotal { font: 650 30px/1 var(--font-sans); letter-spacing: -0.02em; margin-top: 10px; }
 .fy-spendbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }

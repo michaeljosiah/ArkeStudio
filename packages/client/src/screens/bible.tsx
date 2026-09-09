@@ -3,11 +3,12 @@ import { useParams } from "react-router";
 import { bibleSize, DEFAULT_NARRATOR, formatMicroUsd, splitBible, supportsVoiceUse } from "@arke-studio/contracts";
 import { RichMarkdownEditor } from "../components/editor/rich-markdown-editor.js";
 import { updateRichModeGate, type RichModeGate } from "../components/editor/rich-mode.js";
-import { Button, Callout } from "../components/ui.js";
+import { Button, Callout, IconButton } from "../components/ui.js";
 import { readBibleSection, restoreBible, saveBible, useStore, useVoiceAudio, useVoiceParts } from "../lib/store.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
 import { mediaUrl } from "../lib/media.js";
 import { clearQueue, enqueueClip, playClip } from "../lib/audio.js";
+import { Speaker } from "../components/icons.js";
 import { ClipPlayButton } from "../components/player.js";
 
 /**
@@ -274,8 +275,11 @@ export function BibleScreen() {
                             }}
                           />
                         ) : (
-                          <Button
-                            aria-label={`Read ${section.heading} aloud`}
+                          <IconButton
+                            type="button"
+                            label={`Read ${section.heading} aloud`}
+                            title={read?.heading === section.heading && !mine ? "Preparing audio…" : `Read ${section.heading} aloud`}
+                            aria-busy={read?.heading === section.heading && !mine}
                             disabled={section.body.trim() === "" || (read?.heading === section.heading && !mine)}
                             onClick={() => {
                               if (!worldId) return;
@@ -284,8 +288,8 @@ export function BibleScreen() {
                               setRead({ requestId: readBibleSection(worldId, section.heading), heading: section.heading });
                             }}
                           >
-                            {read?.heading === section.heading && !mine ? "Preparing…" : "Listen"}
-                          </Button>
+                            <Speaker />
+                          </IconButton>
                         )}
                       </span>
                       {mine?.status === "confirmation-required" && (

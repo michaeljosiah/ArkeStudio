@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, Callout, Input, Textarea, cx } from "../components/ui.js";
+import { Badge, Button, Callout, IconButton, Input, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
 import { EmptyState } from "../components/layout.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
 import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
+import { ActivityIcon, Archive, ChevronDown, ChevronRight, Plus, Sparkle, Trash } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
   CAPABILITY_LABEL,
@@ -2756,7 +2756,7 @@ export function ActivityScreen() {
                     </div>
                     <div className="fy-activityrow__sub">{entry.detail}</div>
                     <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
-                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <Button variant="ghost" onClick={() => setInspectedJobId(entry.ref!)}>Provider calls</Button>}
+                      {entry.ref && jobs.some((job) => job.id === entry.ref) && <IconButton type="button" label="Provider calls" onClick={() => setInspectedJobId(entry.ref!)}><ActivityIcon /></IconButton>}
                       {entry.actions.includes("resolve") && entry.ref && (
                         <>
                           <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
@@ -2837,7 +2837,15 @@ export function ActivityScreen() {
           {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
           {recent.slice(0, 20).map((job) => (
             <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <JobRow job={job} state={state} />
+              <div className="fy-activityrow__summary">
+                <JobRow job={job} state={state} />
+                <span className="fy-activityrow__actions">
+                  <IconButton type="button" label="Provider calls" onClick={() => setInspectedJobId(job.id)}><ActivityIcon /></IconButton>
+                  {jobActions(job).includes("delete") && confirmingDelete !== job.id && (
+                    <IconButton type="button" label="Delete" onClick={() => setConfirmingDelete(job.id)}><Trash /></IconButton>
+                  )}
+                </span>
+              </div>
               {/* Where this one is re-run from, which is not one place (issue 226). The row used
                   to name the production's dispatch dialog under every failure, including the
                   reference work that belongs to no production and has no such dialog. */}
@@ -2868,7 +2876,6 @@ export function ActivityScreen() {
                     <span className="scr-field__hint">failed — run it again from wherever you started it</span>
                   );
                 })()}
-              <Button variant="ghost" onClick={() => setInspectedJobId(job.id)}>Provider calls</Button>
               {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
                   and the words say what survives it. Offered only where the state permits it
                   (R-13) — work still finishing, or a finalization the user can still retry, is
@@ -2892,11 +2899,7 @@ export function ActivityScreen() {
                       Keep
                     </Button>
                   </>
-                ) : (
-                  <Button variant="ghost" onClick={() => setConfirmingDelete(job.id)}>
-                    Delete
-                  </Button>
-                ))}
+                ) : null)}
             </div>
           ))}
           {(inspectedJobId || inspectAllCalls) && (
