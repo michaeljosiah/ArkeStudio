@@ -318,9 +318,7 @@ export function ProviderKeyLine({ id }: { id: ProviderId }) {
             </>
           }
         >
-          {/* No last-four: the key never comes back over the bridge, and inventing a tail would
-              be a picture of a secret rather than the secret's state (SPEC-008 R-10). */}
-          <span className="fy-fact__mono">•••••••••••• stored</span>
+          <span className="fy-fact__mono">•••••••••••• stored{status.credentialFingerprint ? ` · fingerprint ${status.credentialFingerprint}` : ""}</span>
         </FactRow>
       ) : (
         <FactRow
@@ -395,7 +393,10 @@ function connectionWords(id: ProviderId, status: ProviderStatus | undefined): { 
   const external = PROVIDER_TABLE[id].credential === "external";
   const troubled = Boolean(status?.fault) || status?.validation === "invalid";
   if (troubled) return { word: external ? "sign-in needed" : "key rejected", tone: "warn" };
-  if (status?.configured === true) return { word: "connected", tone: "ok" };
+  if (status?.configured === true) {
+    if (status.validation === "valid") return { word: "connected", tone: "ok" };
+    return { word: status.validation === "testing" ? "testing" : "untested", tone: "idle" };
+  }
   return { word: external ? "not signed in" : "no key", tone: "idle" };
 }
 

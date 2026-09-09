@@ -5,6 +5,43 @@ import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
+import { orderedShots } from "./scene-flow.js";
+import { PerformanceTargetSchema } from "./performance.js";
+
+/** The same names for running and completed work, resolved only inside its owning world (#1005). */
+export function activityJobLabels(state: ClientState | null | undefined, job: Job): { target: string; model: string } {
+  const world = state?.world?.meta.worldId === job.worldId ? state.world : null;
+  const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
+  const targetParts = job.target.id?.split("/") ?? [];
+  const targetId = targetParts[0];
+  const prose = job.target.kind === "voice-preview" && job.params.purpose === "prose";
+  const proseProductions = prose ? world?.productions.filter((candidate) => candidate.meta.id === targetId || candidate.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === targetId))) ?? [] : [];
+  const production = world?.productions.find((candidate) => candidate.meta.id === job.productionId) ?? (proseProductions.length === 1 ? proseProductions[0] : undefined);
+  const performanceInput = (job.target.kind === "performance-generation" ? job.params.performanceGeneration : job.target.kind === "performance-conversion" ? job.params.performanceConversion : undefined) as { target?: unknown } | undefined;
+  const parsedTarget = PerformanceTargetSchema.safeParse(performanceInput?.target);
+  const performance = parsedTarget.success && parsedTarget.data.productionId === job.productionId ? parsedTarget.data : undefined;
+  const tableRead = job.target.kind === "table-read-cache";
+  const sceneId = performance?.sceneId ?? (tableRead && typeof job.params.tableReadSceneId === "string" ? job.params.tableReadSceneId : undefined);
+  const shotId = performance?.shotId ?? job.target.coversShots?.[0] ?? targetId;
+  const scene = production?.scenes.find((candidate) => sceneId ? candidate.id === sceneId : candidate.id === targetId || orderedShots(candidate).some((shot) => shot.id === shotId));
+  const shot = scene ? orderedShots(scene).find((candidate) => candidate.id === shotId) : undefined;
+  const sheet = REFERENCE_ORIGINS[job.target.kind] ? world?.sheets.find((candidate) => candidate.id === targetId) : undefined;
+  const bench = job.target.kind === "bench-take" ? world?.benchSessions.find((session) => session.id === targetId) : undefined;
+  const kind = job.target.kind === "shot" ? "clip" : job.target.kind.replaceAll("-", " ");
+  const sceneWide = job.target.kind === "scene-pass" || job.target.kind === "storyboard";
+  const speakerId = performance?.speakerSheetId ?? (tableRead ? job.params.tableReadSpeakerSheetId : undefined);
+  const speaker = world?.sheets.find((candidate) => candidate.id === speakerId && candidate.type === "character");
+  const proseName = prose ? world?.canon.find((candidate) => candidate.id === targetId)?.title
+    ?? world?.series.find((candidate) => candidate.id === targetId)?.title
+    ?? (production && !shot && typeof job.params.sectionHeading === "string" ? job.params.sectionHeading : undefined) : undefined;
+  const bible = job.target.kind === "voice-preview" && job.params.purpose === "bible-section";
+  const chapterName = prose && targetParts[1] === "chapters" ? production?.chapters.find((chapter) => chapter.id === targetParts[2]?.split("#")[0])?.title : undefined;
+  const subject = [speaker?.name, chapterName ?? proseName ?? (bible ? `Bible${typeof job.params.sectionHeading === "string" ? ` · ${job.params.sectionHeading}` : ""}` : undefined)
+    ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
+  const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
+  return { target, model };
+}
 
 /**
  * The Activity read model (SPEC-014): nothing is added to the needs-you queue — every entry is
@@ -245,6 +282,8 @@ export interface RunningEntry {
   kind: "job" | "model-download" | "export";
   title: string;
   detail: string;
+  /** Exact identities for a diagnostic tooltip, separate from the human title. */
+  diagnostic?: string;
   /** 0..100 where known; null where the work reports none. */
   percent: number | null;
   ref: string;
@@ -266,10 +305,12 @@ export function computeRunning(
   for (const job of state.app.jobs) {
     const finalizing = job.status === "succeeded" && job.finalization?.status === "pending";
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
+    const labels = activityJobLabels(state, job);
     entries.push({
       kind: "job",
-      title: `${job.model} · ${job.target.kind}${job.target.id !== undefined ? ` ${job.target.id}` : ""}`,
-      detail: finalizing ? `${job.provider} · generated · preparing result` : `${job.provider} · ${job.status}`,
+      title: labels.target,
+      detail: `${labels.model} · ${finalizing ? "generated · preparing result" : job.status}`,
+      diagnostic: [job.id, job.target.id, `${job.provider}/${job.model}`].filter(Boolean).join(" · "),
       percent: null,
       ref: job.id,
       worldId: job.worldId,

@@ -51,7 +51,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { episodeThumbnailPath, takeMediaPath, Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -1892,7 +1892,7 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
           }
           disabled={sheetTalkStarting}
         >
-          {sheetTalkStarting ? "Starting…" : "Talk about them"}
+          {sheetTalkStarting ? "Starting…" : sheet.type === "character" ? "Talk about them" : "Talk about it"}
         </Button>
         {/* Page scale (issue 859). The speaker on each paragraph reads that paragraph; this
               reads the sheet through, in the order declared above. Offered only when there is
@@ -3892,10 +3892,24 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
-  // The design's card metas name things, not slugs ("The Vigil", never "the-vigil"). Sheets
-  // resolve by id, canon by CANON id; a link that names neither keeps its own spelling.
-  const linkName = (link: string): string =>
-    world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title ?? link;
+  // Resolve names from this world's existing records; unknown links retain their spelling.
+  const linkName = (link: string, links: readonly string[] = []): string => {
+    const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
+    if (name) return name;
+    const owning = world?.productions.filter((production) => links.includes(production.meta.id)) ?? [];
+    const names: string[] = [];
+    for (const production of owning.length ? owning : world?.productions ?? []) {
+      if (production.meta.id === link) return production.meta.title;
+      const episode = production.episodes.find((candidate) => candidate.id === link);
+      if (episode) names.push(episode.title);
+      for (const scene of production.scenes) {
+        if (scene.id === link) names.push(scene.title);
+        const shot = orderedShots(scene).find((candidate) => candidate.id === link);
+        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
+      }
+    }
+    return names.length === 1 ? names[0]! : link;
+  };
   const kindLabel: Record<string, string> = {
     image: "Images",
     board: "Boards",
@@ -4090,15 +4104,16 @@ export function ArtifactsScreen() {
         }}
       >
         {visible.map((a) => {
-          const name = a.file.split("/").pop() ?? a.file;
+          const filename = a.file.split("/").pop() ?? a.file;
+          const name = artifactDisplayName(a, linkName);
           const isImage = a.kind === "image" || /\.(png|jpe?g|webp|gif)$/i.test(a.file);
           // One line, the design's vocabulary (68a): type · made here · duration · linked. An
           // uploaded file carries no provenance token — where it came from is not what it is.
           const meta = [
-            name.includes(".") ? name.split(".").pop() : a.kind,
+            filename.includes(".") ? filename.split(".").pop() : a.kind,
             ...(madeHere(a) ? [generatedOriginLabel(a)] : []),
             ...(a.mediaInfo?.durationSec !== undefined ? [formatSeconds(a.mediaInfo.durationSec)] : []),
-            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map(linkName).join(", ")}`] : []),
+            ...(a.links.length > 0 ? [`linked: ${a.links.slice(0, 2).map((link) => linkName(link, a.links)).join(", ")}`] : []),
           ].join(" · ");
           return (
             <div
@@ -4116,8 +4131,8 @@ export function ArtifactsScreen() {
               <button
                 type="button"
                 className="fy-gridcard__open"
-                aria-label={artifactOpenLabel(a)}
-                title={artifactOpenLabel(a)}
+                aria-label={artifactOpenLabel(a, name)}
+                title={filename}
                 onClick={(event) => {
                   openTrigger.current = event.currentTarget;
                   setOpenArtifactId(a.id);
@@ -4137,7 +4152,7 @@ export function ArtifactsScreen() {
                     path={`artifacts/${a.file}`}
                     label={name}
                     download
-                    downloadName={name}
+                    downloadName={filename}
                   />
                 </div>
               ) : a.kind === "audio" ? (

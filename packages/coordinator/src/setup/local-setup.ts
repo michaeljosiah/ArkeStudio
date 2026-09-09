@@ -172,6 +172,8 @@ export class LocalSetupService {
   /** The install action a paused member belongs to, persisted into its receipt for restart. */
   private readonly pendingClosures = new Map<string, readonly string[]>();
   private readonly receiptUpdates = new Set<Promise<void>>();
+  /** Observed per-file bytes, refreshed by detection and the existing transfer loop. */
+  private readonly fileProgress = new Map<string, number>();
 
   constructor(
     private readonly deps: SetupDeps,
@@ -209,12 +211,19 @@ export class LocalSetupService {
 
   status(): SetupStatus {
     return {
-      components: [...this.components.values()].map(({ entry, ...c }) => ({
+      components: [...this.components.values()].map(({ entry, ...c }) => {
+        const location = this.installLocationOf(entry);
+        return {
         ...c,
         // Resolved at publication time because a newly activated or remapped engine can change
         // where dependent weights land without rebuilding the setup service.
-        installLocation: this.installLocationOf(entry),
-      })),
+        installLocation: location,
+        files: entry.spec.kind === "files" && location ? entry.spec.files.map((file) => {
+          const target = join(location, file.file);
+          return { key: createHash("sha256").update(JSON.stringify([target, file.sha256 ?? file.url, file.sizeMb])).digest("hex"), sizeMb: file.sizeMb,
+            bytesDone: componentIsSettled(c.state) ? file.sizeMb * 1024 * 1024 : Math.min(file.sizeMb * 1024 * 1024, this.fileProgress.get(target) ?? 0) };
+        }) : undefined,
+      }; }),
       running: this.running,
       diskFreeMb: this.diskFreeMb,
       diskCheckedAt: this.diskCheckedAt,
@@ -401,12 +410,14 @@ export class LocalSetupService {
     let paused: OwnedDownload | null = null;
     for (const { spec, target } of this.downloadTargets(entry)) {
       const complete = await stat(toExtendedLength(target)).catch(() => null);
+      this.fileProgress.set(target, complete?.isFile() ? complete.size : 0);
       if (complete?.isFile() && complete.size > 0) {
         bytesDone += complete.size;
         continue;
       }
       const owned = await this.ownedDownload(entry.id, spec, target, true);
       if (owned !== null) {
+        this.fileProgress.set(target, owned.receipt.durableBytes);
         bytesDone += owned.receipt.durableBytes;
         paused = owned;
       }
@@ -846,6 +857,7 @@ export class LocalSetupService {
           const target = join(dir, f.file);
           const existing = await stat(toExtendedLength(target)).catch(() => null);
           if (existing !== null && existing.size > 0) {
+            this.fileProgress.set(target, existing.size);
             done += existing.size;
             this.set(entry.id, { bytesDone: done });
             this.publish();
@@ -1146,6 +1158,7 @@ export class LocalSetupService {
       preserve: null,
     };
     this.activeTransfer = transfer;
+    this.fileProgress.set(target, resumedAt);
     const started = Date.now();
     let received = 0;
     let lastEmit = 0;
@@ -1220,6 +1233,7 @@ export class LocalSetupService {
             offset += bytesWritten;
           }
           received += chunk.byteLength;
+          this.fileProgress.set(target, resumedAt + received);
           const now = Date.now();
           if (now - lastCheckpoint >= Math.max(5_000, (this.opts.throttleMs ?? DEFAULT_THROTTLE_MS) * 10)) {
             lastCheckpoint = now;
@@ -1281,6 +1295,7 @@ export class LocalSetupService {
         }
         const info = await stat(toExtendedLength(receipt.partialPath));
         receipt.durableBytes = info.size;
+        this.fileProgress.set(target, receipt.durableBytes);
         await this.writeReceipt(receiptPath, receipt);
         this.set(componentId, { bytesDone: alreadyDone + receipt.durableBytes });
         throw new DownloadPausedError(
@@ -1297,6 +1312,7 @@ export class LocalSetupService {
         receipt.rangeSupported &&
         receipt.durableBytes > 0;
       if (retainForResume) {
+        this.fileProgress.set(target, receipt.durableBytes);
         throw new DownloadPausedError(
           `paused after ${failure instanceof Error ? failure.message : String(failure)}`,
           true,
@@ -1305,6 +1321,7 @@ export class LocalSetupService {
       try {
         await rm(toExtendedLength(receipt.partialPath), { force: true });
         await rm(toExtendedLength(receiptPath), { force: true });
+        this.fileProgress.set(target, 0);
         this.set(componentId, { bytesDone: alreadyDone });
       } catch (err) {
         this.set(componentId, {
@@ -1316,6 +1333,7 @@ export class LocalSetupService {
       }
       throw failure;
     }
+    this.fileProgress.set(target, receipt.durableBytes);
     return receipt.durableBytes;
   }
 

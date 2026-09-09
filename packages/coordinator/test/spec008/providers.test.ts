@@ -45,6 +45,96 @@ async function makeService(probes: CapabilityProbe[] | Error) {
 }
 
 describe("provider statuses and availability (R-1..R-4, §3.2)", () => {
+  it("completes testing and fingerprint refresh in either order for the same saved key", { timeout: 10_000 }, async () => {
+    for (const metadataFirst of [true, false]) {
+      const dir = await tempDir("arke-provider-concurrent-test-");
+      const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+      await credentials.set("fal", "same-saved-key");
+      let finishMetadata!: (value: string) => void;
+      let finishKey!: (value: string) => void;
+      let finishProbe!: (value: CapabilityProbe[]) => void;
+      let entered!: () => void;
+      const probing = new Promise<void>((resolve) => { entered = resolve; });
+      const probe = new Promise<CapabilityProbe[]>((resolve) => { finishProbe = resolve; });
+      const service = new ProviderService(credentials, { fal: { validateKey: async () => { entered(); return probe; } } }, null);
+      await service.init();
+      credentials.fingerprint = () => new Promise((resolve) => { finishMetadata = resolve; });
+      credentials.get = () => new Promise((resolve) => { finishKey = resolve; });
+      const configuring = service.setConfigured("fal", true);
+      const validating = service.validate("fal");
+      if (metadataFirst) { finishMetadata("1234ABCD"); await configuring; }
+      finishKey("same-saved-key");
+      await probing;
+      if (!metadataFirst) { finishMetadata("1234ABCD"); await configuring; }
+      finishProbe([{ capability: "image", available: true }]);
+      const status = await validating;
+      assert.equal(status.validation, "valid");
+      assert.equal(status.credentialFingerprint, "1234ABCD");
+    }
+  });
+  it("refreshes credential fingerprints and discards validation of a replaced key (#1004)", async () => {
+    const dir = await tempDir("arke-provider-identity-");
+    const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+    await credentials.set("fal", "first-secret-key");
+    let finish!: (probes: CapabilityProbe[]) => void;
+    let started!: () => void;
+    const inFlight = new Promise<void>((resolve) => { started = resolve; });
+    const response = new Promise<CapabilityProbe[]>((resolve) => { finish = resolve; });
+    let wait = false;
+    const service = new ProviderService(credentials, { fal: { validateKey: async () => {
+      if (!wait) return [{ capability: "image", available: true }];
+      started();
+      return response;
+    } } }, null);
+    await service.init();
+    const first = service.list().find((provider) => provider.id === "fal")!.credentialFingerprint;
+    assert.match(first!, /^[A-F0-9]{8}$/);
+    assert.equal(first, await credentials.fingerprint("fal"), "stable for the stored record");
+    assert.doesNotMatch(JSON.stringify(service.list()), /first-secret-key/);
+    await service.validate("fal");
+    wait = true;
+    const validating = service.validate("fal");
+    await inFlight;
+    await credentials.set("fal", "replacement-secret-key");
+    const replacementFingerprint = await credentials.fingerprint("fal");
+    let finishFingerprint!: (fingerprint: string | undefined) => void;
+    credentials.fingerprint = () => new Promise((resolve) => { finishFingerprint = resolve; });
+    const configuring = service.setConfigured("fal", true);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.validation, "untested", "invalidation precedes the optional read");
+    finish([{ capability: "image", available: true }]);
+    const current = await validating;
+    assert.equal(current.validation, "untested");
+    assert.equal(current.lastValidated, undefined);
+    assert.deepEqual(current.probes, []);
+    finishFingerprint(replacementFingerprint);
+    await configuring;
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.credentialFingerprint, replacementFingerprint);
+    assert.notEqual(replacementFingerprint, first);
+    await credentials.clear("fal");
+    await service.setConfigured("fal", false);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.credentialFingerprint, undefined);
+  });
+  it("keeps a saved credential configured when optional metadata fails and ignores a stale fingerprint", async () => {
+    const dir = await tempDir("arke-provider-metadata-");
+    const credentials = new CredentialStore(join(dir, "credentials.dat"), cipher, new SecretRegistry(), async () => {});
+    await credentials.set("fal", "saved-secret");
+    credentials.fingerprint = async () => { throw new Error("temporary read failure"); };
+    const service = new ProviderService(credentials, {}, null);
+    await service.init();
+    await service.setConfigured("fal", true);
+    assert.equal(service.list().find((provider) => provider.id === "fal")!.configured, true);
+    assert.equal(await credentials.get("fal"), "saved-secret");
+    let finish!: (fingerprint: string) => void;
+    credentials.fingerprint = () => new Promise((resolve) => { finish = resolve; });
+    const pending = service.setConfigured("fal", true);
+    await credentials.clear("fal");
+    await service.setConfigured("fal", false);
+    finish("1234ABCD");
+    await pending;
+    const status = service.list().find((provider) => provider.id === "fal")!;
+    assert.equal(status.configured, false);
+    assert.equal(status.credentialFingerprint, undefined);
+  });
   it("a key that authenticates but lacks video reports image available, video not (R-3)", async () => {
     const service = await makeService([
       { capability: "image", available: true },
