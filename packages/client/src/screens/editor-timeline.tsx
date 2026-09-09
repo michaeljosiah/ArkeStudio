@@ -157,6 +157,9 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
 } & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "style" | "className">) {
   const ref = useRef<HTMLButtonElement>(null);
   const width = useMeasuredWidth(ref);
+  // A poster that never arrives — a build with no ffmpeg draws none — leaves the kind's mark, not
+  // an empty frame with a name on it.
+  const [posterMissing, setPosterMissing] = useState(false);
   return (
     <button ref={ref} type="button" className={className} style={style} {...rest}>
       {children}
@@ -164,9 +167,9 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
         <span className="fy-pictclip__gap">{view.label}</span>
       ) : (
         <>
-          {view.poster === null
+          {view.poster === null || posterMissing
             ? <div className="fy-portrait--fallback"><Film size={18} /></div>
-            : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} />}
+            : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} onAvailabilityChange={(available) => setPosterMissing(!available)} />}
           <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames / frameRate} widthPx={width} />
           <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
         </>
@@ -286,7 +289,7 @@ export function PictureTrack({
       lastScrub = clamped;
       onScrub?.(clamped);
     };
-    const started = startClipGesture({
+    startClipGesture({
       event,
       lane,
       canvas: lane.closest<HTMLElement>(".fy-timeline__canvas"),
@@ -326,7 +329,6 @@ export function PictureTrack({
         }
       },
     });
-    if (!started) return;
   };
 
   const onLanePointerDown = (event: React.PointerEvent) => {

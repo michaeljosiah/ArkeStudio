@@ -65,7 +65,6 @@ export function startClipGesture(options: GestureOptions): boolean {
   let scrolled = 0;
   let lastClientX = originX;
   let bypass = false;
-  let last: GestureUpdate | null = null;
   let frame = 0;
   let ended = false;
 
@@ -95,10 +94,7 @@ export function startClipGesture(options: GestureOptions): boolean {
       moved: clientX !== originX || scrolled !== 0,
     };
   };
-  const report = () => {
-    last = compute(lastClientX);
-    options.onUpdate(last);
-  };
+  const report = () => options.onUpdate(compute(lastClientX));
   const tick = () => {
     frame = 0;
     if (ended || canvas === null) return;
@@ -159,6 +155,5 @@ export function startClipGesture(options: GestureOptions): boolean {
   element.addEventListener("pointerup", up);
   element.addEventListener("pointercancel", cancel);
   if (typeof window !== "undefined") window.addEventListener("keydown", onKey, true);
-  void last;
   return true;
 }

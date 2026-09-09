@@ -7459,10 +7459,10 @@ export function CutScreen() {
   }, []);
 
   const laneCount = shownTimeline ? shownTimeline.tracks.length : spineCut ? 2 : 1;
-  const inFlight_ = pendingImports.filter((pending) => pending.failures === null);
-  const picturePending = inFlight_.find((pending) => typeof pending.destination === "number");
+  const importsInFlight = pendingImports.filter((pending) => pending.failures === null);
+  const picturePending = importsInFlight.find((pending) => typeof pending.destination === "number");
   const pendingSlot = picturePending ? { frame: picturePending.destination as number, label: picturePending.files[0]?.name ?? "import" } : null;
-  const pendingLaneSlots = inFlight_.flatMap((pending) =>
+  const pendingLaneSlots = importsInFlight.flatMap((pending) =>
     typeof pending.destination === "object" && "trackId" in pending.destination
       ? [{ trackId: pending.destination.trackId, frame: pending.destination.frame, label: pending.files[0]?.name ?? "import" }]
       : []);
