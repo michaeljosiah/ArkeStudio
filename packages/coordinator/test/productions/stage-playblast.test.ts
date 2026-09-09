@@ -1,3 +1,6 @@
+import { stageArtifactProblem } from "../../src/productions/stage-playblast.js";
+import { subjectReferenceRouting } from "../../src/bench/subject.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { FalClient, SHIPPED_MANIFEST } from "@arke-studio/providers";
 import { prepareBenchSubject } from "../../src/bench/subject.js";
@@ -5,9 +8,9 @@ import { planBenchDispatch } from "../../src/bench/service.js";
 import { readContainedVideoReferences, readContainedImageReferences } from "../../src/world/reference-files.js";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, orderedShots, stageShot, type BenchSession, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
+import { newId, orderedShots, stageShot, stageReferenceFrames, type BenchSession, type ManifestModel, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -38,6 +41,10 @@ async function openingFrameFile(bytes = encodePng(solidImage(1280, 720, [20, 40,
   const path = join(dir, "opening-frame.png");
   await writeFile(path, bytes);
   return path;
+}
+
+async function referenceFrameFiles(duration = 4) {
+  return Promise.all(stageReferenceFrames([{ t: 0 }, { t: duration / 2 }, { t: duration }], duration).map(async frame => ({ ...frame, sourcePath: await openingFrameFile() })));
 }
 
 async function harness(duration=4) {
@@ -81,7 +88,7 @@ async function harness(duration=4) {
         staging: {
           cast: fresh.cast,
           sets: fresh.sets,
-          keys: fresh.keys,
+          keys: [fresh.keys[0]!, { ...fresh.keys[0]!, t: duration / 2 }, fresh.keys.at(-1)!],
           rig: fresh.rig,
           seed: fresh.seed,
           rigIntensity: fresh.rigIntensity,
@@ -116,11 +123,12 @@ describe("filing a playblast from the Stage", () => {
         stagingVersion: 1,
         sourcePath: await playblastFile(),
         openingFrameSourcePath: await openingFrameFile(),
+        referenceFrames: await referenceFrameFiles(),
       });
 
       assert.deepEqual(refusals(), []);
       const attached = events.filter((event) => event.type === "artifact.attached");
-      assert.equal(attached.length, 2, "both files are announced like any other artifact");
+      assert.equal(attached.length, 5, "video, opening, last, key and overview are announced together");
       const after = shot();
       const pinned = after.shot.staging?.playblast;
       assert.ok(pinned, "the staging names its playblast");
@@ -129,7 +137,8 @@ describe("filing a playblast from the Stage", () => {
       assert.equal(pinned.rig, "dolly");
       assert.equal(pinned.seed, staged.shot.staging?.seed);
       assert.equal(pinned.rigIntensity, 1);
-      assert.equal(bundle().meta.schemaVersion, 11, "the deterministic rig is fenced even on private blocking");
+      assert.equal(bundle().meta.schemaVersion, 20, "the expanded strict pin fences older readers");
+      await assert.rejects(readWorldMeta(worldDir, { supports: 19 }), /schema|version|newer/i);
       assert.equal(after.scene.version, sceneVersion + 1, "the pin is a versioned scene write");
       const artifact = bundle().artifacts.find((candidate) => candidate.id === pinned.artifactId);
       assert.ok(artifact, "the pinned id resolves on the shelf");
@@ -148,6 +157,19 @@ describe("filing a playblast from the Stage", () => {
       assert.ok(openingFrame.links.includes(SHOT));
       assert.ok((await readFile(join(worldDir, "artifacts", openingFrame.file))).byteLength > 0);
 
+      assert.deepEqual(pinned.referenceFrames?.map(({ artifactId: _id, ...frame }) => frame), stageReferenceFrames(staged.shot.staging!.keys, 4));
+      for (const frame of pinned.referenceFrames!) {
+        const image = bundle().artifacts.find(item => item.id === frame.artifactId)!;
+        assert.equal(image.kind, "image");
+        assert.equal(image.production, PRODUCTION);
+        assert.ok(image.links.includes(SHOT));
+        assert.ok((await readFile(join(worldDir, "artifacts", image.file))).byteLength > 0);
+        assert.equal(stageArtifactProblem(bundle(), image), null);
+        const changed = structuredClone(bundle());
+        const scene = changed.productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === SCENE)!;
+        orderedShots(scene).find(s => s.id === SHOT)!.staging!.keys[0]!.p[0] += 1;
+        assert.match(stageArtifactProblem(changed, image) ?? "", /stale/);
+      }
       await send({
         kind: "scene-command",
         worldId: WORLD_ID,
@@ -182,6 +204,7 @@ describe("filing a playblast from the Stage", () => {
         stagingVersion: 1,
         sourcePath: await playblastFile(),
         openingFrameSourcePath: await openingFrameFile(),
+        referenceFrames: await referenceFrameFiles(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /stage the shot before/);
       assert.equal(bundle().artifacts.length, shelfBefore, "nothing landed on the shelf");
@@ -200,6 +223,7 @@ describe("filing a playblast from the Stage", () => {
         stagingVersion: 7,
         sourcePath: await playblastFile(),
         openingFrameSourcePath: await openingFrameFile(),
+        referenceFrames: await referenceFrameFiles(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /moved to v1 .* export it again/);
       assert.equal(bundle().artifacts.length, shelfBefore);
@@ -220,6 +244,7 @@ describe("filing a playblast from the Stage", () => {
         stagingVersion: 1,
         sourcePath: empty,
         openingFrameSourcePath: await openingFrameFile(),
+        referenceFrames: await referenceFrameFiles(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /came back empty/);
       assert.equal(bundle().artifacts.length, shelfBefore);
@@ -238,6 +263,7 @@ describe("filing a playblast from the Stage", () => {
         stagingVersion: 1,
         sourcePath: await playblastFile(),
         openingFrameSourcePath: await openingFrameFile(new Uint8Array([1, 2, 3])),
+        referenceFrames: await referenceFrameFiles(),
       });
       assert.match(refusals().at(-1)?.reason ?? "", /opening frame is not a valid PNG/);
       assert.equal(bundle().artifacts.length, shelfBefore);
@@ -253,11 +279,19 @@ it("delivers a fresh filed Stage clip through bench admission into the provider 
   try {
     await stage();const staged=shot();
     const sourcePath=await playblastFile();
-    await send({kind:"stage-playblast",worldId:WORLD_ID,productionId:PRODUCTION,sceneFile:SCENE_FILE,sceneId:SCENE,baseVersion:staged.scene.version,shotId:SHOT,durationSec:6,aspect:"16:9",stagingVersion:1,sourcePath,openingFrameSourcePath:await openingFrameFile()});
+    await send({kind:"stage-playblast",worldId:WORLD_ID,productionId:PRODUCTION,sceneFile:SCENE_FILE,sceneId:SCENE,baseVersion:staged.scene.version,shotId:SHOT,durationSec:6,aspect:"16:9",stagingVersion:1,sourcePath,openingFrameSourcePath:await openingFrameFile(),referenceFrames:await referenceFrameFiles(6)});
     assert.deepEqual(refusals(),[]);
     const manifest={...SHIPPED_MANIFEST,models:SHIPPED_MANIFEST.models.filter(m=>m.id==="minimax-h3")};
     const prepared=await prepareBenchSubject(bundle(),{productionId:PRODUCTION,sceneId:SCENE,subject:{kind:"shot",shotId:SHOT},mode:"video",settings:null,manifest,sources:{read:async()=>({refused:"No additional sheet images in this transport fixture."}),durationSec:async()=>6}});
     assert.ok(prepared.ok);if(!prepared.ok)return;
+    const images = prepared.prefill.references.filter(reference => reference.kind === "image");
+    assert.equal(images.length, 4);
+    assert.ok(images.every(reference => reference.ride === "when-supported"));
+    assert.deepEqual(images.map(reference => reference.subjectRole), ["board-frame", "board-frame", "reference", "reference"]);
+    const stills: ManifestModel = { ...manifest.models[0]!, accepts: { referenceImages: 4, referenceVideos: 0, startFrame: false, endFrame: false }, modes: { generate: { locked: [] } } };
+    assert.deepEqual(subjectReferenceRouting(prepared.prefill.references, prepared.prefill.subject, stills), { activeTokens: images.map(image => image.token), keyframeTokens: [] });
+    const pair: ManifestModel = { ...stills, modes: { "first-and-last-frame": { route: "test/image-to-video", locked: ["aspect"] } } };
+    assert.deepEqual(subjectReferenceRouting(prepared.prefill.references, prepared.prefill.subject, pair), { activeTokens: [], keyframeTokens: images.slice(0, 2).map(image => image.token) });
     const session={schemaVersion:1,id:newId("sess"),...prepared.prefill,tokenRegistry:prepared.prefill.references,subjectTokens:prepared.prefill.references.map(r=>r.token),nextToken:{image:2,video:2,audio:1},nextTake:1,takes:[],createdAt:CLOCK,updatedAt:CLOCK} as BenchSession;
     assert.ok(session.tokenRegistry.some(r=>r.kind==="video"&&session.composer.activeTokens.includes(r.token)));
     const plan=planBenchDispatch(session,bundle(),manifest,{worldId:WORLD_ID,requestId:"stage-transport",at:CLOCK});
@@ -287,4 +321,25 @@ it("fences expanded encoded metadata even when ordinary filing writes it without
     assert.equal(outcome.outcome,"filed");
     assert.equal(bundle().meta.schemaVersion,11);
   } finally {await provider.close();}
+});
+
+it("refuses an incomplete or invalid reference set before any artifact lands", async () => {
+  const { provider, worldDir, send, bundle, shot, stage, refusals } = await harness();
+  try {
+    await stage();
+    const before = await readdir(join(worldDir, "artifacts"));
+    const shelf = bundle().artifacts.length;
+    const frames = await referenceFrameFiles();
+    const message = { kind: "stage-playblast" as const, worldId: WORLD_ID, productionId: PRODUCTION, sceneFile: SCENE_FILE,
+      sceneId: SCENE, baseVersion: shot().scene.version, shotId: SHOT, durationSec: 4, aspect: "16:9", stagingVersion: 1,
+      sourcePath: await playblastFile(), openingFrameSourcePath: await openingFrameFile() };
+    await send({ ...message, referenceFrames: frames.filter(frame => frame.kind !== "key") });
+    assert.match(refusals().at(-1)?.reason ?? "", /do not cover/);
+    frames[1]!.sourcePath = await openingFrameFile(encodePng(solidImage(16, 9, [0, 0, 0, 255])));
+    await send({ ...message, referenceFrames: frames });
+    assert.match(refusals().at(-1)?.reason ?? "", /export resolution/);
+    assert.equal(bundle().artifacts.length, shelf);
+    assert.equal(shot().shot.staging?.playblast, undefined);
+    assert.deepEqual(await readdir(join(worldDir, "artifacts")), before);
+  } finally { await provider.close(); }
 });

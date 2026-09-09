@@ -310,15 +310,17 @@ export function subjectReferenceRouting(
   const ordinary = references.filter((reference) => reference.subjectRole !== "board-frame");
   // Stage motion is the primary structural reference on routes that can receive it.
   const motion = ordinary.filter(reference=>reference.kind === "video");
-  const motionTokens = admittedTokens([...motion,...ordinary.filter(reference=>reference.kind!=="video"),...frames],model);
+  const motionTokens = admittedTokens([...motion,...(subject.kind === "shot" ? references : [...ordinary,...frames]).filter(reference=>reference.kind!=="video")],model);
   if(subject.kind === "shot" && motion.some(reference=>motionTokens.includes(reference.token))) return {activeTokens:motionTokens,keyframeTokens:[]};
   if (
     subject.kind === "shot" &&
     model.capability === "video" &&
-    frames.length === 1 &&
-    supportsMode(model, "first-frame")
+    frames.length > 0
   ) {
-    return { activeTokens: [], keyframeTokens: [frames[0]!.token] };
+    if (frames.length === 2 && supportsMode(model, "first-and-last-frame")) {
+      return { activeTokens: [], keyframeTokens: frames.map(frame => frame.token) };
+    }
+    if (supportsMode(model, "first-frame")) return { activeTokens: [], keyframeTokens: [frames[0]!.token] };
   }
   // A complete frame sequence is structural guidance, not a bag of optional references. Keep it
   // intact in the keyframe lane even when this model cannot carry it, so dispatch refuses by name
@@ -327,7 +329,7 @@ export function subjectReferenceRouting(
     return { activeTokens: [], keyframeTokens: frames.map((reference) => reference.token) };
   }
   return {
-    activeTokens: admittedTokens([...ordinary, ...frames], model),
+    activeTokens: admittedTokens(subject.kind === "shot" ? references : [...ordinary, ...frames], model),
     keyframeTokens: [],
   };
 }
@@ -451,6 +453,17 @@ export async function prepareBenchSubject(
       : world.artifacts.find((candidate) => candidate.id === frameArtifactId);
     if (openingFrame !== null) {
       references.push(openingFrame);
+      for (const frame of staging?.playblast?.referenceFrames ?? []) {
+        const artifact = world.artifacts.find(candidate => candidate.id === frame.artifactId);
+        if (artifact?.kind !== "image") continue;
+        references.push({
+          token: benchTokenFor("image", references.length + 1), kind: "image",
+          source: { source: "artifact", artifactId: artifact.id, hash: artifact.hash },
+          label: `Staging · ${frame.kind === "last" ? "last frame" : frame.kind === "key" ? "camera key" : "overview"} · ${frame.at.toFixed(2)}s`,
+          detail: frame.kind === "overview" ? "top-down camera path and cast marks" : `camera composition at ${frame.at.toFixed(2)}s`,
+          ride: "when-supported", subjectRole: frame.kind === "last" ? "board-frame" : "reference",
+        });
+      }
     } else if (hasOwnFrame(selection, world.artifacts) && frameArtifact?.kind === "image") {
       references.push({
         token: benchTokenFor("image", references.length + 1),

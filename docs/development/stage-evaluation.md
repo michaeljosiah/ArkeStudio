@@ -31,7 +31,7 @@ This launches a hidden sandboxed Electron window with a dedicated test bridge, r
 inspection frames and MP4s through StageViewport and the real Stage exporter, and prints its
 output directory. It needs installed Electron plus `ffmpeg`/`ffprobe` on PATH; optional
 `ARKE_STAGE_FFMPEG` and `ARKE_STAGE_FFPROBE` name executables. It makes no model/provider calls.
-Each output includes measured encoded metadata, an opening PNG and frame observations. Expect
+Each output includes measured encoded metadata, opening/last PNGs, every interior camera-key PNG, a top-down camera-path/cast overview, and frame observations (issue 1043). All filed PNGs use export resolution; the gate compares both opening and last PNGs to their decoded video frames. Expect
 1280×720, 30fps, 180 frames for 6s or 240 for 8s. Compare decoded opening video to opening PNG
 (with lossy-codec tolerance), and inspect camera framing, screen orientation and timed action.
 Outputs are intentionally retained for visual review in the printed temporary directory.
@@ -48,7 +48,9 @@ the real provider client's request. This proves delivery without spending on gen
 explicitly authorized paid smoke test can separately evaluate whether generated motion follows
 the accepted reference. Compare the generated take and playable Stage reference in Bench.
 
-World schema 11 is a compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
+World schema 20 additionally fences the expanded playblast reference pin, so older readers refuse before scanning its strict scene fields. Opening, last, key and overview artifacts share the pin’s source fingerprint and staleness checks. Bench offers the opening/last pair to end-frame routes and the ordered still strip to image-reference routes, within existing manifest limits.
+
+World schema 11 is the earlier compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
 the normal committer to advance the world minimum reader version. No bulk migration is required;
 legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.
