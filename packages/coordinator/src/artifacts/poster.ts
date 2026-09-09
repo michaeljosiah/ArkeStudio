@@ -121,6 +121,14 @@ async function writeMediaPoster(
 const BACKSTOP_MS = 1_000;
 
 /**
+ * How long one import spends drawing posters, all files together. The maker allows fifteen
+ * seconds a file, and the import's answer — and with it every Cut command — waits for the loop;
+ * sixteen videos ffmpeg cannot read would have held both for four minutes over a derived cache
+ * the next open backfills anyway.
+ */
+export const IMPORT_POSTER_BUDGET_MS = 20_000;
+
+/**
  * Draw the pictures video artifacts filed before posters existed, oldest first, until the budget
  * runs out. Bounded by wall clock for the reason the bench pass is: a world with forty clips
  * draws what it can and the rest next time, and once drawn every later open costs one stat each.
@@ -156,10 +164,13 @@ export async function backfillArtifactPosters(
      * purpose: against a maker that never settles it is the only thing keeping the loop alive,
      * and Node 22 resolves an empty loop out from under the await.
      */
+    let backstop: ReturnType<typeof setTimeout> | undefined;
     const outcome = await Promise.race([
       writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs: remaining }),
-      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining + BACKSTOP_MS); }),
+      new Promise<null>((resolve) => { backstop = setTimeout(() => resolve(null), remaining + BACKSTOP_MS); }),
     ]);
+    // A maker that won leaves no timer behind to hold the process — or a test — open after it.
+    clearTimeout(backstop);
     if (outcome === null) break;
     if (outcome) drawn += 1;
   }

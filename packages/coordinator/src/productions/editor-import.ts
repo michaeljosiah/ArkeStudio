@@ -5,21 +5,13 @@ import {
 } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 import { fileArtifact } from "../artifacts/filing.js";
-import { writeArtifactPoster } from "../artifacts/poster.js";
+import { IMPORT_POSTER_BUDGET_MS, writeArtifactPoster } from "../artifacts/poster.js";
 import type { MediaProbe } from "../media/probe.js";
 import type { TakePosterMaker, TakePosterUnavailableReason } from "../takes/poster.js";
 import type { WorldStore } from "../world/store.js";
 import { applyTimelineCommand } from "./timeline.js";
 
 export type EditorImport = NonNullable<Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"]>;
-
-/**
- * How long one import spends drawing posters, all files together. The maker allows fifteen
- * seconds a file, and the import's answer — and with it every Cut command — waits for the loop;
- * sixteen videos ffmpeg cannot read would have held both for four minutes over a derived cache
- * the next open backfills anyway.
- */
-const IMPORT_POSTER_BUDGET_MS = 20_000;
 
 /** Filing survives a stale edit; only placement and Library membership form the timeline transaction. */
 export async function importEditorMedia(store: WorldStore, sources: readonly (string | null)[], editor: EditorImport, options: {

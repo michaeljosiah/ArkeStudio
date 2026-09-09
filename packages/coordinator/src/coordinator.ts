@@ -273,7 +273,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 };
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
-import { backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
+import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
@@ -12097,6 +12097,8 @@ export class Coordinator {
           return;
         }
         const failures: Array<{ index: number; reason: string }> = [];
+        // Posters share one budget across the batch, as the editor import's do (issue 1037).
+        const posterDeadline = Date.now() + IMPORT_POSTER_BUDGET_MS;
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
@@ -12136,10 +12138,14 @@ export class Coordinator {
             });
             continue;
           }
-          // Its picture, before the snapshot that lists it (issue 1037); best-effort, like a take's.
-          await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
-            void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
-          });
+          // Its picture, before the snapshot that lists it (issue 1037); best-effort, like a take's,
+          // and within what is left of the batch's budget — the next open draws the rest.
+          const posterMs = posterDeadline - Date.now();
+          if (posterMs > 0) {
+            await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
+              void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
+            }, { timeoutMs: posterMs });
+          }
         }
         // Filing completes locally. The counts tell the client whether to report success, a mixed
         // result, or refusal; none of those outcomes creates an Activity job.
