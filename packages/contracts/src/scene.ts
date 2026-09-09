@@ -159,8 +159,15 @@ export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
 export const StageRigSchema = z.enum(["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"]);
 export type StageRig = z.infer<typeof StageRigSchema>;
 
+export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
+export type StageGait = z.infer<typeof StageGaitSchema>;
+
 export const StagePerformanceKeySchema = z.object({
   t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
+  gait: StageGaitSchema.optional(),
+  easeIn: z.number().min(0).max(.5).optional(),
+  easeOut: z.number().min(0).max(.5).optional(),
+  hold: z.number().finite().nonnegative().optional(),
   y: z.number().finite().optional(), facing: z.number().finite().optional(),
   pose: z.enum(["stand", "sit", "lie"]).optional(),
 }).strict();
@@ -171,6 +178,7 @@ export const StagePerformanceSchema = z.object({
 export type StagePerformance = z.infer<typeof StagePerformanceSchema>;
 export const StageObjectMotionSchema = z.object({
   group: SlugSchema,
+  maxSpeed: z.number().finite().positive().optional(),
   keys: z.array(z.object({ t: z.number().finite().nonnegative(), p: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]), rotation: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]).optional(), easeIn: z.number().min(0).max(1).optional(), easeOut: z.number().min(0).max(1).optional() }).strict()).min(1).max(120),
 }).strict();
 export type StageObjectMotion = z.infer<typeof StageObjectMotionSchema>;
@@ -208,6 +216,13 @@ export const ShotStageEditSchema = z
   });
 export type ShotStageEdit = z.infer<typeof ShotStageEditSchema>;
 
+/** Additional views filed with a playblast (issue 1043); opening remains its structural frame. */
+export const StageReferenceFrameSchema = z.object({
+  kind: z.enum(["last", "key", "overview"]),
+  at: z.number().finite().nonnegative(),
+}).strict();
+export type StageReferenceFrame = z.infer<typeof StageReferenceFrameSchema>;
+
 export const ShotStagingSchema = z
   .object({
     /** Counted up on every Keep, so a filed playblast can say which staging it was rendered from. */
@@ -216,7 +231,7 @@ export const ShotStagingSchema = z
     ...ShotRigShape,
     keys: z.array(StagingKeySchema),
     /**
-      * The playblast and opening frame filed from this staging, and what they were rendered from:
+      * The playblast and reference images filed from this staging, and what they were rendered from:
       * the staging version and the shot length, lens and aspect. A pin that disagrees with any of
       * them is stale — the files still exist, they just no longer show this shot.
      */
@@ -225,6 +240,7 @@ export const ShotStagingSchema = z
         sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
         artifactId: ArtifactIdSchema,
         openingFrameArtifactId: ArtifactIdSchema.optional(),
+        referenceFrames: z.array(StageReferenceFrameSchema.extend({ artifactId: ArtifactIdSchema })).optional(),
         version: z.number().int().min(1),
         durationSec: z.number().positive().optional(),
         aspect: z.string().min(1).optional(),

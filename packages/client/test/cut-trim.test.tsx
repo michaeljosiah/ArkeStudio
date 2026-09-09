@@ -414,7 +414,7 @@ describe("the artifact panel and the overlay lane (82a)", () => {
     };
     const html = renderCut(state);
     assert.match(html, /fy-typedclip/, "the placement is drawn");
-    assert.match(html, /harbour-bells\.wav, 00:00:02:00 to 00:00:06:00/, "by its own window");
+    assert.match(html, /The Vigil, 00:00:02:00 to 00:00:06:00/, "by its own window");
     // A placed artifact is never coverage: it is counted as a clip, and the shot count is untouched.
     assert.match(html, /3 clips/, "two shots and the bells");
     assert.match(html, /1 of 2 shots covered/);

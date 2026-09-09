@@ -51,7 +51,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { episodeThumbnailPath, takeMediaPath, Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactDisplayName, artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -3862,7 +3862,15 @@ export function ArtifactsScreen() {
   const retiredCount = shelfArtifacts.filter(a => a.retiredAt !== undefined).length;
   const artifacts = shelfArtifacts.filter(a => (a.retiredAt !== undefined) === retiredOnly);
   const report = useImportReport();
-  const notices = useArtifactNotices();
+  /*
+   * The world's own refusals, not every surface's (Codex round 1).
+   *
+   * `artifactNotices` is one global list, and a `needs-consent` notice is an offer to retry at a
+   * scope — this one retries at the world's. A production's refusal answered here would file its
+   * bytes as the world's, which is the escape hatch firing where nobody invoked it. A notice
+   * with no scope is a filing that stated no opinion, and the world is what that means.
+   */
+  const notices = useArtifactNotices().filter((n) => (n.production ?? null) === null);
   const [dropActive, setDropActive] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const upload = (files?: readonly File[]) => {
@@ -3903,24 +3911,9 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
-  // Resolve names from this world's existing records; unknown links retain their spelling.
-  const linkName = (link: string, links: readonly string[] = []): string => {
-    const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
-    if (name) return name;
-    const owning = world?.productions.filter((production) => links.includes(production.meta.id)) ?? [];
-    const names: string[] = [];
-    for (const production of owning.length ? owning : world?.productions ?? []) {
-      if (production.meta.id === link) return production.meta.title;
-      const episode = production.episodes.find((candidate) => candidate.id === link);
-      if (episode) names.push(episode.title);
-      for (const scene of production.scenes) {
-        if (scene.id === link) names.push(scene.title);
-        const shot = orderedShots(scene).find((candidate) => candidate.id === link);
-        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
-      }
-    }
-    return names.length === 1 ? names[0]! : link;
-  };
+  // Resolve names from this world's existing records; unknown links retain their spelling. The
+  // Cut names its rows by the same rule (issue 1005), so the resolver lives beside the display name.
+  const linkName = linkNameResolver(world);
   const kindLabel: Record<string, string> = {
     image: "Images",
     board: "Boards",

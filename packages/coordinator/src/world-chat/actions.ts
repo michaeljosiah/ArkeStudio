@@ -4438,7 +4438,8 @@ export function worldChatActionAdapters(
                 message.durationSec === undefined ||
                 message.aspect === undefined ||
                 message.sourcePath === undefined ||
-                message.openingFrameSourcePath === undefined
+                message.openingFrameSourcePath === undefined ||
+                message.referenceFrames === undefined
               ) {
                 await removePreparation(store, "world", action.actionId);
                 return { status: "failed", detail: "The Stage completion was incomplete or named another target." };
@@ -4453,6 +4454,7 @@ export function worldChatActionAdapters(
                   stagingVersion: message.stagingVersion,
                   sourcePath: message.sourcePath,
                   openingFrameSourcePath: message.openingFrameSourcePath,
+                  referenceFrames: message.referenceFrames,
                   durationSec: message.durationSec,
                   aspect: message.aspect,
                   ...(message.lens !== undefined ? { lens: message.lens } : {}),

@@ -10,6 +10,7 @@ import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { WorldImageReferenceSchema } from "./world-image-references.js";
 import { ArtifactKindSchema } from "./artifact.js";
+import { BorrowableArtifactSchema } from "./editor-media.js";
 import { AskCandidateSchema, AskResultSchema } from "./ask.js";
 import { BenchPresetSchema } from "./bench.js";
 import { BibleHelperKindSchema } from "./bible.js";
@@ -109,6 +110,7 @@ export const QueueCommandSchema = z.enum([
   "bench-rerun",
   "bench-upload-references",
   "upload-artifacts",
+  "borrow-artifacts",
   "import-shot-frame",
   "clear-shot-frame",
 ]);
@@ -125,6 +127,9 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
     detail: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal("reference.images"), requestId: UlidSchema,
     slug: SlugSchema, images: z.array(WorldImageReferenceSchema), error: z.string().optional() }).strict(),
+  /** Another world's placeable files, as the Cut's Library lists them (issue 1033). */
+  z.object({ ...base, type: z.literal("world.artifacts"), requestId: UlidSchema,
+    slug: SlugSchema, artifacts: z.array(BorrowableArtifactSchema), error: z.string().optional() }).strict(),
   /** Unexpected command failures are transient notices, never evidence of rollback (#926). */
   z.object({ ...base, type: z.literal("command.failed"), command: z.string(),
     requestId: z.string().nullable(), reason: z.string() }).strict(),
@@ -786,6 +791,16 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       outcome: z.enum(["needs-consent", "refused"]),
       reason: z.string(),
       sizeBytes: z.number().nullable(),
+      /**
+       * The scope the refused filing was attempted at, so a surface can tell its own refusals
+       * from another's.
+       *
+       * A `needs-consent` notice is an offer to retry, and the retry restates a scope. Without
+       * this the notices are one undifferentiated list: a large file refused on the world's shelf
+       * would offer `Copy it anyway` inside a production and re-file the bytes as that
+       * production's. `null` is the world, absent is a filing that stated no opinion.
+       */
+      production: SlugSchema.nullable().optional(),
     })
     .strict(),
 

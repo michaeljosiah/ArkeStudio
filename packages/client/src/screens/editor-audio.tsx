@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
+  artifactPicturePath,
   AUDIO_TRACK_KINDS,
   effectiveAudioRole,
   placementAudioRole,
@@ -23,8 +24,12 @@ import {
   PICTURE_TRACK_ID,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
+import { Portrait } from "../components/portrait.js";
 import type { EditorTool } from "./editor-timeline.js";
-import { frameAtPixel, framesFromDelta, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
+import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
+import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
+import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
 
 /**
  * The typed tracks beside the story's Picture (SPEC-038 R-12, R-13; SPEC-039 R-13, R-19c, R-23;
@@ -54,6 +59,25 @@ export function dragAccepts(types: ArrayLike<string> | readonly string[], wantsS
   // A drag from before the lane types existed (tests, other windows) says nothing about its kind and is let through.
   if (!list.includes(LANE_DRAG_PICTURE) && !list.includes(LANE_DRAG_SOUND)) return true;
   return list.includes(wantsSound ? LANE_DRAG_SOUND : LANE_DRAG_PICTURE);
+}
+
+/**
+ * The Library row in the air right now (issue 1035). `dataTransfer` will not give up its payload
+ * until the drop, so a lane that wants to draw the landing clip at its real length while the
+ * drag hovers reads it from here instead. Set on dragstart, cleared on dragend, same window only.
+ */
+export interface LibraryDrag {
+  artifactId: string;
+  label: string;
+  /** The clip's length once placed, when the media is measured. */
+  durationFrames: number | null;
+}
+let libraryDragCurrent: LibraryDrag | null = null;
+export function setLibraryDrag(drag: LibraryDrag | null): void {
+  libraryDragCurrent = drag;
+}
+export function libraryDrag(): LibraryDrag | null {
+  return libraryDragCurrent;
 }
 
 /** The lane marks the target draws beside each name. */
@@ -98,6 +122,7 @@ export function typedTracksOf(timeline: ProductionTimeline): TimelineTrack[] {
 export function TypedTrackRows({
   production,
   artifacts,
+  slug,
   timeline,
   totalFrames,
   frameRate,
@@ -105,15 +130,22 @@ export function TypedTrackRows({
   onSelect,
   onCommands,
   onPreview,
+  onScrub,
   disabled,
   sourceLength,
   onDrop,
+  onFileDrop,
+  fileKinds = null,
+  snapFrames = null,
+  pendingSlots = [],
   playheadFrame,
   mintClipId,
+  nameOf,
   tool = "select",
 }: {
   production?: ProductionBundle;
   artifacts?: readonly ArtifactSidecar[];
+  slug?: string;
   timeline: ProductionTimeline;
   totalFrames: number;
   frameRate: FrameRate;
@@ -121,58 +153,106 @@ export function TypedTrackRows({
   onSelect: (clipId: TimelineClipId) => void;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onPreview: (timeline: ProductionTimeline | null) => void;
+  /** Bring the viewer to a frame while an edge moves, and park it there on release (issue 1036). */
+  onScrub?: (frame: number) => void;
   disabled: boolean;
   sourceLength: SourceLengthFrames;
   onDrop: (drop: TrackDrop) => void;
+  /** Desktop files dropped on a lane land on that lane (SPEC-043 R-3, issue 1035). */
+  onFileDrop?: (files: File[], trackId: TimelineTrackId, frame: number) => void;
+  /** What desktop files are over the window right now. */
+  fileKinds?: readonly DroppedKind[] | null;
+  /** Frames an edge may snap onto while Snap is on, for the clip in hand; null when Snap is off. */
+  snapFrames?: ((except: TimelineClipId) => readonly number[]) | null;
+  /** Drops being imported, drawn as slots until their clips are real. */
+  pendingSlots?: ReadonlyArray<{ trackId: TimelineTrackId; frame: number; label: string }>;
   playheadFrame: number;
   mintClipId: () => TimelineClipId;
+  /** The name a placed file is known by (issue 1005); the record's label is the file name. */
+  nameOf?: (artifact: ArtifactSidecar) => string;
   /** The toolbar's tool applies to every track (round eight): Blade splits here, Hand pans here. */
   tool?: EditorTool;
 }) {
-  const [over, setOver] = useState<TimelineTrackId | null>(null);
-  const [refused, setRefused] = useState<TimelineTrackId | null>(null);
+  const [hover, setHover] = useState<{ trackId: TimelineTrackId; frame: number; refused: boolean; files: boolean } | null>(null);
+  const [drag, setDrag] = useState<(GestureUpdate & { trackId: TimelineTrackId; refused: boolean }) | null>(null);
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
+  // A drag that ends on another lane, or outside the window, fires no dragleave here.
+  useEffect(() => {
+    const clear = () => setHover(null);
+    window.addEventListener("drop", clear);
+    window.addEventListener("dragend", clear);
+    return () => {
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("dragend", clear);
+    };
+  }, []);
   const span = Math.max(totalFrames, 1);
   const anySolo = timeline.tracks.some((track) => track.solo === true);
   const tracks = typedTracksOf(timeline);
   const menuClip = menu ? tracks.filter(track => track.kind === "picture").flatMap(track => track.clips).find(clip => clip.id === menu.clipId) : undefined;
+  const filesOver = fileKinds !== null && fileKinds.length > 0 && !disabled && onFileDrop !== undefined;
   if (tracks.length === 0) return null;
+  const percent = (frames: number): string => `${(frames / span) * 100}%`;
+  const artifactOf = (clip: TimelineClip): ArtifactSidecar | null =>
+    clip.source.kind === "artifact" ? (artifacts?.find((candidate) => clip.source.kind === "artifact" && candidate.id === clip.source.artifactId) ?? null) : null;
+  const shownName = (clip: TimelineClip): string => {
+    const artifact = artifactOf(clip);
+    return artifact !== null && nameOf !== undefined ? nameOf(artifact) : clipLabel(clip);
+  };
 
+  /*
+   * A press begins a gesture on the shared engine (issue 1034). A move on these lanes is a frame,
+   * so the ghost, the landing rectangle and the command all agree; the record is untouched until
+   * release, and a landing the algebra refuses — on top of a neighbour — is drawn refused.
+   */
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
     onSelect(clipId);
-    event.preventDefault();
-    event.stopPropagation();
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
-    const laneWidth = lane?.getBoundingClientRect().width ?? 0;
-    if (laneWidth <= 0) return;
-    element.setPointerCapture(event.pointerId);
-    const originX = event.clientX;
-    let command: TimelineClipCommand | null = null;
     const clips = orderedTrackClips(track);
-    const move = (pointer: PointerEvent) => {
-      const delta = framesFromDelta(pointer.clientX - originX, laneWidth, span);
-      command = trackDragCommand(clips, clipId, gesture, delta, sourceLength);
-      onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
+    const clip = clips.find((candidate) => candidate.id === clipId);
+    if (lane === null || clip === undefined) return;
+    let command: TimelineClipCommand | null = null;
+    let lastScrub: number | null = null;
+    const scrub = (frame: number) => {
+      const clamped = Math.max(0, Math.min(span, frame));
+      if (clamped === lastScrub) return;
+      lastScrub = clamped;
+      onScrub?.(clamped);
     };
-    const finish = (pointer: PointerEvent) => {
-      element.releasePointerCapture(pointer.pointerId);
-      element.removeEventListener("pointermove", move);
-      element.removeEventListener("pointerup", up);
-      element.removeEventListener("pointercancel", cancel);
-      onPreview(null);
-    };
-    const up = (pointer: PointerEvent) => {
-      finish(pointer);
-      if (command !== null && previewTimeline(timeline, [command], sourceLength) !== null) {
-        onCommands([command], gesture === "move" ? "Move clip" : `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
-      }
-    };
-    const cancel = (pointer: PointerEvent) => finish(pointer);
-    element.addEventListener("pointermove", move);
-    element.addEventListener("pointerup", up);
-    element.addEventListener("pointercancel", cancel);
+    startClipGesture({
+      event,
+      lane,
+      canvas: lane.closest<HTMLElement>(".fy-timeline__canvas"),
+      totalFrames: span,
+      clip,
+      gesture,
+      snapFrames: snapFrames === null ? null : snapFrames(clipId),
+      onUpdate: (update) => {
+        command = trackDragCommand(clips, clipId, gesture, update.deltaFrames, sourceLength);
+        const preview = command === null ? timeline : previewTimeline(timeline, [command], sourceLength);
+        if (gesture === "move") {
+          setDrag({ ...update, trackId: track.id, refused: preview === null });
+          return;
+        }
+        onPreview(command === null ? null : preview);
+        setDrag({ ...update, trackId: track.id, refused: preview === null });
+        const delta = command !== null && command.kind === "trim" ? command.deltaFrames : 0;
+        scrub(gesture === "trim-start" ? clip.startFrame + delta : clip.startFrame + clip.durationFrames + delta - 1);
+      },
+      onEnd: (final) => {
+        setDrag(null);
+        onPreview(null);
+        if (final === null) return;
+        const sent = trackDragCommand(clips, clipId, gesture, final.deltaFrames, sourceLength);
+        if (sent === null || previewTimeline(timeline, [sent], sourceLength) === null) return;
+        onCommands([sent], gesture === "move" ? "Move clip" : `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
+        if (sent.kind === "trim") {
+          onScrub?.(sent.edge === "start" ? clip.startFrame + sent.deltaFrames : Math.max(clip.startFrame, clip.startFrame + clip.durationFrames + sent.deltaFrames - 1));
+        }
+      },
+    });
   };
 
   const blade = (track: TimelineTrack, clip: TimelineClip) => (event: React.MouseEvent) => {
@@ -229,6 +309,17 @@ export function TypedTrackRows({
     event.stopPropagation();
   };
 
+  const frameUnder = (event: React.DragEvent): number => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return frameAtPixel(event.clientX - box.left, box.width, span);
+  };
+  const hoverAt = (trackId: TimelineTrackId, frame: number, refused: boolean, files: boolean) =>
+    setHover((current) =>
+      current !== null && current.trackId === trackId && current.frame === frame && current.refused === refused && current.files === files
+        ? current
+        : { trackId, frame, refused, files },
+    );
+
   return (
     <>
       {tracks.map((track) => {
@@ -237,6 +328,14 @@ export function TypedTrackRows({
         const kindLabel = track.kind === "picture" ? "picture" : track.kind;
         // An empty extra lane can go (the target's ×); the base Picture track and a lane holding anything stay.
         const removable = track.clips.length === 0 && (track.cues ?? []).length === 0 && track.id !== PICTURE_TRACK_ID;
+        const laneHover = hover !== null && hover.trackId === track.id ? hover : null;
+        const laneDrag = drag !== null && drag.trackId === track.id ? drag : null;
+        const dragged = laneDrag === null ? null : (track.clips.find((clip) => clip.id === laneDrag.clipId) ?? null);
+        const moving = laneDrag !== null && dragged !== null && laneDrag.gesture === "move";
+        const ghostStart = moving ? Math.max(0, dragged.startFrame + laneDrag.deltaFrames) : null;
+        const libraryHover = laneHover !== null && !laneHover.files ? libraryDrag() : null;
+        const refuseWords = audio ? "sound lanes take sound" : "picture lanes take picture";
+        const slots = pendingSlots.filter((slot) => slot.trackId === track.id);
         return (
           <div className={cx("fy-track", silenced && "fy-track--silent")} data-track={track.kind === "picture" ? "overlay" : track.kind} data-track-id={track.id} key={track.id}>
             <span className="fy-track__label fy-track__label--typed">
@@ -280,52 +379,100 @@ export function TypedTrackRows({
               className={cx(
                 "fy-track__lane",
                 "fy-typedlane",
-                over === track.id && "fy-typedlane--over",
-                refused === track.id && "fy-typedlane--refuse",
+                laneHover !== null && !laneHover.refused && "fy-lane--over",
+                laneHover !== null && laneHover.refused && "fy-lane--refused",
+                filesOver && "fy-lane--files",
+                laneDrag !== null && "fy-typedlane--dragging",
                 tool === "hand" && "fy-pictlane--hand",
                 tool === "blade" && "fy-pictlane--blade",
               )}
+              data-dropping={filesOver ? "true" : undefined}
               onPointerDown={onLanePointerDown}
               onDragOver={(event) => {
                 if (disabled) return;
+                const kinds = fileKindsFromTransfer(event.dataTransfer);
+                if (kinds.length > 0) {
+                  if (!onFileDrop) return;
+                  event.preventDefault();
+                  // Refused only on a real mismatch (issue 1035): a still on a sound lane, sound
+                  // on a picture lane. A file the browser cannot name is read by the import.
+                  const refused = !laneTakesFiles(kinds, audio);
+                  event.dataTransfer.dropEffect = refused ? "none" : "copy";
+                  hoverAt(track.id, frameUnder(event), refused, true);
+                  return;
+                }
                 // The lane says no while the drag is still over it (R-10): sound on a picture lane, or the reverse.
                 if (!dragAccepts(event.dataTransfer.types, audio)) {
                   event.dataTransfer.dropEffect = "none";
-                  setRefused(track.id);
+                  hoverAt(track.id, frameUnder(event), true, false);
                   return;
                 }
                 event.preventDefault();
                 event.dataTransfer.dropEffect = "copy";
-                setOver(track.id);
+                hoverAt(track.id, frameUnder(event), false, false);
               }}
-              onDragLeave={() => {
-                setOver((current) => (current === track.id ? null : current));
-                setRefused((current) => (current === track.id ? null : current));
+              onDragLeave={(event) => {
+                if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                setHover((current) => (current?.trackId === track.id ? null : current));
               }}
               onDrop={(event) => {
+                setHover(null);
+                if (event.dataTransfer.files?.length) {
+                  event.preventDefault(); event.stopPropagation();
+                  if (!disabled && onFileDrop && laneTakesFiles(fileKindsFromTransfer(event.dataTransfer), audio)) {
+                    onFileDrop(Array.from(event.dataTransfer.files), track.id, frameUnder(event));
+                  }
+                  return;
+                }
                 event.preventDefault();
-                setOver(null);
-                setRefused(null);
                 const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
                 if (!artifactId || disabled) return;
-                const box = event.currentTarget.getBoundingClientRect();
-                onDrop({ trackId: track.id, artifactId, frame: frameAtPixel(event.clientX - box.left, box.width, span) });
+                onDrop({ trackId: track.id, artifactId, frame: frameUnder(event) });
               }}
             >
-              {track.clips.length === 0 && refused !== track.id && (
-                <span className="fy-track__empty">{audio ? "drop sound here" : "drop a picture here"}</span>
+              {track.clips.length === 0 && laneHover === null && slots.length === 0 && (
+                <span className="fy-track__empty">{filesOver ? `Drop to add · ${track.name}` : audio ? "drop sound here" : "drop a picture here"}</span>
               )}
-              {refused === track.id && <span className="fy-track__refuse">{audio ? "sound lanes take sound" : "picture lanes take picture"}</span>}
+              {laneHover !== null && laneHover.refused && <span className="fy-track__refuse">{refuseWords}</span>}
+              {laneHover !== null && !laneHover.refused && (
+                <DropTarget
+                  frame={laneHover.frame}
+                  span={span}
+                  frameRate={frameRate}
+                  widthFrames={libraryHover?.durationFrames ?? null}
+                  label={laneHover.files ? `Drop to add · ${track.name}` : `Drop ${libraryHover?.label ?? "here"} · ${track.name}`}
+                />
+              )}
+              {slots.map((slot, index) => (
+                <span key={`${slot.frame}-${index}`} className="fy-landing fy-landing--pending" style={{ left: percent(slot.frame), width: percent(Math.max(1, Math.round(span / 10))) }} data-testid="pending-slot">
+                  <span className="fy-landing__label">{slot.label} · importing…</span>
+                </span>
+              ))}
+              {moving && ghostStart !== null && (
+                <span
+                  className={cx("fy-landing", laneDrag.refused && "fy-landing--refused")}
+                  style={{ left: percent(ghostStart), width: percent(dragged.durationFrames) }}
+                  data-testid="landing"
+                  aria-hidden="true"
+                />
+              )}
+              {laneDrag !== null && laneDrag.snappedTo !== null && (
+                <span className="fy-snapline" style={{ left: percent(laneDrag.snappedTo) }} data-testid="snap-line" aria-hidden="true" />
+              )}
               {orderedTrackClips(track).map((clip) => {
                 const selected = clip.id === selectedClipId;
-                const label = `${clipLabel(clip)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
+                const name = shownName(clip);
+                const label = `${name}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
+                const isGhost = moving && clip.id === laneDrag.clipId;
+                const artifact = artifactOf(clip);
+                const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
                 return (
                   <button
                     key={clip.id}
                     type="button"
                     data-clip={clip.id}
-                    className={cx("fy-typedclip", audio && "fy-typedclip--audio", selected && "fy-typedclip--selected")}
-                    style={{ left: `${(clip.startFrame / span) * 100}%`, width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
+                    className={cx("fy-typedclip", audio && "fy-typedclip--audio", picture !== null && "fy-typedclip--picture", selected && "fy-typedclip--selected", isGhost && "fy-typedclip--ghost")}
+                    style={{ left: percent(isGhost && ghostStart !== null ? ghostStart : clip.startFrame), width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
                     aria-pressed={selected}
                     aria-label={label}
                     title={label}
@@ -347,14 +494,24 @@ export function TypedTrackRows({
                     onPointerDown={begin(track, clip.id, "move")}
                     onKeyDown={onClipKeyDown(clip.id, clip)}
                   >
-                    <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(track, clip.id, "trim-start")} aria-hidden="true" />
-                    <span className="fy-typedclip__name">{clipLabel(clip)}</span>
+                    {/* An image overlay shows its image (issue 1037): the picture behind the name, not a text chip. */}
+                    {picture !== null && <Portrait worldSlug={slug} path={picture} label="" radius={0} />}
+                    <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(track, clip.id, "trim-start")} aria-hidden="true"><i /></span>
+                    <span className="fy-typedclip__name">{name}</span>
                     {clip.gainDb !== undefined && clip.gainDb !== 0 && <span className="fy-typedclip__gain">{clip.gainDb > 0 ? `+${clip.gainDb}` : clip.gainDb} dB</span>}
                     {clip.audio === "mute" && <span className="fy-typedclip__gain">MUTE</span>}
-                    <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true" />
+                    <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true"><i /></span>
                   </button>
                 );
               })}
+              {laneDrag !== null && dragged !== null && (
+                laneDrag.gesture === "move"
+                  ? <GestureChip x={laneDrag.pointerX} frame={ghostStart ?? dragged.startFrame} frameRate={frameRate} refused={laneDrag.refused} detail={laneDrag.refused ? "in the way" : undefined} />
+                  : (() => {
+                      const shown = timeline.tracks.flatMap((candidate) => candidate.clips).find((candidate) => candidate.id === laneDrag.clipId) ?? dragged;
+                      return <GestureChip x={laneDrag.pointerX} frame={laneDrag.gesture === "trim-start" ? shown.startFrame : shown.startFrame + shown.durationFrames} frameRate={frameRate} detail={chipSeconds(shown.durationFrames, frameRate)} />;
+                    })()
+              )}
             </div>
           </div>
         );

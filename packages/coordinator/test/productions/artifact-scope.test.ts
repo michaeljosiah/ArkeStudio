@@ -142,12 +142,36 @@ it("checks every legacy bulk-save source format while allowing existing referenc
   assert.deepEqual(productionOf(store).cut, { audio: [], overlays: [] });
 });
 
-it("the suggested import recovery makes a scoped file available and places it (#895)", async t => {
+it("an import whose bytes another production already holds is refused by file, not by the whole batch", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const source = join(store.dir, "theirs.wav"); await writeFile(source, "bytes another production filed");
+  const theirs = await fileArtifact(store, { sourcePath: source, mediaProbe: probe, production: "another-production" });
+  assert.ok(theirs.outcome === "filed");
+  const ours = join(store.dir, "ours.wav"); await writeFile(ours, "bytes nobody has filed");
+  const p = productionOf(store);
+  const before = await readFile(timelinePath(store), "utf8").catch(() => null);
+  // The same bytes arriving here — a drop, or a borrow from a world that holds a copy — dedup
+  // onto their file, which this production's Library may not hold. The other file still lands.
+  const failures = await importEditorMedia(store, [source, ours], {
+    productionId: PRODUCTION, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p), destination: "library",
+  }, { mediaProbe: probe, abandoned: () => false });
+  assert.deepEqual(failures.map(f => f.index), [0]);
+  assert.match(failures[0]!.reason, /theirs\.wav: already in this world as another production's file; share it from Artifacts first/);
+  assert.notEqual(await readFile(timelinePath(store), "utf8").catch(() => null), before, "the file nobody owned was placed");
+  const library = (productionOf(store).timeline as { timeline: { library: Array<{ kind: string; artifactId?: string }> } }).timeline.library;
+  assert.ok(library.some(item => item.artifactId === store.getBundle().artifacts.find(a => a.file === "ours.wav")!.id));
+  assert.ok(!library.some(item => item.artifactId === theirs.artifact.id), "their file is not in this Library");
+});
+
+it("explicit re-filing makes a scoped file available for import and placement (#895, #1039)", async t => {
   const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
   const source = join(store.dir, "recover.wav"); await writeFile(source, "recoverable audio");
   const filed = await fileArtifact(store, { sourcePath: source, mediaProbe: probe, production: "another-production" });
   assert.ok(filed.outcome === "filed");
   const artifact = filed.artifact;
+  // Ownership transfer is an explicit re-file; an ordinary import preserves the owner (#1039).
+  const shared = await fileArtifact(store, { sourcePath: source, production: null, reownOnDuplicate: true });
+  assert.ok(shared.outcome === "deduplicated");
   const p = productionOf(store);
   const failures = await importEditorMedia(store, [join(store.dir, "artifacts", artifact.file)], {
     productionId: PRODUCTION, baseRevision: null, sourceFingerprint: storyTimelineFingerprint(p), destination: "append",

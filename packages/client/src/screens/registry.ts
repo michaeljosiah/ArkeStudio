@@ -70,6 +70,8 @@ export const SCREENS: ScreenEntry[] = [
   // Production
   { id: "production-dashboard", samplePath: P },
   { id: "production-cast", samplePath: `${P}/cast` },
+  // The production's own shelf, inside the production (design 134).
+  { id: "production-artifacts", samplePath: `${P}/artifacts` },
   // Talking and looking are two screens (turn 88): the thread, then what it settled.
   { id: "production-chat", samplePath: `${P}/story` },
   { id: "story-overview", samplePath: `${P}/overview` },

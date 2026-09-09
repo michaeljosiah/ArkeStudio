@@ -1,5 +1,8 @@
-import { sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
-import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion } from "./scene.js";
+import { PerspectiveCamera, Vector3 } from "three";
+import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
+import { orderedShots } from "./scene-flow.js";
+import { stagePathPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
 
@@ -15,6 +18,14 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+/** Ordered for admission: an end-frame route receives the pair before optional key/overview stills. */
+export function stageReferenceFrames(keys: readonly { t: number }[], durationSec: number): StageReferenceFrame[] {
+  return [
+    { kind: "last", at: (stageFrameCount(durationSec) - 1) / STAGE_FRAME_RATE },
+    ...keys.filter(key => key.t > 0 && key.t < durationSec).map(key => ({ kind: "key" as const, at: key.t })),
+    { kind: "overview", at: 0 },
+  ];
+}
 export const MAX_STAGE_WALK_SPEED_MPS = 2.2;
 export const STAGE_RIGS: readonly StageRig[] = ["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"];
 
@@ -501,12 +512,7 @@ export function stagingBeats(
 ): string[] {
   staging = stagingRetimed(staging,durationSec) as ResolvedShotStaging;
   const keys = staging.keys;
-  const warnings = durationSec <= 0 ? [] : staging.cast.flatMap((figure) => {
-    const speed = stageWalkSpeed(figure, durationSec);
-    if (speed === null || speed <= MAX_STAGE_WALK_SPEED_MPS) return [];
-    const shownSpeed = Math.ceil(speed * 100) / 100;
-    return [`Blocking warning — ${nameOf(figure.sheetId)} · ${(speed * durationSec).toFixed(1)}m in ${durationSec.toFixed(1)}s · ${shownSpeed.toFixed(2)}m/s · too fast for a walk`];
-  });
+  const warnings = stageSpeedWarnings(staging, nameOf, durationSec);
   const camera = keys.map((k) => {
     const subject = k.anchor ?? k.track ?? null;
     const pose = sampleStageCamera({...staging,keys},k.t,durationSec);
@@ -536,6 +542,71 @@ export function stageWalkSpeed(figure: StagingFigure, durationSec: number): numb
   return distance / durationSec;
 }
 
+export const STAGE_GAIT_SPEEDS: Record<StageGait, number> = { walk: MAX_STAGE_WALK_SPEED_MPS, jog: 4, run: 9 };
+export interface StageMotionSpeed {
+  kind: "performance" | "object";
+  id: string;
+  from: number;
+  to: number;
+  distance: number;
+  speed: number;
+  ceiling?: number;
+  gait?: StageGait;
+}
+
+/** Measure local performer travel, so riding a moving vehicle does not count as running. */
+export function stageMotionSpeeds(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, durationSec: number): StageMotionSpeed[] {
+  const result: StageMotionSpeed[] = [];
+  const measure = (leg: Omit<StageMotionSpeed, "distance" | "speed">, point: (at: number) => readonly number[]) => {
+    let distance = 0;
+    let previous = point(leg.from);
+    for (let i = 1; i <= 32; i++) {
+      const next = point(leg.from + (leg.to - leg.from) * i / 32);
+      distance += Math.hypot(...next.map((value, axis) => value - previous[axis]!));
+      previous = next;
+    }
+    if (distance < .05) return;
+    result.push({ ...leg, distance, speed: leg.to > leg.from ? distance / (leg.to - leg.from) : Infinity });
+  };
+  for (const figure of staging.cast) {
+    const performance = staging.performances?.find(track => track.sheetId === figure.sheetId);
+    if (performance) {
+      for (let index = 0; index < performance.keys.length - 1; index++) {
+        const a = performance.keys[index]!, b = performance.keys[index + 1]!;
+        const gait = a.gait ?? "walk";
+        measure({ kind: "performance", id: figure.sheetId, from: stagePerformanceDeparture(a, b), to: b.t, gait, ceiling: STAGE_GAIT_SPEEDS[gait] }, at => {
+          const state = stageFigureLocalAt(figure, staging.performances, at, durationSec);
+          return [state.x, state.y, state.z];
+        });
+      }
+    } else if (figure.to) {
+      const speed = stageWalkSpeed(figure, durationSec)!;
+      const distance = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
+      if (distance >= .05) result.push({ kind: "performance", id: figure.sheetId, from: 0, to: durationSec, gait: "walk", ceiling: STAGE_GAIT_SPEEDS.walk, distance, speed });
+    }
+  }
+  for (const motion of staging.objectMotions ?? []) {
+    for (let index = 0; index < motion.keys.length - 1; index++) {
+      const a = motion.keys[index]!, b = motion.keys[index + 1]!;
+      measure({ kind: "object", id: motion.group, from: a.t, to: b.t, ...(motion.maxSpeed === undefined ? {} : { ceiling: motion.maxSpeed }) }, at => stageObjectAt(staging.objectMotions, motion.group, at).p);
+    }
+  }
+  return result;
+}
+
+export function stageSpeedWarning(leg: StageMotionSpeed, nameOf: (id: string) => string): string | null {
+  if (leg.ceiling === undefined || leg.speed <= leg.ceiling) return null;
+  const suggestion = leg.gait === undefined ? undefined : (["jog", "run"] as const).find(gait => STAGE_GAIT_SPEEDS[gait] >= leg.speed);
+  const verdict = leg.gait ? `too fast for a ${leg.gait}` : `above ${leg.ceiling.toFixed(2)}m/s ceiling`;
+  return `Blocking warning — ${leg.kind === "performance" ? nameOf(leg.id) : leg.id} · ${leg.distance.toFixed(1)}m in ${(leg.to - leg.from).toFixed(1)}s · ${(Math.ceil(leg.speed * 100) / 100).toFixed(2)}m/s · ${verdict} (${leg.from.toFixed(2)}–${leg.to.toFixed(2)}s); ${suggestion ? `use ${suggestion} or add time` : "add time"}`;
+}
+export function stageSpeedWarnings(staging: { cast: readonly StagingFigure[]; performances?: readonly StagePerformance[]; objectMotions?: readonly StageObjectMotion[] }, nameOf: (id: string) => string, durationSec: number): string[] {
+  return stageMotionSpeeds(staging, durationSec).flatMap(leg => {
+    const warning = stageSpeedWarning(leg, nameOf);
+    return warning === null ? [] : [warning];
+  });
+}
+
 /** Where a figure stands a fraction `u` of the way through the shot: on its walk, or where it was put. */
 function figureAt(figure: StagingFigure, u: number): [number, number] {
   if (figure.to === undefined) return [figure.x, figure.z];
@@ -550,12 +621,15 @@ function figureAt(figure: StagingFigure, u: number): [number, number] {
  * that no longer fit are pulled in ahead of the end, in order. Returns the same object when
  * nothing needs to move.
  */
-export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotStaging {
+export function stagingRetimed(staging: ShotStaging, durationSec: number, previousDurationSec?: number): ShotStaging {
   if (staging.keys.length === 0) return staging;
   const last = staging.keys.length - 1;
-  const oldDuration = staging.keys[last]!.t;
+  const oldDuration = staging.keys[last]!.t || previousDurationSec || 0;
   if (staging.objectMotions && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, objectMotions: staging.objectMotions.map(motion => ({ ...motion, keys: motion.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration })) })) };
-  if (staging.performances && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, performances: staging.performances.map(performance => ({ ...performance, keys: performance.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration })) })) };
+  if (staging.performances && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, performances: staging.performances.map(performance => ({ ...performance, keys: performance.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration, ...(key.hold === undefined ? {} : { hold: key.hold * durationSec / oldDuration }) })) })) };
+  // A single mark is a static camera, not an end pose. Give it equivalent endpoints so a
+  // subsequent draft retime has a duration even when its action finishes before the shot does.
+  if (staging.keys.length === 1) return { ...staging, keys: [{ ...staging.keys[0]!, t: 0 }, { ...staging.keys[0]!, t: durationSec }] };
   if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
   // Interior keys that still fit stay where they are; if any no longer does, the whole move is
   // scaled to the new length instead of clamped, so no two keys land on one moment.
@@ -587,6 +661,7 @@ export function stagingPromptClause(
   const keys = staging.keys;
   const walkers = staging.cast
     .filter((figure) => {
+      if (staging.performances?.some(performance => performance.sheetId === figure.sheetId)) return false;
       const speed = stageWalkSpeed(figure, durationSec);
       return speed !== null && speed <= MAX_STAGE_WALK_SPEED_MPS;
     })
@@ -607,7 +682,13 @@ export function stagingPromptClause(
     "Use the blockout for composition, action and camera motion. Replace greybox geometry with the approved character, location and style references.",
     `Camera move, ${stagingMotionWord(staging,durationSec)}, blocked out on the stage (${keys.length} keys).${walk}${posture}`,
     ...sets,
-    ...(staging.performances ?? []).flatMap(performance => performance.keys.map(key => `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}`)),
+    ...(staging.performances ?? []).flatMap(performance => performance.keys.map((key, index) => {
+      const next = performance.keys[index + 1];
+      const departure = next ? stagePerformanceDeparture(key, next) : key.t;
+      const y = staging.cast.find(figure => figure.sheetId === performance.sheetId)?.y ?? 0;
+      const moving = next && Math.hypot(next.x - key.x, next.z - key.z, (next.y ?? y) - (key.y ?? y)) >= .05;
+      return `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}${moving ? `, ${key.gait ?? "walk"}` : ", holds position"}${departure > key.t ? `, hold until ${departure.toFixed(2)}s` : ""}${key.easeIn === undefined ? "" : `, ease in ${Math.round(key.easeIn * 100)}%`}${key.easeOut === undefined ? "" : `, ease out ${Math.round(key.easeOut * 100)}%`}`;
+    })),
     ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
     ...stagingBeats(staging, nameOf, durationSec),
     ...keys.slice(0,-1).map((key,index) => {
@@ -626,6 +707,10 @@ export function stageFigureAt(figure: StagingFigure, performances: readonly Stag
   const [x,y,z] = stageLocalPoint([state.x,state.y,state.z], transform);
   return { ...state, x,y,z, facing:state.facing+transform.rotation[1] };
 }
+/** A hold leaves at least 0.1s of its leg for travel, including after retiming (#1046). */
+export function stagePerformanceDeparture(a: StagePerformanceKey, b: StagePerformanceKey): number {
+  return a.t + Math.min(a.hold ?? 0, Math.max(0, b.t - a.t - .1));
+}
 function stageFigureLocalAt(figure: StagingFigure, performances: readonly StagePerformance[] | undefined, at: number, durationSec: number): {x:number;z:number;y:number;facing:number;pose:"stand"|"sit"|"lie"} {
   const keys = performances?.find(p => p.sheetId === figure.sheetId)?.keys;
   if (!keys?.length) {
@@ -636,12 +721,20 @@ function stageFigureLocalAt(figure: StagingFigure, performances: readonly StageP
   while (index < keys.length - 1 && keys[index + 1]!.t <= at) index++;
   const a = keys[index]!;
   const b = keys[Math.min(index + 1, keys.length - 1)]!;
-  const k = b.t === a.t ? 0 : Math.max(0, Math.min(1, (at - a.t) / (b.t - a.t)));
+  const departure = stagePerformanceDeparture(a, b);
+  const progress = b.t === departure ? 0 : Math.max(0, Math.min(1, (at - departure) / (b.t - departure)));
+  const k = stagingEase(a, b, progress);
   const facing = a.facing ?? figure.facing ?? 0;
   const turn = ((b.facing ?? facing) - facing + 540) % 360 - 180;
-  return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k,
-    y: (a.y ?? figure.y ?? 0) + ((b.y ?? figure.y ?? 0) - (a.y ?? figure.y ?? 0)) * k,
-    facing: facing + turn * k, pose: a.pose ?? figure.pose ?? "stand" };
+  // Absent controls retain previously authored linear motion. New marks explicitly opt into
+  // the shared path with zero ease, while two-point moves remain straight lines.
+  const spline = keys.some(key => key.easeIn !== undefined || key.easeOut !== undefined || key.hold !== undefined);
+  const [x, y, z] = spline ? stagePathPoint(keys.map(key => [key.x, key.y ?? figure.y ?? 0, key.z]), index, k) : [
+    a.x + (b.x - a.x) * k,
+    (a.y ?? figure.y ?? 0) + ((b.y ?? figure.y ?? 0) - (a.y ?? figure.y ?? 0)) * k,
+    a.z + (b.z - a.z) * k,
+  ];
+  return { x: x!, y: y!, z: z!, facing: facing + turn * k, pose: a.pose ?? figure.pose ?? "stand" };
 }
 
 /** Write-boundary checks; permissive legacy reading must not admit new unusable camera data. */
@@ -653,7 +746,7 @@ export function stageProblems(staging: ResolvedShotStaging, durationSec: number)
   if ([...groups].some(group=>ids.has(group))) problems.push("Object group names must differ from figure identities.");
   if (ids.size !== staging.cast.length) problems.push("Each figure must have a unique sheet identity.");
   if (staging.keys.length < 1 || staging.keys[0]?.t !== 0 || (staging.keys.length > 1 && staging.keys.at(-1)?.t !== durationSec)) problems.push("Camera keys must cover the shot from 0 to its duration.");
-  const ordered = (keys: readonly { t: number }[]) => keys.every((k, i) => Number.isFinite(k.t) && k.t <= durationSec && (i === 0 || k.t > keys[i - 1]!.t));
+  const ordered = (keys: readonly { t: number }[]) => keys.length > 0 && keys.every((k, i) => Number.isFinite(k.t) && k.t >= 0 && k.t <= durationSec && (i === 0 || k.t > keys[i - 1]!.t));
   if (!ordered(staging.keys)) problems.push("Camera key times must be strictly increasing within the shot.");
   for (const k of staging.keys) {
     if (![...k.p, ...k.l].every(Number.isFinite)) problems.push("Camera coordinates must be finite.");
@@ -664,11 +757,79 @@ export function stageProblems(staging: ResolvedShotStaging, durationSec: number)
   for (const set of staging.sets) if (![set.w, set.h, set.d].every(v => Number.isFinite(v) && v > 0)) problems.push("Set dimensions must be positive and finite.");
   for (const figure of staging.cast) if (figure.parent && !groups.has(figure.parent)) problems.push("A figure names a missing parent object.");
   for (const set of staging.sets) if (set.shape === "mesh" && (!set.vertices || !set.triangles || set.triangles.length % 3 !== 0 || set.triangles.some(index=>index >= set.vertices!.length))) problems.push("Mesh geometry needs valid vertices and triangle indices.");
-  for (const motion of staging.objectMotions ?? []) if (!groups.has(motion.group) || !ordered(motion.keys) || motion.keys[0]?.t !== 0) problems.push("Object motion must name a group and have ordered keys from time 0.");
+  // Timed action may start late; the evaluator holds its first pose until that mark (#1041).
+  for (const motion of staging.objectMotions ?? []) if (!groups.has(motion.group) || !ordered(motion.keys)) problems.push("Object motion must name a group and have ordered keys within the shot.");
   if (new Set(staging.objectMotions?.map(m=>m.group)).size !== (staging.objectMotions?.length??0)) problems.push("An object can have only one motion track.");
   if (new Set(staging.performances?.map(p=>p.sheetId)).size !== (staging.performances?.length??0)) problems.push("A figure can have only one performance track.");
   for (const performance of staging.performances ?? []) {
-    if (!ids.has(performance.sheetId) || !ordered(performance.keys) || performance.keys[0]?.t !== 0) problems.push("Performance keys must name a figure and increase from time 0 within the shot.");
+    if (!ids.has(performance.sheetId) || !ordered(performance.keys)) problems.push("Performance keys must name a figure and increase within the shot.");
   }
   return [...new Set(problems)];
+}
+
+export interface StageLineFinding {
+  kind: "within-shot" | "across-coverage";
+  shotIds: string[];
+  pair: [string, string];
+  at: number;
+  message: string;
+}
+
+/** Advisory screen direction at authored camera marks; never a write-boundary refusal (#1045). */
+export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: { shotId: string; staging: ResolvedShotStaging }): StageLineFinding[] {
+  const findings: StageLineFinding[] = [];
+  const coverage: Array<{ shot: Shot; blocking: string; pair: [string, string]; sides: Array<{ at: number; side: number }> }> = [];
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  for (const shot of orderedShots(scene)) {
+    const staging = draft?.shotId === shot.id ? draft.staging : shot.staging && resolvedShotStaging(scene, shot.staging);
+    if (!staging || staging.cast.length < 2 || !staging.keys.length) continue;
+    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+    const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
+    const camera = new PerspectiveCamera(fov, ratio, .1, 200);
+    const cast = [...staging.cast].sort((a, b) => a.sheetId.localeCompare(b.sheetId));
+    // Shared blocking naturally has the same value. Identical private copies cover the same
+    // action too; a deliberately changed private layout must not be compared with the scene.
+    const blocking = JSON.stringify([cast, staging.sets]);
+    const samples = staging.keys.map(key => {
+      const pose = sampleStageCamera(staging, key.t, duration);
+      const lens = stageCameraKeyAt(staging, key.t, duration, fov, ratio);
+      camera.fov = lens.focalMm === undefined ? fov : stagingFov(`${lens.focalMm}mm`, aspect);
+      camera.updateProjectionMatrix();
+      camera.position.set(...pose.p);
+      camera.lookAt(new Vector3(...pose.l));
+      camera.rotateZ((lens.roll ?? 0) * Math.PI / 180);
+      camera.updateMatrixWorld(true);
+      return { at: key.t, camera: pose.p, figures: cast.map(figure => {
+        const state = stageFigureAt(figure, staging.performances, key.t, duration, staging.objectMotions);
+        const point = new Vector3(state.x, state.y + (figure.height ?? 1.8) * (state.pose === "lie" ? .1 : state.pose === "sit" ? .5 : .65), state.z).project(camera);
+        return { ...state, visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1 };
+      }) };
+    });
+    for (let a = 0; a < cast.length - 1; a++) for (let b = a + 1; b < cast.length; b++) {
+      if (!samples.some(sample => sample.figures[a]!.visible && sample.figures[b]!.visible)) continue;
+      const pair: [string, string] = [cast[a]!.sheetId, cast[b]!.sheetId];
+      const sides = samples.flatMap(sample => {
+        const first = sample.figures[a]!, second = sample.figures[b]!;
+        if (!first.visible || !second.visible) return [];
+        const dx = second.x - first.x, dz = second.z - first.z;
+        const length = Math.hypot(dx, dz);
+        if (length < .05) return [];
+        const distance = (dx * (sample.camera[2] - first.z) - dz * (sample.camera[0] - first.x)) / length;
+        return Math.abs(distance) < .05 ? [] : [{ at: sample.at, side: Math.sign(distance) }];
+      });
+      for (let i = 1; i < sides.length; i++) if (sides[i]!.side !== sides[i - 1]!.side) {
+        const at = sides[i]!.at;
+        findings.push({ kind: "within-shot", shotIds: [shot.id], pair, at,
+          message: `180° line: Shot ${shot.number} crosses between ${pair.join(" / ")} by ${at.toFixed(2)}s.` });
+      }
+      for (const previous of coverage) {
+        if (previous.blocking !== blocking || previous.pair[0] !== pair[0] || previous.pair[1] !== pair[1]) continue;
+        const opposite = sides.find(side => previous.sides.some(other => other.side !== side.side));
+        if (opposite) findings.push({ kind: "across-coverage", shotIds: [previous.shot.id, shot.id], pair, at: opposite.at,
+          message: `180° line: Shots ${previous.shot.number} and ${shot.number} cover ${pair.join(" / ")} from opposite sides.` });
+      }
+      coverage.push({ shot, blocking, pair, sides });
+    }
+  }
+  return findings;
 }

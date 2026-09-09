@@ -32,7 +32,8 @@ window.runStageSmoke=async()=>{
     const frames=await viewport.inspectFrames([fixture.duration/3,fixture.duration*2/3]);
     await window.smoke.inspect(fixture.name,frames);
     const result=await viewport.record({start:window.smoke.start,write:window.smoke.write,cancel:window.smoke.cancel},()=>{});
-    await window.smoke.finish(fixture.name,result.jobId,new Uint8Array(await result.openingFrame.arrayBuffer()),fixture.duration);
+    const references=await Promise.all(result.referenceFrames.map(async({png,...frame})=>({...frame,bytes:new Uint8Array(await png.arrayBuffer())})));
+    await window.smoke.finish(fixture.name,result.jobId,new Uint8Array(await result.openingFrame.arrayBuffer()),fixture.duration,references,s.keys.filter(key=>key.t>0&&key.t<fixture.duration).map(key=>key.t));
     viewport.dispose();
   }
 };`,
@@ -77,7 +78,7 @@ ipcMain.handle("stage-smoke:inspect",async(_,name,frames)=>{
   for(const [index,frame] of frames.entries()) await writeFile(join(__dirname,name+"-"+index+"-"+frame.view+".png"),Buffer.from(frame.png,"base64"));
   await writeFile(join(__dirname,name+"-observations.json"),JSON.stringify(frames.map(({png,...frame})=>frame),null,2));
 });
-ipcMain.handle("stage-smoke:finish",async(_,name,id,png,duration)=>{
+ipcMain.handle("stage-smoke:finish",async(_,name,id,png,duration,references,keyTimes)=>{
   const {path}=check(await exporter.finish(id));
   const target=join(__dirname,name+".mp4");
   await copyFile(path,target);
@@ -90,7 +91,14 @@ ipcMain.handle("stage-smoke:finish",async(_,name,id,png,duration)=>{
   const {stderr}=await promisify(execFile)(process.env.ARKE_STAGE_FFMPEG||"ffmpeg",["-i",target,"-i",join(__dirname,name+"-opening.png"),"-filter_complex","[0:v]trim=end_frame=1,setpts=PTS-STARTPTS[a];[1:v]format=yuv420p[b];[a][b]ssim","-frames:v","1","-f","null","-"],{windowsHide:true,timeout:15000});
   const score=Number(/All:([0-9.]+)/.exec(stderr)?.[1]);assert.ok(score>.98,name+" opening video/PNG mismatch: "+score);
   await writeFile(join(__dirname,name+"-opening-agreement.txt"),"SSIM "+score);
-  console.log(name+": "+duration+"s, "+stream.nb_frames+" frames, opening SSIM "+score);
+  assert.deepEqual(references.map(frame=>({kind:frame.kind,at:frame.at})),[{kind:"last",at:(Math.ceil(duration*30)-1)/30},...keyTimes.map(at=>({kind:"key",at})),{kind:"overview",at:0}]);
+  for(const [index,frame] of references.entries()) {
+    assert.deepEqual(nativeImage.createFromBuffer(Buffer.from(frame.bytes)).getSize(),{width:1280,height:720});
+    await writeFile(join(__dirname,name+"-reference-"+index+"-"+frame.kind+".png"),frame.bytes);
+  }
+  const {stderr:lastError}=await promisify(execFile)(process.env.ARKE_STAGE_FFMPEG||"ffmpeg",["-i",target,"-i",join(__dirname,name+"-reference-0-last.png"),"-filter_complex","[0:v]trim=start_frame="+(Math.ceil(duration*30)-1)+",setpts=PTS-STARTPTS[a];[1:v]format=yuv420p[b];[a][b]ssim","-frames:v","1","-f","null","-"],{windowsHide:true,timeout:15000});
+  const lastScore=Number(/All:([0-9.]+)/.exec(lastError)?.[1]);assert.ok(lastScore>.98,name+" last video/PNG mismatch: "+lastScore);
+  console.log(name+": "+duration+"s, "+stream.nb_frames+" frames, opening SSIM "+score+", last SSIM "+lastScore+", "+references.length+" references");
 });
 app.whenReady().then(async()=>{
  const win=new BrowserWindow({show:false,width:1100,height:720,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:join(__dirname,"preload.cjs")}});

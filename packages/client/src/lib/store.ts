@@ -316,7 +316,9 @@ interface StoreState {
   exportsState: Record<string, ExportState>;
   /** SPEC-015: the last import report and filing notices — transient. */
   importReport: ImportReportState | null;
-  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null }>;
+  /* `production` is the scope the refused filing was attempted at, so a surface can tell its
+     own refusals from another's: `null` is the world, absent is a filing that stated no opinion. */
+  artifactNotices: Array<{ sourcePath: string; outcome: string; reason: string; sizeBytes: number | null; production?: string | null }>;
   /** Filed by attaching to a chat, newest last — what the composer shows as chips. */
   attached: Array<{
     worldId: string;
@@ -471,6 +473,33 @@ export function subscribeReferenceImages(listener: (result: ReferenceImagesResul
 }
 export function browseReferenceImages(slug: string, requestId: string): void {
   send({ kind: "browse-reference-images", slug, requestId });
+}
+
+/** Another world's placeable files, for the Cut's Library (issue 1033). */
+export type WorldArtifactsResult = Extract<DomainEvent, { type: "world.artifacts" }>;
+const worldArtifactListeners = new Set<(result: WorldArtifactsResult) => void>();
+export function subscribeWorldArtifacts(listener: (result: WorldArtifactsResult) => void): () => void {
+  worldArtifactListeners.add(listener);
+  return () => { worldArtifactListeners.delete(listener); };
+}
+export function browseWorldArtifacts(slug: string, requestId: string): void {
+  send({ kind: "browse-world-artifacts", slug, requestId });
+}
+/**
+ * Copy files from another world into this one, then list or place them as an upload would
+ * (issue 1033). Answered like an upload, through the queue results, under the returned request.
+ */
+export function borrowArtifacts(
+  worldId: string, slug: string, files: readonly string[],
+  editor: Extract<ClientMessage, { kind: "borrow-artifacts" }>["editor"],
+): { requestId: string | null; reason?: string } {
+  if (files.length === 0 || files.length > 16) return { requestId: null, reason: "Copy up to 16 files at a time." };
+  const requestId = queueRequest("borrow-artifacts");
+  if (!send({ kind: "borrow-artifacts", worldId, requestId, slug, files: [...files], editor })) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The files could not be copied. Check the connection and try again." };
+  }
+  return { requestId };
 }
 
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
@@ -1161,6 +1190,9 @@ function handleFrame(json: string): void {
     if (event.type === "reference.images") {
       for (const listener of referenceImageListeners) listener(event);
     }
+    if (event.type === "world.artifacts") {
+      for (const listener of worldArtifactListeners) listener(event);
+    }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);
     }
@@ -1564,6 +1596,7 @@ function handleFrame(json: string): void {
           outcome: event.outcome,
           reason: event.reason,
           sizeBytes: event.sizeBytes,
+          ...(event.production !== undefined ? { production: event.production } : {}),
         },
       ];
     }
@@ -3664,11 +3697,12 @@ export async function stagePlayblast(
   target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
   jobId: string,
   openingFrame: Uint8Array,
+  referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const host = bridge;
   if (!host?.finishStageExport) return { ok: false, reason: "deterministic playblast export needs the desktop app" };
   try {
-    return await host.finishStageExport(target, jobId, openingFrame);
+    return await host.finishStageExport(target, jobId, openingFrame, referenceFrames);
   } catch {
     await cancelStageExport(jobId).catch(() => {});
     return { ok: false, reason: "the Stage export could not be handed to the app" };
@@ -3773,9 +3807,19 @@ export function moveTimelineHistory(
   send({ kind: "timeline-history", worldId, productionId, action, baseRevision });
 }
 
-/** File new artifacts into the world: the host picks, the renderer never sees the bytes (82a). */
-export function uploadArtifacts(worldId: string, files?: readonly File[]): { requestId: string | null; reason?: string } {
-  return importEditorMedia(worldId, undefined, files);
+/**
+ * File new artifacts: the host picks, the renderer never sees the bytes (82a).
+ *
+ * The world's shelf unless `production` names one. A production's own artifacts page is the only
+ * surface that scopes what it takes (SPEC-020 R-13, design 134); everywhere else the omission is
+ * the world saying so.
+ */
+export function uploadArtifacts(
+  worldId: string,
+  files?: readonly File[],
+  production?: string,
+): { requestId: string | null; reason?: string } {
+  return importEditorMedia(worldId, undefined, files, production);
 }
 
 export function restoreArtifact(worldId: string, artifactId: string): void {
@@ -3788,14 +3832,17 @@ export function retireArtifact(worldId: string, artifactId: string): void {
 
 export function importEditorMedia(
   worldId: string, editor: Extract<ClientMessage, { kind: "upload-artifacts" }>["editor"],
-  files?: readonly File[],
+  files?: readonly File[], production?: string,
 ): { requestId: string | null; reason?: string } {
   if (files && !bridge?.importDroppedMedia) return { requestId: null, reason: "File drops are available in the desktop app. Use Import media instead." };
   if (files && files.length > 16) return { requestId: null, reason: "Import up to 16 files at a time." };
   const requestId = queueRequest("upload-artifacts");
+  // Omitted rather than sent as undefined: the frame is `.strict()`, and the picker and the drop
+  // have to carry the same scope or one entrance on a page would file somewhere the other did not.
+  const scope = production !== undefined ? { production } : {};
   const submitted = files
-    ? bridge!.importDroppedMedia!({ worldId, requestId, editor }, files).submitted
-    : send({ kind: "upload-artifacts", worldId, requestId, editor });
+    ? bridge!.importDroppedMedia!({ worldId, requestId, editor, ...scope }, files).submitted
+    : send({ kind: "upload-artifacts", worldId, requestId, editor, ...scope });
   if (!submitted) {
     pendingQueueRequests.delete(requestId);
     return { requestId: null, reason: "The files could not be imported. Check the connection and use Import media." };
@@ -4070,6 +4117,7 @@ export function useArtifactNotices(): Array<{
   outcome: string;
   reason: string;
   sizeBytes: number | null;
+  production?: string | null;
 }> {
   return useStore().artifactNotices;
 }

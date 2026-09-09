@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { applyTimelineCommands, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -162,13 +162,23 @@ describe("the Library (SPEC-039 T-3)", () => {
       const bells = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${BELLS}"]`)!;
       assert.equal(bells.querySelector(".fy-artrow__lane")?.textContent, "Audio", "an audio file lands on Audio");
       assert.ok(bells.querySelector(".fy-artrow__dot"), "a used file carries the in-the-cut dot");
+      // A member the cut no longer uses can leave the record from its row; one in use cannot.
+      await act(async () => rowButton(screen, `artifact:${BOARD}`).click());
+      assert.ok(action(screen, "Remove from library"), "the unused board's membership comes off from its row");
+      await act(async () => rowButton(screen, `artifact:${BELLS}`).click());
+      assert.equal(action(screen, "Remove from library"), null, "the bells are in the cut; their membership stays");
+      await act(async () => rowButton(screen, `artifact:${BELLS}`).click());
       const document_ = screen.container.querySelector<HTMLElement>('[data-library-item^="artifact:"] .fy-artrow__meta--destructive, [data-library-item] .fy-artrow__meta');
       assert.ok(document_, "rows carry a status line");
-      const pdf = [...screen.container.querySelectorAll<HTMLElement>("[data-library-item]")].find((row) => row.textContent?.includes("undersong-treatment.pdf"));
+      // Named by its link (issue 1005) — the production's title, here — so the row is found by its key.
+      const pdf = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${PAPER}"]`);
       assert.ok(pdf, "an unsupported document stays in the list (R-12)");
       assert.match(pdf.textContent ?? "", /no picture or sound/);
-
       const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]')!;
+      await typeInto(search, "treatment");
+      assert.deepEqual(rows(screen), [`artifact:${PAPER}`], "the file name still finds it");
+      await typeInto(search, "");
+
       await typeInto(search, "harbour-bells");
       assert.deepEqual(rows(screen), [`artifact:${BELLS}`], "search narrows to the bells");
       await typeInto(search, "");
@@ -217,6 +227,108 @@ describe("the Library (SPEC-039 T-3)", () => {
       const place = sent.commands.find((command) => command.kind === "place");
       assert.ok(place && place.kind === "place", "it places the artifact");
       assert.equal(place.clip.source.kind, "artifact");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("keeps a retired file the record still names, with its refusal and a way off the Library", async () => {
+    const state = stateWithBells();
+    const board = state.world!.artifacts.find((artifact) => artifact.id === BOARD)!;
+    (board as { retiredAt?: string }).retiredAt = "2026-09-08T12:00:00Z";
+    const screen = await mount(state);
+    try {
+      const row = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${BOARD}"]`);
+      assert.ok(row, "a retired file the Library names stays a row");
+      assert.match(row.textContent ?? "", /retired from the shelf/);
+      assert.equal(row.getAttribute("draggable"), "false");
+      await act(async () => rowButton(screen, `artifact:${BOARD}`).click());
+      assert.ok(action(screen, "Remove from library"), "its membership can come off from the row");
+      assert.equal(action(screen, "Append to timeline"), null, "and nothing offers to place it");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("browses another world's shelf read-only and copies a file in with its provenance (issue 1033, #972)", async () => {
+    const state = stateWithBells();
+    // A second scene, so the Scene control is on the panel to begin with.
+    const scenes = state.world!.productions[0]!.scenes;
+    scenes.push({ ...scenes[0]!, id: "sc_05", number: 5, title: "The morning after", shots: [] });
+    state.worlds.push({ worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ", slug: "the-other-one", name: "The Other One", counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 }, updated: "2026-09-01T12:00:00Z" } as (typeof state.worlds)[number]);
+    const screen = await mount(state);
+    try {
+      const browse = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]');
+      assert.ok(browse, "another world can be browsed");
+      // linkedom clears the selected option whenever any option's `selected` is set, even to
+      // false, so only the chosen one is touched; its setter deselects the rest.
+      const choose = async (value: string) => act(async () => {
+        const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+        [...select.querySelectorAll("option")].find((option) => option.value === value)!.selected = true;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      // A scene chosen at home is this production's frame; the other world's shelf has none.
+      const sceneSelect = () => screen.container.querySelector<HTMLSelectElement>('select[aria-label="Scene"]');
+      const firstScene = sceneSelect()!.querySelectorAll("option")[1]!;
+      await act(async () => {
+        firstScene.selected = true;
+        sceneSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value, firstScene.value, "a scene is chosen");
+      await choose("the-other-one");
+      assert.equal(sceneSelect(), null, "no scene control over another world's shelf");
+      const asked = screen.sent.find((message) => message.kind === "browse-world-artifacts");
+      assert.ok(asked && asked.kind === "browse-world-artifacts" && asked.slug === "the-other-one", "the coordinator is asked for that world's shelf");
+      await act(async () => __applyEventForTest({
+        type: "world.artifacts", at: "2026-09-09T12:00:00Z", requestId: asked.requestId, slug: "the-other-one",
+        artifacts: [{ id: "ar_01J8G0000000000000000000B9", kind: "video", file: "clip.mp4", name: "Halima Sadiq", durationSec: 6, picture: ".index/posters/ar_01J8G0000000000000000000B9.png" }],
+      }));
+      const row = screen.container.querySelector<HTMLElement>('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]');
+      assert.ok(row, "the other world's file is a row");
+      assert.match(row.querySelector(".fy-artrow__name")?.textContent ?? "", /Halima Sadiq/, "named as its own shelf names it");
+      assert.match(row.querySelector(".fy-artrow__meta")?.textContent ?? "", /video · 6s · from The Other One/);
+      assert.match(row.querySelector(".fy-artrow__swatch img")?.getAttribute("src") ?? "", /\/media\/the-other-one\/\.index\/posters\//, "its picture is served under its own world");
+      assert.equal(row.getAttribute("draggable"), null, "read-only: nothing here drags onto a lane");
+      // The pressed filter still means what it says on these rows: Audio keeps only sound.
+      const chip = (label: string) => [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === label)!;
+      await act(async () => chip("Audio").click());
+      assert.equal(screen.container.querySelector('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]'), null, "a video is not sound");
+      await act(async () => chip("All").click());
+      const shownAgain = screen.container.querySelector<HTMLElement>('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]')!;
+      assert.ok(shownAgain, "back with the filter");
+      await act(async () => shownAgain.querySelector<HTMLButtonElement>(".fy-artrow__pick")!.click());
+      await act(async () => action(screen, "Copy into this world")!.click());
+      const borrow = screen.sent.find((message) => message.kind === "borrow-artifacts");
+      assert.ok(borrow && borrow.kind === "borrow-artifacts");
+      assert.deepEqual([borrow.slug, borrow.files, borrow.editor.destination], ["the-other-one", ["clip.mp4"], "library"]);
+      const pending = screen.container.querySelector("[data-testid='pending-import']")?.textContent ?? "";
+      assert.match(pending, /clip\.mp4/, "listed here while it copies");
+      assert.match(pending, /importing…/);
+      assert.doesNotMatch(pending, /KB|MB/, "a borrow has no size to state");
+      // Back home: the bells are this world's, and a borrowed file would say where it came from.
+      // Browsing stays available while the copy runs; only copying waits.
+      assert.equal(action(screen, "Copy into this world")?.disabled, true);
+      await choose("here");
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`));
+      assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value ?? "all", "all", "home again with every scene, not the stale one");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("drops a shot-only filter when the production shown has no shots", async () => {
+    const state = stateWithBells();
+    const screen = await mount(state);
+    try {
+      const chip = (label: string) => [...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].find((button) => button.textContent === label)!;
+      await act(async () => chip("Needs a take").click());
+      assert.ok(rows(screen).every((key) => key.startsWith("shot:")), "shots only");
+      // The same panel, a production with no shots under it: the filter has no control left and no meaning.
+      const without = structuredClone(state) as ClientState;
+      without.world!.productions[0]!.scenes = [];
+      await act(async () => __setStateForTest(without));
+      assert.equal(chip("All").getAttribute("aria-pressed"), "true", "back to everything");
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`), "and the files are listed again");
     } finally {
       await close(screen);
     }

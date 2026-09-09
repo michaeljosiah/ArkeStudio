@@ -1,3 +1,4 @@
+import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
@@ -59,6 +60,23 @@ export type Frame = z.infer<typeof FrameSchema>;
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
 const StagedReferenceKeySchema = z.string().min(1).max(120).regex(STAGED_REFERENCE_KEY);
+
+/**
+ * Where the editor's import lands and what fences it (SPEC-043 R-1, R-3). A bare frame is the
+ * base Picture track; a named lane or the new-lane strip carry the frame with them (issue 1035).
+ * See `MediaDestination`.
+ */
+export const EditorImportSchema = z.object({
+  productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
+  sourceFingerprint: TimelineSourceFingerprintSchema,
+  destination: z.union([
+    z.enum(["library", "append"]),
+    z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    z.object({ trackId: TimelineTrackIdSchema, frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+    z.object({ newTrack: z.literal(true), frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+  ]),
+}).strict();
+export type EditorImport = z.infer<typeof EditorImportSchema>;
 
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
   ProductionSetupCommandSchema,
@@ -2371,7 +2389,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /**
    * File the playblast and opening frame the Stage rendered onto its shot. The bytes arrive the
-   * way a pasted picture does — spooled by the host, which appends their paths — and both
+   * way a pasted picture does — spooled by the host, which appends their paths — and all
    * artifacts are pinned through one versioned scene write, so a stale scene refuses them by
    * name rather than pinning a move onto keys that have since changed.
    */
@@ -2392,6 +2410,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2),
     })
     .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
@@ -2414,6 +2433,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       lens: z.string().max(80).optional(),
       sourcePath: z.string().min(1).optional(),
       openingFrameSourcePath: z.string().min(1).optional(),
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
@@ -2519,18 +2539,37 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * 82a: file new artifacts into the world from the artifact panel.
    *
    * The host opens the picker and the renderer never sees the bytes, the same arrangement key art
-   * has. They land on the **world's** shelf, not the production's: an artifact laid over one cut
-   * is still the world's, and the panel says so by being the world's.
+   * has. They land on the **world's** shelf by default, not the production's: an artifact laid
+   * over one cut is still the world's, and the panel beside the cut says so by being the world's.
+   *
+   * `production` is the exception, and the only one (design 134): a production's own artifacts
+   * page files into that production, because it is the page that shows what a production owns and
+   * a surface that shows a scope has to be able to add to it. Absent means the world, so every
+   * existing caller is unchanged; the three states are `file-artifact`'s.
    */
   z.object({
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
     // Null preserves the original position of a dropped File without a native path.
     sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
-    editor: z.object({
-      productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
-      sourceFingerprint: TimelineSourceFingerprintSchema,
-      destination: z.union([z.enum(["library", "append"]), z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)]),
-    }).strict().optional(),
+    production: SlugSchema.nullable().optional(),
+    editor: EditorImportSchema.optional(),
+  }).strict(),
+  /**
+   * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
+   * lengths and pictures, never paths. Answered by `world.artifacts`.
+   */
+  z.object({ kind: z.literal("browse-world-artifacts"), requestId: UlidSchema, slug: SlugSchema }).strict(),
+  /**
+   * Copy files from another world into this one and file them here (issue 1033), the way the
+   * reference picker borrows an image (#972): the coordinator resolves the world and the file,
+   * copies the bytes through ordinary filing with `importedFrom: world:<slug>` as provenance,
+   * and then places or lists them exactly as an upload would. No host path crosses the wire.
+   */
+  z.object({
+    kind: z.literal("borrow-artifacts"), worldId: UlidSchema, requestId: UlidSchema, slug: SlugSchema,
+    /** Artifact file names within the source world's `artifacts/`. */
+    files: z.array(z.string().min(1)).min(1).max(16),
+    editor: EditorImportSchema,
   }).strict(),
   /**
    * 82a: place an artifact over the picture for a window.

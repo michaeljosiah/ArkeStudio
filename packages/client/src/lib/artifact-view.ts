@@ -1,5 +1,37 @@
 import { mediaExtension, orderedShots, type ArtifactSidecar, type WorldBundle } from "@arke-studio/contracts";
 
+/**
+ * The artifacts a production may see (SPEC-020 R-13): the world's own, plus the ones it owns.
+ *
+ * Another production's scoped material is absent — selecting audio by kind alone would put one
+ * production's scratch takes in every other production's pickers.
+ */
+export function artifactsForProduction<T extends { production?: string }>(
+  artifacts: readonly T[],
+  productionId: string | undefined,
+): T[] {
+  return artifacts.filter((a) => a.production === undefined || a.production === productionId);
+}
+
+/**
+ * What a production's artifacts page shows, and therefore what its rail row counts.
+ *
+ * The two have to be the same set or the row advertises a number no filter on the page can
+ * reach — which is exactly what the row did while it pointed at the world's shelf and counted
+ * the world's files. Superseded artifacts drop out here as they drop out of pickers (R-5), and
+ * a superseding artifact this production owns supersedes for this production alone.
+ */
+export function productionShelf(
+  artifacts: readonly ArtifactSidecar[],
+  productionId: string | undefined,
+): ArtifactSidecar[] {
+  const scoped = artifactsForProduction(artifacts, productionId);
+  const superseded = new Set(
+    scoped.map((a) => a.supersedes).filter((id): id is string => id !== undefined),
+  );
+  return scoped.filter((a) => a.retiredAt === undefined && !superseded.has(a.id));
+}
+
 /** Advisory uses from the live snapshot. Retirement never depends on this being a history index. */
 export function artifactUses(world: WorldBundle, artifact: ArtifactSidecar): string[] {
   const identities = new Set([artifact.id, `artifacts/${artifact.file}`]);
@@ -112,11 +144,11 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
   details: "details",
 };
 
-/** Linked names title the shelf and its viewer; the file remains the download identity (issue 1005). */
-export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string, links?: readonly string[]) => string): string {
-  const names = artifact.links.map((link) => linkName(link, artifact.links)).filter((name, index) => name !== artifact.links[index]);
-  return [...new Set(names)].slice(0, 2).join(" · ") || artifact.file.split("/").pop() || artifact.file;
-}
+/**
+ * The naming rule lives in contracts now (issue 1033): the coordinator states it too when it
+ * lists another world's shelf. Re-exported so every screen keeps importing it from here.
+ */
+export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-studio/contracts";
 
 /** The visible name and viewer are also the open button's accessible name. */
 export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {

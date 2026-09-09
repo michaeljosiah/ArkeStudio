@@ -854,3 +854,22 @@ it("saves an authored shot prompt with its route and location source, refusing s
   assert.deepEqual(await sceneOnDisk(store), after);
   await store.close();
 });
+
+it("retimes a one-key camera's action and hold using the previous shot duration (#1046)", async () => {
+  const { store } = await open();
+  const before = await sceneOnDisk(store);
+  const target = orderedShots(before)[1]!;
+  const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+  await applySceneCommand(store, { ...base, baseVersion: before.version, command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 4 } } });
+  await applySceneCommand(store, { ...base, baseVersion: (await sceneOnDisk(store)).version, command: {
+    kind: "edit-stage", shotId: target.id, staging: { cast: [{ sheetId: "maren-kest", x: 0, z: 0 }], sets: [],
+      keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }],
+      performances: [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0, hold: 1 }, { t: 2, x: 1, z: 0 }] }],
+    },
+  } });
+  await applySceneCommand(store, { ...base, baseVersion: (await sceneOnDisk(store)).version, command: { kind: "edit-shot", shotId: target.id, change: { durationSec: 8 } } });
+  const after = orderedShots(await sceneOnDisk(store)).find(shot => shot.id === target.id)!;
+  assert.deepEqual(after.staging?.keys.map(key => key.t), [0, 8]);
+  assert.deepEqual(after.staging?.performances?.[0]?.keys.map(key => key.t), [0, 4]);
+  assert.equal(after.staging?.performances?.[0]?.keys[0]?.hold, 2);
+});

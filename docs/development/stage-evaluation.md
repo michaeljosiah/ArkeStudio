@@ -13,6 +13,7 @@ script-relevant openings and props. Review intermediate motion, not only the fir
 | Doorway entry | Actor waits to 1s, crosses z=0 at 3s, stops at 5s; 1.4m opening and 2.4m clearance | Actor visibly passes through an opening, not a wall |
 | Seated furniture | Actor stays seated for 6s; face visible above table | Chair/table dimensions and body relationship are plausible |
 | Delayed action | Hold to 1s; cross by 3s; finish turn by 4s; sit at 5s | Distinct beats read without sliding through furniture |
+| Eased action (#1046) | Hold to 1s; curved travel through (0, -0.5) at 3s to (1, 0) at 5s; sit at 6s | Visible wait, gradual starts/stops and smooth travel; legacy delayed-action fixture remains unchanged |
 | Independent motion | Actor crosses x=-2 to +2 in 6s while camera completes an orbit | Camera and actor move independently; tracking keeps subject framed |
 | Valley chase | Driver rides car from z=0 to 50 in 8s; camera settles in car space at 6s; final offset holds within 1e-8m | Valley/road/car silhouettes read, windows are open, final driver view is unobstructed |
 
@@ -31,7 +32,7 @@ This launches a hidden sandboxed Electron window with a dedicated test bridge, r
 inspection frames and MP4s through StageViewport and the real Stage exporter, and prints its
 output directory. It needs installed Electron plus `ffmpeg`/`ffprobe` on PATH; optional
 `ARKE_STAGE_FFMPEG` and `ARKE_STAGE_FFPROBE` name executables. It makes no model/provider calls.
-Each output includes measured encoded metadata, an opening PNG and frame observations. Expect
+Each output includes measured encoded metadata, opening/last PNGs, every interior camera-key PNG, a top-down camera-path/cast overview, and frame observations (issue 1043). All filed PNGs use export resolution; the gate compares both opening and last PNGs to their decoded video frames. Expect
 1280×720, 30fps, 180 frames for 6s or 240 for 8s. Compare decoded opening video to opening PNG
 (with lossy-codec tolerance), and inspect camera framing, screen orientation and timed action.
 Outputs are intentionally retained for visual review in the printed temporary directory.
@@ -48,7 +49,11 @@ the real provider client's request. This proves delivery without spending on gen
 explicitly authorized paid smoke test can separately evaluate whether generated motion follows
 the accepted reference. Compare the generated take and playable Stage reference in Bench.
 
-World schema 11 is a compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
+World schema 21 fences authored gait and object speed ceilings (#1044); schema 22 fences performance ease and hold (#1046). Legacy performance tracks retain linear travel until a hold or ease control is authored. New action marks use the shared camera/object spline with zero ease by default. Performance holds leave at least 0.1s of travel, scale with shot duration, and are reflected in timeline spans, speed measurements and generation beats.
+
+World schema 20 additionally fences the expanded playblast reference pin, so older readers refuse before scanning its strict scene fields. Opening, last, key and overview artifacts share the pin’s source fingerprint and staleness checks. Bench offers the opening/last pair to end-frame routes and the ordered still strip to image-reference routes, within existing manifest limits.
+
+World schema 11 is the earlier compatibility fence: expanded Stage fields, animation, provenance and encoded video metadata cause
 the normal committer to advance the world minimum reader version. No bulk migration is required;
 legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.
