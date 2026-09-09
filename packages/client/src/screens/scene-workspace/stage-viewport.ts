@@ -1,6 +1,7 @@
 import { sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
   BoxGeometry,
+  Color,
   CylinderGeometry,
   BufferAttribute,
   BufferGeometry,
@@ -1298,7 +1299,7 @@ export class StageViewport {
       const screen = point.clone().project(camera);
       return [(screen.x + 1) * canvas.width / 2, (1 - screen.y) * canvas.height / 2] as const;
     };
-    context.strokeStyle = "#385d87";
+    context.strokeStyle = new Color(PALETTE[2]!).getStyle();
     context.lineWidth = Math.max(3, canvas.width / 320);
     context.beginPath();
     path.forEach((point, index) => { const [x, y] = project(point); if (index === 0) context.moveTo(x, y); else context.lineTo(x, y); });
@@ -1306,9 +1307,9 @@ export class StageViewport {
     context.font = `${Math.max(12, canvas.width / 80)}px sans-serif`;
     for (const walker of this.walkers) {
       const [x, y] = project(walker.getWorldPosition(new Vector3()));
-      context.fillStyle = "#fff";
+      context.fillStyle = renderer.getClearColor(new Color()).getStyle();
       context.beginPath(); context.arc(x, y, 7, 0, Math.PI * 2); context.fill(); context.stroke();
-      context.fillStyle = "#263849";
+      context.fillStyle = new Color(INK).getStyle();
       context.fillText(String(walker.userData["name"]), x + 11, y - 9);
     }
     return canvas;
