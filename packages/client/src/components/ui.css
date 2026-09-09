@@ -75,8 +75,14 @@
   cursor: pointer;
   transition: var(--transition-control);
 }
-.ui-iconbtn:hover {
+.ui-iconbtn:hover:not(:disabled) {
   background: var(--accent);
+}
+/* A glyph carries a verb, so an unavailable one has to look unavailable — the text button it
+   replaced said so through `.ui-btn:disabled` (issue 1010). */
+.ui-iconbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---- Inputs ------------------------------------------------ */
@@ -155,7 +161,10 @@
   gap: var(--space-2);
   cursor: pointer;
 }
-.ui-check--off {
+/* Read from the input, not from a prop: a `<fieldset disabled>` disables everything inside it
+   without any of them being passed `disabled`, and the panels that wrap these in one are exactly
+   where a checkbox that looks live and does nothing is most misleading (issue 1010). */
+.ui-check:has(input:disabled) {
   cursor: default;
   opacity: 0.55;
 }

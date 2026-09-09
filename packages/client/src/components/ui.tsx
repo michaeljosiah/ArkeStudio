@@ -34,12 +34,14 @@ export function Button({
 }
 
 /**
- * A verb drawn as its glyph, with the house tooltip carrying the word (issue 1010).
+ * A verb drawn as its glyph, with the word on its tooltip and its accessible name (issue 1010).
  *
- * The tip is `.fy-tip`'s styled bubble rather than the browser's `title`, for the same reason
- * the selects below stopped being native ones: a designed screen that borrows the platform's
- * chrome for half its controls reads as two screens. `aria-label` still carries the word for
- * anything that is not a pointer, so the glyph is never the only statement of what this does.
+ * The tooltip is the platform's `title` and not the timeline's drawn `.fy-tip` bubble, which was
+ * tried first and reverted: `.fy-tip` is an absolutely positioned pseudo-element, so it is cut
+ * off by any ancestor that clips — the put-away World Chat rail is 48px wide with
+ * `overflow: hidden`, and its two icon-only controls would have had no discoverable name at all.
+ * A control that appears anywhere cannot rely on nothing above it clipping. `.fy-tip` stays
+ * where its container is known: the cut's toolbar.
  */
 export function IconButton({
   label,
@@ -48,7 +50,7 @@ export function IconButton({
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & { label: string }) {
   return (
-    <button className={cx("ui-iconbtn", "fy-tip", className)} aria-label={label} data-tip={label} {...rest}>
+    <button className={cx("ui-iconbtn", className)} aria-label={label} title={label} {...rest}>
       {children}
     </button>
   );
@@ -98,7 +100,7 @@ export function Checkbox({
   ...rest
 }: Omit<InputHTMLAttributes<HTMLInputElement>, "type"> & { label: ReactNode }) {
   return (
-    <label className={cx("ui-check", rest.disabled === true && "ui-check--off", className)}>
+    <label className={cx("ui-check", className)}>
       <span className="ui-check__box">
         <input type="checkbox" {...rest} />
         <CheckMark size={11} />

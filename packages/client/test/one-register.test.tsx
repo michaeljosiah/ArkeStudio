@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { legacySceneView } from "@arke-studio/contracts";
@@ -24,6 +27,7 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const WORLD = FIXTURE_STATE.world!;
 const WORLD_ID = WORLD.meta.worldId;
+const UI_CSS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/components/ui.css"), "utf8");
 
 function renderRoute(path: string): string {
   __setStateForTest(FIXTURE_STATE);
@@ -51,13 +55,29 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
       const button = labelled(html, verb);
       assert.ok(button, `${verb} is a control with an accessible name`);
       assert.match(button, /class="[^"]*ui-iconbtn/, `${verb} is drawn as a glyph`);
-      assert.match(button, new RegExp(`data-tip="${verb}"`), `${verb} carries the house tooltip`);
+      // `title`, not the timeline's drawn tip: an icon-only control can sit inside a clipping
+      // ancestor — the put-away World Chat rail is 48px and hides its overflow.
+      assert.match(button, new RegExp(`title="${verb}"`), `${verb} carries a tooltip`);
     }
     assert.doesNotMatch(
       html,
       /<button[^>]*class="ui-btn[^"]*"[^>]*>Rename<\/button>/,
       "and no longer a second row of words under the primary buttons",
     );
+  });
+
+  /*
+   * A glyph says less than a word, so it has to keep the affordances the word had. Chapters
+   * disables the first Up and the last Down, the kit's Upload goes dead outside the desktop app,
+   * and the Bible's speaker is dead on an empty section — all of which read as live controls
+   * until the shared rule says otherwise (codex review of this change).
+   */
+  it("says an unavailable glyph is unavailable, and stops hovering it", () => {
+    assert.match(UI_CSS, /\.ui-iconbtn:disabled\s*\{[^}]*cursor:\s*default/);
+    assert.match(UI_CSS, /\.ui-iconbtn:hover:not\(:disabled\)/, "an unavailable glyph does not light up");
+    assert.doesNotMatch(UI_CSS, /\.ui-iconbtn:hover\s*\{/, "and the unguarded hover rule is gone");
+    // A fieldset disables everything inside it without passing any of them `disabled`.
+    assert.match(UI_CSS, /\.ui-check:has\(input:disabled\)/);
   });
 
   it("gives the bible's contents one speaker per heading rather than the word Listen", () => {
