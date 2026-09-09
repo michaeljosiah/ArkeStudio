@@ -37,3 +37,13 @@ docs/system/
 
 # Story bibles written by hand for reference — working documents, not shipped.
 docs/example/
+
+# The specification set and the design record it rests on. These live in the private
+# document set beside vision and scope (OneDrive: 04_AI_Projects/Arke Worlds/arke-studio-specs);
+# the paths below are junctions into it, so every relative link in CLAUDE.md, AGENTS.md and
+# the specs themselves still resolves locally. The code stays open under AGPL; the design
+# reasoning behind it does not, because that is the part a reader cannot derive from source.
+docs/specification.md
+docs/specifications/
+docs/decisions/
+docs/architecture/

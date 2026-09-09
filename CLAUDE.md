@@ -7,6 +7,39 @@ tour of the architecture. Start with [AGENTS.md](AGENTS.md) and the
 This file is the shared operational reference for all coding agents; keep these rules here
 rather than duplicating them in package guides.
 
+## The specs are not in this repository
+
+The code is public under AGPL. The specification set is not: the master spec, the capability
+specs, the ADRs and the architecture guides live in the private document set beside vision and
+scope, at `%USERPROFILE%\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs`.
+
+Every spec path in this file and in AGENTS.md still resolves, because those paths are junctions
+into that folder rather than tracked files. They are gitignored, so nothing you do at
+`docs/specifications/` can commit a spec back into the public repository by accident — which is
+the point, and the reason for junctions rather than a second clone somewhere else.
+
+**A fresh checkout or worktree has no junctions.** The paths are simply absent, and every spec
+link in this file dead-ends. That is not a broken repository; it is a checkout that has not been
+linked yet. From the checkout root, in PowerShell:
+
+```powershell
+$specs = "$env:USERPROFILE\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs"
+foreach ($n in @("specifications", "decisions", "architecture")) {
+  New-Item -ItemType Junction -Path "docs\$n" -Target "$specs\$n"
+}
+New-Item -ItemType HardLink -Path "docs\specification.md" -Target "$specs\specification.md"
+```
+
+`specification.md` is a single file, so it is a hard link rather than a junction — and OneDrive
+can break a hard link by replacing the file on sync, which leaves the checkout holding a stale
+copy that looks fine. If the master spec disagrees with what you last wrote there, re-run the
+last line before believing it.
+
+Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
+of those citations sit in `packages/`, they are the only record of why a great deal of this code
+is shaped as it is, and a confident reconstruction of a spec you cannot read is worse than
+saying you cannot read it.
+
 ## Never hand-roll branch or worktree deletion
 
 Use `/cleanup`, or `node scripts/prune-merged.mjs` directly. Dry run is the default.

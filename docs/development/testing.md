@@ -13,7 +13,7 @@ npm run build
 npm test
 ```
 
-Lint checks source text, rejects duplicate `specId` declarations under `docs/specifications/`, and runs oxlint over packages/apps; it does not lint all maintenance scripts. Run `node scripts/check-spec-ids.mjs` to check specification identity alone, including new files before staging them. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
+Lint checks source text, rejects duplicate `specId` declarations under `docs/specifications/`, and runs oxlint over packages/apps; it does not lint all maintenance scripts. The `specId` check passes silently where the specifications are absent, which is the normal case in CI and in a clone without the private document set — it verifies identity only on machines that actually hold the specs to break. Run `node scripts/check-spec-ids.mjs` to check specification identity alone, including new files before staging them. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
 
 For one workspace, run these from the repository root:
 

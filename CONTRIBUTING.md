@@ -79,20 +79,22 @@ Start with [the developer index](docs/development/README.md) for code navigation
 
 ## How changes are shaped
 
-Arke Studio is **specification-first**. `docs/specification.md` is the master product spec, and
-`docs/specifications/NNN.*.md` are the capability specs that break out of its §19. Behaviour is
-decided in a spec and then built.
+Arke Studio is **specification-first**: behaviour is decided in a capability spec and then built.
+The specification set is not published with the code, so a contribution cannot amend one directly.
+That changes the order of work rather than the standard:
 
-So:
-
-- **A change to behaviour needs a spec change.** Amend the relevant capability spec in the same
-  pull request, or link the spec section your change implements. A pull request that changes what
-  the product does without touching a spec will be asked for one.
+- **A change to behaviour starts with an issue, not a pull request.** Say what should be different
+  and why. If it is accepted the spec is amended here, and the issue comes back with the section
+  your change implements. A pull request that changes what the product does, with no spec section
+  behind it, will be asked for the issue first — not because the idea is unwelcome, but because
+  the spec is where that decision is recorded and it has to be recorded somewhere.
 - **A bug fix, a refactor, a test, a typo** needs none of that. Just send it.
-- Specs use RFC-2119 keywords and numbered acceptance criteria (`R-1`, `R-2`, …). Match the house
-  format of the file you are editing.
-- Record *why*, not just *what*. The specs keep decision tables for reversed and rejected
-  decisions, because the reasoning outlives the decision.
+- **Cite the spec section you are implementing** in the pull request, the way the code already
+  does: `SPEC-014 §3`. The document is private; the citation is not, and it is how the change is
+  reviewed against what was decided.
+- Record *why*, not just *what*. The reasoning outlives the decision, and in a public repository
+  whose specs are private, a comment explaining the failure that motivated the code is often the
+  only place that reasoning survives.
 
 ## Pull requests
 
