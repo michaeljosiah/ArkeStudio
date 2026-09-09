@@ -273,6 +273,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 };
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
+import { backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -294,6 +295,11 @@ import {
  * enough for an ordinary session in one pass, short enough that nobody waits on it.
  */
 const BENCH_POSTER_BACKFILL_MS = 5_000;
+/**
+ * The same budget for video artifacts filed before posters existed (issue 1037): drawn before the
+ * open-world snapshot so the Library's first render already has its pictures.
+ */
+const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
@@ -3053,6 +3059,10 @@ export class Coordinator {
         finally { await this.refreshConversations(store); }
       });
     }
+    // Video artifacts filed before posters existed get their pictures now, before the snapshot
+    // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
+    // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
+    if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -12069,6 +12079,10 @@ export class Coordinator {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
               abandoned: () => !this.stillOpen(store) || this.stopping,
             });
@@ -12099,7 +12113,12 @@ export class Coordinator {
           }));
           if (outcome.outcome !== "filed" && outcome.outcome !== "deduplicated") {
             failures.push({ index, reason: `${basename(sourcePath)}: ${outcome.reason}` });
+            continue;
           }
+          // Its picture, before the snapshot that lists it (issue 1037); best-effort, like a take's.
+          await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
+            void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
+          });
         }
         // Filing completes locally. The counts tell the client whether to report success, a mixed
         // result, or refusal; none of those outcomes creates an Activity job.
@@ -14244,6 +14263,22 @@ export class Coordinator {
    * what it can and the rest next time, which is self-healing and never a session that will not
    * open; and once drawn, every later open finds them all and does nothing at all.
    */
+  /** The artifact shelf's pictures, on the same terms as the bench's (issue 1037). */
+  private async backfillArtifactPosters(store: WorldStore): Promise<void> {
+    if (this.opts.takePosterMaker === undefined) return;
+    try {
+      await backfillArtifactPosters(store, this.opts.takePosterMaker, {
+        budgetMs: ARTIFACT_POSTER_BACKFILL_MS,
+        stillOpen: () => this.stillOpen(store) && !this.stopping,
+        onUnavailable: (artifactId, reason) => {
+          void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, backfill: true, reason });
+        },
+      });
+    } catch {
+      // A world whose pictures cannot be drawn is a world that opens exactly as it did before.
+    }
+  }
+
   private async backfillBenchPosters(store: WorldStore, session: BenchSession): Promise<void> {
     await backfillPosters(
       session.takes.flatMap((take) =>

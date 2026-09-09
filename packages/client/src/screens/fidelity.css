@@ -6020,6 +6020,7 @@ select.fy-set__pill { padding-right: 26px; }
   overflow: hidden;
 }
 .fy-artpanel {
+  position: relative;
   min-width: 0;
   min-height: 0;
   border-right: 1px solid var(--border);
@@ -8355,3 +8356,53 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 /* The sheet editor's prose fields (issue 1007). A section of a character sheet is a paragraph
    or three; at the shared 112px each one showed four lines behind its own scrollbar. */
 .fy-sheetedit__prose { min-height: 232px; }
+
+/* ---- Drags, drops and handles on the lanes (issues 1034, 1035, 1036, 1037) --------------------
+   The clip in hand travels; the slot the sequence will use is drawn; a neighbour slides rather
+   than swaps; a drop target says what it will do; a handle can be found without hunting. */
+.fy-pictclip__grip { width: 12px; }
+.fy-pictclip__grip > i { position: absolute; top: 50%; width: 3px; height: 18px; margin-top: -9px; border-radius: 2px; background: var(--foreground); opacity: 0; transition: opacity .12s; }
+.fy-pictclip__grip--start > i { left: 3px; }
+.fy-pictclip__grip--end > i { right: 3px; }
+.fy-pictclip__grip:hover { background: color-mix(in srgb, var(--foreground) 14%, transparent); }
+.fy-pictclip:hover .fy-pictclip__grip > i, .fy-cutseg--selected .fy-pictclip__grip > i, .fy-typedclip:hover .fy-pictclip__grip > i, .fy-typedclip--selected .fy-pictclip__grip > i, .fy-pictclip__grip:hover > i { opacity: .9; }
+.fy-typedclip { padding: 0 12px; }
+.fy-typedclip--picture > .fy-portrait { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0; z-index: 0; }
+.fy-typedclip--picture > .fy-portrait--fallback { display: none; }
+.fy-typedclip--picture > .fy-typedclip__name { position: relative; z-index: 1; flex: none; max-width: calc(100% - 20px); background: color-mix(in srgb, var(--media-overlay-bg) 65%, transparent); color: var(--media-overlay-fg); border-radius: 4px; padding: 1px 5px; }
+/* The ghost: the clip in hand, lifted; neighbours slide with a transition only while a drag is on. */
+.fy-pictlane--dragging .fy-pictclip:not(.fy-pictclip--ghost), .fy-typedlane--dragging .fy-typedclip:not(.fy-typedclip--ghost) { transition: left .16s var(--ease-out); }
+.fy-pictclip--ghost, .fy-typedclip--ghost { z-index: 6; opacity: .85; box-shadow: var(--shadow-lg); cursor: grabbing; }
+.fy-slot { position: absolute; top: 1px; height: 58px; box-sizing: border-box; border: 1.5px dashed var(--foreground); border-radius: 7px; background: color-mix(in srgb, var(--foreground) 6%, transparent); pointer-events: none; z-index: 1; }
+.fy-snapline { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--primary); box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent); pointer-events: none; z-index: 7; }
+.fy-dragchip { position: absolute; top: -22px; transform: translateX(-50%); display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 7px; border-radius: 5px; background: var(--foreground); color: var(--background); font: 500 9.5px var(--font-mono); white-space: nowrap; pointer-events: none; z-index: 8; }
+.fy-dragchip--refused { background: var(--destructive); }
+.fy-dragchip__detail { font: 400 9px var(--font-mono); opacity: .8; }
+/* Landing: the rectangle a drop makes, and the words beside it. */
+.fy-landing { position: absolute; top: 2px; bottom: 2px; box-sizing: border-box; border: 1.5px dashed var(--foreground); border-radius: 6px; background: color-mix(in srgb, var(--foreground) 8%, transparent); pointer-events: none; z-index: 4; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.fy-landing--refused { border-color: var(--destructive); background: color-mix(in srgb, var(--destructive) 8%, transparent); }
+.fy-landing--pending { border-style: dotted; }
+.fy-landing__label { font: 400 8.5px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 6px; }
+.fy-droplabel { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); padding: 2px 7px; border-radius: 5px; background: var(--foreground); color: var(--background); font: 500 9px var(--font-mono); letter-spacing: .04em; pointer-events: none; z-index: 5; white-space: nowrap; }
+.fy-droplabel--refused { background: var(--destructive); }
+/* A lane under a drag: dashed and lifted against the ground, not a tint nobody could see. */
+.fy-lane--over { outline: 1.5px dashed var(--foreground); outline-offset: -2px; border-radius: 6px; background: color-mix(in srgb, var(--foreground) 6%, transparent); }
+.fy-lane--refused { outline: 1.5px dashed var(--destructive); outline-offset: -2px; border-radius: 6px; background: color-mix(in srgb, var(--destructive) 6%, transparent); cursor: not-allowed; }
+.fy-lane--files:not(.fy-lane--over):not(.fy-lane--refused) { outline: 1px dashed color-mix(in srgb, var(--foreground) 45%, transparent); outline-offset: -2px; border-radius: 6px; }
+.fy-track--new.fy-track--files { opacity: 1; }
+.fy-track--new.fy-track--files .fy-track__lane { border-color: var(--foreground); }
+/* The Library as one target while files are over the window. */
+.fy-dropzone { position: absolute; inset: 8px; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 1.5px dashed var(--foreground); border-radius: 10px; background: color-mix(in srgb, var(--background) 88%, transparent); color: var(--foreground); font: 500 12px var(--font-sans); pointer-events: none; }
+.fy-dropzone--over { background: color-mix(in srgb, var(--accent) 70%, var(--background)); }
+/* Rows carry a picture (issue 1037), and an import in flight is a row too (issue 1035). */
+.fy-artrow__img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fy-artrow--pending .fy-artrow__swatch { border: 1px dashed var(--border); background: transparent; }
+.fy-artrow__dismiss { border: 0; background: none; color: var(--muted-foreground); font-size: 13px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.fy-artrow__dismiss:hover { color: var(--foreground); }
+.fy-artpanel__kind { height: 20px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--foreground); font: 400 9.5px var(--font-mono); max-width: 110px; }
+.fy-artpanel__empty .fy-mono { font-size: 9.5px; color: var(--neutral-400); }
+.fy-libpick--shots { grid-template-columns: 220px minmax(0, 1fr); }
+/* Frames across a video clip; the poster shows through until each has decoded. */
+.fy-filmstrip { position: absolute; inset: 0; display: flex; overflow: hidden; pointer-events: none; }
+.fy-filmstrip__frame { flex: none; height: 100%; overflow: hidden; }
+.fy-filmstrip__frame img { width: 100%; height: 100%; object-fit: cover; display: block; }

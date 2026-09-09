@@ -31,3 +31,25 @@ export function posterNameFor(file: string): string {
 export function posterize(path: string): string {
   return path.replace(/[^/\\]+$/, (name) => posterNameFor(name));
 }
+
+/**
+ * A video artifact's picture (issue 1037). Artifacts share one directory, so their posters
+ * live apart from the media, under the derived `.index/` the coordinator regenerates on open
+ * (coordinator `artifacts/poster.ts`); the id is the name because the file's own name is not
+ * unique across re-imports. Pinned against the coordinator by a test.
+ */
+export const ARTIFACT_POSTER_DIR = ".index/posters";
+
+export function artifactPosterPath(artifactId: string): string {
+  return `${ARTIFACT_POSTER_DIR}/${artifactId}.png`;
+}
+
+/**
+ * The world-relative picture that stands for an artifact, or null for one with no picture: a
+ * still is its own, a video has its poster, and sound and documents have none.
+ */
+export function artifactPicturePath(artifact: { id: string; kind: string; file: string }): string | null {
+  if (artifact.kind === "image" || artifact.kind === "board") return `artifacts/${artifact.file}`;
+  if (artifact.kind === "video") return artifactPosterPath(artifact.id);
+  return null;
+}

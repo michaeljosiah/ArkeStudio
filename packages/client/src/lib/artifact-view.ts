@@ -112,6 +112,35 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
   details: "details",
 };
 
+/** How a link is spelled to a person: the record's name, or the link itself when nothing names it. */
+export type LinkName = (link: string, links?: readonly string[]) => string;
+
+/**
+ * Resolve link ids against this world's records (issue 1005). Sheets and canon by id; a
+ * production by its slug; an episode, scene or shot by the production the artifact's other
+ * links name, or any production when they name none. An id nothing owns keeps its spelling.
+ * One rule for the Artifacts page and the Cut, so the same file has the same name on both.
+ */
+export function linkNameResolver(world: Pick<WorldBundle, "sheets" | "canon" | "productions"> | null | undefined): LinkName {
+  return (link, links = []) => {
+    const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
+    if (name) return name;
+    const owning = world?.productions.filter((production) => links.includes(production.meta.id)) ?? [];
+    const names: string[] = [];
+    for (const production of owning.length ? owning : world?.productions ?? []) {
+      if (production.meta.id === link) return production.meta.title;
+      const episode = production.episodes.find((candidate) => candidate.id === link);
+      if (episode) names.push(episode.title);
+      for (const scene of production.scenes) {
+        if (scene.id === link) names.push(scene.title);
+        const shot = orderedShots(scene).find((candidate) => candidate.id === link);
+        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
+      }
+    }
+    return names.length === 1 ? names[0]! : link;
+  };
+}
+
 /** Linked names title the shelf and its viewer; the file remains the download identity (issue 1005). */
 export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string, links?: readonly string[]) => string): string {
   const names = artifact.links.map((link) => linkName(link, artifact.links)).filter((name, index) => name !== artifact.links[index]);

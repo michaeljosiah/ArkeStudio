@@ -69,14 +69,11 @@ for (const unavailable of ["foreign", "missing"] as const) {
       const item = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${artifact.id}"]`)!;
       assert.ok(item); assert.equal(item.getAttribute("draggable"), "false");
       await act(async () => item.querySelector<HTMLButtonElement>("button")!.click());
-      assert.doesNotMatch(item.textContent!, /Append to timeline|Overlay at playhead/);
-      await act(async () => screen.button("Add").click());
-      const rows = [...screen.container.querySelectorAll<HTMLLabelElement>(".fy-libpick__row")];
-      assert.equal(rows.some(row => row.textContent?.includes("private.mp4")), false);
-      const box = rows.find(row => row.textContent?.includes(unavailable === "missing" ? artifact.id : artifact.file))!.querySelector<HTMLInputElement>("input")!;
-      assert.equal(box.checked, true);
-      await act(async () => box.click());
-      await act(async () => screen.button("Update the library").click());
+      assert.doesNotMatch(item.textContent!, /Append to timeline|Overlay at playhead|Place at playhead/);
+      // The Library lists what the production can see (SPEC-020 R-13): another production's new file is not a row here.
+      assert.equal(screen.container.querySelector('[data-library-item="artifact:ar_01J8G0000000000000000000ZZ"]'), null);
+      // Membership comes off from the row itself (issue 1033); there is no picker in front of the files any more.
+      await act(async () => screen.button("Remove from library").click());
       const command = screen.sent.find(message => message.kind === "timeline-command");
       assert.ok(command?.kind === "timeline-command");
       assert.deepEqual(command.commands, [{ kind: "remove-from-library", items: [{ kind: "artifact", artifactId: artifact.id }] }]);
@@ -151,13 +148,16 @@ it("shows the filename as an editable clip and detaches sound with a neutral rol
   const screen = await mount(stateWithVideo(true));
   try {
     const picture = screen.container.querySelector<HTMLButtonElement>('[data-clip="cl_holiday"]')!;
-    assert.ok(picture); assert.match(picture.getAttribute("aria-label")!, /holiday.mp4/);
+    // Named as the Artifacts page names it (issue 1005): the fixture file is linked to The Vigil.
+    assert.ok(picture); assert.match(picture.getAttribute("aria-label")!, /The Vigil/);
     assert.equal(picture.classList.contains("fy-cutseg--gap"), false);
-    assert.equal(picture.querySelector("img"), null, "imported video does not request a take-only poster or an empty media path");
+    // Its picture is the poster the coordinator draws under the derived index (issue 1037), never a take-only frame.png.
+    assert.match(picture.querySelector("img")?.getAttribute("src") ?? "", /\.index\/posters\/ar_[A-Z0-9]+\.png$/);
     assert.equal(screen.container.querySelector(".fy-scenes__band"), null);
     assert.equal(screen.container.querySelector('[data-testid="needs-decision"]'), null, "imported footage is not a shot waiting for a take");
     assert.doesNotMatch(screen.container.textContent!, /0 of 0 shots|1 gap/);
     await act(async () => picture.click());
+    assert.match(screen.container.querySelector("#cut-inspector-panel")!.textContent!, /holiday\.mp4/, "the file stays in the Inspector's Source row");
     assert.equal(screen.button("Detach audio").disabled, false);
     await act(async () => screen.button("Detach audio").click());
     const batch = screen.sent.find(message => message.kind === "timeline-command");

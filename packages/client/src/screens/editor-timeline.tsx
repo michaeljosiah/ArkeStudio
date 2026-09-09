@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ClipMenu, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   basePictureTrack,
@@ -17,27 +17,33 @@ import {
 } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
 import { cx } from "../components/ui.js";
-import { posterize } from "../lib/poster.js";
+import { artifactPicturePath, posterize } from "../lib/poster.js";
+import { mediaUrl } from "../lib/media.js";
+import { FILMSTRIP_HEIGHT_PX, useFilmstrip } from "../lib/filmstrip.js";
 import {
   clipAtFrame,
   frameAtPixel,
-  framesFromDelta,
   pictureDragCommand,
   previewTimeline,
   timingEntryCommand,
   type PictureGesture,
   type TimingField,
 } from "../lib/picture-edit.js";
+import { fileKindsFromTransfer, laneTakesFiles, reorderPreview, type DroppedKind } from "../lib/clip-gesture.js";
 import { Film } from "../components/icons.js";
-import { ARTIFACT_DRAG_TYPE, dragAccepts } from "./editor-audio.js";
+import { startClipGesture, type GestureUpdate } from "./editor-gesture.js";
+import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
+import { ARTIFACT_DRAG_TYPE, dragAccepts, libraryDrag } from "./editor-audio.js";
 
 /**
  * The Picture track as an editable sequence (SPEC-037 R-19..R-23, SPEC-039 R-13..R-18).
  *
  * Every gesture here reduces to one semantic command sent on release; the track never keeps a
- * timeline of its own. While a drag is in flight the preview is the pure algebra applied to the
- * live record, so what the hand sees is exactly what the coordinator will write — or, when the
- * algebra refuses, the untouched record, which is what the coordinator would leave.
+ * timeline of its own. A trim is previewed by applying the algebra to the live record, so what
+ * the hand sees is exactly what the coordinator will write. A move is different (issue 1034):
+ * the record is untouched until release, the clip itself travels with the hand, and the slot
+ * the reorder will put it in is drawn — because previewing a reorder by applying it showed a
+ * jump where the reference shows a drag.
  */
 
 export type EditorTool = "select" | "blade" | "hand";
@@ -47,6 +53,8 @@ export interface PictureClipView {
   label: string;
   /** World-relative poster path, or null when the clip has nothing to show. */
   poster: string | null;
+  /** The footage behind the clip, for a strip of frames across it; null for a still or a gap. */
+  footage: { path: string; inSec: number } | null;
   /** No accepted take resolves for this clip: it plays as a labelled gap. */
   gap: boolean;
   sceneNumber: number | null;
@@ -54,9 +62,16 @@ export interface PictureClipView {
 }
 
 /** Join the base Picture track with what the resolver found for each clip. */
-export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPictureCut | null, artifacts: readonly ArtifactSidecar[] = []): PictureClipView[] {
+export function pictureClipViews(
+  timeline: ProductionTimeline,
+  cut: ResolvedPictureCut | null,
+  artifacts: readonly ArtifactSidecar[] = [],
+  /** The name a placed file is known by (issue 1005); the record's label is the file name. */
+  nameOf: (artifact: ArtifactSidecar) => string = (artifact) => artifact.file.split("/").pop() ?? artifact.file,
+): PictureClipView[] {
   const base = basePictureTrack(timeline);
   if (base === null) return [];
+  const frameRate = timeline.frameRate;
   const played = (cut?.entries ?? []).filter((entry) => entry.hole !== true);
   const byClip = new Map(played.filter((entry) => entry.clipId !== undefined).map((entry) => [entry.clipId, entry] as const));
   // Before the first save the cut is the legacy derivation, which names shots and not clips; the
@@ -67,13 +82,17 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
     const entry = byClip.get(clip.id) ?? (shotId !== null ? byShot.get(shotId) : undefined);
     const artifact = clip.source.kind === "artifact" ? artifacts.find(item => clip.source.kind === "artifact" && item.id === clip.source.artifactId) : undefined;
     const mediaPath = artifact ? `artifacts/${artifact.file}` : entry?.media?.path;
+    const still = artifact !== undefined && artifact.kind !== "video";
     return {
       clip,
       label: clip.source.kind === "shot"
         ? `${entry?.shot.title ?? clip.source.label}${mediaPath ? "" : " · no accepted take"}`
-        : clip.source.label,
-      // Imported videos have no take-directory frame.png; show their label until a poster exists.
-      poster: artifact?.kind === "video" ? null : mediaPath ? posterize(mediaPath) : null,
+        : artifact ? nameOf(artifact) : clip.source.label,
+      // A placed file's picture is its poster or itself (issue 1037); a take's is the frame beside it.
+      poster: artifact ? artifactPicturePath(artifact) : mediaPath ? posterize(mediaPath) : null,
+      footage: mediaPath && !still
+        ? { path: mediaPath, inSec: (entry?.media?.inSec ?? 0) + clip.sourceInFrames / frameRate }
+        : null,
       gap: !mediaPath,
       sceneNumber: clip.source.kind === "shot" ? clip.source.sceneNumber : null,
       shotId,
@@ -84,6 +103,76 @@ export function pictureClipViews(timeline: ProductionTimeline, cut: ResolvedPict
 function describeClip(view: PictureClipView, frameRate: FrameRate): string {
   const { clip } = view;
   return `${view.label}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${view.gap ? ", gap" : ""}`;
+}
+
+/**
+ * A clip's width on screen, kept current as the lane resizes and the zoom changes. The strip
+ * asks for as many frames as fit, so the number is measured rather than derived from a
+ * percentage nobody has turned into pixels yet.
+ */
+function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const element = ref.current;
+    if (element === null) return;
+    const read = () => setWidth(Math.round(element.getBoundingClientRect().width));
+    read();
+    if (typeof ResizeObserver !== "function") return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}
+
+/** Frames across a video clip (issue 1037), over its poster until each one has decoded. */
+export function Filmstrip({ slug, footage, durationSec, widthPx, heightPx = FILMSTRIP_HEIGHT_PX }: {
+  slug: string | undefined;
+  footage: { path: string; inSec: number } | null;
+  durationSec: number;
+  widthPx: number;
+  heightPx?: number;
+}) {
+  const src = footage !== null && slug !== undefined ? mediaUrl(slug, footage.path) : null;
+  const frames = useFilmstrip({ src, inSec: footage?.inSec ?? 0, durationSec, widthPx, heightPx });
+  if (frames.every((frame) => frame === null)) return null;
+  return (
+    <span className="fy-filmstrip" aria-hidden="true" data-frames={frames.filter((frame) => frame !== null).length}>
+      {frames.map((frame, index) => (
+        <span key={index} className="fy-filmstrip__frame" style={{ width: `${100 / frames.length}%` }}>
+          {frame !== null && <img src={frame} alt="" draggable={false} />}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** One clip on the sequence: its picture, its strip, its two handles and its tag. */
+function PictureClip({ view, slug, frameRate, style, className, children, ...rest }: {
+  view: PictureClipView;
+  slug: string | undefined;
+  frameRate: FrameRate;
+  style: React.CSSProperties;
+  className: string;
+} & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "style" | "className">) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const width = useMeasuredWidth(ref);
+  return (
+    <button ref={ref} type="button" className={className} style={style} {...rest}>
+      {children}
+      {view.gap ? (
+        <span className="fy-pictclip__gap">{view.label}</span>
+      ) : (
+        <>
+          {view.poster === null
+            ? <div className="fy-portrait--fallback"><Film size={18} /></div>
+            : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} />}
+          <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames / frameRate} widthPx={width} />
+          <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
+        </>
+      )}
+    </button>
+  );
 }
 
 export function PictureTrack({
@@ -98,11 +187,15 @@ export function PictureTrack({
   onSelect,
   onCommands,
   onPreview,
+  onScrub,
   tool,
   playheadFrame,
   disabled,
   mintClipId,
   sourceLength,
+  snapFrames = null,
+  fileKinds = null,
+  pendingSlot = null,
   onDrop,
   onFileDrop,
 }: {
@@ -117,25 +210,35 @@ export function PictureTrack({
   onSelect: (clipId: TimelineClipId) => void;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onPreview: (timeline: ProductionTimeline | null) => void;
+  /** Bring the viewer to a frame while an edge moves, and park it there on release (issue 1036). */
+  onScrub?: (frame: number) => void;
   tool: EditorTool;
   playheadFrame: number;
   disabled: boolean;
   mintClipId: () => TimelineClipId;
   /** Measured source lengths, so a tail drag stops where the source does. */
   sourceLength: SourceLengthFrames;
+  /** Frames an edge snaps onto while Snap is on; null when it is off. */
+  snapFrames?: readonly number[] | null;
+  /** What desktop files are over the window right now, for the lane to say what a drop will do. */
+  fileKinds?: readonly DroppedKind[] | null;
+  /** A drop that is being imported: its slot is drawn until the clip is real. */
+  pendingSlot?: { frame: number; label: string } | null;
   /** A picture from the Library dropped on the base track (R-10); absent while the record cannot be edited. */
   onDrop?: (drop: { artifactId: string; frame: number }) => void;
   onFileDrop?: (files: File[], frame: number) => void;
 }) {
   const [menu, setMenu] = useState<{ clipId: TimelineClipId; x: number; y: number } | null>(null);
-  const [over, setOver] = useState(false);
-  const [refused, setRefused] = useState(false);
+  const [hover, setHover] = useState<{ frame: number; refused: boolean; files: boolean } | null>(null);
+  const [drag, setDrag] = useState<GestureUpdate | null>(null);
+  const laneRef = useRef<HTMLDivElement>(null);
   const clips = views.map((view) => view.clip);
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);
   const playheadInside = (clip: TimelineClip): boolean =>
     playheadFrame > clip.startFrame && playheadFrame < clip.startFrame + clip.durationFrames;
+  const percent = (frames: number): string => `${(frames / span) * 100}%`;
 
   /** The keyboard and menu path of every gesture: one command per action (R-23, SPEC-039 R-17). */
   const act = (clipId: TimelineClipId, action: "split" | "duplicate" | "delete" | "ripple" | "earlier" | "later"): void => {
@@ -163,43 +266,67 @@ export function PictureTrack({
     }
   };
 
+  /*
+   * A press begins a gesture on the shared engine (issue 1034). A trim previews the algebra's
+   * answer on the record and scrubs the viewer to the edge in hand; a move leaves the record
+   * alone, follows the hand with the clip, and draws the slot the reorder will use.
+   */
   const begin = (clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
     onSelect(clipId);
-    event.preventDefault();
-    event.stopPropagation();
+    const clip = clips.find((candidate) => candidate.id === clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
-    const laneWidth = lane?.getBoundingClientRect().width ?? 0;
-    if (laneWidth <= 0) return;
-    element.setPointerCapture(event.pointerId);
-    const originX = event.clientX;
+    if (clip === undefined || lane === null) return;
     let command: TimelineClipCommand | null = null;
-    const move = (pointer: PointerEvent) => {
-      const delta = framesFromDelta(pointer.clientX - originX, laneWidth, span);
-      command = pictureDragCommand(clips, clipId, gesture, delta, sourceLength);
-      onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
+    let lastScrub: number | null = null;
+    const scrub = (frame: number) => {
+      const clamped = Math.max(0, Math.min(span, frame));
+      if (clamped === lastScrub) return;
+      lastScrub = clamped;
+      onScrub?.(clamped);
     };
-    const finish = (pointer: PointerEvent) => {
-      element.releasePointerCapture(pointer.pointerId);
-      element.removeEventListener("pointermove", move);
-      element.removeEventListener("pointerup", up);
-      element.removeEventListener("pointercancel", cancel);
-      onPreview(null);
-    };
-    const up = (pointer: PointerEvent) => {
-      finish(pointer);
-      // A click that only selected sends nothing: a write with no change is not an edit.
-      if (command !== null && previewTimeline(timeline, [command], sourceLength) !== null) {
-        onCommands([command], gesture === "move" ? "Move clip" : `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
-      }
-    };
-    // A gesture the browser took away — a touch the OS claimed, capture lost — was never
-    // completed, so it writes nothing: the preview clears and the record stays as it was.
-    const cancel = (pointer: PointerEvent) => finish(pointer);
-    element.addEventListener("pointermove", move);
-    element.addEventListener("pointerup", up);
-    element.addEventListener("pointercancel", cancel);
+    const started = startClipGesture({
+      event,
+      lane,
+      canvas: lane.closest<HTMLElement>(".fy-timeline__canvas"),
+      totalFrames: span,
+      clip,
+      gesture,
+      snapFrames,
+      onUpdate: (update) => {
+        if (gesture === "move") {
+          setDrag(update);
+          return;
+        }
+        command = pictureDragCommand(clips, clipId, gesture, update.deltaFrames, sourceLength);
+        onPreview(command === null ? null : previewTimeline(timeline, [command], sourceLength));
+        setDrag(update);
+        // The frame at the edge in hand, in the record as it stands: a head trim shows its new
+        // first frame, a tail trim its new last one. The source frame is the same either way,
+        // so the viewer's committed spans answer without a draft.
+        const delta = command !== null && command.kind === "trim" ? command.deltaFrames : 0;
+        scrub(gesture === "trim-start" ? clip.startFrame + delta : clip.startFrame + clip.durationFrames + delta - 1);
+      },
+      onEnd: (final) => {
+        setDrag(null);
+        onPreview(null);
+        if (final === null) return;
+        if (gesture === "move") {
+          const move = pictureDragCommand(clips, clipId, "move", final.deltaFrames, sourceLength);
+          if (move !== null && previewTimeline(timeline, [move], sourceLength) !== null) onCommands([move], "Move clip");
+          return;
+        }
+        // A click that only selected sends nothing: a write with no change is not an edit.
+        if (command !== null && previewTimeline(timeline, [command], sourceLength) !== null) {
+          onCommands([command], `Trim clip ${gesture === "trim-start" ? "head" : "tail"}`);
+          // Parked on the edge the cut now has, where the reference leaves it.
+          const delta = command.kind === "trim" ? command.deltaFrames : 0;
+          onScrub?.(gesture === "trim-start" ? clip.startFrame + delta : Math.max(clip.startFrame, clip.startFrame + clip.durationFrames + delta - 1));
+        }
+      },
+    });
+    if (!started) return;
   };
 
   const onLanePointerDown = (event: React.PointerEvent) => {
@@ -256,6 +383,25 @@ export function PictureTrack({
     event.stopPropagation();
   };
 
+  /** Where the pointer is over the lane, in frames. */
+  const frameUnder = (event: React.DragEvent): number => {
+    const box = event.currentTarget.getBoundingClientRect();
+    return frameAtPixel(event.clientX - box.left, box.width, span);
+  };
+  const hoverAt = (frame: number, refused: boolean, files: boolean) =>
+    setHover((current) => (current !== null && current.frame === frame && current.refused === refused && current.files === files ? current : { frame, refused, files }));
+
+  // The slot a move will land in, and how far each neighbour slides to open it.
+  const reorder = drag !== null && drag.gesture === "move" ? reorderPreview(clips, drag.clipId, drag.deltaFrames) : null;
+  const dragged = drag === null ? null : (clips.find((clip) => clip.id === drag.clipId) ?? null);
+  const dragging = drag !== null && dragged !== null;
+  const ghostStart = dragging && drag.gesture === "move" ? Math.max(0, Math.min(span - dragged.durationFrames, dragged.startFrame + drag.deltaFrames)) : null;
+  // What the trim chip states: the edge in hand and the length the clip will have.
+  const trimmed = dragging && drag.gesture !== "move" ? views.find((view) => view.clip.id === drag.clipId)?.clip ?? null : null;
+  const libraryHover = hover !== null && !hover.files ? libraryDrag() : null;
+  const fileHover = hover !== null && hover.files;
+  const filesOver = fileKinds !== null && fileKinds.length > 0;
+
   return (
     <div className="fy-track" data-track="picture">
       <span className="fy-track__label">
@@ -263,63 +409,110 @@ export function PictureTrack({
         <span className="fy-track__name">Picture</span>
       </span>
       <div
-        className={cx("fy-track__lane", "fy-pictlane", over && "fy-typedlane--over", refused && "fy-typedlane--refuse", tool === "hand" && "fy-pictlane--hand", tool === "blade" && "fy-pictlane--blade")}
+        ref={laneRef}
+        className={cx(
+          "fy-track__lane",
+          "fy-pictlane",
+          hover !== null && !hover.refused && "fy-lane--over",
+          hover !== null && hover.refused && "fy-lane--refused",
+          filesOver && !disabled && onFileDrop && "fy-lane--files",
+          dragging && "fy-pictlane--dragging",
+          tool === "hand" && "fy-pictlane--hand",
+          tool === "blade" && "fy-pictlane--blade",
+        )}
+        data-dropping={filesOver && !disabled && onFileDrop ? "true" : undefined}
         onPointerDown={onLanePointerDown}
         onDragOver={(event) => {
-          if (!disabled && onFileDrop && Array.from(event.dataTransfer.types).includes("Files")) {
-            event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setOver(true); return;
+          const kinds = fileKindsFromTransfer(event.dataTransfer);
+          if (kinds.length > 0) {
+            if (disabled || !onFileDrop) return;
+            event.preventDefault();
+            // Sound has no picture to put here (SPEC-043 R-3); anything else lands, and a file
+            // the browser cannot name is read by the import and refused there if it must be.
+            const refused = !laneTakesFiles(kinds, false);
+            event.dataTransfer.dropEffect = refused ? "none" : "copy";
+            hoverAt(frameUnder(event), refused, true);
+            return;
           }
           if (onDrop === undefined || disabled) return;
           if (!dragAccepts(event.dataTransfer.types, false)) {
             event.dataTransfer.dropEffect = "none";
-            setRefused(true);
+            hoverAt(frameUnder(event), true, false);
             return;
           }
           event.preventDefault();
           event.dataTransfer.dropEffect = "copy";
-          setOver(true);
+          hoverAt(frameUnder(event), false, false);
         }}
-        onDragLeave={() => {
-          setOver(false);
-          setRefused(false);
+        onDragLeave={(event) => {
+          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+          setHover(null);
         }}
         onDrop={(event) => {
+          setHover(null);
           if (event.dataTransfer.files?.length) {
-            event.preventDefault(); event.stopPropagation(); setOver(false);
-            if (!disabled && onFileDrop) {
-              const box = event.currentTarget.getBoundingClientRect();
-              onFileDrop(Array.from(event.dataTransfer.files), frameAtPixel(event.clientX - box.left, box.width, span));
+            event.preventDefault(); event.stopPropagation();
+            if (!disabled && onFileDrop && laneTakesFiles(fileKindsFromTransfer(event.dataTransfer), false)) {
+              onFileDrop(Array.from(event.dataTransfer.files), frameUnder(event));
             }
             return;
           }
           if (onDrop === undefined) return;
           event.preventDefault();
-          setOver(false);
-          setRefused(false);
           const artifactId = event.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
           if (!artifactId || disabled) return;
-          const box = event.currentTarget.getBoundingClientRect();
-          onDrop({ artifactId, frame: frameAtPixel(event.clientX - box.left, box.width, span) });
+          onDrop({ artifactId, frame: frameUnder(event) });
         }}
       >
-        {views.length === 0 && !refused && <span className="fy-track__empty">{onDrop === undefined ? "No picture yet" : "drop a picture here, or add a scene from the Library"}</span>}
-        {refused && <span className="fy-track__refuse">picture lanes take picture</span>}
+        {views.length === 0 && hover === null && pendingSlot === null && (
+          <span className="fy-track__empty">
+            {filesOver && onFileDrop && !disabled ? "Drop to add · Picture" : onDrop === undefined ? "No picture yet" : "drop a picture here, or add from the Library"}
+          </span>
+        )}
+        {hover !== null && hover.refused && <span className="fy-track__refuse">picture lanes take picture</span>}
+        {hover !== null && !hover.refused && (
+          <DropTarget
+            frame={hover.frame}
+            span={span}
+            frameRate={frameRate}
+            widthFrames={libraryHover?.durationFrames ?? null}
+            label={fileHover ? "Drop to add · Picture" : `Drop ${libraryHover?.label ?? "here"} · Picture`}
+          />
+        )}
+        {pendingSlot !== null && (
+          <span className="fy-landing fy-landing--pending" style={{ left: percent(pendingSlot.frame), width: percent(Math.max(1, Math.round(span / 10))) }} data-testid="pending-slot">
+            <span className="fy-landing__label">{pendingSlot.label} · importing…</span>
+          </span>
+        )}
+        {reorder !== null && dragged !== null && reorder.index !== reorder.from && (
+          <span className="fy-slot" style={{ left: percent(reorder.slotStartFrame), width: percent(dragged.durationFrames) }} data-testid="drop-slot" aria-hidden="true" />
+        )}
+        {drag !== null && drag.snappedTo !== null && (
+          <span className="fy-snapline" style={{ left: percent(drag.snappedTo) }} data-testid="snap-line" aria-hidden="true" />
+        )}
         {views.map((view) => {
           const { clip } = view;
           const selected = clip.id === selectedClipId;
+          const isGhost = dragging && drag.gesture === "move" && clip.id === drag.clipId;
+          const shift = reorder?.shifts.get(clip.id) ?? 0;
+          const left = isGhost && ghostStart !== null ? ghostStart : clip.startFrame + shift;
           return (
-            <button
+            <PictureClip
               key={clip.id}
-              type="button"
+              view={view}
+              slug={slug}
+              frameRate={frameRate}
               data-clip={clip.id}
               className={cx(
                 "fy-cutseg",
                 "fy-pictclip",
                 view.gap ? "fy-cutseg--gap fy-cutseg--gap-warn" : "fy-cutseg--pick",
                 selected && "fy-cutseg--selected",
+                isGhost && "fy-pictclip--ghost",
+                shift !== 0 && "fy-pictclip--shifted",
               )}
               style={{
-                left: `${(clip.startFrame / span) * 100}%`,
+                left: percent(left),
                 width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%`,
               }}
               aria-pressed={selected}
@@ -344,21 +537,22 @@ export function PictureTrack({
                 setMenu({ clipId: clip.id, x: event.clientX, y: event.clientY });
               }}
             >
-              <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(clip.id, "trim-start")} aria-hidden="true" />
-              {view.gap ? (
-                <span className="fy-pictclip__gap">{view.label}</span>
-              ) : (
-                <>
-                  {view.poster === null
-                    ? <div className="fy-portrait--fallback"><Film size={18} /></div>
-                    : <Portrait worldSlug={slug} path={view.poster} label={view.label} radius={0} />}
-                  <span className="fy-cutseg__tag">{view.label.replace(/^shot /, "")}</span>
-                </>
-              )}
-              <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(clip.id, "trim-end")} aria-hidden="true" />
-            </button>
+              <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(clip.id, "trim-start")} aria-hidden="true"><i /></span>
+              <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(clip.id, "trim-end")} aria-hidden="true"><i /></span>
+            </PictureClip>
           );
         })}
+        {dragging && drag.gesture === "move" && reorder !== null && (
+          <GestureChip x={drag.pointerX} frame={reorder.slotStartFrame} frameRate={frameRate} />
+        )}
+        {dragging && drag.gesture !== "move" && trimmed !== null && (
+          <GestureChip
+            x={drag.pointerX}
+            frame={drag.gesture === "trim-start" ? trimmed.startFrame : trimmed.startFrame + trimmed.durationFrames}
+            frameRate={frameRate}
+            detail={chipSeconds(trimmed.durationFrames, frameRate)}
+          />
+        )}
       </div>
       {menu !== null && menuView !== null && (
         <ClipMenu at={menu} label={`Actions for ${menuView.label}`} onClose={() => setMenu(null)}>
@@ -517,7 +711,8 @@ export function TakePicker({
 /**
  * A clip's timing, as the target Inspector states it and as the keyboard edits it. A typed edge
  * reduces through the drag's clamp, so it never asks the coordinator for a range it would refuse;
- * a stepped one goes as it is, one frame being the finest thing there is to refuse.
+ * a stepped one goes as it is, one frame being the finest thing there is to refuse. Either way
+ * the viewer goes to the edge that moved (issue 1036), as it does under a grip.
  */
 export function PictureClipTiming({
   clip,
@@ -525,6 +720,7 @@ export function PictureClipTiming({
   frameRate,
   disabled,
   onCommands,
+  onScrub,
   sourceLength,
 }: {
   clip: TimelineClip;
@@ -533,25 +729,38 @@ export function PictureClipTiming({
   frameRate: FrameRate;
   disabled: boolean;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+  onScrub?: (frame: number) => void;
   sourceLength: SourceLengthFrames;
 }) {
   const end = clip.startFrame + clip.durationFrames;
+  /** Where the viewer goes after a command: the edge it moved, in the record it will produce. */
+  const follow = (command: TimelineClipCommand) => {
+    if (command.kind === "trim") {
+      onScrub?.(command.edge === "start" ? clip.startFrame + command.deltaFrames : Math.max(clip.startFrame, end + command.deltaFrames - 1));
+    } else if (command.kind === "move-to-frame") {
+      onScrub?.(command.startFrame);
+    }
+  };
+  const send = (command: TimelineClipCommand, label: string) => {
+    onCommands([command], label);
+    follow(command);
+  };
   const typed = (field: TimingField, label: string) => (text: string) => {
     const command = timingEntryCommand(clips, clip.id, field, text, frameRate, sourceLength);
-    if (command !== null) onCommands([command], label);
+    if (command !== null) send(command, label);
   };
-  const trimEnd = (delta: number) => onCommands([{ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }], "Trim clip tail");
+  const trimEnd = (delta: number) => send({ kind: "trim", clipId: clip.id, edge: "end", deltaFrames: delta }, "Trim clip tail");
   return (
     <div className="fy-cutinspect__rows">
       <TimingRow label="Position" value={clip.startFrame} frameRate={frameRate} disabled={disabled}
-        onStep={delta => onCommands([{ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }], "Move clip")}
+        onStep={delta => send({ kind: "move-to-frame", clipId: clip.id, startFrame: Math.max(0, clip.startFrame + delta) }, "Move clip")}
         onEnter={typed("position", "Move clip")} />
       <TimingRow
         label="In"
         value={clip.startFrame}
         frameRate={frameRate}
         disabled={disabled}
-        onStep={(delta) => onCommands([{ kind: "trim", clipId: clip.id, edge: "start", deltaFrames: delta }], "Trim clip head")}
+        onStep={(delta) => send({ kind: "trim", clipId: clip.id, edge: "start", deltaFrames: delta }, "Trim clip head")}
         onEnter={typed("in", "Trim clip head")}
       />
       <TimingRow label="Out" value={end} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("out", "Trim clip tail")} />

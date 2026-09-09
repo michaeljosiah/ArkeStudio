@@ -164,11 +164,15 @@ describe("the Library (SPEC-039 T-3)", () => {
       assert.ok(bells.querySelector(".fy-artrow__dot"), "a used file carries the in-the-cut dot");
       const document_ = screen.container.querySelector<HTMLElement>('[data-library-item^="artifact:"] .fy-artrow__meta--destructive, [data-library-item] .fy-artrow__meta');
       assert.ok(document_, "rows carry a status line");
-      const pdf = [...screen.container.querySelectorAll<HTMLElement>("[data-library-item]")].find((row) => row.textContent?.includes("undersong-treatment.pdf"));
+      // Named by its link (issue 1005) — the production's title, here — so the row is found by its key.
+      const pdf = screen.container.querySelector<HTMLElement>(`[data-library-item="artifact:${PAPER}"]`);
       assert.ok(pdf, "an unsupported document stays in the list (R-12)");
       assert.match(pdf.textContent ?? "", /no picture or sound/);
-
       const search = screen.container.querySelector<HTMLInputElement>('input[type="search"]')!;
+      await typeInto(search, "treatment");
+      assert.deepEqual(rows(screen), [`artifact:${PAPER}`], "the file name still finds it");
+      await typeInto(search, "");
+
       await typeInto(search, "harbour-bells");
       assert.deepEqual(rows(screen), [`artifact:${BELLS}`], "search narrows to the bells");
       await typeInto(search, "");

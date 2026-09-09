@@ -137,7 +137,7 @@ describe("typed tracks on the editor (issue 681)", () => {
       assert.equal(row.dataset["track"], "ambience");
       const clip = row.querySelector<HTMLButtonElement>("[data-clip='cl_ov-01J8G0000000000000000000A1']");
       assert.ok(clip);
-      assert.match(clip.getAttribute("aria-label") ?? "", /harbour-bells\.wav, 00:00:01:00 to 00:00:03:00/);
+      assert.match(clip.getAttribute("aria-label") ?? "", /The Vigil, 00:00:01:00 to 00:00:03:00/);
 
       await act(async () => byLabel(screen, "Mute Overlay L0 sound").click());
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId: "tr_lane-0-sound", muted: true }]);

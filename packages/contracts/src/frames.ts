@@ -2529,7 +2529,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     editor: z.object({
       productionId: SlugSchema, baseRevision: z.number().int().nonnegative().nullable(),
       sourceFingerprint: TimelineSourceFingerprintSchema,
-      destination: z.union([z.enum(["library", "append"]), z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER)]),
+      // A bare frame is the base Picture track; a named lane or the new-lane strip carry the
+      // frame with them (SPEC-043 R-3, issue 1035). See `MediaDestination`.
+      destination: z.union([
+        z.enum(["library", "append"]),
+        z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+        z.object({ trackId: TimelineTrackIdSchema, frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+        z.object({ newTrack: z.literal(true), frame: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) }).strict(),
+      ]),
     }).strict().optional(),
   }).strict(),
   /**

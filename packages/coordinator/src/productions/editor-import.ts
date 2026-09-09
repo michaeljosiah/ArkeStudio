@@ -1,10 +1,13 @@
 import { basename } from "node:path";
 import {
-  mediaPlacementCommands, migrateLegacyCut, seedFirstPictureTimeline, type ArtifactSidecar, type ClientMessage,
+  AUDIO_TRACK_KINDS, laneRefusal, mediaPlacementCommands, migrateLegacyCut, seedFirstPictureTimeline,
+  type ArtifactSidecar, type ClientMessage,
 } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
 import { fileArtifact } from "../artifacts/filing.js";
+import { writeArtifactPoster } from "../artifacts/poster.js";
 import type { MediaProbe } from "../media/probe.js";
+import type { TakePosterMaker, TakePosterUnavailableReason } from "../takes/poster.js";
 import type { WorldStore } from "../world/store.js";
 import { applyTimelineCommand } from "./timeline.js";
 
@@ -13,6 +16,9 @@ export type EditorImport = NonNullable<Extract<ClientMessage, { kind: "upload-ar
 /** Filing survives a stale edit; only placement and Library membership form the timeline transaction. */
 export async function importEditorMedia(store: WorldStore, sources: readonly (string | null)[], editor: EditorImport, options: {
   mediaProbe?: MediaProbe;
+  /** Draws a video artifact's picture as it lands (issue 1037); absent on a build without ffmpeg. */
+  poster?: TakePosterMaker;
+  onPosterUnavailable?: (artifactId: string, reason: TakePosterUnavailableReason) => void;
   abandoned: () => boolean;
   confirmLarge?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
 }): Promise<Array<{ index: number; reason: string }>> {
@@ -23,6 +29,11 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   if (production.timeline?.status !== "ready" && production.spine) throw new Error("Open this production on the timeline before importing");
   const seed = production.timeline?.status === "ready" ? production.timeline.timeline : seedFirstPictureTimeline(production);
   const timeline = migrateLegacyCut(seed, production, store.getBundle().artifacts).timeline;
+  const destination = editor.destination;
+  // A drop on a named lane is checked file by file, so one wrong file is reported and the rest
+  // still land (SPEC-043 R-4); a lane that has gone is refused once, below, by the placement.
+  const lane = typeof destination === "object" && "trackId" in destination
+    ? timeline.tracks.find(track => track.id === destination.trackId) ?? null : null;
   const artifacts: ArtifactSidecar[] = [], failures: Array<{ index: number; reason: string }> = [];
   for (const [index, sourcePath] of sources.entries()) {
     if (options.abandoned()) throw new Error("The world closed during import");
@@ -38,11 +49,17 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
         // Filing measures after its first commit; the return value predates that sidecar update.
         const id = result.artifact.id;
         const artifact = store.getBundle().artifacts.find(artifact => artifact.id === id) ?? result.artifact;
+        // Before the snapshot that carries the artifact, so the Library's first row already has
+        // its picture; a poster that could not be drawn leaves the row as it was before posters.
+        await writeArtifactPoster(store, artifact, options.poster, (reason) => options.onPosterUnavailable?.(artifact.id, reason));
+        const laneRefused = lane === null ? null : laneRefusal(artifact, AUDIO_TRACK_KINDS.has(lane.kind));
         if (!["audio", "video", "image", "board"].includes(artifact.kind)) {
           failures.push({ index, reason: `${basename(sourcePath)}: this file has no playable picture or sound` });
-        } else if (typeof editor.destination === "number" && artifact.kind === "audio") {
+        } else if (typeof destination === "number" && artifact.kind === "audio") {
           failures.push({ index, reason: `${basename(sourcePath)}: this file has no picture; use Import media to add it to an audio track` });
-        } else if (editor.destination !== "library" && (artifact.kind === "audio" || artifact.kind === "video") &&
+        } else if (laneRefused !== null) {
+          failures.push({ index, reason: `${basename(sourcePath)}: saved, but ${laneRefused}; ${lane!.name} takes ${AUDIO_TRACK_KINDS.has(lane!.kind) ? "sound" : "picture"}` });
+        } else if (destination !== "library" && (artifact.kind === "audio" || artifact.kind === "video") &&
             !(artifact.mediaInfo && artifact.mediaInfo.durationSec > 0)) {
           failures.push({ index, reason: `${basename(sourcePath)}: saved, but needs a measured duration before placement; recover it through Library → Add` });
         } else artifacts.push(artifact);
@@ -55,11 +72,11 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   if (options.abandoned()) throw new Error("The world closed during import");
   if (artifacts.length) {
     try {
-      const commands = mediaPlacementCommands(timeline, artifacts, editor.destination, () => `cl_${randomUUID()}`);
+      const commands = mediaPlacementCommands(timeline, artifacts, destination, () => `cl_${randomUUID()}`);
       if (!commands.length) return failures;
       await applyTimelineCommand(store, editor.productionId, {
         kind: "commands", commands, baseRevision: editor.baseRevision, sourceFingerprint: editor.sourceFingerprint,
-        label: editor.destination === "library" ? "Import to Library" : "Import media to timeline",
+        label: destination === "library" ? "Import to Library" : "Import media to timeline",
       });
     } catch (error) {
       throw new Error(`Files were saved, but the timeline was unchanged: ${error instanceof Error ? error.message : String(error)}. Use Library → Add to recover the imported files.`);
