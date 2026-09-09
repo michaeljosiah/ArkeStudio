@@ -13,7 +13,7 @@ import {
 } from "@arke-studio/contracts";
 import { Button } from "../../components/ui.js";
 import { dismissPlayback, playClip, playbackSnapshot } from "../../lib/audio.js";
-import { send, subscribePerformanceResults, subscribeQueueResults } from "../../lib/store.js";
+import { generatePerformance, send, subscribePerformanceResults, subscribeQueueResults } from "../../lib/store.js";
 
 /** One line the character speaks in the scene, as the dialog lists it (SPEC-044 R-16). */
 export interface SpokenLine { id: string; shotId: string; blockId?: string; number: number; text: string }
@@ -184,9 +184,11 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
   useEffect(() => subscribePerformanceResults((result) => {
     if (result.requestId !== pending.current) return;
     pending.current = null; setBusy(false);
+    // A local generation lands as a kept record straight away; the card is on the Voice row.
+    if (result.status === "kept") { onClose(); return; }
     if (result.quote) setQuote(result.quote);
     setNotice(result.reason ?? "");
-  }), []);
+  }), [onClose]);
   useEffect(() => subscribeQueueResults((result) => {
     if (result.requestId !== pending.current) return;
     pending.current = null; setBusy(false);
@@ -216,9 +218,10 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
           <pre className="fy-linedoor__wording">{quote.mapping.providerText}</pre>
           <div className="fy-linedoor__actions">
             <Button size="sm" variant="primary" disabled={busy} onClick={() => {
-              pending.current = ulid(); setBusy(true);
-              if (!send({ kind: "generate-performance", requestId: pending.current, worldId: world.meta.worldId, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd })) { setBusy(false); setNotice("The studio is disconnected."); }
-            }}>Generate · {formatMicroUsd(quote.estimatedMicroUsd)}</Button>
+              setBusy(true);
+              pending.current = generatePerformance({ worldId: world.meta.worldId, operationId: quote.operationId, confirmedMicroUsd: quote.estimatedMicroUsd });
+              if (pending.current === null) { setBusy(false); setNotice("The studio is disconnected."); }
+            }}>Generate · {quote.estimatedMicroUsd === 0 ? "local" : formatMicroUsd(quote.estimatedMicroUsd)}</Button>
             {busy && <Button size="sm" variant="ghost" onClick={() => send({ kind: "cancel-performance-generation", worldId: world.meta.worldId, operationId: quote.operationId })}>Cancel</Button>}
           </div>
         </div>

@@ -8,7 +8,7 @@ import { MemoryRouter } from "react-router";
 import type { ClientMessage, ClientState, SceneRecord, WorldBundle } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { CharacterDialog } from "../src/screens/scene-workspace/character-dialog.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest, generatePerformance, subscribeQueueResults } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -117,16 +117,37 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.doesNotMatch(container.textContent ?? "", /sha256|sh_\d+|pf_/, "no hash, route id or shot id on the dialog");
   });
 
-  it("rings the production's look only when no scene look exists, and Kit when neither does", async () => {
-    const { container } = await mount(stateFor({ sceneLook: false }));
-    assert.deepEqual(cards(container, "Look").slice(0, 2), [["Kit · portrait", "false"], ["Formal council coat · this production", "true"]]);
+  it("rings the production's look only when no scene look exists, and Kit then belongs to the production", async () => {
+    const { container, sent } = await mount(stateFor({ sceneLook: false }));
+    assert.deepEqual(cards(container, "Look").slice(0, 2), [["Kit · held by the production", "false"], ["Formal council coat · this production", "true"]]);
     assert.match(container.querySelector(".fy-chardialog__picture img")?.getAttribute("src") ?? "", /council-coat/);
+    assert.equal(card(container, "Kit · held by the production").disabled, true, "the Looks page owns the production's attachment");
+    await click(card(container, "Formal council coat · this production"));
+    assert.deepEqual(sent.filter((message) => message.kind === "attach-character-look"), [], "already in use: nothing to send");
+  });
+
+  it("a generated line's confirm is a queue request, so its result reaches the sheet that asked (T-7)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __setStateForTest(stateFor());
+    const results: string[] = [];
+    const off = subscribeQueueResults((result) => { results.push(result.requestId); });
+    const requestId = generatePerformance({ worldId: FIXTURE_WORLD_ID, operationId: "00000000-0000-4000-8000-000000000001", confirmedMicroUsd: 20 });
+    assert.ok(requestId, "sent");
+    assert.equal(sent.at(-1)?.kind, "generate-performance");
+    await act(async () => {
+      __applyEventForTest({ at: AT, type: "queue.enqueue-result", requestId, command: "generate-performance", disposition: "accepted", requestedCount: 1, acceptedJobIds: [], failures: [] } as never);
+    });
+    off();
+    assert.deepEqual(results, [requestId]);
   });
 
   it("presses commit: a look attaches to this scene, Kit detaches, a voice card writes the cast, new accepts and chooses, Remove clears (T-4, T-5, T-7)", async () => {
     const { container, writes, closes, sent } = await mount(stateFor({ voice: { kind: "sample" } }));
+    // A production look is let through by detaching this scene's own, never moved here (R-12).
     await click(card(container, "Formal council coat · this production"));
-    assert.deepEqual(sent.at(-1), { kind: "attach-character-look", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: "council-coat", scope: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" } });
+    assert.deepEqual(sent.at(-1), { kind: "attach-character-look", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: "wet-coat", scope: null });
+    sent.length = 0;
     await click(card(container, "Kit · portrait"));
     assert.deepEqual(sent.at(-1), { kind: "attach-character-look", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: "wet-coat", scope: null });
     await click(card(container, "Line 12 · read · 3.1s"));
@@ -150,10 +171,10 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.match(container.querySelector(".fy-chardialog__line")?.textContent ?? "", /read · earlier wording/);
   });
 
-  it("closes on Done and on Escape, with nothing to save; a derived member cannot be removed (R-9, R-11)", async () => {
-    const { container, closes, writes } = await mount(stateFor());
+  it("closes on Done and on Escape, with nothing to save; a member with nothing chosen here cannot be removed (R-9, R-11)", async () => {
+    const { container, closes, writes } = await mount(stateFor({ sceneLook: false }));
     const remove = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Remove from scene") as HTMLButtonElement;
-    assert.equal(remove.disabled, true, "cited by a shot, and not a member: nothing to remove");
+    assert.equal(remove.disabled, true, "cited by a shot, no entry and no scene look: nothing to remove");
     await click([...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Done") ?? null);
     assert.equal(closes.count, 1);
     await act(async () => { container.querySelector(".fy-chardialog")!.dispatchEvent(new dom.window.Event("cancel", { bubbles: false, cancelable: true })); });

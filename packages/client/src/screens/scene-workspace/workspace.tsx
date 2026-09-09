@@ -99,7 +99,12 @@ export function SceneWorkspace({
   // A closed picker or dialog is unmounted, and a removed modal drops focus on the body; the
   // door that opened it takes focus back, as the Generate frames dialog's does.
   const doorFocus = useRef<HTMLElement | null>(null);
-  const closeDoor = () => { setPicker(null); setOpenMember(null); setPlaceOpen(false); doorFocus.current?.focus(); };
+  const closeDoor = () => { setPicker(null); setOpenMember(null); setPlaceOpen(false); };
+  // Once the modal is gone, not while it still holds the top layer: a focus() under a modal
+  // dialog is ignored, and the removal then drops focus on the body.
+  useEffect(() => {
+    if (picker === null && openMember === null && !placeOpen) doorFocus.current?.focus();
+  }, [picker, openMember, placeOpen]);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
@@ -771,6 +776,7 @@ export function SceneWorkspace({
             production={production}
             scene={scene}
             sheetId={openMember}
+            locked={locked}
             onClose={closeDoor}
             onWrite={write}
           />

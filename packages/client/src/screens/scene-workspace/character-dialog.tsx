@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   deriveRehearsalLines,
@@ -16,12 +16,12 @@ import {
   type SceneRecord,
   type WorldBundle,
 } from "@arke-studio/contracts";
-import { X } from "../../components/icons.js";
+import { PlaySolid, X } from "../../components/icons.js";
 import { Button, cx } from "../../components/ui.js";
 import { characterPortraitPath } from "../../components/portrait.js";
 import { playClip } from "../../lib/audio.js";
 import { mediaUrl } from "../../lib/media.js";
-import { attachCharacterLook, send, useStore } from "../../lib/store.js";
+import { attachCharacterLook, send, subscribePerformanceResults, useStore } from "../../lib/store.js";
 import { lookTileLabel } from "../character-reference.js";
 import { GenerateLineSheet, RecordLineSheet, textHash, type SpokenLine } from "./line-doors.js";
 
@@ -59,14 +59,18 @@ export function Card({ on, door, thumb, label, sub, disabled, onPress }: {
  * grammar — Look, Voice, Lines — where a press commits. Nothing is saved on Done, because
  * nothing waits to be saved.
  */
-export function CharacterDialog({ world, production, scene, sheetId, onClose, onWrite }: {
+export function CharacterDialog({ world, production, scene, sheetId, locked = false, onClose, onWrite }: {
   world: WorldBundle; production: ProductionBundle; scene: SceneRecord; sheetId: string;
+  /** A staged proposal or a command in flight: the choice cards wait, the doors do not. */
+  locked?: boolean;
   onClose: () => void; onWrite: (command: Command) => boolean;
 }) {
   const navigate = useNavigate();
   const { state } = useStore();
   const dialog = useRef<HTMLDialogElement>(null);
   const [door, setDoor] = useState<"record" | "generate" | null>(null);
+  // Stable, so the sheets' subscriptions do not churn on every snapshot.
+  const closeSheet = useCallback(() => setDoor(null), []);
   useEffect(() => {
     const node = dialog.current;
     if (node === null) return;
@@ -104,10 +108,14 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
     return held !== undefined && held.productionId === productionId && (held.kind === "production" || held.sceneId === scene.id);
   });
   const picture = lookInUse === undefined ? characterPortraitPath(world, sheetId) : `references/${sheetId}/${lookInUse.file}`;
+  // A production look is the production's choice (SPEC-017 R-20): using it here means letting it
+  // through — detaching this scene's own — never moving it, which would strip every other scene.
+  // Kit likewise detaches only what this scene attached; a look the production holds is theirs.
   const useLook = (look: Look | null) => {
-    if (look !== null) attachCharacterLook(worldId, sheetId, look.id, { kind: "scene", productionId, sceneId: scene.id });
-    else if (lookInUse !== undefined) attachCharacterLook(worldId, sheetId, lookInUse.id, null);
+    if (look !== null && look.attachedTo?.kind !== "production") attachCharacterLook(worldId, sheetId, look.id, { kind: "scene", productionId, sceneId: scene.id });
+    else if (sceneLook !== undefined) attachCharacterLook(worldId, sheetId, sceneLook.id, null);
   };
+  const kitHeldByProduction = sceneLook === undefined && productionLook !== undefined;
 
   // The voice: the kit's sample by default (R-8), or one read chosen for this scene (R-13).
   const sample = kit?.designatedVoiceSample;
@@ -125,11 +133,23 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
   const chooseVoice = (voice: NonNullable<NonNullable<SceneRecord["cast"]>[string]["voice"]>) =>
     onWrite({ kind: "edit-scene", cast: { [sheetId]: { ...member, voice } } });
   // A generated line arrives unreviewed; one press accepts, selects and chooses (R-15), the
-  // composition Keep uses, under the review's own request id.
-  const acceptAndChoose = (record: PerformanceRecord) =>
-    send({ kind: "review-performance", requestId: ulid(), worldId, productionId, performanceId: record.id, decision: "accept",
+  // composition Keep uses, under the review's own request id. What comes back is said under the
+  // row when it is not the choice: nothing else on the page shows a review's result.
+  const reviewPending = useRef<string | null>(null);
+  const [voiceNotice, setVoiceNotice] = useState("");
+  const acceptAndChoose = (record: PerformanceRecord) => {
+    const requestId = ulid();
+    reviewPending.current = requestId;
+    setVoiceNotice("");
+    if (!send({ kind: "review-performance", requestId, worldId, productionId, performanceId: record.id, decision: "accept",
       expectedReviewHash: production.performanceReview.reviewHash, expectedSelectionHash: production.performanceReview.selectionHash,
-      select: true, expectedSceneVersion: scene.version });
+      select: true, expectedSceneVersion: scene.version })) { reviewPending.current = null; setVoiceNotice("The studio is disconnected."); }
+  };
+  useEffect(() => subscribePerformanceResults((result) => {
+    if (result.requestId !== reviewPending.current) return;
+    reviewPending.current = null;
+    setVoiceNotice(result.status === "refused" || result.reason?.startsWith("Accepted, but") ? result.reason ?? "" : "");
+  }), []);
   const voiceModel = sheet?.voice === undefined ? undefined
     : state?.app.manifest?.models.find((model) => model.capability === "voice-tts" && model.provider === sheet.voice?.provider && model.cadence);
   const firstLine = lines[0];
@@ -160,8 +180,8 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
       ref={dialog}
       className="fy-chardialog"
       aria-label={`${name} in scene ${scene.number}`}
-      onCancel={(event) => { event.preventDefault(); if (door !== null) setDoor(null); else onClose(); }}
-      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onCancel={(event) => { event.preventDefault(); if (door !== null) closeSheet(); else onClose(); }}
+      onClick={(event) => { if (event.target !== event.currentTarget) return; if (door !== null) closeSheet(); else onClose(); }}
     >
       <div className="fy-chardialog__panel">
         <div className="fy-chardialog__picture" aria-hidden="true">
@@ -182,13 +202,15 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
               <Card
                 on={lookInUse === undefined}
                 label="Kit"
-                sub="portrait"
+                sub={kitHeldByProduction ? "held by the production" : "portrait"}
+                disabled={locked || kitHeldByProduction}
                 thumb={<span className="fy-chardialog__thumb fy-chardialog__thumb--round"><img src={mediaUrl(world.meta.slug, characterPortraitPath(world, sheetId))} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /></span>}
                 onPress={() => useLook(null)}
               />
               {looks.map((look) => (
                 <Card
                   key={look.id}
+                  disabled={locked}
                   on={lookInUse?.id === look.id}
                   label={lookTileLabel(look.prompt, look.kind)}
                   sub={look.attachedTo?.kind === "scene" ? "this scene" : "this production"}
@@ -205,15 +227,16 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
             <div className="fy-chardialog__cards">
               {sample === undefined
                 ? <Card door label="no sample yet" sub="Voice page" onPress={voicePage} />
-                : <Card on={choice === undefined || choice.kind === "sample"} label="Sample" sub={sampleSeconds === null ? "Voice page" : `Voice page · ${sampleSeconds}`} thumb={<span className="fy-chardialog__dot" />} onPress={() => chooseVoice({ kind: "sample" })} />}
+                : <Card on={choice === undefined || choice.kind === "sample"} disabled={locked} label="Sample" sub={sampleSeconds === null ? "Voice page" : `Voice page · ${sampleSeconds}`} thumb={<span className="fy-chardialog__dot" />} onPress={() => chooseVoice({ kind: "sample" })} />}
               {stale ? <Card on label="read missing" sub="the sample rides" thumb={<span className="fy-chardialog__dot" />} disabled onPress={() => undefined} /> : null}
               {reads.map(({ record, decision }) => (
                 <Card
                   key={record.id}
                   on={chosen?.record.id === record.id}
+                  disabled={locked}
                   label={`Line ${numberOf(record.target.shotId)}`}
                   sub={decision === "accept" ? `read · ${seconds(record.provenance.outputTechnical.durationSec) ?? "kept"}` : "new"}
-                  thumb={<span className="fy-chardialog__dot fy-chardialog__dot--read" />}
+                  thumb={<span className="fy-chardialog__dot fy-chardialog__dot--read"><PlaySolid size={9} /></span>}
                   onPress={() => {
                     if (decision === "accept") chooseVoice({ kind: "performance", performanceId: record.id, hash: record.provenance.outputHash });
                     else acceptAndChoose(record);
@@ -223,8 +246,9 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
               <Card door label="Record a line" sub={lines.length === 0 ? "no line to read" : "your microphone"} disabled={lines.length === 0} onPress={() => setDoor("record")} />
               {voiceModel === undefined
                 ? <Card door label="Generate a line" sub="Voice page" onPress={voicePage} />
-                : <Card door label="Generate a line" sub={lines.length === 0 ? "no line to read" : price} disabled={lines.length === 0} onPress={() => setDoor("generate")} />}
+                : <Card door label="Generate a line" sub={lines.length === 0 ? "no line to read" : price === "$0.00" ? "local" : price} disabled={lines.length === 0} onPress={() => setDoor("generate")} />}
             </div>
+            {voiceNotice === "" ? null : <p role="status" className="fy-chardialog__none">{voiceNotice}</p>}
           </div>
 
           <div className="fy-chardialog__row" aria-label="Lines in this scene">
@@ -238,7 +262,7 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
                   <span className="fy-chardialog__linetext">“{line.text}”</span>
                   {record === undefined ? <span className="fy-chardialog__lineread">no read yet</span> : (
                     <>
-                      <button type="button" className="fy-chardialog__play" aria-label={`Play shot ${line.number}`} onClick={() => play(record, line)} />
+                      <button type="button" className="fy-chardialog__play" aria-label={`Play shot ${line.number}`} onClick={() => play(record, line)}><PlaySolid size={9} /></button>
                       <span className="fy-chardialog__lineread">{earlier ? "read · earlier wording" : `read · ${seconds(record.provenance.outputTechnical.durationSec) ?? "kept"}`}</span>
                     </>
                   )}
@@ -249,8 +273,9 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
 
           <span className="fy-chardialog__spacer" />
           <div className="fy-chardialog__foot">
-            <Button variant="ghost" size="sm" disabled={member === undefined} title={member === undefined ? "cited by a shot" : undefined}
-              onClick={() => { onWrite({ kind: "edit-scene", cast: { [sheetId]: null } }); onClose(); }}>
+            {/* Cited by a shot with nothing chosen here, there is nothing to remove (R-9); a scene look alone is something. */}
+            <Button variant="ghost" size="sm" disabled={locked || (member === undefined && sceneLook === undefined)} title={member === undefined && sceneLook === undefined ? "cited by a shot" : undefined}
+              onClick={() => { if (onWrite({ kind: "edit-scene", cast: { [sheetId]: null } })) onClose(); }}>
               Remove from scene
             </Button>
             <span className="fy-chardialog__spacer" />
@@ -258,10 +283,10 @@ export function CharacterDialog({ world, production, scene, sheetId, onClose, on
           </div>
         </div>
         {door === "record" && sheet !== undefined ? (
-          <RecordLineSheet world={world} production={production} scene={scene} sheet={sheet} lines={lines} onClose={() => setDoor(null)} />
+          <RecordLineSheet world={world} production={production} scene={scene} sheet={sheet} lines={lines} onClose={closeSheet} />
         ) : null}
         {door === "generate" && sheet !== undefined && voiceModel !== undefined ? (
-          <GenerateLineSheet world={world} production={production} scene={scene} sheet={sheet} model={voiceModel} lines={lines} onClose={() => setDoor(null)} />
+          <GenerateLineSheet world={world} production={production} scene={scene} sheet={sheet} model={voiceModel} lines={lines} onClose={closeSheet} />
         ) : null}
       </div>
     </dialog>

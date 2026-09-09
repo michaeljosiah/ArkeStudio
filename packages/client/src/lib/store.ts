@@ -4919,3 +4919,9 @@ export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "c
   const requestId = queueRequest("convert-performance");
   return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
 }
+
+/** Generate a line (SPEC-044 R-14): a queue request, so the enqueue result reaches the sheet that asked. */
+export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "generate-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-performance");
+  return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
+}
