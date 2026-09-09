@@ -127,6 +127,7 @@ describe("setup turns share conversation durability but no world-mutation author
     h.runner.cancel(h.id);
     assert.equal((await running).status, "cancelled");
     assert.equal((await h.view())!.activeRun, null);
+    assert.equal((await h.view())!.lastFailedRun, null, "Stop does not offer a failure retry");
     assert.equal((await h.service.review(h.id, 2)).status, "reviewed");
     respond(reply());
     assert.equal((await h.runner.send(h.log, h.id, "Keep the title.")).status, "completed");

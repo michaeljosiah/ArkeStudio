@@ -541,7 +541,7 @@ describe("a turn that never answers", () => {
     assert.equal(outcome.status, "cancelled");
     const { events } = await store.read();
     const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string } }).run;
-    assert.equal(run.status, "interrupted");
+    assert.equal(run.status, "cancelled");
   });
 
   it("reports nothing to cancel when no turn is running", async () => {
@@ -846,7 +846,7 @@ it("puts the leased chapter brief into the model prompt and preserves the chapte
 });
 
 
-it("durably interrupts a turn cancelled while its chapter brief is being read", async () => {
+it("durably cancels a turn stopped while its chapter brief is being read", async () => {
   let releaseBrief!: () => void;
   let briefStarted!: () => void;
   const started = new Promise<void>((resolve) => { briefStarted = resolve; });
@@ -868,7 +868,7 @@ it("durably interrupts a turn cancelled while its chapter brief is being read", 
   assert.equal(folded.needsInterruptedRunRepair, false);
   const finished = (await h.store.read()).events.find((e) => e.event.type === "run.finished")!.event;
   assert.ok(finished.type === "run.finished");
-  assert.equal(finished.run.status, "interrupted");
+  assert.equal(finished.run.status, "cancelled");
   assert.equal(h.released.length, 1);
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
 });

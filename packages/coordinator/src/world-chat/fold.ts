@@ -688,8 +688,8 @@ function dependencyBlockReason(dependency: ConversationActionRecord): string {
 /**
  * The newest run, when it failed and left the conversation without an answer.
  *
- * Explicitly cancelled runs are excluded. Interrupted runs remain retryable: the same terminal
- * status records both Stop and recovery after world closure, which must not fail silently.
+ * Explicitly cancelled runs are excluded. Interruptions after world closure remain retryable
+ * because a turn lost to navigation must not fail silently.
  *
  * Also excluded once a later studio message exists for the same turn, which is what a retry
  * produces: the failure is then answered history rather than the state of the conversation.

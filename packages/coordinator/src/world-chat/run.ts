@@ -314,7 +314,7 @@ export class WorldChatRunner {
 
   constructor(private readonly deps: RunDeps) {
     deps.closingSignal?.addEventListener("abort", () => {
-      for (const controller of this.cancelling.values()) controller.abort();
+      for (const controller of this.cancelling.values()) controller.abort("world-closed");
     }, { once: true });
   }
 
@@ -343,11 +343,11 @@ export class WorldChatRunner {
     return !this.deps.closingSignal?.aborted && this.cancelling.size > 0;
   }
 
-  /** Stop a run now. Local and immediate: the log says interrupted without waiting for a model. */
+  /** Stop a run now. Local and immediate: the log says cancelled without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
     const controller = this.cancelling.get(conversationId);
     if (!controller) return false;
-    controller.abort();
+    controller.abort("cancelled");
     return true;
   }
 
@@ -597,7 +597,7 @@ export class WorldChatRunner {
       return { status: "failed", reason };
     }
     if (controller.signal.aborted) {
-      await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
+      await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
       return { status: "cancelled" };
     }
 
@@ -618,7 +618,7 @@ export class WorldChatRunner {
         brief = await this.deps.setupBrief({ leaseToken, draft: view.productionSetup.draft, budgetChars: setupBudget });
       }
       if (controller.signal.aborted) {
-        await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
+        await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
         return { status: "cancelled" };
       }
       const session = this.deps.createSession
@@ -744,7 +744,9 @@ export class WorldChatRunner {
     } catch (err) {
       const cancelled = controller.signal.aborted;
       const timedOut = err instanceof Error && err.message === "timeout";
-      const status = cancelled ? "interrupted" : timedOut ? "timeout" : "failed";
+      const status = cancelled
+        ? controller.signal.reason === "world-closed" ? "interrupted" : "cancelled"
+        : timedOut ? "timeout" : "failed";
       if (status === "failed") {
         // The raw error, once, where an operator can read it. It never leaves this process and it
         // never reaches the screen — `safeDetail` still decides what the person is told.
