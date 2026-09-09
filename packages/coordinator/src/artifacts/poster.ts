@@ -140,7 +140,9 @@ export async function backfillArtifactPosters(
   const deadline = now() + options.budgetMs;
   let drawn = 0;
   for (const artifact of store.getBundle().artifacts) {
-    if (!wantsArtifactPoster(artifact) || artifact.retiredAt !== undefined) continue;
+    // Retired ones included: retirement keeps the bytes for the cuts that cite them (#957), and a
+    // clip that still does asks for the picture like any other.
+    if (!wantsArtifactPoster(artifact)) continue;
     const remaining = deadline - now();
     if (remaining <= 0 || options.stillOpen?.() === false || store.isClosed()) break;
     const output = join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"), `${artifact.id}.png`);

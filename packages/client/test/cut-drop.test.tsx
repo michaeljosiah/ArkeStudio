@@ -261,6 +261,33 @@ describe("where a drop lands", () => {
     }
   });
 
+  it("leaves a desktop file on a legacy overlay lane to the chrome, which appends it", async () => {
+    // An unmigrated cut still draws its overlay lanes. They take artifact drags only; a file they
+    // claimed went nowhere, because the chrome's append fallback stands down for a drop a lane
+    // has answered. So they answer nothing for files, and the fallback appends.
+    const state = lanesState();
+    const production = state.world!.productions[0]!;
+    production.cut = { audio: [], overlays: [{ id: "ov_01J8G0000000000000000000A1", artifactId: state.world!.artifacts[0]!.id, startSec: 0, endSec: 4, lane: 1, audio: "keep" }] } as typeof production.cut;
+    const screen = await mount(state);
+    try {
+      const lane = screen.container.querySelector<HTMLElement>(".fy-ovlane");
+      assert.ok(lane, "the legacy lanes are drawn");
+      let claimed = 0;
+      await act(async () => reactProps(lane)["onDragOver"]!({ ...dragEvent([video()]), preventDefault() { claimed += 1; } }));
+      await act(async () => reactProps(lane)["onDrop"]!({ ...dragEvent([video()]), preventDefault() { claimed += 1; } }));
+      assert.equal(claimed, 0, "the lane does not claim a file");
+      assert.equal(uploads(screen).length, 0);
+      const drop = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(drop, "dataTransfer", { value: fileTransfer([video()]) });
+      Object.defineProperty(drop, "clientX", { value: 50 });
+      await act(async () => { lane.dispatchEvent(drop); });
+      const [appended] = uploads(screen);
+      assert.equal(appended?.editor?.destination, "append", "the chrome appends what the lane left alone");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("makes a new lane from the strip, and files to the Library from the panel", async () => {
     const screen = await mount(lanesState());
     try {

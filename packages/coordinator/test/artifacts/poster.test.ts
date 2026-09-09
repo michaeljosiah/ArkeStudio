@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, symlink, writeFile } from "node:fs/prom
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { storyTimelineFingerprint } from "@arke-studio/contracts";
-import { fileArtifact } from "../../src/artifacts/filing.js";
+import { fileArtifact, retireArtifact } from "../../src/artifacts/filing.js";
 import {
   ARTIFACT_POSTER_DIR,
   artifactPosterPath,
@@ -117,10 +117,13 @@ describe("drawing the picture", () => {
     // One already drawn by hand: the pass costs it one stat and nothing more.
     await mkdir(join(dir, ".index", "posters"), { recursive: true });
     await writeFile(join(dir, ".index", "posters", `${filed[0]!.id}.png`), "already");
+    // Retired since, but a cut may still cite it and its bytes are kept (#957): it gets its picture too.
+    await retireArtifact(store, filed[2]!.id);
     const posters = maker();
     let now = 0;
     const drawn = await backfillArtifactPosters(store, posters.maker, { budgetMs: 100, now: () => (now += 10) });
     assert.equal(drawn, 2, "the two undrawn videos, not the still and not the one already there");
+    assert.equal(await readFile(join(dir, ".index", "posters", `${filed[2]!.id}.png`), "utf8"), "png", "the retired video's picture is drawn");
     assert.equal(await readFile(join(dir, ".index", "posters", `${filed[0]!.id}.png`), "utf8"), "already");
     assert.equal(await backfillArtifactPosters(store, posters.maker, { budgetMs: 100 }), 0, "every later pass finds them all");
     assert.equal(await backfillArtifactPosters(store, undefined, { budgetMs: 100 }), 0, "no maker, no work");

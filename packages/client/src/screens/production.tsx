@@ -5047,6 +5047,13 @@ function ClipLanes({
   const maxLane = laneCount - 1;
 
   const drop = (lane: number) => (e: React.DragEvent) => {
+    // A desktop file is not an overlay. Left alone it goes on up to the chrome, which appends it
+    // to the record (issue 1035); claimed here, it went nowhere, since the chrome stands down for
+    // a drop a lane has answered.
+    if (e.dataTransfer.files?.length) {
+      setOver(null);
+      return;
+    }
     e.preventDefault();
     setOver(null);
     const artifactId = e.dataTransfer.getData(ARTIFACT_DRAG_TYPE);
@@ -5096,6 +5103,7 @@ function ClipLanes({
           <div
             className={cx("fy-track__lane", "fy-ovlane", over === lane && "fy-ovlane--over")}
             onDragOver={(e) => {
+              if (Array.from(e.dataTransfer.types).includes("Files")) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = "copy";
               setOver(lane);

@@ -10,7 +10,7 @@ import {
   snapFrame,
   snapMoveDelta,
 } from "../src/lib/clip-gesture.js";
-import { evictableSource, filmstripFrameCount, filmstripTimes, pruneQueue } from "../src/lib/filmstrip.js";
+import { evictFrames, evictableSource, filmstripFrameCount, filmstripTimes, pruneQueue } from "../src/lib/filmstrip.js";
 
 /**
  * What a drag shows before it commits (issue 1034): the slot a reorder lands in and the way the
@@ -151,5 +151,15 @@ describe("the strip and the poster", () => {
     assert.deepEqual(pruneQueue(queue, (key) => !stale.has(key), 24).map((entry) => entry.key), queue.slice(3).map((entry) => entry.key), "the unwanted go, in order");
     assert.equal(pruneQueue(queue, () => true, 24).length, 30, "a wide clip at a deep zoom wants more than the cap; none of it is dropped");
     assert.equal(pruneQueue(queue.slice(0, 10), () => false, 24).length, 10, "under the cap nothing is touched");
+  });
+
+  it("makes room in the frame cache from the oldest frames no strip shows, and never from one still shown", () => {
+    const cache = new Map(Array.from({ length: 8 }, (_, index) => [`f${index}`, "data"] as const));
+    const shown = new Set(["f0", "f1"]);
+    assert.equal(evictFrames(cache, (key) => shown.has(key), 8), 2, "a quarter of the cap");
+    assert.deepEqual([...cache.keys()], ["f0", "f1", "f4", "f5", "f6", "f7"], "the two oldest unshown went; the shown pair stayed");
+    const all = new Map(Array.from({ length: 8 }, (_, index) => [`f${index}`, "data"] as const));
+    assert.equal(evictFrames(all, () => true, 8), 0, "nothing goes while every frame is on screen");
+    assert.equal(all.size, 8);
   });
 });

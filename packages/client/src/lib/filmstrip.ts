@@ -22,8 +22,26 @@ const DEFAULT_ASPECT = 16 / 9;
 const JPEG_QUALITY = 0.72;
 /** How many decoded sources stay alive; beyond this the oldest is released. */
 const MAX_SOURCES = 6;
-/** How many frames the cache keeps; past this the oldest quarter goes, insertion order being age. */
+/** How many frames the cache keeps; past this a quarter goes, oldest first, insertion order being age. */
 const MAX_FRAMES = 2000;
+
+/**
+ * Make room in the cache: up to a quarter of `max` goes, oldest first, skipping every frame a
+ * mounted strip still shows. An evicted frame is never asked for again — the hook asks once per
+ * signature — so a strip that lost one to a long session's browsing stayed on its poster for
+ * good. When everything is wanted nothing goes; the screen bounds it. Returns how many went.
+ */
+export function evictFrames(cache: Map<string, string>, stillWanted: (key: string) => boolean, max = MAX_FRAMES): number {
+  const target = Math.floor(max / 4);
+  let evicted = 0;
+  for (const key of cache.keys()) {
+    if (evicted >= target) break;
+    if (stillWanted(key)) continue;
+    cache.delete(key);
+    evicted += 1;
+  }
+  return evicted;
+}
 /** Past this many waiting decodes a source's queue is pruned of the times no strip wants any more. */
 const MAX_QUEUE = 24;
 
@@ -171,9 +189,7 @@ async function drain(src: string, source: Source): Promise<void> {
       if (context === null) throw new Error("canvas");
       context.drawImage(source.video, 0, 0, canvas.width, canvas.height);
       frames.set(next.key, canvas.toDataURL("image/jpeg", JPEG_QUALITY));
-      if (frames.size > MAX_FRAMES) {
-        for (const key of [...frames.keys()].slice(0, MAX_FRAMES / 4)) frames.delete(key);
-      }
+      if (frames.size > MAX_FRAMES) evictFrames(frames, (candidate) => wanted.has(candidate));
       notify();
     }
   } catch {
