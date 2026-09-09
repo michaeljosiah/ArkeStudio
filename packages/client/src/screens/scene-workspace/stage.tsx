@@ -85,7 +85,7 @@ function keyName(index: number, count: number): string {
 
 function holdsPosition(from: StagingKey, to: StagingKey): boolean {
   // Equal offsets only describe a hold when they belong to the same coordinate space.
-  return from.anchor === to.anchor && (from.anchorSpace ?? "world") === (to.anchorSpace ?? "world") &&
+  return from.anchor === to.anchor && (!from.anchor || (from.anchorSpace ?? "world") === (to.anchorSpace ?? "world")) &&
     from.p.reduce((distance, value, axis) => distance + (value - to.p[axis]!) ** 2, 0) < 1e-12;
 }
 

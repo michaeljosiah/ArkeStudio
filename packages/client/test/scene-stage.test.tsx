@@ -229,6 +229,7 @@ it("scales every lane with the shot and stops an active key drag when frozen (#1
 
 it("edits camera easing through Keep and preserves duplicate-key holds when their edge is dragged (#1042)", async () => {
   const { q, sent } = await mount(shot => {
+    shot.staging!.keys[0]!.anchorSpace = "local"; // A detached anchor's space flag no longer changes world coordinates.
     shot.staging!.keys[2]!.p = [2, 1.5, 3];
   });
   const setEase = async (label: string, value: string) => {

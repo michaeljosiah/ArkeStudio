@@ -7639,6 +7639,9 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button,
   .fy-swstage__set input, .fy-swstage__set-head button { min-width: 44px; min-height: 44px; }
   .fy-swstage__track { height: 44px; }
+  .fy-swstage__key, .fy-swstage__lane-head { top: 18px; }
+  .fy-swstage__rail, .fy-swstage__head-fill { top: 24px; }
+  .fy-swstage__hold { top: 22px; }
   .fy-swstage__key::before, .fy-swstage__hold-end::before { content: ""; position: absolute; width: 44px; height: 44px; left: 50%; top: 50%; transform: translate(-50%, -50%); }
   .fy-swboard__sheet, .fy-swboard-sheet__head button { width: 44px; height: 44px; }
   .fy-swboard-sheet__retry-cell, .fy-swboard-sheet__foot button { min-width: 44px; min-height: 44px; }
