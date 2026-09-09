@@ -21,7 +21,7 @@ import {
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
 import { artifactsForProduction } from "../../lib/artifact-view.js";
-import { clearPlaylist, loadPlaylist, playPlaylistLine, setPlaylistRate, setPlaylistSolo, type PlaylistState } from "../../lib/audio.js";
+import { loadPlaylist, playPlaylistLine, setPlaylistRate, setPlaylistSolo, type PlaylistState } from "../../lib/audio.js";
 import { mediaUrl } from "../../lib/media.js";
 import { planTableRead, prepareTableRead, subscribeRehearsalResults, useStore } from "../../lib/store.js";
 import { posterize } from "../../lib/poster.js";
@@ -153,7 +153,7 @@ export function ScenePreview({
   // table-read cache — in shot order through the one player; the rest are counted, not played, and
   // a dashed door prepares them at the cost the plan quoted. The plan is asked for when the lines,
   // the reviews or the cache's jobs change, so the door's count and price are current before a press.
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const lines = useMemo(() => deriveRehearsalLines(scene, sheets).filter((line) => line.reason === undefined), [scene, sheets]);
   const [plan, setPlan] = useState<TableReadPlan | null>(null);
   const [linesNotice, setLinesNotice] = useState("");
@@ -165,14 +165,19 @@ export function ScenePreview({
   const requestPlan = useCallback(() => { planRequest.current = planTableRead(worldId, production.meta.id, scene.id); }, [worldId, production.meta.id, scene.id]);
   useEffect(() => subscribeRehearsalResults((result) => {
     if (result.requestId !== planRequest.current && result.requestId !== prepareRequest.current) return;
-    if (result.requestId === prepareRequest.current) { prepareRequest.current = null; setPreparing(false); setLinesNotice(result.reason); }
-    else planRequest.current = null;
+    if (result.requestId === prepareRequest.current) {
+      prepareRequest.current = null; setPreparing(false);
+      // A preparation that went through says itself through the refreshed plan; only a refusal
+      // needs words, and its token is spent, so the plan is asked for again.
+      setLinesNotice(result.status === "refused" ? result.reason : "");
+      if (result.status === "refused") requestPlan();
+    } else planRequest.current = null;
     if (result.plan) setPlan(result.plan);
     else if (result.status === "refused") setLinesNotice(result.reason);
-  }), []);
+  }), [requestPlan]);
   const cacheJobs = state?.app.jobs.filter((job) => job.target.kind === "table-read-cache" && job.worldId === worldId).map((job) => `${job.id}:${job.status}`).join("|") ?? "";
-  useEffect(() => { if (lines.length > 0) requestPlan(); }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, requestPlan]);
-  useEffect(() => () => clearPlaylist(), []);
+  // Asked again when the connection comes back: a request that found no studio was never sent.
+  useEffect(() => { if (lines.length > 0 && connection === "open") requestPlan(); }, [lines.length, scene.version, production.performanceReview.reviewHash, production.performanceReview.selectionHash, cacheJobs, connection, requestPlan]);
   const playable = plan?.items.filter((item) => item.file !== undefined) ?? [];
   const missing = plan?.items.filter((item) => item.route === "local" || item.route === "cloud") ?? [];
   const playLines = () => {
@@ -185,11 +190,13 @@ export function ScenePreview({
     });
     loadPlaylist(items);
     setPlaylistRate(rate);
+    // Soloing a speaker other than the first line's starts the read at their line itself.
     setPlaylistSolo(solo);
-    void playPlaylistLine();
+    if (solo === null || items[0]?.speakerSheetId === solo) void playPlaylistLine();
   };
   const prepareLines = () => {
     if (plan === null) return;
+    setLinesNotice("");
     setPreparing(true);
     prepareRequest.current = prepareTableRead(worldId, production.meta.id, scene.id, plan.confirmationToken, plan.totalEstimatedMicroUsd);
     if (prepareRequest.current === null) { setPreparing(false); setLinesNotice("The studio is disconnected."); }
@@ -435,7 +442,7 @@ export function ScenePreview({
         </div>
         {lines.length === 0 ? null : (
           <div className="fy-swpreview__lines" aria-label="Lines">
-            <button type="button" className="fy-swpreview__lines-play" disabled={playable.length === 0} onClick={playLines}>
+            <button type="button" className="fy-swpreview__lines-play" disabled={playable.length === 0 || worldSlug === undefined} onClick={playLines}>
               <PlaySolid size={10} />Play lines
             </button>
             <label>solo
@@ -455,7 +462,7 @@ export function ScenePreview({
                 Prepare {missing.length} line{missing.length === 1 ? "" : "s"} · {formatMicroUsd(plan.totalEstimatedMicroUsd)}
               </button>
             )}
-            {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-count">{linesNotice}</span>}
+            {linesNotice === "" ? null : <span role="status" className="fy-swpreview__lines-notice">{linesNotice}</span>}
           </div>
         )}
       </div>

@@ -7691,6 +7691,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swpreview__lines-door:hover { border-color: var(--neutral-400); color: var(--foreground); }
 .fy-swpreview__lines-play:disabled, .fy-swpreview__lines-door:disabled { opacity: .5; cursor: default; }
 .fy-swpreview__lines-count { white-space: nowrap; }
+.fy-swpreview__lines-notice { flex: 1 1 100%; min-width: 0; }
+/* The lines' transport on the one player (R-33): previous, restart, skip, and where the read is. */
+.fy-dock__lines { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+.fy-dock__line { width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: inherit; opacity: .75; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fy-dock__line:hover { opacity: 1; background: color-mix(in srgb, currentColor 12%, transparent); }
+.fy-dock__linecount { margin-left: 4px; font: 400 10px var(--font-mono); opacity: .7; white-space: nowrap; }
 .fy-swpreview__transport button { flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; padding: 0; cursor: pointer; transition: var(--transition-control), opacity var(--dur-fast) var(--ease-standard); }
 .fy-swpreview__toggle { width: 32px; height: 32px; border-radius: 999px; background: var(--foreground); color: var(--background); }
 .fy-swpreview__toggle:hover { opacity: .88; }

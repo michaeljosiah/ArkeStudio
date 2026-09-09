@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { Copy, PauseSolid, PlaySolid, Speaker, X } from "./icons.js";
+import { ChevronLeft, ChevronRight, Copy, PauseSolid, PlaySolid, RotateCcw, Speaker, X } from "./icons.js";
 import { cx } from "./ui.js";
-import { dismissPlayback, playClip, seekTo, togglePlayback, usePlayback, type Clip } from "../lib/audio.js";
+import { dismissPlayback, nextPlaylistLine, playClip, restartPlaylistLine, seekTo, togglePlayback, usePlayback, usePlaylist, type Clip } from "../lib/audio.js";
 
 /** "0:03", "1:07" — the dock's own clock, tabular so it does not jitter as it counts. */
 export function clock(seconds: number): string {
@@ -16,6 +16,9 @@ export function clock(seconds: number): string {
  */
 export function PlayerDock() {
   const playback = usePlayback();
+  // A read of the scene's lines (SPEC-044 R-33) is a playlist on this one player, so its
+  // Previous, Skip and Restart live here, where the read goes on sounding after Preview is left.
+  const playlist = usePlaylist();
   const { clip, status, currentTime, duration } = playback;
 
   const scrub = useCallback(
@@ -73,6 +76,14 @@ export function PlayerDock() {
           </div>
         )}
       </div>
+      {playlist === null ? null : (
+        <span className="fy-dock__lines">
+          <button type="button" className="fy-dock__line" aria-label="Previous line" onClick={() => nextPlaylistLine(-1)}><ChevronLeft size={12} /></button>
+          <button type="button" className="fy-dock__line" aria-label="Restart line" onClick={restartPlaylistLine}><RotateCcw size={11} /></button>
+          <button type="button" className="fy-dock__line" aria-label="Skip line" onClick={() => nextPlaylistLine()}><ChevronRight size={12} /></button>
+          <span className="fy-dock__linecount">{playlist.index + 1} of {playlist.items.length}</span>
+        </span>
+      )}
       {status === "error" ? (
         <div className="fy-dock__error">{playback.error}</div>
       ) : (
