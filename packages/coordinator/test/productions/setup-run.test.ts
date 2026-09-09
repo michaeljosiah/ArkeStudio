@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, ulid, type ConversationId, type HarnessAdapter, type WorldChatMessage } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { WorldChatRunnerCache } from "../../src/world-chat/runner-cache.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { recoverConversations } from "../../src/world-chat/recovery.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
+import { checkpointPath } from "../../src/world-chat/checkpoint.js";
 import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
@@ -16,12 +19,12 @@ import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 const AT = "2026-09-08T10:00:00Z";
-async function setup(answer: () => string | Promise<string>) {
-  const world = await WorldStore.open(await makeTempWorld(), { clock: () => AT });
+async function setup(answer: () => string | Promise<string>, existing?: { world: WorldStore; id: ConversationId }) {
+  const world = existing?.world ?? await WorldStore.open(await makeTempWorld(), { clock: () => AT });
   closeOnCleanup(() => world.close());
   const service = new ProductionSetupService(world);
-  const id = newId("cv") as ConversationId;
-  await service.start(id);
+  const id = existing?.id ?? newId("cv") as ConversationId;
+  if (!existing) await service.start(id);
   const log = new ProductionSetupConversationStore(world, id);
   const prompts: string[] = [];
   const adapter = {
@@ -31,6 +34,7 @@ async function setup(answer: () => string | Promise<string>) {
     streamEvents: () => (async function* () { yield { type: "message.completed", sessionId: "s1", text: await answer() }; })(),
   } as unknown as HarnessAdapter;
   const runner = new WorldChatRunner({
+    closingSignal: world.closingSignal,
     adapter, prepare: async () => ({ cwd: world.dir, leaseToken: "test" }), release: async () => {},
     receiptsFor: () => [], runCheckPlan: async () => { throw new Error("Setup cannot check world mutations."); },
     evidenceSources: (messages: readonly WorldChatMessage[]) => ({ messages, bundle: world.getBundle(), attachments: [], attachmentText: new Map() }),
@@ -53,6 +57,8 @@ describe("setup turns share conversation durability but no world-mutation author
     const requested = new Promise<void>(resolve => { asked = resolve; });
     const answer = new Promise<string>(resolve => { respond = resolve; });
     const h = await setup(() => { asked(); return answer; });
+    const cache = new WorldChatRunnerCache<WorldChatRunner>();
+    cache.remember(h.world.worldId, h.world, h.runner);
     await h.service.update(h.id, { expectedRevision: 1, fields: { title: "The crossing" } });
     const running = handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
       setupId: h.id, requestId: ulid(), action: { operation: "send", text: "Develop the crossing." } },
@@ -61,7 +67,6 @@ describe("setup turns share conversation durability but no world-mutation author
     await requested;
     await assert.rejects(h.service.review(h.id, 2), /Wait for Arke/);
     await h.world.close();
-    respond(reply({ expectedRevision: 2, fields: { title: "A late model title" } }));
     await refused;
     assert.equal(h.runner.isRunning(h.id), false);
 
@@ -69,14 +74,41 @@ describe("setup turns share conversation durability but no world-mutation author
     closeOnCleanup(() => reopened.close());
     assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, [h.id]);
     assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, []);
+    const log = new ProductionSetupConversationStore(reopened, h.id);
+    const recovered = foldConversation(h.id, AT, (await log.read()).events).view;
+    await reopened.ownedWrite(() => writeFile(checkpointPath(log.dir), JSON.stringify({
+      schemaVersion: 1, throughSeq: recovered.seq,
+      view: { ...recovered, activeRun: recovered.lastFailedRun, lastFailedRun: null },
+    })));
     const view = (await h.view())!;
-    assert.equal(view.activeRun, null);
+    assert.equal(view.activeRun, null, "a same-tail checkpoint from the old fold must be rebuilt");
     assert.equal(view.lastFailedRun?.status, "interrupted");
     assert.equal(view.messages.length, 1, "the original message survives without a fabricated reply");
     assert.equal(view.productionSetup!.draft.title, "The crossing", "a late result cannot write through the closed owner");
     const service = new ProductionSetupService(reopened);
     const review = await service.review(h.id, 2);
     assert.equal(review.status, "reviewed");
+
+    assert.equal(cache.runnerFor(reopened.worldId, reopened, h.id), undefined, "a closed runner cannot serve Retry");
+    let retryAsked!: () => void;
+    let retryRespond!: (text: string) => void;
+    const retryRequested = new Promise<void>(resolve => { retryAsked = resolve; });
+    const retryAnswer = new Promise<string>(resolve => { retryRespond = resolve; });
+    const fresh = await setup(() => { retryAsked(); return retryAnswer; }, { world: reopened, id: h.id });
+    cache.remember(reopened.worldId, reopened, fresh.runner);
+    const retry = fresh.runner.retry(fresh.log, h.id, view.lastFailedRun!.turnId);
+    await retryRequested;
+    assert.equal((await fresh.runner.retry(fresh.log, h.id, view.lastFailedRun!.turnId)).status, "unavailable", "a second Retry cannot replace the live controller");
+    assert.equal((await h.runner.send(h.log, h.id, "Use the closed owner")).status, "unavailable");
+    respond(reply({ expectedRevision: 2, fields: { title: "A late model title" } }));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cache.runnerFor(reopened.worldId, reopened, h.id), fresh.runner);
+    assert.equal(fresh.runner.isRunning(h.id), true, "the old response cannot clear the retry's controller");
+    assert.equal(fresh.runner.cancel(h.id), true);
+    assert.equal((await retry).status, "cancelled");
+    retryRespond(reply());
+    assert.equal((await fresh.view())!.productionSetup!.draft.title, "The crossing");
+    assert.equal((await fresh.view())!.messages.length, 1, "Retry keeps the original user message");
     await reopened.close();
     const again = await WorldStore.open(h.world.dir, { clock: () => AT });
     closeOnCleanup(() => again.close());

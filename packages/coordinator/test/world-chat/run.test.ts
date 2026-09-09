@@ -198,6 +198,19 @@ describe("taking a turn", () => {
     assert.ok((await store.read()).events.some((e) => e.event.type === "turn.started"), "the conversation is still live");
   });
 
+  it("releases the turn slot after a preflight failure so the overlap guard cannot lock it (#1030)", async () => {
+    let fail = true;
+    const { runner, store, conversationId } = await setup(fakeAdapter([
+      JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] }),
+    ]), { resolveLanguageModel: async () => {
+      if (fail) { fail = false; throw new Error("model selection failed"); }
+      return {};
+    } });
+    await assert.rejects(runner.send(store, conversationId, "First attempt"), /model selection failed/);
+    assert.equal(runner.isRunning(conversationId), false);
+    assert.equal((await runner.send(store, conversationId, "Try again")).status, "completed");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");

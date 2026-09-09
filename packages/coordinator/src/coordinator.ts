@@ -15178,6 +15178,7 @@ export class Coordinator {
         )
       : undefined;
     const runner = new WorldChatRunner({
+      closingSignal: store.closingSignal,
       adapter: this.opts.adapter ?? null,
       /*
        * A look can only be rewritten by something that can read it — see currentLookContext.
