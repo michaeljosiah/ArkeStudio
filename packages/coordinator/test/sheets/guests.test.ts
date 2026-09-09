@@ -517,8 +517,7 @@ describe("filing states an owner, and dedup honours it (R-11, D8)", () => {
 
     // The escape hatch of §2.5: the same document, filed from the world's shelf, says "the
     // world's" out loud. Dedup returns the existing sidecar, so silence could not have said it.
-    const refile = { sourcePath: source, production: null, reownOnDuplicate: true };
-    const again = await fileArtifact(store, refile);
+    const again = await fileArtifact(store, { sourcePath: source, production: null, reownOnDuplicate: true });
     assert.equal(again.outcome, "deduplicated");
     assert.equal(again.outcome === "deduplicated" ? again.artifact.production : "still owned", undefined);
     assert.equal(

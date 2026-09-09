@@ -184,6 +184,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   await pointer(first, "pointermove", 500);
   await pointer(first, "pointerup", 500);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "2.9", "cannot cross the next mark");
+  assert.match(q('[data-testid="stage-moved"]').textContent ?? "", /^Stage changed/, "motion edits do not claim the camera start moved");
   await pointer(first, "pointerdown", 390);
   await pointer(first, "pointermove", 225);
   await pointer(first, "pointerup", 225);

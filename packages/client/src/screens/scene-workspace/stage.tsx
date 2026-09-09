@@ -202,6 +202,10 @@ export function SceneStage({
     return base === null ? null : stagingRetimed(base, durationSec);
   }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
+  const motionChanged = draft !== null && (
+    JSON.stringify(draft.performances) !== JSON.stringify(resolvedPersisted?.performances) ||
+    JSON.stringify(draft.objectMotions) !== JSON.stringify(resolvedPersisted?.objectMotions)
+  );
   const currentBlocking = effectiveStageBlocking(scene, persisted ?? undefined);
   const desiredBlocking = draft === null ? null : { cast: draft.cast, sets: draft.sets };
   const overrideChanged = draft !== null && (
@@ -925,7 +929,7 @@ export function SceneStage({
               <div className="fy-swstage__corner">
                 {moved ? (
                   <span className="fy-swstage__moved" data-testid="stage-moved">
-                    <span>{overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
+                    <span>{motionChanged ? "Stage changed" : overrideChanged || sharedChanged ? cameraChanged ? "Stage changed" : "blocking moved" : `${keyName(active, keys.length)} moved`}</span>
                     <button type="button" aria-label="Discard" title="Discard" onClick={discard}><X size={11} /></button>
                     <button type="button" className="fy-swstage__keep" disabled={locked || frozen} onClick={keep}>Keep</button>
                   </span>

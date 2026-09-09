@@ -149,8 +149,7 @@ it("explicit re-filing makes a scoped file available for import and placement (#
   assert.ok(filed.outcome === "filed");
   const artifact = filed.artifact;
   // Ownership transfer is an explicit re-file; an ordinary import preserves the owner (#1039).
-  const refile = { sourcePath: source, production: null, reownOnDuplicate: true };
-  const shared = await fileArtifact(store, refile);
+  const shared = await fileArtifact(store, { sourcePath: source, production: null, reownOnDuplicate: true });
   assert.ok(shared.outcome === "deduplicated");
   const p = productionOf(store);
   const failures = await importEditorMedia(store, [join(store.dir, "artifacts", artifact.file)], {
