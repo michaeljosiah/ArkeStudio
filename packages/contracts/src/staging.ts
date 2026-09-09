@@ -653,7 +653,7 @@ export function stageProblems(staging: ResolvedShotStaging, durationSec: number)
   if ([...groups].some(group=>ids.has(group))) problems.push("Object group names must differ from figure identities.");
   if (ids.size !== staging.cast.length) problems.push("Each figure must have a unique sheet identity.");
   if (staging.keys.length < 1 || staging.keys[0]?.t !== 0 || (staging.keys.length > 1 && staging.keys.at(-1)?.t !== durationSec)) problems.push("Camera keys must cover the shot from 0 to its duration.");
-  const ordered = (keys: readonly { t: number }[]) => keys.every((k, i) => Number.isFinite(k.t) && k.t <= durationSec && (i === 0 || k.t > keys[i - 1]!.t));
+  const ordered = (keys: readonly { t: number }[]) => keys.length > 0 && keys.every((k, i) => Number.isFinite(k.t) && k.t >= 0 && k.t <= durationSec && (i === 0 || k.t > keys[i - 1]!.t));
   if (!ordered(staging.keys)) problems.push("Camera key times must be strictly increasing within the shot.");
   for (const k of staging.keys) {
     if (![...k.p, ...k.l].every(Number.isFinite)) problems.push("Camera coordinates must be finite.");
@@ -664,11 +664,12 @@ export function stageProblems(staging: ResolvedShotStaging, durationSec: number)
   for (const set of staging.sets) if (![set.w, set.h, set.d].every(v => Number.isFinite(v) && v > 0)) problems.push("Set dimensions must be positive and finite.");
   for (const figure of staging.cast) if (figure.parent && !groups.has(figure.parent)) problems.push("A figure names a missing parent object.");
   for (const set of staging.sets) if (set.shape === "mesh" && (!set.vertices || !set.triangles || set.triangles.length % 3 !== 0 || set.triangles.some(index=>index >= set.vertices!.length))) problems.push("Mesh geometry needs valid vertices and triangle indices.");
-  for (const motion of staging.objectMotions ?? []) if (!groups.has(motion.group) || !ordered(motion.keys) || motion.keys[0]?.t !== 0) problems.push("Object motion must name a group and have ordered keys from time 0.");
+  // Timed action may start late; the evaluator holds its first pose until that mark (#1041).
+  for (const motion of staging.objectMotions ?? []) if (!groups.has(motion.group) || !ordered(motion.keys)) problems.push("Object motion must name a group and have ordered keys within the shot.");
   if (new Set(staging.objectMotions?.map(m=>m.group)).size !== (staging.objectMotions?.length??0)) problems.push("An object can have only one motion track.");
   if (new Set(staging.performances?.map(p=>p.sheetId)).size !== (staging.performances?.length??0)) problems.push("A figure can have only one performance track.");
   for (const performance of staging.performances ?? []) {
-    if (!ids.has(performance.sheetId) || !ordered(performance.keys) || performance.keys[0]?.t !== 0) problems.push("Performance keys must name a figure and increase from time 0 within the shot.");
+    if (!ids.has(performance.sheetId) || !ordered(performance.keys)) problems.push("Performance keys must name a figure and increase within the shot.");
   }
   return [...new Set(problems)];
 }
