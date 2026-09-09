@@ -133,6 +133,13 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
   return { ...staging, cast: blocking.cast, sets: blocking.sets };
 }
 
+/** Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050). */
+export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string): string {
+  if (!shot.staging) return "";
+  const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
+  return JSON.stringify({ staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
+}
+
 /** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
 export function stagePlayblastIsStale(
   scene: Pick<SceneRecord, "blocking">,
