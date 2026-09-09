@@ -76,17 +76,32 @@ const isLink = (path) => {
   }
 };
 
+// Where a replacement is built before it is swapped in. Unique per process so that two runs, or a
+// run beside a file somebody happens to have named this, cannot collide; the plan refuses if one
+// is occupied rather than clearing it, because everything else here refuses to delete what it did
+// not create.
+const stagingPathFor = (target) => `${target}.${process.pid}.arke-link-tmp`;
+
 // Build the new link beside the old one and swap it in, rather than removing first and creating
 // after. Creation is the step that fails — the documented ARKE_PRIVATE_DOCS override allows the
 // private set onto another volume, where a hard link is EXDEV and impossible — and a delete-first
 // order turns that failure into a deleted document. This way a failed link leaves the checkout
 // exactly as it was.
-const place = (make, target) => {
-  const staged = `${target}.arke-link-tmp`;
-  rmSync(staged, { recursive: true, force: true });
-  make(staged);
-  rmSync(target, { recursive: false, force: true });
-  renameSync(staged, target);
+const place = (make, target, staged) => {
+  let created = false;
+  try {
+    make(staged);
+    created = true;
+    rmSync(target, { recursive: false, force: true });
+    renameSync(staged, target);
+    created = false;
+  } finally {
+    // A staged hard link that never reached its destination still holds the private document's
+    // full content, under a name no .gitignore rule was written for. Left behind — the target
+    // locked by OneDrive mid-sync is enough — the next `git add -A` commits the master spec back
+    // into the public repository, which is precisely what this arrangement exists to prevent.
+    if (created) rmSync(staged, { recursive: true, force: true });
+  }
 };
 
 if (!existsSync(privateRoot)) {
@@ -103,6 +118,7 @@ const plan = [];
 for (const link of LINKS) {
   const target = join(repoRoot, link.path);
   const source = join(privateRoot, link.source);
+  const staged = stagingPathFor(target);
 
   if (!existsSync(source)) {
     problems.push(`${link.path}: nothing to link to — ${source} does not exist`);
@@ -121,10 +137,12 @@ for (const link of LINKS) {
       const to = resolve(readlinkSync(target));
       if (to === resolve(source)) {
         plan.push({ describe: `${link.path}: already linked`, run: null });
+      } else if (existsSync(staged)) {
+        problems.push(`${link.path}: the staging path ${staged} is occupied. Move it aside yourself, then re-run.`);
       } else {
         plan.push({
           describe: `${link.path}: RELINK (points at ${to})`,
-          run: () => place((at) => symlinkSync(source, at, "junction"), target),
+          run: () => place((at) => symlinkSync(source, at, "junction"), target, staged),
         });
       }
     } else if (existsSync(target)) {
@@ -145,10 +163,24 @@ for (const link of LINKS) {
   // would silently discard somebody's writing — OneDrive replacing a file on sync produces
   // exactly this, and it is the case the old instructions got wrong.
   if (existsSync(target)) {
-    if (readFileSync(target).equals(readFileSync(source))) {
+    // Reading the target is how identity is decided, so a target that cannot be read is not a
+    // crash, it is a refusal: a directory sitting where the file belongs, or a permission denied
+    // mid-sync, means nothing here can be concluded safely.
+    let same;
+    try {
+      same = readFileSync(target).equals(readFileSync(source));
+    } catch (error) {
+      problems.push(`${link.path}: exists but could not be read (${error?.code ?? error}). Sort it out yourself, then re-run.`);
+      continue;
+    }
+    if (same) {
+      if (existsSync(staged)) {
+        problems.push(`${link.path}: the staging path ${staged} is occupied. Move it aside yourself, then re-run.`);
+        continue;
+      }
       plan.push({
         describe: `${link.path}: already current (re-linking)`,
-        run: () => place((at) => linkSync(source, at), target),
+        run: () => place((at) => linkSync(source, at), target, staged),
       });
     } else {
       problems.push(
