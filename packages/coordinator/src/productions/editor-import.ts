@@ -1,6 +1,6 @@
 import { basename } from "node:path";
 import {
-  AUDIO_TRACK_KINDS, laneRefusal, mediaPlacementCommands, migrateLegacyCut, seedFirstPictureTimeline,
+  AUDIO_TRACK_KINDS, laneRefusal, mediaPlacementCommands, migrateLegacyCut, resolveProductionArtifact, seedFirstPictureTimeline,
   type ArtifactSidecar, type ClientMessage,
 } from "@arke-studio/contracts";
 import { randomUUID } from "node:crypto";
@@ -55,7 +55,16 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
         // its picture; a poster that could not be drawn leaves the row as it was before posters.
         await writeArtifactPoster(store, artifact, options.poster, (reason) => options.onPosterUnavailable?.(artifact.id, reason));
         const laneRefused = lane === null ? null : laneRefusal(artifact, AUDIO_TRACK_KINDS.has(lane.kind));
-        if (!["audio", "video", "image", "board"].includes(artifact.kind)) {
+        /*
+         * Dedup is by bytes across the world and keeps the owner (PR 1039): a file — or a borrow
+         * — whose bytes another production already holds comes back as that production's, which
+         * this one's Library may not hold. Said here, by file, rather than as the placement's
+         * refusal of the whole batch with a recovery that cannot recover it.
+         */
+        const owner = resolveProductionArtifact([artifact], artifact.id, editor.productionId);
+        if (!owner.ok) {
+          failures.push({ index, reason: `${basename(sourcePath)}: already in this world as another production's file; share it from Artifacts first` });
+        } else if (!["audio", "video", "image", "board"].includes(artifact.kind)) {
           failures.push({ index, reason: `${basename(sourcePath)}: this file has no playable picture or sound` });
         } else if (typeof destination === "number" && artifact.kind === "audio") {
           failures.push({ index, reason: `${basename(sourcePath)}: this file has no picture; use Import media to add it to an audio track` });

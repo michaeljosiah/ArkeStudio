@@ -10,7 +10,7 @@ import {
   snapFrame,
   snapMoveDelta,
 } from "../src/lib/clip-gesture.js";
-import { evictableSource, filmstripFrameCount, filmstripTimes } from "../src/lib/filmstrip.js";
+import { evictableSource, filmstripFrameCount, filmstripTimes, pruneQueue } from "../src/lib/filmstrip.js";
 
 /**
  * What a drag shows before it commits (issue 1034): the slot a reorder lands in and the way the
@@ -143,5 +143,13 @@ describe("the strip and the poster", () => {
     // instead of becoming a decoder past the cap.
     assert.equal(evictableSource(entries.filter(([name]) => name === "b" || name === "c"), (key) => wanted.has(key)), null);
     assert.equal(evictableSource([], () => false), null);
+  });
+
+  it("prunes a long queue of the times nobody wants and keeps every one a strip still waits for", () => {
+    const queue = Array.from({ length: 30 }, (_, index) => ({ key: `k${index}` }));
+    const stale = new Set(["k0", "k1", "k2"]);
+    assert.deepEqual(pruneQueue(queue, (key) => !stale.has(key), 24).map((entry) => entry.key), queue.slice(3).map((entry) => entry.key), "the unwanted go, in order");
+    assert.equal(pruneQueue(queue, () => true, 24).length, 30, "a wide clip at a deep zoom wants more than the cap; none of it is dropped");
+    assert.equal(pruneQueue(queue.slice(0, 10), () => false, 24).length, 10, "under the cap nothing is touched");
   });
 });

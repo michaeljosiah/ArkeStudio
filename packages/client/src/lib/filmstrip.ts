@@ -24,8 +24,19 @@ const JPEG_QUALITY = 0.72;
 const MAX_SOURCES = 6;
 /** How many frames the cache keeps; past this the oldest quarter goes, insertion order being age. */
 const MAX_FRAMES = 2000;
-/** How many decodes one source may have waiting; a live trim asks for new times faster than they decode. */
+/** Past this many waiting decodes a source's queue is pruned of the times no strip wants any more. */
 const MAX_QUEUE = 24;
+
+/**
+ * A queue kept within `max` by dropping only what nobody wants: a live trim asks for new times
+ * faster than they decode and the old ones go, but a wide clip at a deep zoom legitimately wants
+ * more than the cap at once, and a wanted time dropped here was never asked for again — the
+ * hook asks once per signature — so its column stayed on the poster for good.
+ */
+export function pruneQueue<T extends { key: string }>(queue: readonly T[], stillWanted: (key: string) => boolean, max = MAX_QUEUE): T[] {
+  if (queue.length <= max) return [...queue];
+  return queue.filter((entry) => stillWanted(entry.key));
+}
 
 /** How many frames fit across `widthPx` at `heightPx`; at least one when there is any width. */
 export function filmstripFrameCount(widthPx: number, heightPx: number, aspect = DEFAULT_ASPECT): number {
@@ -202,17 +213,14 @@ export function filmstripFrame(src: string, timeSec: number, heightPx: number): 
   const source = sourceFor(src);
   if (source === null) {
     const waiting = pending.get(src) ?? [];
-    if (!waiting.some((entry) => entry.key === key)) {
-      waiting.push({ key, timeSec, heightPx });
-      if (waiting.length > MAX_QUEUE) waiting.splice(0, waiting.length - MAX_QUEUE);
-    }
-    pending.set(src, waiting);
+    if (!waiting.some((entry) => entry.key === key)) waiting.push({ key, timeSec, heightPx });
+    pending.set(src, pruneQueue(waiting, (candidate) => wanted.has(candidate)));
     return null;
   }
   if (source.failed) return null;
   if (!source.queue.some((entry) => entry.key === key)) {
     source.queue.push({ key, timeSec, heightPx });
-    if (source.queue.length > MAX_QUEUE) source.queue.splice(0, source.queue.length - MAX_QUEUE);
+    if (source.queue.length > MAX_QUEUE) source.queue = pruneQueue(source.queue, (candidate) => wanted.has(candidate));
   }
   void drain(src, source);
   return null;

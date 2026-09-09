@@ -84,18 +84,20 @@ export type TakePosterUnavailableReason = "not-configured" | "timeout" | "proces
 export interface TakePosterMaker {
   /**
    * Draw `output` from `input`. Resolves either way — the reason is for the log, and the caller
-   * carries on regardless. Both paths are absolute host paths.
+   * carries on regardless. Both paths are absolute host paths. A caller with less time than the
+   * maker's own limit says so (`timeoutMs`), and the run is bounded by the shorter: the process
+   * is stopped, not left drawing into a world the caller has moved on from.
    */
-  write(input: string, output: string): Promise<{ ok: true } | { ok: false; reason: TakePosterUnavailableReason }>;
+  write(input: string, output: string, options?: { timeoutMs?: number }): Promise<{ ok: true } | { ok: false; reason: TakePosterUnavailableReason }>;
 }
 
 export function createTakePosterMaker(runner: MediaProbeRunner): TakePosterMaker {
   return {
-    write: async (input, output) => {
+    write: async (input, output, options) => {
       let result;
       try {
         result = await runner.run(posterArgs(input, output), {
-          timeoutMs: POSTER_TIMEOUT_MS,
+          timeoutMs: Math.max(1, Math.min(POSTER_TIMEOUT_MS, Math.floor(options?.timeoutMs ?? POSTER_TIMEOUT_MS))),
           maxOutputBytes: POSTER_MAX_OUTPUT_BYTES,
         });
       } catch {

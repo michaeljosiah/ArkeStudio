@@ -41,6 +41,8 @@ export async function writeArtifactPoster(
   artifact: Pick<ArtifactSidecar, "id" | "kind" | "file">,
   maker: TakePosterMaker | undefined,
   onUnavailable?: (reason: TakePosterUnavailableReason) => void,
+  /** How long the caller can wait, when that is less than the maker's own limit. */
+  options: { timeoutMs?: number } = {},
 ): Promise<boolean> {
   if (!wantsArtifactPoster(artifact) || maker === undefined) return false;
   /*
@@ -68,7 +70,7 @@ export async function writeArtifactPoster(
   const existing = await lstat(toExtendedLength(output)).catch(() => null);
   if (existing !== null && !existing.isFile()) return false;
   if (existing !== null && existing.size > 0) return true;
-  return await writeMediaPoster(toExtendedLength(input), toExtendedLength(output), maker, onUnavailable);
+  return await writeMediaPoster(toExtendedLength(input), toExtendedLength(output), maker, onUnavailable, options);
 }
 
 /** A poster is a file with bytes in it; a zero-byte leftover is drawn again. */
@@ -86,7 +88,8 @@ async function writeMediaPoster(
   input: string,
   output: string,
   maker: TakePosterMaker,
-  onUnavailable?: (reason: TakePosterUnavailableReason) => void,
+  onUnavailable: ((reason: TakePosterUnavailableReason) => void) | undefined,
+  options: { timeoutMs?: number },
 ): Promise<boolean> {
   // A run that is killed or exits badly can leave a partial file where the poster should be, and
   // every later pass would take it for a finished picture; a failure leaves nothing behind.
@@ -95,7 +98,7 @@ async function writeMediaPoster(
   };
   let outcome;
   try {
-    outcome = await maker.write(input, output);
+    outcome = await maker.write(input, output, options);
   } catch {
     await discard();
     try { onUnavailable?.("process-failed"); } catch { /* a diagnostic that fails is still only a diagnostic */ }
@@ -113,6 +116,9 @@ async function writeMediaPoster(
   }
   return true;
 }
+
+/** How long past its own deadline the backfill waits for a maker that does not honour one. */
+const BACKSTOP_MS = 1_000;
 
 /**
  * Draw the pictures video artifacts filed before posters existed, oldest first, until the budget
@@ -142,13 +148,15 @@ export async function backfillArtifactPosters(
     /*
      * The budget binds the wait, not only the start. A maker stuck on a corrupt file has its own
      * timeout, fifteen seconds, and the open this pass sits in front of would otherwise wait it
-     * out. The extraction runs on unwatched: the file it leaves is found next time, or nothing is.
-     * The timer stays referenced on purpose: against a maker that never settles it is the only
-     * thing keeping the loop alive, and Node 22 resolves an empty loop out from under the await.
+     * out. So the maker is given what is left and stops its process at that — drained, not
+     * abandoned to draw into a world that may have closed — and a maker that ignores the figure
+     * is left behind at a backstop a second later. The backstop timer stays referenced on
+     * purpose: against a maker that never settles it is the only thing keeping the loop alive,
+     * and Node 22 resolves an empty loop out from under the await.
      */
     const outcome = await Promise.race([
-      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason)),
-      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining); }),
+      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs: remaining }),
+      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining + BACKSTOP_MS); }),
     ]);
     if (outcome === null) break;
     if (outcome) drawn += 1;

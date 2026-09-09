@@ -4351,6 +4351,7 @@ function ArtifactPanel({
       setForeign(null);
       return;
     }
+    setSceneFilter("all");
     const requestId = ulid();
     setForeign({ slug: browseSlug, rows: null, error: null });
     const unsubscribe = subscribeWorldArtifacts((result) => {
@@ -4378,8 +4379,10 @@ function ArtifactPanel({
   // Scene controls exist only where there are shots to frame by (issue 1033): an artifact-only
   // cut has no scene to select and no scene to add.
   const hasShots = (production?.scenes ?? []).some((scene) => orderedShots(scene).length > 0);
-  // The panel can outlive a production change (the router keeps the screen); a scene of the last production is no filter here.
-  const sceneScope = hasShots && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
+  // The panel can outlive a production change (the router keeps the screen); a scene of the last
+  // production is no filter here. Nor is any scene while another world's shelf is shown: its
+  // files belong to no scene of this production, so the control goes and the scope is every row.
+  const sceneScope = hasShots && browseSlug === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
   const shots = (production?.scenes ?? []).flatMap((scene) =>
     orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
@@ -4662,7 +4665,7 @@ function ArtifactPanel({
             <option value="image">Image</option>
             <option value="audio">Audio</option>
           </select>
-          {hasShots && (production?.scenes.length ?? 0) > 1 && (
+          {hasShots && browseSlug === null && (production?.scenes.length ?? 0) > 1 && (
             <select className="fy-artpanel__scene" aria-label="Scene" value={sceneScope} onChange={(event) => setSceneFilter(event.target.value)}>
               <option value="all">All scenes</option>
               {(production?.scenes ?? []).map((scene) => (

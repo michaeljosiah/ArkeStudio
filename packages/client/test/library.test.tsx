@@ -246,6 +246,9 @@ describe("the Library (SPEC-039 T-3)", () => {
 
   it("browses another world's shelf read-only and copies a file in with its provenance (issue 1033, #972)", async () => {
     const state = stateWithBells();
+    // A second scene, so the Scene control is on the panel to begin with.
+    const scenes = state.world!.productions[0]!.scenes;
+    scenes.push({ ...scenes[0]!, id: "sc_05", number: 5, title: "The morning after", shots: [] });
     state.worlds.push({ worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ", slug: "the-other-one", name: "The Other One", counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 }, updated: "2026-09-01T12:00:00Z" } as (typeof state.worlds)[number]);
     const screen = await mount(state);
     try {
@@ -258,7 +261,16 @@ describe("the Library (SPEC-039 T-3)", () => {
         [...select.querySelectorAll("option")].find((option) => option.value === value)!.selected = true;
         select.dispatchEvent(new Event("change", { bubbles: true }));
       });
+      // A scene chosen at home is this production's frame; the other world's shelf has none.
+      const sceneSelect = () => screen.container.querySelector<HTMLSelectElement>('select[aria-label="Scene"]');
+      const firstScene = sceneSelect()!.querySelectorAll("option")[1]!;
+      await act(async () => {
+        firstScene.selected = true;
+        sceneSelect()!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value, firstScene.value, "a scene is chosen");
       await choose("the-other-one");
+      assert.equal(sceneSelect(), null, "no scene control over another world's shelf");
       const asked = screen.sent.find((message) => message.kind === "browse-world-artifacts");
       assert.ok(asked && asked.kind === "browse-world-artifacts" && asked.slug === "the-other-one", "the coordinator is asked for that world's shelf");
       await act(async () => __applyEventForTest({
@@ -292,6 +304,7 @@ describe("the Library (SPEC-039 T-3)", () => {
       assert.equal(action(screen, "Copy into this world")?.disabled, true);
       await choose("here");
       assert.ok(rows(screen).includes(`artifact:${BELLS}`));
+      assert.equal(sceneSelect()!.querySelector<HTMLOptionElement>("option[selected]")?.value ?? "all", "all", "home again with every scene, not the stale one");
     } finally {
       await close(screen);
     }

@@ -137,11 +137,16 @@ describe("drawing the picture", () => {
     const source = join(dir, "stuck.mp4");
     await writeFile(source, "a film ffmpeg cannot finish");
     assert.equal((await fileArtifact(store, { sourcePath: source, production: null, mediaProbe: probe })).outcome, "filed");
-    // The maker's own timeout is fifteen seconds; the pass in front of `world.opened` waits only its budget.
-    const hanging: TakePosterMaker = { write: () => new Promise(() => undefined) };
+    // The maker's own timeout is fifteen seconds; the pass in front of `world.opened` hands it
+    // what is left of the budget, so the run stops there rather than drawing on into a world
+    // that may have closed — and a maker that ignores the figure is left behind at a backstop.
+    const asked: number[] = [];
+    const hanging: TakePosterMaker = { write: (_input, _output, options) => { asked.push(options?.timeoutMs ?? -1); return new Promise(() => undefined); } };
     const started = Date.now();
     assert.equal(await backfillArtifactPosters(store, hanging, { budgetMs: 50 }), 0);
-    assert.ok(Date.now() - started < 5_000, "returned at the budget, not the maker's timeout");
+    assert.ok(Date.now() - started < 5_000, "returned at the backstop, not the maker's timeout");
+    assert.equal(asked.length, 1);
+    assert.ok(asked[0]! > 0 && asked[0]! <= 50, `the maker was given the remaining budget, not its own limit (${asked[0]})`);
   });
 });
 
