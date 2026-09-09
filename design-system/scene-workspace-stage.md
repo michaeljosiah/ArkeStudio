@@ -261,8 +261,6 @@ The playblast is what makes the Stage worth using: the generator receives an act
 - **No skeletal animation.** Figures translate, turn and change posture at marks (standing, seated, lying); a figure can ride a moving group. Performance is the generator's job.
 - **Camera positions follow a centripetal curved path between keys, arc-length mapped per leg, and `easeIn` / `easeOut` shape the timing along each leg.** Preview, export and the prompt's beats all sample the same evaluator, so what the previs shows is what the generator is told. (SPEC-036 R-32; this replaced the original linear-with-ease-as-a-word-only behaviour, #757.)
 
-The Stage's rig profiles, Super 35 lens gate and crop-to-aspect FOV, velocity-profile easing, and centripetal spline convention with 32 samples per leg were adopted from [Blockout](https://github.com/wassermanproductions/blockout) by **Sam Wasserman (wassermanproductions.com)**, licensed under Apache-2.0. The retained upstream NOTICE and licence text are in [Third-party notices](../THIRD-PARTY-NOTICES.md#blockout-stage-camera-conventions), which ships with the desktop application.
-
 ---
 
 ## Part 5 · Design history worth carrying forward
