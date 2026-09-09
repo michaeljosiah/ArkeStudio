@@ -31,7 +31,7 @@ export function stagePlateSources(world: WorldBundle, production: ProductionBund
   };
 }
 
-/** Editor chrome only: a sibling of the WebGL canvas, never part of the rendered scene (#1049). */
+/** Editor chrome only: a sibling of the WebGL canvas, never part of the rendered scene (issue 1049). */
 export function StageUnderlay({ world, production, shotId, viewport, aspect, at, playing, visible, disabled, onChoose }: {
   world: WorldBundle; production: ProductionBundle; shotId: string; viewport: HTMLElement | null; aspect: string;
   at: number; playing: boolean; visible: boolean; disabled: boolean; onChoose: () => void;
