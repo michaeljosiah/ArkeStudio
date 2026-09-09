@@ -138,11 +138,11 @@ describe("drawing the picture", () => {
     assert.equal(await backfillArtifactPosters(store, exhausted.maker, { budgetMs: 1, now: () => (late += 1000) }), 0);
   });
 
-  it("moves past a video that exhausts every timeout and removes its partial poster (#1061)", async (t) => {
+  it("resumes past five corrupt videos across reopen and allows a slower valid extraction (#1061)", async (t) => {
     const dir = await makeTempWorld();
-    const store = await WorldStore.open(dir);
+    let store = await WorldStore.open(dir);
     t.after(() => store.close());
-    for (const name of ["broken.mp4", "good.mp4"]) {
+    for (const name of ["broken-0.mp4", "broken-1.mp4", "broken-2.mp4", "broken-3.mp4", "broken-4.mp4", "good.mp4"]) {
       const source = join(dir, name);
       await writeFile(source, `film ${name}`);
       assert.equal((await fileArtifact(store, { sourcePath: source, production: null, mediaProbe: probe })).outcome, "filed");
@@ -151,23 +151,35 @@ describe("drawing the picture", () => {
     const attempts: string[] = [];
     const posters: TakePosterMaker = { write: async (input, output, options) => {
       attempts.push(input);
-      if (input.endsWith("broken.mp4")) {
+      if (!input.endsWith("good.mp4")) {
         now += options!.timeoutMs!;
         await writeFile(output, "partial");
         return { ok: false, reason: "timeout" };
       }
-      now += 10;
+      assert.ok(options!.timeoutMs! >= 1_500, "a valid slow first frame keeps its full opportunity to finish");
+      now += 1_500;
       await writeFile(output, "png");
       return { ok: true };
     } };
-    assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), 1);
-    assert.equal(attempts.length, 2, "the first timeout leaves time for the next video");
-    assert.ok(now < 5_000);
-    const broken = store.getBundle().artifacts.find((artifact) => artifact.file === "broken.mp4")!;
-    assert.equal(await stat(join(dir, artifactPosterPath(broken.id))).catch(() => null), null);
+    for (let pass = 0; pass < 6; pass += 1) {
+      attempts.length = 0;
+      assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), pass === 5 ? 1 : 0);
+      assert.ok(attempts[0]!.endsWith(pass === 5 ? "good.mp4" : `broken-${pass}.mp4`), "the saved cursor advances even on failure");
+      await store.close();
+      store = await WorldStore.open(dir);
+    }
+    for (const artifact of store.getBundle().artifacts.filter(wantsArtifactPoster)) {
+      const output = join(dir, artifactPosterPath(artifact.id));
+      if (artifact.file === "good.mp4") assert.equal(await readFile(output, "utf8"), "png");
+      else assert.equal(await stat(output).catch(() => null), null, "failed partial posters are discarded");
+    }
     attempts.length = 0;
     assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), 0);
     assert.equal(attempts.length, 1, "later opens reuse the successful poster despite the repeated failure");
+    await writeFile(join(dir, ".index", "poster-backfill.cursor"), "missing-artifact");
+    attempts.length = 0;
+    assert.equal(await backfillArtifactPosters(store, posters, { budgetMs: 5_000, now: () => now }), 0);
+    assert.ok(attempts[0]!.endsWith("broken-0.mp4"), "a stale cursor safely restarts at the first video");
   });
 
   it("does not hold the open past its budget for a maker that hangs", async (t) => {
@@ -211,6 +223,13 @@ describe("where the picture is read from and written to", () => {
     assert.equal(await writeArtifactPoster({ dir: linkedIndex }, artifact, asked.maker), false);
     assert.deepEqual(asked.written, []);
     assert.deepEqual(await readdir(elsewhere), [], "nothing landed outside the world");
+    const linkedCache = await tempDir("arke-linked-cache-");
+    await mkdir(join(linkedCache, "artifacts"));
+    await writeFile(join(linkedCache, "artifacts", "clip.mp4"), "film");
+    await symlink(elsewhere, join(linkedCache, ".index"), "junction");
+    const linkedStore = { dir: linkedCache, getBundle: () => ({ artifacts: [artifact] }), isClosed: () => false } as unknown as WorldStore;
+    assert.equal(await backfillArtifactPosters(linkedStore, asked.maker, { budgetMs: 100 }), 0);
+    assert.deepEqual(await readdir(elsewhere), [], "neither a poster nor a resume cursor is written through a linked index");
     // A sidecar naming a path, or an id that is one, is not a poster either.
     assert.equal(await writeArtifactPoster({ dir: linkedIndex }, { ...artifact, file: "../world.json" }, asked.maker), false);
     assert.equal(await writeArtifactPoster({ dir: linkedIndex }, { ...artifact, id: "../escape" }, asked.maker), false);
