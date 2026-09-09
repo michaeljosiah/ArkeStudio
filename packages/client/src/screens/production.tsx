@@ -1320,7 +1320,7 @@ export function ProductionCastScreen() {
   });
 
   return (
-    <div data-screen="production-cast">
+    <div className="fy-prodscroll" data-screen="production-cast">
       <div className="fy-hero">
         <div className="fy-eyebrow-sm">CAST · {production.meta.title.toUpperCase()}</div>
         <h1 className="fy-hero__title" style={{ fontSize: 52 }}>
