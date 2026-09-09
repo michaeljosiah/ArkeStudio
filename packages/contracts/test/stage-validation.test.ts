@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { SceneSchema, stageFigureAt, stageObjectAt, stagingEase, stagePerformanceDeparture, stagingRetimed, stageLineCrossings, stageMotionSpeeds, stageSpeedWarnings, stagingPromptClause, type ResolvedShotStaging } from "../src/index.js";
+import { SceneSchema, stageFigureAt, stageObjectAt, stagingEase, stagePerformanceDeparture, stagingRetimed, stageLineCrossings, stageMotionSpeeds, stageSpeedWarnings, stagingPromptClause, type StagePerformanceKey, type ResolvedShotStaging } from "../src/index.js";
 
 const stage = (): ResolvedShotStaging => ({ version: 1, cast: [{ sheetId: "runner", x: 0, z: 0, parent: "car", to: [100, 0] }], sets: [],
   keys: [{ t: 0, p: [0, 2, 4], l: [0, 1, 0] }, { t: 4, p: [0, 2, 4], l: [0, 1, 0] }],
@@ -72,7 +72,7 @@ it("ignores same-side coverage and ambiguous axes, evaluating parented people an
 it("preserves legacy paths and shares object spline travel when performance controls are authored (#1046)", () => {
   const staging = stage();
   const figure = { sheetId: "runner", x: 0, z: 0 };
-  const keys = staging.performances![0]!.keys = [{ t: 0, x: -1, z: 0, gait: "walk" }, { t: 2, x: 0, z: 1 }, { t: 4, x: 1, z: 0 }];
+  const keys: StagePerformanceKey[] = staging.performances![0]!.keys = [{ t: 0, x: -1, z: 0, gait: "walk" }, { t: 2, x: 0, z: 1 }, { t: 4, x: 1, z: 0 }];
   assert.equal(stageFigureAt(figure, staging.performances, 1, 4).z, .5, "old tracks keep linear travel");
   keys[0]!.easeOut = 0;
   const objects = [{ group: "copy", keys: keys.map(key => ({ t: key.t, p: [key.x, 0, key.z] as [number, number, number] })) }];
@@ -88,7 +88,7 @@ it("preserves legacy paths and shares object spline travel when performance cont
 it("holds before eased travel, turns by the same progress, steps posture and scales holds on retime (#1046)", () => {
   const staging = stage();
   const figure = staging.cast[0] = { sheetId: "runner", x: 0, z: 0 };
-  const keys = staging.performances![0]!.keys = [
+  const keys: StagePerformanceKey[] = staging.performances![0]!.keys = [
     { t: 1, x: 0, z: 0, facing: 350, hold: 1, easeOut: .5 },
     { t: 3, x: 10, z: 0, facing: 10, pose: "sit", easeIn: .5 },
   ];
