@@ -2,25 +2,22 @@
 // and the one internal architecture note. See CLAUDE.md, "The specs are not in this repository".
 //
 // This exists because the hand-written version of these four commands had a real bug in it — a
-// hard link cannot be re-created over an existing file, so the documented recovery for a stale
-// link failed and left the checkout reading an obsolete spec while believing it was repaired.
-// The linking rules are fiddly in a way that does not survive being retyped: two of the paths are
-// directories and take junctions, two are single files and take hard links, and the whole thing is
-// only safe in a checkout where git does not track those paths.
+// hard link cannot be created over an existing file, so the documented recovery for a stale link
+// failed and left the checkout reading an obsolete spec while believing it was repaired. The rules
+// are fiddly in a way that does not survive being retyped: two of the paths are directories and
+// take junctions, two are single files and take hard links, and the whole thing is only safe in a
+// checkout where git does not track those paths.
+//
+// It never replaces a file. Earlier versions built a replacement link and swapped it in, which
+// bought nothing and cost a great deal: a staged hard link holds the private document's whole
+// content, so a failed swap could leave the master spec sitting at an unignored path ready to be
+// committed back into the public repository, and a swap decided from an earlier comparison could
+// discard an edit written in between. There is no such window here. A path is created only when
+// nothing is there, and anything unexpected is reported for a person to resolve.
 //
 // Dry run is the default, as it is for prune-merged.mjs. Pass --apply to act.
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  linkSync,
-  lstatSync,
-  mkdirSync,
-  readFileSync,
-  readlinkSync,
-  renameSync,
-  rmSync,
-  symlinkSync,
-} from "node:fs";
+import { existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -76,31 +73,15 @@ const isLink = (path) => {
   }
 };
 
-// Where a replacement is built before it is swapped in. Unique per process so that two runs, or a
-// run beside a file somebody happens to have named this, cannot collide; the plan refuses if one
-// is occupied rather than clearing it, because everything else here refuses to delete what it did
-// not create.
-const stagingPathFor = (target) => `${target}.${process.pid}.arke-link-tmp`;
-
-// Build the new link beside the old one and swap it in, rather than removing first and creating
-// after. Creation is the step that fails — the documented ARKE_PRIVATE_DOCS override allows the
-// private set onto another volume, where a hard link is EXDEV and impossible — and a delete-first
-// order turns that failure into a deleted document. This way a failed link leaves the checkout
-// exactly as it was.
-const place = (make, target, staged) => {
-  let created = false;
+// Two paths are the same file when they are the same inode — which is exactly what a hard link is,
+// and what NTFS reports faithfully. Content equality is not the same question: a copy holding
+// identical bytes today drifts the moment either side is edited.
+const sameFile = (a, b) => {
   try {
-    make(staged);
-    created = true;
-    rmSync(target, { recursive: false, force: true });
-    renameSync(staged, target);
-    created = false;
-  } finally {
-    // A staged hard link that never reached its destination still holds the private document's
-    // full content, under a name no .gitignore rule was written for. Left behind — the target
-    // locked by OneDrive mid-sync is enough — the next `git add -A` commits the master spec back
-    // into the public repository, which is precisely what this arrangement exists to prevent.
-    if (created) rmSync(staged, { recursive: true, force: true });
+    const [x, y] = [statSync(a), statSync(b)];
+    return x.ino !== 0 && x.ino === y.ino && x.dev === y.dev;
+  } catch {
+    return false;
   }
 };
 
@@ -110,15 +91,14 @@ if (!existsSync(privateRoot)) {
   process.exit(1);
 }
 
-// Plan first, act second. Every refusal has to be known before the first mutation, or a refusal on
-// the fourth path leaves the first three already relinked under a message saying nothing changed.
+// Plan first, act second. Every refusal has to be known before the first change, or a refusal on
+// the fourth path leaves the first three already altered under a message saying nothing happened.
 const problems = [];
 const plan = [];
 
 for (const link of LINKS) {
   const target = join(repoRoot, link.path);
   const source = join(privateRoot, link.source);
-  const staged = stagingPathFor(target);
 
   if (!existsSync(source)) {
     problems.push(`${link.path}: nothing to link to — ${source} does not exist`);
@@ -137,12 +117,15 @@ for (const link of LINKS) {
       const to = resolve(readlinkSync(target));
       if (to === resolve(source)) {
         plan.push({ describe: `${link.path}: already linked`, run: null });
-      } else if (existsSync(staged)) {
-        problems.push(`${link.path}: the staging path ${staged} is occupied. Move it aside yourself, then re-run.`);
       } else {
+        // Removing a junction removes a pointer, never the documents it points at, so repointing
+        // one costs nothing if it fails halfway.
         plan.push({
-          describe: `${link.path}: RELINK (points at ${to})`,
-          run: () => place((at) => symlinkSync(source, at, "junction"), target, staged),
+          describe: `${link.path}: REPOINT (currently ${to})`,
+          run: () => {
+            rmSync(target, { recursive: false, force: true });
+            symlinkSync(source, target, "junction");
+          },
         });
       }
     } else if (existsSync(target)) {
@@ -157,38 +140,11 @@ for (const link of LINKS) {
     continue;
   }
 
-  // Hard links are indistinguishable from ordinary files, so identity is decided on content.
-  // Equal content means it is either already linked or a faithful copy, and re-linking is safe.
-  // Differing content means one side holds edits the other does not, and guessing which to keep
-  // would silently discard somebody's writing — OneDrive replacing a file on sync produces
-  // exactly this, and it is the case the old instructions got wrong.
-  if (existsSync(target)) {
-    // Reading the target is how identity is decided, so a target that cannot be read is not a
-    // crash, it is a refusal: a directory sitting where the file belongs, or a permission denied
-    // mid-sync, means nothing here can be concluded safely.
-    let same;
-    try {
-      same = readFileSync(target).equals(readFileSync(source));
-    } catch (error) {
-      problems.push(`${link.path}: exists but could not be read (${error?.code ?? error}). Sort it out yourself, then re-run.`);
-      continue;
-    }
-    if (same) {
-      if (existsSync(staged)) {
-        problems.push(`${link.path}: the staging path ${staged} is occupied. Move it aside yourself, then re-run.`);
-        continue;
-      }
-      plan.push({
-        describe: `${link.path}: already current (re-linking)`,
-        run: () => place((at) => linkSync(source, at), target, staged),
-      });
-    } else {
-      problems.push(
-        `${link.path}: differs from the private copy. One of them has edits the other does not — ` +
-          `compare them and copy the version you want into ${source} yourself, then re-run.`,
-      );
-    }
-  } else {
+  // Hard links are the delicate half, because the file at the target is a real document and
+  // deleting it can lose writing. So this never deletes one. Already the same inode means there is
+  // nothing to repair. Anything else present is reported, and the person decides — which turns the
+  // dangerous case into the CREATE case below, where there is nothing to lose.
+  if (!existsSync(target)) {
     plan.push({
       describe: `${link.path}: CREATE hard link -> ${source}`,
       run: () => {
@@ -196,6 +152,20 @@ for (const link of LINKS) {
         linkSync(source, target);
       },
     });
+  } else if (sameFile(target, source)) {
+    plan.push({ describe: `${link.path}: already linked`, run: null });
+  } else {
+    let detail = "it is a separate file";
+    try {
+      detail = readFileSync(target).equals(readFileSync(source))
+        ? "it is a copy with identical content — probably a hard link OneDrive replaced on sync"
+        : "its content differs from the private copy, so one of them holds writing the other does not";
+    } catch (error) {
+      detail = `it could not be read (${error?.code ?? error})`;
+    }
+    problems.push(
+      `${link.path}: present but not linked — ${detail}. Save anything you need from it, delete it, then re-run.`,
+    );
   }
 }
 

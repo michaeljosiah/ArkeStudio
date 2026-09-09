@@ -52,9 +52,3 @@ docs/decisions/
 # file is internal: it is integration and recovery notes for a half-built subsystem, not an
 # explanation of anything shipped.
 docs/architecture/character-audio-foundation.md
-
-# Where link-private-docs.mjs builds a replacement link before swapping it in. It cleans these up
-# itself, including when the swap fails — but a killed process cannot run its own cleanup, and
-# what would be left behind is a hard link holding the master spec's full content under a name
-# none of the rules above match. Ignored so that surviving one cannot be committed by a `git add -A`.
-*.arke-link-tmp
