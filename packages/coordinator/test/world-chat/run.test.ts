@@ -545,6 +545,23 @@ describe("a turn that never answers", () => {
     );
   });
 
+  it("does not dispatch after Stop arrives during session creation (#1030)", async () => {
+    let creating!: () => void;
+    let created!: () => void;
+    const started = new Promise<void>(resolve => { creating = resolve; });
+    const session = new Promise<void>(resolve => { created = resolve; });
+    const prompts: string[] = [];
+    const adapter = fakeAdapter([JSON.stringify({ reply: "Too late", candidateOperations: [], groupOperations: [] })], { prompts });
+    adapter.createSession = async () => { creating(); await session; return { sessionId: "s1" } as never; };
+    const h = await setup(adapter);
+    const running = h.runner.send(h.store, h.conversationId, "Find a direction");
+    await started;
+    h.runner.cancel(h.conversationId);
+    created();
+    assert.equal((await running).status, "cancelled");
+    assert.deepEqual(prompts, [], "a stopped turn cannot start a paid model request");
+  });
+
   it("stops immediately when cancelled, without waiting for the model", async () => {
     const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 30_000 });
     const inFlight = runner.send(store, conversationId, "hello");

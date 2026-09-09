@@ -241,6 +241,7 @@ async function askOnce(
   /** Every tool the confinement refused this turn, by harness name, as it happens (#506). */
   onRefused?: (tool: string) => void,
 ): Promise<string> {
+  if (signal.aborted) throw new Error("cancelled");
   let finalText = "";
   const abort = new AbortController();
   const onAbort = () => abort.abort();
