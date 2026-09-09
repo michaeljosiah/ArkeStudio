@@ -236,6 +236,16 @@ export function PictureTrack({
   const [drag, setDrag] = useState<GestureUpdate | null>(null);
   const laneRef = useRef<HTMLDivElement>(null);
   const clips = views.map((view) => view.clip);
+  // A drag that ends on another lane, or outside the window, fires no dragleave here.
+  useEffect(() => {
+    const clear = () => setHover(null);
+    window.addEventListener("drop", clear);
+    window.addEventListener("dragend", clear);
+    return () => {
+      window.removeEventListener("drop", clear);
+      window.removeEventListener("dragend", clear);
+    };
+  }, []);
 
   const span = Math.max(totalFrames, 1);
   const menuView = menu === null ? null : (views.find((view) => view.clip.id === menu.clipId) ?? null);

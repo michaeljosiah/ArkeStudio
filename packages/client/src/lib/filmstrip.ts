@@ -22,6 +22,8 @@ const DEFAULT_ASPECT = 16 / 9;
 const JPEG_QUALITY = 0.72;
 /** How many decoded sources stay alive; beyond this the oldest is released. */
 const MAX_SOURCES = 6;
+/** How many frames the cache keeps; past this the oldest quarter goes, insertion order being age. */
+const MAX_FRAMES = 2000;
 
 /** How many frames fit across `widthPx` at `heightPx`; at least one when there is any width. */
 export function filmstripFrameCount(widthPx: number, heightPx: number, aspect = DEFAULT_ASPECT): number {
@@ -130,6 +132,9 @@ async function drain(src: string, source: Source): Promise<void> {
       if (context === null) throw new Error("canvas");
       context.drawImage(source.video, 0, 0, canvas.width, canvas.height);
       frames.set(next.key, canvas.toDataURL("image/jpeg", JPEG_QUALITY));
+      if (frames.size > MAX_FRAMES) {
+        for (const key of [...frames.keys()].slice(0, MAX_FRAMES / 4)) frames.delete(key);
+      }
       notify();
     }
   } catch {
