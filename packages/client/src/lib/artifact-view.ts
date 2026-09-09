@@ -144,11 +144,11 @@ const VIEWER_LABEL: Record<ArtifactViewerKind, string> = {
   details: "details",
 };
 
-/** Linked names title the shelf and its viewer; the file remains the download identity (issue 1005). */
-export function artifactDisplayName(artifact: ArtifactSidecar, linkName: (link: string, links?: readonly string[]) => string): string {
-  const names = artifact.links.map((link) => linkName(link, artifact.links)).filter((name, index) => name !== artifact.links[index]);
-  return [...new Set(names)].slice(0, 2).join(" · ") || artifact.file.split("/").pop() || artifact.file;
-}
+/**
+ * The naming rule lives in contracts now (issue 1033): the coordinator states it too when it
+ * lists another world's shelf. Re-exported so every screen keeps importing it from here.
+ */
+export { artifactDisplayName, linkNameResolver, type LinkName } from "@arke-studio/contracts";
 
 /** The visible name and viewer are also the open button's accessible name. */
 export function artifactOpenLabel(artifact: Pick<ArtifactSidecar, "file">, name = artifact.file.split("/").pop() ?? artifact.file): string {

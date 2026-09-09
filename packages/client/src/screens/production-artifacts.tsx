@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { useParams } from "react-router";
-import { formatSeconds, isGeneratedArtifact, orderedShots, type ArtifactSidecar } from "@arke-studio/contracts";
+import { formatSeconds, isGeneratedArtifact, type ArtifactSidecar } from "@arke-studio/contracts";
 import { EmptyState, Screen, Section } from "../components/layout.js";
 import { Badge, Button, Callout, cx } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
@@ -16,6 +16,7 @@ import {
   artifactOpenLabel,
   artifactUses,
   artifactsForProduction,
+  linkNameResolver,
 } from "../lib/artifact-view.js";
 import {
   extractArtifact,
@@ -124,24 +125,8 @@ export function ProductionArtifactsScreen() {
     openTrigger.current?.focus();
   };
 
-  /** Resolve names from this world's records; unknown links retain their spelling. */
-  const linkName = (link: string, links: readonly string[] = []): string => {
-    const name = world.sheets.find((s) => s.id === link)?.name ?? world.canon.find((c) => c.id === link)?.title;
-    if (name) return name;
-    const owning = world.productions.filter((p) => links.includes(p.meta.id));
-    const names: string[] = [];
-    for (const candidate of owning.length ? owning : world.productions) {
-      if (candidate.meta.id === link) return candidate.meta.title;
-      const episode = candidate.episodes.find((e) => e.id === link);
-      if (episode) names.push(episode.title);
-      for (const scene of candidate.scenes) {
-        if (scene.id === link) names.push(scene.title);
-        const shot = orderedShots(scene).find((s) => s.id === link);
-        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
-      }
-    }
-    return names.length === 1 ? names[0]! : link;
-  };
+  // The same rule the world's shelf and the Cut use (issue 1005), so one file has one name.
+  const linkName = linkNameResolver(world);
 
   const kindLabel: Record<string, string> = {
     image: "Images",

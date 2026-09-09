@@ -154,6 +154,14 @@ export {
   type TakeQcAnalyzer,
   type TakeQcUnavailableReason,
 } from "./takes/qc.js";
+export { listBorrowableArtifacts } from "./artifacts/borrow.js";
+export {
+  ARTIFACT_POSTER_DIR,
+  artifactPosterPath,
+  backfillArtifactPosters,
+  wantsArtifactPoster,
+  writeArtifactPoster,
+} from "./artifacts/poster.js";
 export {
   backfillPosters,
   createTakePosterMaker,

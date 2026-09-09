@@ -51,7 +51,7 @@ import { PageReadControl, usePageRead, type PageReadBlock } from "../components/
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { episodeThumbnailPath, takeMediaPath, Wave } from "./production.js";
 import { generatedOriginLabel, shortDateTime } from "../lib/format.js";
-import { artifactDisplayName, artifactOpenLabel, artifactUses } from "../lib/artifact-view.js";
+import { artifactDisplayName, artifactOpenLabel, artifactUses, linkNameResolver } from "../lib/artifact-view.js";
 import { mediaUrl } from "../lib/media.js";
 import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
@@ -3911,24 +3911,9 @@ export function ArtifactsScreen() {
   const kinds = [...new Set(artifacts.map((a) => a.kind))];
   const madeHereCount = artifacts.filter((a) => !superseded.has(a.id) && madeHere(a)).length;
   const batches = shelfArtifacts.filter((a) => (a.extraction?.pending.length ?? 0) > 0);
-  // Resolve names from this world's existing records; unknown links retain their spelling.
-  const linkName = (link: string, links: readonly string[] = []): string => {
-    const name = world?.sheets.find((s) => s.id === link)?.name ?? world?.canon.find((c) => c.id === link)?.title;
-    if (name) return name;
-    const owning = world?.productions.filter((production) => links.includes(production.meta.id)) ?? [];
-    const names: string[] = [];
-    for (const production of owning.length ? owning : world?.productions ?? []) {
-      if (production.meta.id === link) return production.meta.title;
-      const episode = production.episodes.find((candidate) => candidate.id === link);
-      if (episode) names.push(episode.title);
-      for (const scene of production.scenes) {
-        if (scene.id === link) names.push(scene.title);
-        const shot = orderedShots(scene).find((candidate) => candidate.id === link);
-        if (shot) names.push(`Shot ${shot.number} · ${shot.title}`);
-      }
-    }
-    return names.length === 1 ? names[0]! : link;
-  };
+  // Resolve names from this world's existing records; unknown links retain their spelling. The
+  // Cut names its rows by the same rule (issue 1005), so the resolver lives beside the display name.
+  const linkName = linkNameResolver(world);
   const kindLabel: Record<string, string> = {
     image: "Images",
     board: "Boards",

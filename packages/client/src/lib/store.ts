@@ -475,6 +475,33 @@ export function browseReferenceImages(slug: string, requestId: string): void {
   send({ kind: "browse-reference-images", slug, requestId });
 }
 
+/** Another world's placeable files, for the Cut's Library (issue 1033). */
+export type WorldArtifactsResult = Extract<DomainEvent, { type: "world.artifacts" }>;
+const worldArtifactListeners = new Set<(result: WorldArtifactsResult) => void>();
+export function subscribeWorldArtifacts(listener: (result: WorldArtifactsResult) => void): () => void {
+  worldArtifactListeners.add(listener);
+  return () => { worldArtifactListeners.delete(listener); };
+}
+export function browseWorldArtifacts(slug: string, requestId: string): void {
+  send({ kind: "browse-world-artifacts", slug, requestId });
+}
+/**
+ * Copy files from another world into this one, then list or place them as an upload would
+ * (issue 1033). Answered like an upload, through the queue results, under the returned request.
+ */
+export function borrowArtifacts(
+  worldId: string, slug: string, files: readonly string[],
+  editor: Extract<ClientMessage, { kind: "borrow-artifacts" }>["editor"],
+): { requestId: string | null; reason?: string } {
+  if (files.length === 0 || files.length > 16) return { requestId: null, reason: "Copy up to 16 files at a time." };
+  const requestId = queueRequest("borrow-artifacts");
+  if (!send({ kind: "borrow-artifacts", worldId, requestId, slug, files: [...files], editor })) {
+    pendingQueueRequests.delete(requestId);
+    return { requestId: null, reason: "The files could not be copied. Check the connection and try again." };
+  }
+  return { requestId };
+}
+
 export type WorldChatMediaOpened = Extract<DomainEvent, { type: "world-chat.media-opened" }>;
 const worldChatMediaListeners = new Set<(answer: WorldChatMediaOpened) => void>();
 export function subscribeWorldChatMediaOpened(listener: (answer: WorldChatMediaOpened) => void): () => void {
@@ -1162,6 +1189,9 @@ function handleFrame(json: string): void {
     }
     if (event.type === "reference.images") {
       for (const listener of referenceImageListeners) listener(event);
+    }
+    if (event.type === "world.artifacts") {
+      for (const listener of worldArtifactListeners) listener(event);
     }
     if (event.type === "world-chat.media-opened") {
       for (const listener of worldChatMediaListeners) listener(event);

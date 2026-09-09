@@ -273,6 +273,8 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 };
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
+import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
+import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -294,6 +296,11 @@ import {
  * enough for an ordinary session in one pass, short enough that nobody waits on it.
  */
 const BENCH_POSTER_BACKFILL_MS = 5_000;
+/**
+ * The same budget for video artifacts filed before posters existed (issue 1037): drawn before the
+ * open-world snapshot so the Library's first render already has its pictures.
+ */
+const ARTIFACT_POSTER_BACKFILL_MS = 5_000;
 
 /** Stable per candidate revision, so a retried handoff reopens instead of creating duplicates. */
 function mediaSessionId(candidateId: string, revision: number): SessionId {
@@ -347,7 +354,7 @@ import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./wor
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
-import { WorldOpenError } from "./world/scan.js";
+import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
@@ -3053,6 +3060,10 @@ export class Coordinator {
         finally { await this.refreshConversations(store); }
       });
     }
+    // Video artifacts filed before posters existed get their pictures now, before the snapshot
+    // (issue 1037): the Library's `Portrait` remembers a failed decode per URL, so a poster drawn
+    // a moment after the rows render would sit on disk unseen until the screen was rebuilt.
+    if (store && !wasAlreadyOpen) await this.backfillArtifactPosters(store);
     this.emit({ at: new Date().toISOString(), type: "world.opened", worldId });
     // The bundle itself travels as a fresh snapshot — a world is small enough to re-send (D4).
     this.transport.broadcastSnapshot();
@@ -12070,6 +12081,10 @@ export class Coordinator {
           try {
             const failures = await importEditorMedia(store, chosen, msg.editor, {
               ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
               ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
               abandoned: () => !this.stillOpen(store) || this.stopping,
             });
@@ -12082,6 +12097,8 @@ export class Coordinator {
           return;
         }
         const failures: Array<{ index: number; reason: string }> = [];
+        // Posters share one budget across the batch, as the editor import's do (issue 1037).
+        const posterDeadline = Date.now() + IMPORT_POSTER_BUDGET_MS;
         for (const [index, sourcePath] of chosen.entries()) {
           if (!this.stillOpen(store)) return;
           if (sourcePath === null) { failures.push({ index, reason: `File ${index + 1}: this drop has no local file; save it to disk and import it again` }); continue; }
@@ -12119,6 +12136,15 @@ export class Coordinator {
               sizeBytes: outcome.outcome === "needs-consent" ? outcome.sizeBytes : null,
               production: msg.production ?? null,
             });
+            continue;
+          }
+          // Its picture, before the snapshot that lists it (issue 1037); best-effort, like a take's,
+          // and within what is left of the batch's budget — the next open draws the rest.
+          const posterMs = posterDeadline - Date.now();
+          if (posterMs > 0) {
+            await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
+              void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
+            }, { timeoutMs: posterMs });
           }
         }
         // Filing completes locally. The counts tell the client whether to report success, a mixed
@@ -12277,6 +12303,83 @@ export class Coordinator {
         } catch (error) {
           this.emit({ at: this.nowIso(), type: "reference.images", requestId: msg.requestId, slug: msg.slug, images: [],
             error: error instanceof Error ? error.message : "Images could not be read." });
+        }
+        return;
+      }
+      /*
+       * Another world's shelf, for the Cut's Library (issue 1033). Read, never opened: the open
+       * store answers for its own world, and any other world is scanned from its directory the
+       * way the reference picker lists its images. Names, kinds, lengths and pictures travel;
+       * no path does.
+       */
+      case "browse-world-artifacts": {
+        try {
+          const source = await this.borrowSource(msg.slug);
+          if (source === null) throw new Error("That world is unavailable.");
+          const artifacts = await listBorrowableArtifacts(source.bundle, source.dir);
+          this.emit({ at: this.nowIso(), type: "world.artifacts", requestId: msg.requestId, slug: msg.slug, artifacts });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "world.artifacts", requestId: msg.requestId, slug: msg.slug, artifacts: [],
+            error: error instanceof Error ? error.message : "That world could not be read." });
+        }
+        return;
+      }
+      /*
+       * Copy files from another world into this one (issue 1033), as the reference picker borrows
+       * an image (#972). The source world's own media guard resolves each file — a registered
+       * world, a file inside its `artifacts/`, a kind the route serves — and the bytes then go
+       * through ordinary filing, deduplicated by hash, with `world:<slug>` as their provenance,
+       * before being listed or placed exactly as an upload would be.
+       */
+      case "borrow-artifacts": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        // Everything from here answers the queue request, whatever fails: a source world that
+        // cannot be read mid-copy must not leave the Cut waiting on an import that never answers.
+        try {
+          const source = await this.borrowSource(msg.slug);
+          if (source === null || source.world.worldId === msg.worldId) {
+            this.rejectEnqueue(msg.requestId, msg.kind, "That world is unavailable.");
+            return;
+          }
+          // Checked against the shelf as it is now, not as it was browsed: a file retired or
+          // scoped to a production since then is no longer offered, whatever the row still says.
+          const offered = new Set((await listBorrowableArtifacts(source.bundle, source.dir)).map((row) => row.file));
+          const failures: Array<{ index: number; reason: string }> = [];
+          const sources: string[] = [];
+          const origins: number[] = [];
+          for (const [index, file] of msg.files.entries()) {
+            const path = offered.has(file) ? await resolveBorrowedFile(source.dir, file) : null;
+            if (path === null) {
+              failures.push({ index, reason: `${file}: no longer offered by ${source.world.name}` });
+              continue;
+            }
+            sources.push(path);
+            origins.push(index);
+          }
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `world:${msg.slug}`,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          // The destination store itself, not a reload by id: a world opened since the copy
+          // began would be closed and this one reopened underneath it (`refreshIfStillOpen`).
+          this.refreshIfStillOpen(store);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          this.refreshIfStillOpen(store);
         }
         return;
       }
@@ -14264,6 +14367,37 @@ export class Coordinator {
    * what it can and the rest next time, which is self-healing and never a session that will not
    * open; and once drawn, every later open finds them all and does nothing at all.
    */
+  /**
+   * A world's shelf as the Library borrows from it (issue 1033): the open store's own bundle for
+   * its world, a scan of the directory for any other. Null when the world is not registered or
+   * cannot be reached without opening it.
+   */
+  private async borrowSource(slug: string) {
+    const world = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === slug);
+    if (!world) return null;
+    const open = this.opts.provider.openStore?.();
+    if (open && open.worldId === world.worldId) return { world, bundle: open.getBundle(), dir: open.dir };
+    if (!this.opts.provider.worldDir) return null;
+    const dir = await this.opts.provider.worldDir(world.worldId);
+    return { world, bundle: (await scanWorld(dir)).bundle, dir };
+  }
+
+  /** The artifact shelf's pictures, on the same terms as the bench's (issue 1037). */
+  private async backfillArtifactPosters(store: WorldStore): Promise<void> {
+    if (this.opts.takePosterMaker === undefined) return;
+    try {
+      await backfillArtifactPosters(store, this.opts.takePosterMaker, {
+        budgetMs: ARTIFACT_POSTER_BACKFILL_MS,
+        stillOpen: () => this.stillOpen(store) && !this.stopping,
+        onUnavailable: (artifactId, reason) => {
+          void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, backfill: true, reason });
+        },
+      });
+    } catch {
+      // A world whose pictures cannot be drawn is a world that opens exactly as it did before.
+    }
+  }
+
   private async backfillBenchPosters(store: WorldStore, session: BenchSession): Promise<void> {
     await backfillPosters(
       session.takes.flatMap((take) =>
@@ -14392,6 +14526,11 @@ export class Coordinator {
       });
       return null;
     }
+    // Its picture, on this path too (issue 1037): `Copy it anyway` files a large video here, and
+    // a poster owed only to the first attempt would wait for the next open's backfill.
+    await writeArtifactPoster(store, outcome.artifact, this.opts.takePosterMaker, (reason) => {
+      void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId: outcome.artifact.id, reason });
+    });
     this.emit({
       at: new Date().toISOString(),
       type: "artifact.attached",
