@@ -316,6 +316,41 @@ describe("the Library (SPEC-039 T-3)", () => {
     }
   });
 
+  it("requests the same thumbnail path in a different borrowed world after a failure (#1062)", async () => {
+    const state = stateWithBells();
+    for (const slug of ["original", "clone"]) state.worlds.push({
+      ...state.worlds[0]!, worldId: slug === "original" ? "01J8F3K2QW9VZX4N7M0RTYB6ZY" : "01J8F3K2QW9VZX4N7M0RTYB6ZZ", slug, name: slug,
+    });
+    const screen = await mount(state);
+    try {
+      // An immediate reply keeps the keyed row mounted across the shelf switch.
+      __setBridgeForTest({ ...bridge(screen.sent), send(json: string) {
+        const message = JSON.parse(json) as ClientMessage;
+        screen.sent.push(message);
+        if (message.kind === "browse-world-artifacts") __applyEventForTest({
+          type: "world.artifacts", at: "2026-09-09T12:00:00Z", requestId: message.requestId, slug: message.slug,
+          artifacts: [{ id: "ar_01J8G0000000000000000000B9", kind: "image", file: "plate.png", name: "Plate", picture: "artifacts/plate.png" }],
+        });
+      } });
+      const choose = async (slug: string) => act(async () => {
+        const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+        [...select.querySelectorAll("option")].find((option) => option.value === slug)!.selected = true;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await choose("original");
+      const row = screen.container.querySelector('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]')!;
+      const picture = row.querySelector("img")!;
+      assert.match(picture.getAttribute("src")!, /\/media\/original\/artifacts\/plate.png/);
+      await act(async () => picture.dispatchEvent(new Event("error")));
+      assert.equal(row.querySelector("img"), null, "the original world uses its fallback");
+      await choose("clone");
+      assert.equal(screen.container.querySelector('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]'), row);
+      assert.match(row.querySelector("img")?.getAttribute("src") ?? "", /\/media\/clone\/artifacts\/plate.png/);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("drops a shot-only filter when the production shown has no shots", async () => {
     const state = stateWithBells();
     const screen = await mount(state);

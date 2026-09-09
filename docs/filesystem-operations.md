@@ -70,6 +70,7 @@ also creates the lock and derived index files described below.
 | Operation | Creates, changes, or removes |
 |---|---|
 | Open read-write | Recovers `W\.commit\`, creates `W\world.lock`, creates or replaces `W\.index\scan-state.json`, and opens `W\.index\world.db`. The lock timestamp is refreshed while open. |
+| Backfill artifact posters | Draws video posters under `W\.index\posters\` and atomically replaces `W\.index\poster-backfill.cursor` after each attempt, including failures. The deletable cursor lets later videos have the next open's full extraction budget. |
 | Close | Replaces `W\.index\scan-state.json`, closes SQLite, and removes `W\world.lock`. |
 | Delete index manually | Deleting `W\.index\` or anything under `R\.index\` removes caches only. The next open or checkpoint verification rebuilds them from durable files. |
 | Reconcile external edit | Recommits, versions, snapshots, and logs changed versioned files. Logs unversioned changes. A file deleted outside the app remains deleted and gains a `deleted: true` change line. |

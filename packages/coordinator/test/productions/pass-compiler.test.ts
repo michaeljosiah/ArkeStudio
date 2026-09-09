@@ -233,7 +233,8 @@ describe("the pass compiler (issue 398)", () => {
     const overlapping = { ...timed, spine: { ...timed.spine, anchors: { ...timed.spine.anchors,
       [otherShot.id]: { startSec: 1, endSec: 2, clipAudio: { mode: "mute" as const } } } } };
     const conflict = planScene({ world: bundle.meta, sheets: bundle.sheets, kits: [], scene, selections: {}, model: WAN_LIKE, timingProduction: overlapping }, "whole-scene");
-    assert.throws(() => compilePasses({ productionId: production.meta.id, scene, plan: conflict, model: WAN_LIKE, world: bundle }), /overlap across the production/);
+    // Worded for the refusal callout (SPEC-044 R-25): shots by number, and a shot of no scene here by what it is.
+    assert.throws(() => compilePasses({ productionId: production.meta.id, scene, plan: conflict, model: WAN_LIKE, world: bundle }), /a shot elsewhere and shot 1 · overlap on the Cut · fix the timing first/);
 
   });
 

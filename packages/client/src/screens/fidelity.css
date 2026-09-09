@@ -7536,7 +7536,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 
 /* Stage — a derived three.js block and an authored-camera playblast, not another shot editor. */
 /* The Stage — a greybox previs of one shot: viewport, panel, timeline (the design's Stage tab). */
-.fy-swstage { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 11px; overflow: hidden; }
+.fy-swstage { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 11px; overflow: auto; }
 .fy-swstage--empty { align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
 .fy-swstage__head { flex: none; display: flex; align-items: center; gap: 8px; }
 .fy-swstage__head > strong { font: 600 12.5px var(--font-sans); letter-spacing: -0.01em; }
@@ -7545,10 +7545,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__step:disabled { opacity: .35; cursor: default; }
 .fy-swstage__meta { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--neutral-400); font: 400 10px var(--font-mono); }
 .fy-swstage__version { color: var(--neutral-400); font: 400 10px var(--font-mono); }
-.fy-swstage__work { flex: 1; min-height: 320px; display: flex; gap: 12px; }
+/* The canvas takes the remaining height; its old floor pushed the transport below the clip. */
+.fy-swstage__work { flex: 1; min-height: 0; display: flex; gap: 12px; }
 /* The gradient is the design's, and it is a fixed light ground on purpose: the ink lines, the
    grid and the labels are drawn in fixed dark values, so the previs reads the same in both themes. */
-.fy-swstage__viewport { flex: 1; min-width: 0; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: linear-gradient(180deg, var(--neutral-100) 0%, var(--neutral-200) 62%, var(--neutral-300) 100%); }
+.fy-swstage__viewport { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-card); background: linear-gradient(180deg, var(--neutral-100) 0%, var(--neutral-200) 62%, var(--neutral-300) 100%); }
 .fy-swstage__canvas { position: absolute; inset: 0; }
 .fy-swstage__canvas canvas { touch-action: none; }
 .fy-swstage__empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; color: var(--muted-foreground); font-size: 12px; }
@@ -8329,7 +8330,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 
 .fy-worldcard__empty { display: grid; place-items: center; width: 100%; height: 100%; border-radius: 10px; background: var(--muted); color: var(--muted-foreground); font: 400 13px var(--font-sans); }
 
-.fy-swstage__construction { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; }
+.fy-swstage__construction { flex: none; display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; align-items: center; }
 .fy-swstage__construction input { flex: 1; min-width: 180px; }
 .fy-swstage__construction > span { font-size: 11px; opacity: .7; }
 .fy-swstage__construction details { width: 100%; }
