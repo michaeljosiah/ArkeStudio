@@ -344,7 +344,7 @@ async function candidateFor(
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
-        ? stagingRetimed(current.staging, command.change.durationSec)
+        ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;
       const change = retimed === undefined || retimed === current?.staging
         ? command.change

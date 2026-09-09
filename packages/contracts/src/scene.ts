@@ -159,8 +159,15 @@ export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
 export const StageRigSchema = z.enum(["sticks", "dolly", "steadicam", "handheld", "crane", "drone", "car-mount"]);
 export type StageRig = z.infer<typeof StageRigSchema>;
 
+export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
+export type StageGait = z.infer<typeof StageGaitSchema>;
+
 export const StagePerformanceKeySchema = z.object({
   t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
+  gait: StageGaitSchema.optional(),
+  easeIn: z.number().min(0).max(.5).optional(),
+  easeOut: z.number().min(0).max(.5).optional(),
+  hold: z.number().finite().nonnegative().optional(),
   y: z.number().finite().optional(), facing: z.number().finite().optional(),
   pose: z.enum(["stand", "sit", "lie"]).optional(),
 }).strict();
@@ -171,6 +178,7 @@ export const StagePerformanceSchema = z.object({
 export type StagePerformance = z.infer<typeof StagePerformanceSchema>;
 export const StageObjectMotionSchema = z.object({
   group: SlugSchema,
+  maxSpeed: z.number().finite().positive().optional(),
   keys: z.array(z.object({ t: z.number().finite().nonnegative(), p: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]), rotation: z.tuple([z.number().finite(),z.number().finite(),z.number().finite()]).optional(), easeIn: z.number().min(0).max(1).optional(), easeOut: z.number().min(0).max(1).optional() }).strict()).min(1).max(120),
 }).strict();
 export type StageObjectMotion = z.infer<typeof StageObjectMotionSchema>;

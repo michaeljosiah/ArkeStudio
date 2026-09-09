@@ -1,4 +1,4 @@
-import { sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
+import { stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
   BoxGeometry,
   Color,
@@ -1353,13 +1353,10 @@ export class StageViewport {
           const blocked=ray.intersectObjects(this.setMeshes.filter(mesh=>(mesh.material as MeshStandardMaterial).opacity===1),false)[0];
           observations.push(`${walker.userData["sheetId"]}: screen (${projected.x.toFixed(2)}, ${projected.y.toFixed(2)}) where -1..1 is inside frame, distance ${distance.toFixed(2)}m${Math.abs(projected.x)>1||Math.abs(projected.y)>1||projected.z>1?"; outside frame":""}${blocked?`; sightline intersects ${blocked.object.userData["label"]}`:""}.`);
         }
-        for(const member of this.data.cast) {
-          const figure={...member,parent:undefined,pose:member.pose??undefined,to:member.to?[...member.to] as [number,number]:undefined};
-          const before=stageFigureAt(figure,this.data.performances,Math.max(0,at-.02),this.data.durationSec);
-          const after=stageFigureAt(figure,this.data.performances,Math.min(this.data.durationSec,at+.02),this.data.durationSec);
-          const speed=Math.hypot(after.x-before.x,after.y-before.y,after.z-before.z)/(at===0||at===this.data.durationSec ? .02 : .04);
-          if(speed>2.2) observations.push(`${member.sheetId}: local motion ${speed.toFixed(2)}m/s, faster than a walk. Check whether running or fast action was intended.`);
-        }
+        observations.push(...stageSpeedWarnings({
+          cast: this.data.cast.map(member => ({ ...member, pose: member.pose ?? undefined, to: member.to ? [...member.to] : undefined })),
+          performances: this.data.performances, objectMotions: this.data.objectMotions,
+        }, id => this.data.cast.find(member => member.sheetId === id)?.name ?? id, this.data.durationSec));
         for(const mesh of this.setMeshes) if(new Box3().setFromObject(mesh).containsPoint(eye)) observations.push(`Camera intersects the bounds of ${mesh.userData["label"]}; inspect for intentional placement or clipping.`);
         result.push({ at, view: "camera", observations:observations.slice(0,40), png: canvas.toDataURL("image/png").split(",")[1]! });
       }

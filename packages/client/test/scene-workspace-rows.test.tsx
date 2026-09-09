@@ -322,3 +322,19 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
     assert.deepEqual(command.command, { kind: "move-board-boundary", fromShotId: "sh_13", toShotId: "sh_14" });
   });
 });
+
+it("shows the advisory 180-degree marker on the shot row and Flow staging node (#1045)", async () => {
+  const state = structuredClone(FIXTURE_STATE);
+  const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+  const shot = orderedShots(scene)[0]!;
+  shot.durationSec = 4;
+  shot.staging = { version: 1, cast: [{ sheetId: "alice", x: -1, z: 0 }, { sheetId: "bob", x: 1, z: 0 }], sets: [],
+    keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }],
+  };
+  const mounted = await mountState(state);
+  const marker = q(mounted, '.fy-swrow__titleline [title^="180° line:"]');
+  assert.equal(marker?.textContent, "180° line");
+  assert.match(marker?.getAttribute("title") ?? "", /crosses/);
+  await click(byText(mounted.container, "Flow"));
+  assert.equal(q(mounted, '.fy-swnode[data-kind="block"] [title^="180° line:"]')?.textContent, "180° line");
+});

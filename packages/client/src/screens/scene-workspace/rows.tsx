@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   assemblePrompt,
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
+  stageLineCrossings,
   orderedShots,
   productionShape,
   promptFor,
@@ -153,6 +154,7 @@ export function StoryboardRows({
   onRenderBoard: (memberShotIds: string[]) => void;
 }) {
   const shots = orderedShots(scene);
+  const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
   const { subject, select } = useWorkspaceSelection();
   const current = selectedShotId(subject);
   const rowBands = useRef(new Map<string, HTMLDivElement>());
@@ -324,6 +326,7 @@ export function StoryboardRows({
                 />
               ) : null}
               <Row
+                lineWarning={lineFindings.filter(finding => finding.shotIds.includes(shot.id)).map(finding => finding.message).join("\n")}
                 shot={shot}
                 prevShotId={shots[shots.indexOf(shot) - 1]?.id ?? null}
                 nextShotId={shots[shots.indexOf(shot) + 1]?.id ?? null}
@@ -721,6 +724,7 @@ function BoardBand({
 }
 
 function Row({
+  lineWarning,
   shot,
   scene,
   world,
@@ -757,6 +761,7 @@ function Row({
   prevShotId,
   nextShotId,
 }: {
+  lineWarning: string;
   shot: Shot;
   scene: SceneRecord;
   world: WorldBundle;
@@ -1263,6 +1268,7 @@ function Row({
         <div className="fy-swrow__titleline">
           <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
           <span className="fy-swchip" data-state={state}>{CHIP[state]}<span aria-hidden="true" /></span>
+          {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
           {shot.staging?.playblast === undefined ? null : (
             <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
           )}
