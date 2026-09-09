@@ -1,8 +1,9 @@
-import { lstat, mkdir, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { ARTIFACT_POSTER_DIR, artifactPosterPath, type ArtifactSidecar } from "@arke-studio/contracts";
 import { writePosterFor, type TakePosterMaker, type TakePosterUnavailableReason } from "../takes/poster.js";
 import { toExtendedLength } from "../world/paths.js";
+import { atomicWriteFile } from "../world/atomic.js";
 import type { WorldStore } from "../world/store.js";
 import { containedArtifactFile, ownDirectory } from "./contained.js";
 
@@ -129,9 +130,9 @@ const BACKSTOP_MS = 1_000;
 export const IMPORT_POSTER_BUDGET_MS = 20_000;
 
 /**
- * Draw the pictures video artifacts filed before posters existed, oldest first, until the budget
- * runs out. Bounded by wall clock for the reason the bench pass is: a world with forty clips
- * draws what it can and the rest next time, and once drawn every later open costs one stat each.
+ * Draw missing artifact pictures until the budget runs out, resuming after the last attempt.
+ * The cursor is a deletable index hint: failed videos also advance it, so even a long corrupt
+ * prefix cannot starve later videos. Each attempt can use the remaining budget in full.
  */
 export async function backfillArtifactPosters(
   store: WorldStore,
@@ -143,14 +144,31 @@ export async function backfillArtifactPosters(
     onUnavailable?: (artifactId: string, reason: TakePosterUnavailableReason) => void;
   },
 ): Promise<number> {
-  if (maker === undefined) return 0;
+  if (maker === undefined || store.isClosed() || options.stillOpen?.() === false || options.budgetMs <= 0) return 0;
   const now = options.now ?? Date.now;
   const deadline = now() + options.budgetMs;
+  const artifacts = store.getBundle().artifacts.filter(wantsArtifactPoster);
+  if (artifacts.length === 0) return 0;
+  let cursor: string | null = null;
+  let nextId = "";
+  try {
+    await mkdir(toExtendedLength(join(store.dir, ".index")), { recursive: true });
+    if (await ownDirectory(store.dir, ".index")) {
+      const path = join(store.dir, ".index", "poster-backfill.cursor");
+      const entry = await lstat(toExtendedLength(path)).catch(() => null);
+      if (entry === null || entry.isFile()) {
+        cursor = path;
+        if (entry !== null && entry.size <= 128) nextId = (await readFile(toExtendedLength(path), "utf8")).trim();
+      }
+    }
+  } catch { /* A missing or invalid cache never prevents the world opening. */ }
+  const start = Math.max(0, artifacts.findIndex(artifact => artifact.id === nextId));
   let drawn = 0;
-  for (const artifact of store.getBundle().artifacts) {
+  for (let offset = 0; offset < artifacts.length; offset += 1) {
+    const index = (start + offset) % artifacts.length;
+    const artifact = artifacts[index]!;
     // Retired ones included: retirement keeps the bytes for the cuts that cite them (#957), and a
     // clip that still does asks for the picture like any other.
-    if (!wantsArtifactPoster(artifact)) continue;
     const remaining = deadline - now();
     if (remaining <= 0 || options.stillOpen?.() === false || store.isClosed()) break;
     const output = join(store.dir, ...ARTIFACT_POSTER_DIR.split("/"), `${artifact.id}.png`);
@@ -158,19 +176,24 @@ export async function backfillArtifactPosters(
     /*
      * The budget binds the wait, not only the start. A maker stuck on a corrupt file has its own
      * timeout, fifteen seconds, and the open this pass sits in front of would otherwise wait it
-     * out. So the maker is given what is left and stops its process at that — drained, not
+     * out. The maker gets the remaining budget and stops its process at that — drained, not
      * abandoned to draw into a world that may have closed — and a maker that ignores the figure
      * is left behind at a backstop a second later. The backstop timer stays referenced on
      * purpose: against a maker that never settles it is the only thing keeping the loop alive,
      * and Node 22 resolves an empty loop out from under the await.
      */
     let backstop: ReturnType<typeof setTimeout> | undefined;
+    const timeoutMs = remaining;
     const outcome = await Promise.race([
-      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs: remaining }),
-      new Promise<null>((resolve) => { backstop = setTimeout(() => resolve(null), remaining + BACKSTOP_MS); }),
+      writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason), { timeoutMs }),
+      new Promise<null>((resolve) => { backstop = setTimeout(() => resolve(null), timeoutMs + BACKSTOP_MS); }),
     ]);
     // A maker that won leaves no timer behind to hold the process — or a test — open after it.
     clearTimeout(backstop);
+    if (cursor !== null && !store.isClosed() && options.stillOpen?.() !== false && await ownDirectory(store.dir, ".index")) {
+      // Atomic replacement cannot write through a cursor-file link introduced during the pass.
+      await atomicWriteFile(cursor, artifacts[(index + 1) % artifacts.length]!.id).catch(() => undefined);
+    }
     if (outcome === null) break;
     if (outcome) drawn += 1;
   }
