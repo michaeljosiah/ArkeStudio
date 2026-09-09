@@ -75,8 +75,14 @@
   cursor: pointer;
   transition: var(--transition-control);
 }
-.ui-iconbtn:hover {
+.ui-iconbtn:hover:not(:disabled) {
   background: var(--accent);
+}
+/* A glyph carries a verb, so an unavailable one has to look unavailable — the text button it
+   replaced said so through `.ui-btn:disabled` (issue 1010). */
+.ui-iconbtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 /* ---- Inputs ------------------------------------------------ */
@@ -102,6 +108,102 @@
   min-height: calc(var(--space-16) + var(--space-12));
   line-height: var(--leading-normal);
   resize: vertical;
+}
+
+/* ---- Select and checkbox (issue 1010) ----------------------- */
+/* The chevron is drawn, so the control must reserve the room the platform's button used to take
+   and then refuse pointer events over it — a click on the glyph still opens the list. */
+.ui-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.ui-select > svg {
+  position: absolute;
+  right: var(--space-2);
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.ui-select__control {
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  padding: var(--control-pad-y) var(--space-7) var(--control-pad-y) var(--space-3);
+  border-radius: var(--radius-control);
+  border: var(--border-1) solid var(--input);
+  background: var(--background);
+  color: var(--foreground);
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: var(--transition-control);
+}
+.ui-select__control:hover:not(:disabled) {
+  background: var(--accent);
+}
+.ui-select__control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: var(--shadow-focus);
+}
+.ui-select__control:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
+.ui-check {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+/* Read from the input, not from a prop: a `<fieldset disabled>` disables everything inside it
+   without any of them being passed `disabled`, and the panels that wrap these in one are exactly
+   where a checkbox that looks live and does nothing is most misleading (issue 1010). */
+.ui-check:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+.ui-check__box {
+  position: relative;
+  flex: none;
+  width: var(--space-4);
+  height: var(--space-4);
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  border: var(--border-1) solid var(--input);
+  background: var(--background);
+  color: transparent;
+  transition: var(--transition-control);
+}
+/* The real input stays, invisible and exactly the size of the box: it keeps the label click,
+   the keyboard, and the form semantics that a div pretending to be a checkbox loses. */
+.ui-check__box input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.ui-check__box:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.ui-check__box:has(input:focus-visible) {
+  border-color: var(--ring);
+  box-shadow: var(--shadow-focus);
+}
+.ui-check__label {
+  font: var(--type-ui);
+  font-weight: var(--weight-regular);
+  color: var(--foreground);
 }
 
 /* ---- Switch ------------------------------------------------ */

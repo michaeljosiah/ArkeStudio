@@ -17,7 +17,8 @@ import {
 import { resolveModel } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
-import { Button, Callout, cx } from "../components/ui.js";
+import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
@@ -294,14 +295,16 @@ export function CharacterReferenceScreen() {
               <h2>Main photo</h2>
               <p>the face and physical identity to preserve</p>
             </div>
-            <Button
-              variant="ghost"
+            {/* Every card carried the same pair of words (issue 1010, U1). Upload is the quiet
+                half — a file from this computer, nothing generated — so it becomes the glyph and
+                the card keeps one named button. */}
+            <IconButton
+              label={photoUploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
               disabled={!canUpload || photoUploading}
-              title={canUpload ? "Use an image from this computer — nothing is generated" : UPLOAD_UNAVAILABLE}
               onClick={() => importMainPhoto(world.meta.worldId, sheetId)}
             >
-              {photoUploading ? "Uploading…" : "Upload"}
-            </Button>
+              {photoUploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             <Button onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/main-photo`)}>
               {photo ? "Replace" : "Create"}
             </Button>
@@ -345,20 +348,21 @@ export function CharacterReferenceScreen() {
                 world's identity anchor nothing, and waiting on one would be a rule with no
                 purpose behind it. Gated on a generation in flight, though — that one designates
                 itself when it lands, and would quietly replace a sheet uploaded while it ran. */}
-            <Button
-              variant="ghost"
-              disabled={!canUpload || runningSheet || sheetUploading}
-              title={
-                !canUpload
-                  ? UPLOAD_UNAVAILABLE
-                  : runningSheet
-                    ? "A generated sheet is on its way and will take this slot when it lands"
-                    : "Use a composite from this computer — nothing is generated"
+            <IconButton
+              label={
+                sheetUploading
+                  ? "Uploading…"
+                  : !canUpload
+                    ? UPLOAD_UNAVAILABLE
+                    : runningSheet
+                      ? "A generated sheet is on its way"
+                      : "Upload"
               }
+              disabled={!canUpload || runningSheet || sheetUploading}
               onClick={() => importCharacterSheet(world.meta.worldId, sheetId)}
             >
-              {sheetUploading ? "Uploading…" : "Upload"}
-            </Button>
+              {sheetUploading ? <Loading inline size={13} /> : <Upload />}
+            </IconButton>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
             </Button>
