@@ -3,7 +3,25 @@ import { it } from "node:test";
 import { PerspectiveCamera, Vector3 } from "three";
 import { stageFixtures } from "./fixtures/stage-scenes.js";
 import { sampleStageCamera, stageObjectAt, stageLocalPoint, stageCameraKeyAt } from "../src/stage-camera.js";
-import { stageProblems, stageFigureAt, stagingRetimed, stagingFov, stagingMotionWord } from "../src/staging.js";
+import { stageProblems, stageFigureAt, stagingRetimed, stagingFov, stagingMotionWord, type ResolvedShotStaging } from "../src/staging.js";
+
+it("admits late action starts while rejecting times outside the shot (#1041)", () => {
+  const stage: ResolvedShotStaging = {
+    version: 1, cast: [{ sheetId: "actor", x: 0, z: 0 }],
+    sets: [{ name: "Cart", group: "cart", x: 0, z: 0, w: 1, h: 1, d: 1 }],
+    keys: [{ t: 0, p: [0, 1, 3], l: [0, 1, 0] }, { t: 4, p: [1, 1, 3], l: [0, 1, 0] }],
+    performances: [{ sheetId: "actor", keys: [{ t: 1, x: 2, z: 0 }, { t: 3, x: 4, z: 0 }] }],
+    objectMotions: [{ group: "cart", keys: [{ t: 2, p: [1, 0, 0] }, { t: 4, p: [3, 0, 0] }] }],
+  };
+  assert.deepEqual(stageProblems(stage, 4), []);
+  assert.equal(stageFigureAt(stage.cast[0]!, stage.performances, 0, 4).x, 2);
+  assert.deepEqual(stageObjectAt(stage.objectMotions, "cart", 0).p, [1, 0, 0]);
+  stage.performances![0]!.keys[0]!.t = -1;
+  stage.objectMotions![0]!.keys[1]!.t = 5;
+  const problems = stageProblems(stage, 4).join(" ");
+  assert.match(problems, /Performance keys/);
+  assert.match(problems, /Object motion/);
+});
 
 it("keeps fixture subjects in frame through camera and independently timed action", () => {
   for (const { name, duration, stage } of stageFixtures) {

@@ -657,7 +657,7 @@ export function SceneStage({
     const target = event.target as HTMLElement;
     if (frozen || working === null || event.altKey || event.ctrlKey || event.metaKey ||
       target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
-    if (event.key === " " && target.closest('button, [role="button"]')) return;
+    if (event.key === " " && target.closest('button, summary, [role="button"]')) return;
     if (event.key === " ") { if (!event.repeat) toggle(); }
     else if (event.key === "ArrowLeft") seekTime(at - 1 / STAGE_FRAME_RATE);
     else if (event.key === "ArrowRight") seekTime(at + 1 / STAGE_FRAME_RATE);
@@ -839,8 +839,8 @@ export function SceneStage({
     rigIntensity: Math.max(0, Math.min(2, round((current.rigIntensity ?? 1) + delta))),
   }));
   const selLabel =
-    motionMark?.kind === "object"
-      ? motionMark.id
+    motionMark !== null
+      ? `${motionMark.kind === "object" ? motionMark.id : nameOf(motionMark.id)} · mark ${motionMark.index + 1}`
       : selection === null
       ? "nothing selected"
       : selection.kind === "rig"
@@ -951,7 +951,7 @@ export function SceneStage({
             <p className="fy-swstage__note">Stage the shot to place the cast, put down the set and start a camera move.</p>
           ) : (
             <>
-              <div className="fy-swstage__sel" data-selected={selection === null ? undefined : "true"} title="Click to select · drag the axis arrows to move it · in Camera view drag to pan and tilt · middle or right drag orbits the view">
+              <div className="fy-swstage__sel" data-selected={selection === null && motionMark === null ? undefined : "true"} title="Click to select · drag the axis arrows to move it · in Camera view drag to pan and tilt · middle or right drag orbits the view">
                 <span aria-hidden="true" />
                 <span>{selLabel}</span>
               </div>

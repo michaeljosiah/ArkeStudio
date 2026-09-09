@@ -3,7 +3,7 @@ import { afterEach, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { orderedShots, STAGE_FRAME_RATE, type ClientMessage, type Shot } from "@arke-studio/contracts";
+import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type Shot } from "@arke-studio/contracts";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
 import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -165,7 +165,7 @@ function movingShot(shot: Shot) {
 }
 
 it("selects timed marks, retimes within neighbours, and Keeps the same performance/object tracks (#1041)", async () => {
-  const { q, sent } = await mount(movingShot);
+  const { q, sent, scene } = await mount(movingShot);
   const performance = q('[data-key-track="performance"]');
   const object = q('[data-key-track="object"]');
   assert.equal(performance.querySelectorAll("button").length, 2);
@@ -176,6 +176,8 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
   assert.ok(q('[data-motion-mark="selected"]').closest("details")!.open);
   assert.match(q(".fy-swstage__sel").textContent ?? "", /Maren/);
+  assert.equal((await key(q('[data-motion-mark="selected"]').closest("details")!.querySelector("summary")!, " ")).defaultPrevented, false);
+  assert.ok(q('[aria-label="Play"]'), "Space leaves summary activation to the browser");
   capturePointer(performance);
   capturePointer(first);
   await pointer(first, "pointerdown", 200);
@@ -186,6 +188,8 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   await pointer(first, "pointermove", 225);
   await pointer(first, "pointerup", 225);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1.25", "the first action mark is not pinned");
+  await click(performance.querySelectorAll<HTMLElement>("button")[1]!);
+  assert.match(q(".fy-swstage__sel").textContent ?? "", /Maren Kest · mark 2/);
   const last = object.querySelectorAll<HTMLElement>("button")[2]!;
   capturePointer(object);
   capturePointer(last);
@@ -203,6 +207,7 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   assert.deepEqual(command.staging?.performances?.[0]?.keys, [{ t: 1.25, x: 0, z: 0, pose: "sit" }, { t: 3, x: 2, z: 1 }]);
   assert.deepEqual(command.staging?.objectMotions?.[0]?.keys.map(key => key.t), [0.5, 2, 4]);
   assert.deepEqual(command.staging?.keys.map(key => key.t), [0, 2, 4]);
+  assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...command.staging!, version: 2 }), 4), [], "Keep passes the coordinator's write-boundary validation");
 });
 
 it("scales every lane with the shot and stops an active key drag when frozen (#1041)", async () => {
