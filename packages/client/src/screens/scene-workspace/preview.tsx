@@ -69,8 +69,8 @@ export function scenePreviewSpans(
     const playblast = fresh ? shelf.find(artifact => artifact.id === pin.artifactId && artifact.kind === "video") : undefined;
     const opening = playblast ? shelf.find(artifact => artifact.id === pin!.openingFrameArtifactId && artifact.kind === "image") : undefined;
     const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : playblast ? `artifacts/${playblast.file}` : null;
-    const frame = playblast ? (opening ? `artifacts/${opening.file}` : null)
-      : shotFramePath(production, artifacts, shot.id) ?? (clipPath === null ? null : posterize(clipPath));
+    const frame = opening ? `artifacts/${opening.file}`
+      : shotFramePath(production, artifacts, shot.id) ?? (playblast || clipPath === null ? null : posterize(clipPath));
     const span: PreviewSpan = {
       shot,
       startSec: at,

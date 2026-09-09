@@ -18,6 +18,7 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+export const STAGE_CAMERA_NEAR = .1;
 /** Ordered for admission: an end-frame route receives the pair before optional key/overview stills. */
 export function stageReferenceFrames(keys: readonly { t: number }[], durationSec: number): StageReferenceFrame[] {
   return [
@@ -310,9 +311,12 @@ export function stageShot(
   }));
   const sets = [...locations, ...blocked.flatMap(({ prop }) => prop === null ? [] : [prop])];
   const subject = cast[0]?.sheetId ?? null;
-  const distance = distanceFor(framing?.size, shot.camera, framing?.lens, input.aspect ?? "16:9", input.subjectHeight ?? cast[0]?.height ?? 1.8);
+  const subjectHeight = input.subjectHeight ?? cast[0]?.height ?? 1.8;
+  // Clear the figure volume as well as the near plane; some wide lenses cannot fit an ECU.
+  const minimumDistance = STAGE_CAMERA_NEAR + subjectHeight / 4;
+  const distance = Math.max(minimumDistance, distanceFor(framing?.size, shot.camera, framing?.lens, input.aspect ?? "16:9", subjectHeight));
   const height = heightFor(framing?.angle);
-  const aimHeight = subject === null ? 1.1 : 1.25;
+  const aimHeight = subject === null ? 1.1 : subjectHeight * (1.25 / 1.8);
   const dur = Math.max(0.5, input.durationSec);
   const move = readCameraMove(`${framing?.movement ?? ""} ${shot.camera ?? ""}`);
 
@@ -322,13 +326,13 @@ export function stageShot(
   // `height`, and what follows moves one coordinate at a time.
   const from: [number, number, number] = [0, height, distance];
   const to: [number, number, number] = [0, height, distance];
-  if (move.dolly !== null) to[2] = Math.max(1, distance * move.dolly);
+  if (move.dolly !== null) to[2] = Math.max(minimumDistance, distance * move.dolly);
   if (move.crane !== null) {
     const low = Math.max(0.6, height - 0.6);
     const high = height + 1.4;
     from[1] = move.crane === "up" ? low : high;
     to[1] = move.crane === "up" ? high : low;
-    to[2] = Math.max(1, to[2] * 0.9);
+    to[2] = Math.max(minimumDistance, to[2] * 0.9);
   }
   if (move.truck !== null) {
     // The camera looks down -Z, so +X is its right.
@@ -873,7 +877,7 @@ export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: 
     if (!staging || staging.cast.length < 2 || !staging.keys.length) continue;
     const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
-    const camera = new PerspectiveCamera(fov, ratio, .1, 200);
+    const camera = new PerspectiveCamera(fov, ratio, STAGE_CAMERA_NEAR, 200);
     const cast = [...staging.cast].sort((a, b) => a.sheetId.localeCompare(b.sheetId));
     // Shared blocking naturally has the same value. Identical private copies cover the same
     // action too; a deliberately changed private layout must not be compared with the scene.

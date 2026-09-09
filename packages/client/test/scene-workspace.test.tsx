@@ -1522,6 +1522,14 @@ describe("Preview plays the accepted scene on its authored clock (R-28)", () => 
     shot.staging!.version--;
     delete shot.staging!.playblast!.sourceFingerprint;
     assert.equal(spans()[1]!.blockout, true, "legacy pins use Bench's existing metadata check");
+    artifacts.push({ ...artifacts[0]!, id: "authored", kind: "image", file: "authored.png" });
+    production.selections[shot.id] = { ...production.selections["sh_12"]!, acceptedTakeId: null, startFrameArtifactId: "authored" };
+    const openingId = shot.staging!.playblast!.openingFrameArtifactId;
+    delete shot.staging!.playblast!.openingFrameArtifactId;
+    assert.equal(spans()[1]!.framePath, "artifacts/authored.png", "legacy pins retain the authored poster fallback");
+    shot.staging!.playblast!.openingFrameArtifactId = openingId;
+    artifacts.find(artifact => artifact.id === openingId)!.retiredAt = "2026-09-01T00:00:00Z";
+    assert.equal(spans()[1]!.framePath, "artifacts/authored.png", "retiring the opening frame does not erase the shot's own picture");
     artifacts.find(artifact => artifact.id === "blast-sh_13")!.retiredAt = "2026-09-01T00:00:00Z";
     assert.equal(spans()[1]!.clipPath, null, "retired artifacts are not resurrected by a pin");
   });

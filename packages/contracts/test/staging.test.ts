@@ -7,7 +7,7 @@ import {
   ShotSchema,
   ShotStagingSchema,
   MAX_STAGE_WALK_SPEED_MPS,
-  STAGE_FRAME_RATE,
+  STAGE_FRAME_RATE, STAGE_CAMERA_NEAR,
   stageRigOffset,
   stageRigSeed,
   stageShot,
@@ -37,6 +37,16 @@ const shot = (extra: Partial<Shot>): Shot => ({
 });
 
 describe("the Stage's arithmetic", () => {
+  it("scales the aim for short figures and keeps wide-lens first passes beyond the near plane (#1047)", () => {
+    const small = stageShot(shot({ framing: { size: "close-up", lens: "24mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, subjectHeight: 1 });
+    assert.ok(Math.abs(small.keys[0]!.l[1] - 1.25 / 1.8) < .01);
+    assert.equal(small.keys[0]!.p[1], 1.55, "the angle height table remains unchanged");
+    const wide = stageShot(shot({ framing: { size: "extreme close-up", lens: "1mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(wide.keys.every(key => Math.hypot(key.p[0] - key.l[0], key.p[2] - key.l[2]) >= STAGE_CAMERA_NEAR + 1.8 / 4));
+    const push = stageShot(shot({ framing: { size: "extreme close-up", lens: "24mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(push.keys.at(-1)!.p[2] < push.keys[0]!.p[2], "the former one-metre clamp must not turn a short push into a pull");
+  });
+
   it("stages a shot deterministically from its cast, sets and framing words", () => {
     const first = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
     const again = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
