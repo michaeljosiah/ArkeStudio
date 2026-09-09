@@ -1,4 +1,4 @@
-import { stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
+import { STAGE_CAMERA_NEAR, stageSpeedWarnings, sampleStageCamera, stageObjectAt, stageKeyOffset, stageWorldPoint, stageFigureAt, stagingFocalForFov, stagingFov, type StagePerformance, type StageObjectMotion, type StageInspectionFrame, type StageReferenceFrame, stageReferenceFrames } from "@arke-studio/contracts";
 import {
   BoxGeometry,
   Color,
@@ -285,7 +285,7 @@ export class StageViewport {
   private readonly events: StageEvents;
   private readonly scene = new Scene();
   private readonly renderer: WebGLRenderer;
-  private readonly view = new PerspectiveCamera(38, 1, 0.1, 200);
+  private readonly view = new PerspectiveCamera(38, 1, STAGE_CAMERA_NEAR, 200);
   private readonly shot: PerspectiveCamera;
   private readonly controls: OrbitControls;
   private readonly transform: TransformControls;
@@ -338,7 +338,7 @@ export class StageViewport {
     this.renderer = renderer;
 
     this.view.position.set(4.4, 3.1, 6.4);
-    this.shot = new PerspectiveCamera(data.fov, data.aspect, 0.1, 200);
+    this.shot = new PerspectiveCamera(data.fov, data.aspect, STAGE_CAMERA_NEAR, 200);
 
     const controls = new OrbitControls(this.view, renderer.domElement);
     // LEFT must be null, not a preference: with LEFT bound to ROTATE, OrbitControls takes pointer
@@ -1184,7 +1184,8 @@ export class StageViewport {
     }
   }
 
-  private hideStaging(hidden: boolean): void {
+  private hideStaging(hidden: boolean, capture = this.recordingAt !== null): void {
+    this.host.parentElement?.toggleAttribute("data-stage-capture", capture);
     this.rigGroup.visible = !hidden;
     for (const aid of this.aids) aid.visible = !hidden;
     this.transformHelper.visible = !hidden && this.transform.object !== undefined;
@@ -1333,7 +1334,7 @@ export class StageViewport {
     try {
       for (const at of samples) {
         this.refresh(at);
-        this.hideStaging(true);
+        this.hideStaging(true, true);
         renderer.render(this.scene, this.shot);
         const observations: string[] = [];
         const eye=this.shot.getWorldPosition(new Vector3());

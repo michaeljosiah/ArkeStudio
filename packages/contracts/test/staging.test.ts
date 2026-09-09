@@ -7,7 +7,7 @@ import {
   ShotSchema,
   ShotStagingSchema,
   MAX_STAGE_WALK_SPEED_MPS,
-  STAGE_FRAME_RATE,
+  STAGE_FRAME_RATE, STAGE_CAMERA_NEAR,
   stageRigOffset,
   stageRigSeed,
   stageShot,
@@ -37,6 +37,16 @@ const shot = (extra: Partial<Shot>): Shot => ({
 });
 
 describe("the Stage's arithmetic", () => {
+  it("scales the aim for short figures and keeps wide-lens first passes beyond the near plane (#1047)", () => {
+    const small = stageShot(shot({ framing: { size: "close-up", lens: "24mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, subjectHeight: 1 });
+    assert.ok(Math.abs(small.keys[0]!.l[1] - 1.25 / 1.8) < .01);
+    assert.equal(small.keys[0]!.p[1], 1.55, "the angle height table remains unchanged");
+    const wide = stageShot(shot({ framing: { size: "extreme close-up", lens: "1mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(wide.keys.every(key => Math.hypot(key.p[0] - key.l[0], key.p[2] - key.l[2]) >= STAGE_CAMERA_NEAR + 1.8 / 4));
+    const push = stageShot(shot({ framing: { size: "extreme close-up", lens: "24mm", movement: "push in" } }), { cast: ["maren-kest"], sets: [], durationSec: 4 });
+    assert.ok(push.keys.at(-1)!.p[2] < push.keys[0]!.p[2], "the former one-metre clamp must not turn a short push into a pull");
+  });
+
   it("stages a shot deterministically from its cast, sets and framing words", () => {
     const first = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
     const again = stageShot(shot({ camera: "MCU · slow push-in" }), { cast: ["maren-kest"], sets: ["The Vigil", "Quay", "Harbour"], durationSec: 4 });
@@ -141,6 +151,18 @@ describe("the Stage's arithmetic", () => {
     assert.deepEqual([24, 35, 50, 85, 135].map((mm) => rounded(`${mm}mm`, "9:16")), [42.5, 29.9, 21.1, 12.5, 7.9]);
     assert.equal(stagingFov(undefined, "16:9"), 34);
     assert.ok(stagingFov("1mm", "16:9") > 160, "a valid extreme lens is not clamped");
+  });
+
+  it("keeps each first-pass framed height consistent at 24, 35 and 85mm (#1047)", () => {
+    for (const [size, fraction] of [["ECU", .3], ["CU", .55], ["Medium", .9], ["Wide", 1.5], ["EWS", 2.5]] as const) {
+      for (const mm of [24, 35, 85]) {
+        const staged = stageShot(shot({ framing: { size, lens: `${mm}mm` } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "16:9" });
+        const depth = staged.keys[0]!.p[2] - staged.cast[0]!.z;
+        assert.ok(Math.abs(2 * depth * Math.tan(stagingFov(`${mm}mm`, "16:9") * Math.PI / 360) - 1.8 * fraction) < .006, `${size} at ${mm}mm`);
+      }
+    }
+    const portrait = stageShot(shot({ framing: { size: "CU", lens: "85mm" } }), { cast: ["maren-kest"], sets: [], durationSec: 4, aspect: "9:16", subjectHeight: 2.2 });
+    assert.ok(Math.abs(2 * portrait.keys[0]!.p[2] * Math.tan(stagingFov("85mm", "9:16") * Math.PI / 360) - 2.2 * .55) < .006);
   });
 
   it("plans a fixed-rate, half-open playblast timeline", () => {

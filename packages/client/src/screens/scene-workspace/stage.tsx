@@ -16,6 +16,9 @@ import {
   type StageObjectMotion,
   type StagePerformanceKey,
   stageShot,
+  STAGE_CAMERA_MOVES,
+  stageCameraMove,
+  type StageCameraMove,
   stageMotionSpeeds,
   stageSpeedWarning,
   stagePerformanceDeparture,
@@ -32,6 +35,7 @@ import {
   type StagingSet,
   type WorldBundle,
 } from "@arke-studio/contracts";
+import { StageUnderlay } from "./stage-underlay.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -191,6 +195,7 @@ export function SceneStage({
   const [exporting, setExporting] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
   const handledPlayblastActions = useRef(new Set<string>());
@@ -586,12 +591,14 @@ export function SceneStage({
   const stage = () => {
     const inherited = effectiveStageBlocking(scene, undefined);
     const firstBlock = scene.blocking === undefined
-      ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing })
+      ? stageShot(shot, { cast: sceneCastIds, sets: sceneLocationIds.map(nameOf), durationSec, framing, aspect })
       : null;
     const availableCast = firstBlock?.cast ?? inherited.cast;
     const cameraCastIds = shotCastIds.filter((id) => availableCast.some((figure) => figure.sheetId === id));
     const fresh = stageShot(shot, {
       cast: cameraCastIds,
+      aspect,
+      subjectHeight: availableCast.find(figure => figure.sheetId === cameraCastIds[0])?.height,
       sets: [],
       durationSec,
       framing,
@@ -915,7 +922,7 @@ export function SceneStage({
         {draft?.authorship ? <details><summary>AI inspection and assumptions</summary><p>{draft.authorship.assessment}</p><ul>{draft.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{draft.authorship.model} · {draft.authorship.inspectedFrames} views inspected</small></details> : null}
       </div>
       <div className="fy-swstage__work">
-        <div className="fy-swstage__viewport" data-mode={mode}>
+        <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode}>
           {working === null ? null : <div ref={host} className="fy-swstage__canvas" data-testid="stage-viewport" />}
           {working === null && !busy ? (
             <div className="fy-swstage__empty">
@@ -982,6 +989,19 @@ export function SceneStage({
                   <span>Camera</span>
                   <span>{keyName(active, keys.length)}</span>
                 </div>
+                <label className="fy-swstage__row">Move
+                  <select aria-label="Camera move" value="" disabled={frozen || !working.cast.length} onChange={event => {
+                    const move = event.target.value as StageCameraMove;
+                    if (!STAGE_CAMERA_MOVES.some(candidate => candidate.id === move)) return;
+                    const subjectId = selection?.kind === "cast" || selection?.kind === "walkend" ? selection.sheetId : undefined;
+                    stop();
+                    patchCamera(current => ({ ...current, keys: stageCameraMove(move, current, { durationSec, at, subjectId, lens: framing.lens, aspect }) }));
+                    setAt(0); setKeyIndex(0); setMotionMark(null);
+                  }}>
+                    <option value="">Choose a move…</option>
+                    {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
+                  </select>
+                </label>
                 <div className="fy-swstage__row fy-swstage__row--chips">
                   <span title="Scene blocking is shared by every camera; This shot keeps a private variant">blocking</span>
                   <span className="fy-swstage__chips">
@@ -1056,6 +1076,10 @@ export function SceneStage({
                 ))}
                 <span className="fy-swstage__quiet">{activeKey?.anchor === undefined ? "fixed in the set" : `rides with ${nameOf(activeKey.anchor)}`}</span>
               </div>
+
+              <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
+                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
+                disabled={frozen} onChoose={() => setMode("camera")} />
 
               {working.cast.length === 0 ? null : (
                 <div className="fy-swstage__block">

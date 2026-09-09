@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DEFAULT_SHOT_SEC, resolvedShotStaging, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, stageReferenceFrames, type StageReferenceFrame, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
+import { DEFAULT_SHOT_SEC, stageSourceFingerprintInput, effectiveFraming, productionAspect, MediaInfoSchema, STAGE_FRAME_RATE, stageFrameCount, stageReferenceFrames, type StageReferenceFrame, editShot, effectiveStageBlocking, orderedShots, ulid, stagePlayblastIsStale, type WorldBundle, type ArtifactSidecar, type ShotStaging, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import type { MediaProbe } from "../media/probe.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { imageFormatOf, verifyArtifact } from "../queue/verify.js";
@@ -158,8 +158,7 @@ export async function filePlayblast(
 
 export function stageSourceFingerprint(scene: SceneRecord, shot: Shot, aspect: string): string {
   if (!shot.staging) return "";
-  const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
-  return createHash("sha256").update(JSON.stringify({ staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect })).digest("hex");
+  return createHash("sha256").update(stageSourceFingerprintInput(scene, shot, aspect)).digest("hex");
 }
 
 /** Recheck Stage references at admission and when the queue reads their bytes. */

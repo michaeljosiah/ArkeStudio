@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_SHOT_SEC,
   deriveCut,
+  effectiveFraming,
+  pickableArtifacts,
+  productionAspect,
+  stagePlayblastIsStale,
+  stageSourceFingerprintInput,
   hasOwnFrame,
   orderedShots,
   type ArtifactSidecar,
@@ -11,6 +16,7 @@ import {
   type Shot,
 } from "@arke-studio/contracts";
 import { ImageMark, PauseSolid, PlaySolid, RotateCcw } from "../../components/icons.js";
+import { artifactsForProduction } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
 import { posterize } from "../../lib/poster.js";
 import { onMediaReady, syncMediaElement, useTransport } from "../../lib/playback-engine.js";
@@ -25,6 +31,7 @@ interface PreviewSpan {
   clipInSec: number;
   framePath: string | null;
   framed: boolean;
+  blockout: boolean;
   boardStart: boolean;
 }
 
@@ -40,6 +47,7 @@ export function scenePreviewSpans(
   scene: SceneRecord,
   artifacts: readonly ArtifactSidecar[],
   boards: readonly PackedBoard[],
+  fingerprints: ReadonlyMap<string, string> = new Map(),
 ): PreviewSpan[] {
   const entries = new Map(
     deriveCut(production).entries
@@ -47,20 +55,31 @@ export function scenePreviewSpans(
       .map((entry) => [entry.shot.id, entry]),
   );
   const boardStarts = new Set(boards.slice(1).map((board) => board.memberShotIds[0]));
+  const shelf = pickableArtifacts(artifactsForProduction(artifacts, production.meta.id));
+  const aspect = productionAspect(production.meta);
   let at = 0;
   return orderedShots(scene).map((shot) => {
     const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const entry = entries.get(shot.id);
-    const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : null;
-    const frame = shotFramePath(production, artifacts, shot.id) ?? (clipPath === null ? null : posterize(clipPath));
+    const staging = shot.staging;
+    const pin = staging?.playblast;
+    const fresh = !entry?.take && staging && pin &&
+      !stagePlayblastIsStale(scene, staging, { durationSec, aspect, lens: effectiveFraming(scene, shot).lens }) &&
+      (pin.sourceFingerprint === undefined || fingerprints.get(stageSourceFingerprintInput(scene, shot, aspect)) === pin.sourceFingerprint);
+    const playblast = fresh ? shelf.find(artifact => artifact.id === pin.artifactId && artifact.kind === "video") : undefined;
+    const opening = playblast ? shelf.find(artifact => artifact.id === pin!.openingFrameArtifactId && artifact.kind === "image") : undefined;
+    const clipPath = entry?.take?.kind === "clip" ? (entry.media?.path ?? null) : playblast ? `artifacts/${playblast.file}` : null;
+    const frame = opening ? `artifacts/${opening.file}`
+      : shotFramePath(production, artifacts, shot.id) ?? (playblast || clipPath === null ? null : posterize(clipPath));
     const span: PreviewSpan = {
       shot,
       startSec: at,
       endSec: at + durationSec,
       clipPath,
-      clipInSec: entry?.media?.inSec ?? 0,
+      clipInSec: playblast ? 0 : entry?.media?.inSec ?? 0,
+      blockout: playblast !== undefined,
       framePath: frame,
-      framed: hasOwnFrame(production.selections[shot.id], artifacts) ||
+      framed: opening !== undefined || hasOwnFrame(production.selections[shot.id], artifacts) ||
         production.takes.some((take) =>
           take.id === production.selections[shot.id]?.acceptedTakeId &&
           (take.kind === "frame" || take.kind === "still"),
@@ -98,9 +117,23 @@ export function ScenePreview({
   onEditShot?: (shotId: string) => void;
   onOpenShotInGenerator?: (shotId: string) => void;
 }) {
+  const fingerprintInputs = useMemo(() => [...new Set(orderedShots(scene)
+    .filter(shot => shot.staging?.playblast?.sourceFingerprint !== undefined)
+    .map(shot => stageSourceFingerprintInput(scene, shot, productionAspect(production.meta))))], [scene, production.meta]);
+  const [fingerprints, setFingerprints] = useState<ReadonlyMap<string, string>>(() => new Map());
+  useEffect(() => {
+    let current = true;
+    void Promise.all(fingerprintInputs.map(async input => {
+      const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+      return [input, Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("")] as const;
+    })).then(values => { if (current) setFingerprints(new Map(values)); }).catch(() => {
+      if (current) setFingerprints(new Map()); // Unverified playblasts stay absent.
+    });
+    return () => { current = false; };
+  }, [fingerprintInputs]);
   const spans = useMemo(
-    () => scenePreviewSpans(production, scene, artifacts, boards),
-    [production, scene, artifacts, boards],
+    () => scenePreviewSpans(production, scene, artifacts, boards, fingerprints),
+    [production, scene, artifacts, boards, fingerprints],
   );
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
@@ -239,7 +272,8 @@ export function ScenePreview({
             ref={video}
             playsInline
             muted
-            aria-label="Rendered scene preview"
+            aria-label="Scene preview"
+            poster={currentFrameSrc ?? undefined}
             onError={(event) => {
               const failed = event.currentTarget.currentSrc || event.currentTarget.getAttribute("src");
               if (failed === null || failed === "") return;
@@ -283,13 +317,13 @@ export function ScenePreview({
             <>
               <span className="fy-swpreview__badges">
                 <span className="fy-swpreview__shot">shot {current.shot.number}</span>
-                <span className="fy-swpreview__kind">{currentHasPlayableClip ? "motion · rendered" : "still · animatic"}</span>
+                <span className="fy-swpreview__kind">{current.blockout ? `${currentHasPlayableClip ? "motion" : "still"} · blockout` : currentHasPlayableClip ? "motion · rendered" : "still · animatic"}</span>
               </span>
               <span className="fy-swpreview__caption">
                 <strong>{current.shot.title}</strong>
                 <span>{current.shot.framing?.size ?? "shot"}{current.shot.framing?.lens === undefined ? "" : ` · ${current.shot.framing.lens}`} · {(current.endSec - current.startSec).toFixed(1)}s</span>
               </span>
-              <button type="button" className="fy-swpreview__larger" onClick={() => setLightboxShotId(current.shot.id)}>Larger</button>
+              {current.blockout ? null : <button type="button" className="fy-swpreview__larger" onClick={() => setLightboxShotId(current.shot.id)}>Larger</button>}
             </>
           )}
           {playing || totalSec === 0 ? null : (

@@ -8,6 +8,7 @@ script-relevant openings and props. Review intermediate motion, not only the fir
 
 | Fixture | Measurable expectations | Cinematic review |
 |---|---|---|
+| Vertigo (#1048) | Generated dolly increases camera distance and focal length by the same factor over 6s; subject stays the same projected size | Background perspective changes while the subject framing holds |
 | Dialogue two-shot | Both heads remain in frame for 6s; fixed camera; left/right order preserved | Balanced readable faces and eyelines |
 | Over shoulder | Foreground shoulder may crop; listener remains visible throughout 6s | Shoulder establishes relation without hiding listener |
 | Doorway entry | Actor waits to 1s, crosses z=0 at 3s, stops at 5s; 1.4m opening and 2.4m clearance | Actor visibly passes through an opening, not a wall |
@@ -57,3 +58,11 @@ World schema 11 is the earlier compatibility fence: expanded Stage fields, anima
 the normal committer to advance the world minimum reader version. No bulk migration is required;
 legacy boxes/figures/cameras remain readable. Restoring a scene restores its Stage state with the
 existing scene journal; prior playblast artifacts remain history and are revalidated before use.
+
+First-pass framing (#1047) solves distance from the production-aspect Super 35 vertical FOV and subject height (default 1.8m). Frame-height fractions retain the existing size ranges: extreme close-up 0.3, close-up/MCU 0.55, medium 0.9, wide 1.5 and extreme wide 2.5. The same table and rule are supplied to Stage construction. The camera-angle height table is unchanged; 24, 35 and 85mm lenses now show the same subject-plane height for a given size.
+
+Reference matching (#1049) is local editor chrome: Camera view can show a filed image or clip in ghost/corner mode, with opacity and a playhead offset. Clip segments retain their source in/out bounds. Imported plates use the production artifact import path. Look view, construction inspection and playblast capture exclude the plate; the WebGL canvas never contains its pixels.
+
+Preview (#1050) plays fresh filed playblasts on the existing ordered scene clock where no accepted take exists, labelled blockout and using the filed opening frame as poster. It verifies the same source fingerprint as Bench before admission and withdraws clips immediately when their source changes. This adds no separate animatic file or acceptance state.
+
+First-pass edge cases retain clearance of one quarter of subject height plus the Stage camera's 0.1m near plane; very wide lenses may therefore frame more broadly than requested. Aim height scales with the subject while the angle-based camera-height table stays unchanged. If a playblast opening poster is missing or retired, Preview retains the existing authored-frame fallback.

@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Vector3 } from "three";
 import { DEFAULT_SHOT_SEC, effectiveFraming } from "./scene.js";
 import { orderedShots } from "./scene-flow.js";
-import { stagePathPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
+import { stagePathPoint, stageWorldPoint, stageCameraKeyAt, sampleStageCamera, stageTargetTransform, stageObjectAt, stageLocalPoint } from "./stage-camera.js";
 import type { Shot, ShotStaging, StageRig, StagingFigure, StagingKey, StagingSet, StagePerformance, StageObjectMotion, StageReferenceFrame, StageGait, StagePerformanceKey } from "./scene.js";
 import type { SceneRecord } from "./scene-flow.js";
 import { parseAspect } from "./manifest.js";
@@ -18,6 +18,7 @@ import { parseAspect } from "./manifest.js";
 const SUPER_35_WIDTH_MM = 24.89;
 const SUPER_35_HEIGHT_MM = 18.66;
 export const STAGE_FRAME_RATE = 30;
+export const STAGE_CAMERA_NEAR = .1;
 /** Ordered for admission: an end-frame route receives the pair before optional key/overview stills. */
 export function stageReferenceFrames(keys: readonly { t: number }[], durationSec: number): StageReferenceFrame[] {
   return [
@@ -133,6 +134,13 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
   return { ...staging, cast: blocking.cast, sets: blocking.sets };
 }
 
+/** Canonical bytes of the existing playblast fingerprint, shared by filing, Bench and Preview (#1050). */
+export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string): string {
+  if (!shot.staging) return "";
+  const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
+  return JSON.stringify({ staging, durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC, lens: effectiveFraming(scene, shot).lens ?? "", aspect });
+}
+
 /** Whether a filed Stage image no longer depicts this camera, blocking, lens, or duration. */
 export function stagePlayblastIsStale(
   scene: Pick<SceneRecord, "blocking">,
@@ -173,14 +181,17 @@ export function stagingFocalForFov(fov: number, aspect: number): number {
   return Math.min(SUPER_35_HEIGHT_MM,SUPER_35_WIDTH_MM/aspect)/(2*Math.tan(fov*Math.PI/360));
 }
 
-/** How far back a shot size stands, in metres, measured to the subject. */
-function distanceFor(size: string | undefined, camera: string | undefined): number {
+/** Frame height as a fraction of a standing subject, retaining the first pass's size ranges (#1047). */
+export const STAGE_FRAMED_HEIGHT = { "extreme close-up": .3, "close-up": .55, medium: .9, wide: 1.5, "extreme wide": 2.5 } as const;
+
+/** Solve the subject-plane height through the same cropped Super 35 lens as the viewport. */
+function distanceFor(size: string | undefined, camera: string | undefined, lens: string | undefined, aspect: string, subjectHeight: number): number {
   const words = `${size ?? ""} ${camera ?? ""}`.toLowerCase();
-  if (/extreme close|ecu/.test(words)) return 1.4;
-  if (/close|mcu|\bcu\b/.test(words)) return 2.4;
-  if (/extreme wide|ews/.test(words)) return 10;
-  if (/wide|\bws\b/.test(words)) return 6.5;
-  return 4;
+  const fraction = /extreme close|ecu/.test(words) ? STAGE_FRAMED_HEIGHT["extreme close-up"]
+    : /close|mcu|\bcu\b/.test(words) ? STAGE_FRAMED_HEIGHT["close-up"]
+    : /extreme wide|ews/.test(words) ? STAGE_FRAMED_HEIGHT["extreme wide"]
+    : /wide|\bws\b/.test(words) ? STAGE_FRAMED_HEIGHT.wide : STAGE_FRAMED_HEIGHT.medium;
+  return subjectHeight * fraction / (2 * Math.tan(stagingFov(lens, aspect) * Math.PI / 360));
 }
 
 function heightFor(angle: string | undefined): number {
@@ -266,7 +277,7 @@ function stagingProp(action: string, x: number, z: number): StagingSet | null {
  */
 export function stageShot(
   shot: Shot,
-  input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"] },
+  input: { cast: readonly string[]; sets: readonly string[]; durationSec: number; framing?: Shot["framing"]; aspect?: string; subjectHeight?: number },
 ): ResolvedShotStaging {
   const framing = input.framing ?? shot.framing;
   const blocked = input.cast.slice(0, 5).map((sheetId, index) => {
@@ -300,9 +311,12 @@ export function stageShot(
   }));
   const sets = [...locations, ...blocked.flatMap(({ prop }) => prop === null ? [] : [prop])];
   const subject = cast[0]?.sheetId ?? null;
-  const distance = distanceFor(framing?.size, shot.camera);
+  const subjectHeight = input.subjectHeight ?? cast[0]?.height ?? 1.8;
+  // Clear the figure volume as well as the near plane; some wide lenses cannot fit an ECU.
+  const minimumDistance = STAGE_CAMERA_NEAR + subjectHeight / 4;
+  const distance = Math.max(minimumDistance, distanceFor(framing?.size, shot.camera, framing?.lens, input.aspect ?? "16:9", subjectHeight));
   const height = heightFor(framing?.angle);
-  const aimHeight = subject === null ? 1.1 : 1.25;
+  const aimHeight = subject === null ? 1.1 : subjectHeight * (1.25 / 1.8);
   const dur = Math.max(0.5, input.durationSec);
   const move = readCameraMove(`${framing?.movement ?? ""} ${shot.camera ?? ""}`);
 
@@ -312,13 +326,13 @@ export function stageShot(
   // `height`, and what follows moves one coordinate at a time.
   const from: [number, number, number] = [0, height, distance];
   const to: [number, number, number] = [0, height, distance];
-  if (move.dolly !== null) to[2] = Math.max(1, distance * move.dolly);
+  if (move.dolly !== null) to[2] = Math.max(minimumDistance, distance * move.dolly);
   if (move.crane !== null) {
     const low = Math.max(0.6, height - 0.6);
     const high = height + 1.4;
     from[1] = move.crane === "up" ? low : high;
     to[1] = move.crane === "up" ? high : low;
-    to[2] = Math.max(1, to[2] * 0.9);
+    to[2] = Math.max(minimumDistance, to[2] * 0.9);
   }
   if (move.truck !== null) {
     // The camera looks down -Z, so +X is its right.
@@ -365,6 +379,84 @@ export function stageShot(
     keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: 0.25 };
   }
   return { version: 1, cast, sets, keys, rig: move.rig, seed: stageRigSeed(shot.id), rigIntensity: 1 };
+}
+
+/** Named starting points produce ordinary keys; no preset identity is stored (#1048). */
+export const STAGE_CAMERA_MOVES = [
+  { id: "push-in", label: "Push in", description: "Dolly to 55% of the starting distance." },
+  { id: "pull-back", label: "Pull back", description: "Dolly to 170% of the starting distance." },
+  { id: "creep-low", label: "Creep in low", description: "Ease closer while lowering the camera." },
+  { id: "orbit-90", label: "Orbit 90°", description: "Quarter orbit around the subject." },
+  { id: "orbit-180", label: "Orbit 180°", description: "Half orbit around the subject." },
+  { id: "orbit-360", label: "Orbit 360°", description: "Full orbit with intermediate marks every 45 degrees." },
+  { id: "arc-push", label: "Arc and push", description: "Quarter orbit while halving the radius." },
+  { id: "crane-up", label: "Crane up reveal", description: "Rise and pull back to reveal the surroundings." },
+  { id: "crane-down", label: "Crane down", description: "Descend toward the subject." },
+  { id: "pedestal", label: "Pedestal", description: "Rise vertically at a fixed horizontal position." },
+  { id: "follow-behind", label: "Follow behind", description: "Settle behind the subject and ride its local transform." },
+  { id: "lead", label: "Lead", description: "Settle in front of the subject and ride its local transform." },
+  { id: "side-track", label: "Side track", description: "Settle beside the subject and ride its local transform." },
+  { id: "vertigo", label: "Vertigo", description: "Dolly and compensate focal length to preserve the subject's size." },
+] as const;
+export type StageCameraMove = typeof STAGE_CAMERA_MOVES[number]["id"];
+
+export function stageCameraMove(
+  move: StageCameraMove,
+  staging: ResolvedShotStaging,
+  input: { durationSec: number; at?: number; subjectId?: string; lens?: string; aspect?: string },
+): StagingKey[] {
+  const figure = staging.cast.find(candidate => candidate.sheetId === input.subjectId) ?? staging.cast[0];
+  if (!figure) return staging.keys;
+  const duration = input.durationSec;
+  const aspect = input.aspect ?? "16:9";
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  const fov = stagingFov(input.lens, aspect);
+  const start = sampleStageCamera(staging, input.at ?? 0, duration).p;
+  const lens = stageCameraKeyAt(staging, input.at ?? 0, duration, fov, ratio);
+  const subject = stageTargetTransform(staging, figure.sheetId, 0, duration)!;
+  const aimHeight = (figure.height ?? 1.8) * .65;
+  const aim: [number, number, number] = [subject.p[0], subject.p[1] + aimHeight, subject.p[2]];
+  const offset: [number, number, number] = [start[0] - aim[0], start[1] - aim[1], start[2] - aim[2]];
+  const radius = Math.max(.3, Math.hypot(offset[0], offset[2]));
+  const inherited = { ...(lens.roll === undefined ? {} : { roll: lens.roll }), ...(lens.focalMm === undefined ? {} : { focalMm: lens.focalMm }) };
+  const make = (t: number, p: [number, number, number]): StagingKey => ({ t, p: [p[0], Math.max(.15, p[1]), p[2]], l: [0, aimHeight, 0], track: figure.sheetId, ...inherited });
+  const world = (scale: number, angle = 0, height = start[1]): [number, number, number] => [
+    aim[0] + (offset[0] * Math.cos(angle) + offset[2] * Math.sin(angle)) * scale,
+    height,
+    aim[2] + (offset[2] * Math.cos(angle) - offset[0] * Math.sin(angle)) * scale,
+  ];
+  let keys: StagingKey[];
+  if (move === "follow-behind" || move === "lead" || move === "side-track") {
+    const local = stageWorldPoint(start, subject);
+    const destination: [number, number, number] = [move === "side-track" ? radius : 0, local[1], move === "follow-behind" ? -radius : move === "lead" ? radius : 0];
+    keys = [0, duration / 4, duration].map((t, index) => ({ ...make(t, start), p: index === 0 ? local : destination, anchor: figure.sheetId, anchorSpace: "local" }));
+  } else if (move === "vertigo") {
+    const focal = lens.focalMm ?? stagingFocalForFov(fov, ratio);
+    const factor = focal > 500 || aim[1] + offset[1] * 1.7 < .15 ? .6 : 1.7;
+    keys = [1, factor].map((scale, index) => ({
+      ...make(index * duration, start), anchor: figure.sheetId,
+      p: [offset[0] * scale, aimHeight + offset[1] * scale, offset[2] * scale],
+      focalMm: focal * scale,
+    }));
+  } else if (move.startsWith("orbit-") || move === "arc-push") {
+    const degrees = move === "arc-push" ? 90 : Number(move.slice(6));
+    const count = Math.ceil(degrees / 45);
+    keys = Array.from({ length: count + 1 }, (_, index) => {
+      const u = index / count;
+      return make(duration * u, world(move === "arc-push" ? 1 - .45 * u : 1, degrees * u * Math.PI / 180));
+    });
+  } else {
+    const end = move === "push-in" ? world(.55)
+      : move === "pull-back" ? world(1.7)
+      : move === "creep-low" ? world(.8, 0, Math.min(start[1], subject.p[1] + .45))
+      : move === "crane-up" ? world(1.25, 0, start[1] + Math.max(1.4, (figure.height ?? 1.8) * 1.5))
+      : move === "crane-down" ? world(1, 0, Math.max(.15, start[1] - 1.8))
+      : world(1, 0, start[1] + 1.2);
+    keys = [make(0, [...start]), make(duration, end)];
+  }
+  keys[0] = { ...keys[0]!, easeOut: .25 };
+  keys[keys.length - 1] = { ...keys[keys.length - 1]!, easeIn: .25 };
+  return keys;
 }
 
 /** What the framing words ask the camera to do, one component per clause. */
@@ -785,7 +877,7 @@ export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: 
     if (!staging || staging.cast.length < 2 || !staging.keys.length) continue;
     const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
     const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
-    const camera = new PerspectiveCamera(fov, ratio, .1, 200);
+    const camera = new PerspectiveCamera(fov, ratio, STAGE_CAMERA_NEAR, 200);
     const cast = [...staging.cast].sort((a, b) => a.sheetId.localeCompare(b.sheetId));
     // Shared blocking naturally has the same value. Identical private copies cover the same
     // action too; a deliberately changed private layout must not be compared with the scene.

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, orderedShots, seedStoryPictureTimeline, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
+import { insertShot, orderedShots, stageSourceFingerprintInput, seedStoryPictureTimeline, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   __applyEventForTest,
@@ -1485,6 +1486,79 @@ describe("New scene makes the scene and opens it (SPEC-036 R-37)", () => {
 });
 
 describe("Preview plays the accepted scene on its authored clock (R-28)", () => {
+  function stagedScene() {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const production = world.productions[0]!;
+    const scene = production.scenes[0]!;
+    const artifacts = world.artifacts;
+    for (const shot of orderedShots(scene)) {
+      shot.staging = { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
+      const sourceFingerprint = createHash("sha256").update(stageSourceFingerprintInput(scene, shot, "16:9")).digest("hex");
+      shot.staging.playblast = { artifactId: `blast-${shot.id}`, openingFrameArtifactId: `opening-${shot.id}`, version: 1, sourceFingerprint, durationSec: shot.durationSec, aspect: "16:9" };
+      for (const kind of ["video", "image"] as const) artifacts.push({ ...artifacts[0]!, kind,
+        id: kind === "video" ? `blast-${shot.id}` : `opening-${shot.id}`,
+        file: kind === "video" ? `${shot.id}.mp4` : `${shot.id}.png`, production: production.meta.id });
+    }
+    const fingerprints = new Map(orderedShots(scene).map(shot => [stageSourceFingerprintInput(scene, shot, "16:9"), shot.staging!.playblast!.sourceFingerprint!]));
+    return { state, world, production, scene, artifacts, fingerprints };
+  }
+
+  it("fills unrendered spans with verified blockouts, retaining accepted-take priority and excluding stale pins (#1050)", () => {
+    const { production, scene, artifacts, fingerprints } = stagedScene();
+    const spans = () => scenePreviewSpans(production, scene, artifacts, [], fingerprints);
+    const shot = orderedShots(scene)[1]!;
+    assert.deepEqual(spans().map(span => [span.startSec, span.endSec, span.blockout]), [[0, 4, false], [4, 10, true]]);
+    assert.match(spans()[0]!.clipPath!, /takes\/.*clip.mp4/);
+    assert.equal(spans()[1]!.clipPath, "artifacts/sh_13.mp4");
+    assert.equal(spans()[1]!.clipInSec, 0);
+    assert.equal(spans()[1]!.framePath, "artifacts/sh_13.png");
+    assert.equal(scenePreviewSpans(production, scene, artifacts, [])[1]!.clipPath, null, "awaiting verification never exposes the movie");
+    shot.staging!.keys[0]!.p[0] = 4;
+    assert.equal(spans()[1]!.blockout, false, "a hand edit with the same version invalidates the fingerprint");
+    shot.staging!.keys[0]!.p[0] = 0;
+    shot.staging!.version++;
+    assert.equal(spans()[1]!.blockout, false, "the regular freshness check still applies");
+    shot.staging!.version--;
+    delete shot.staging!.playblast!.sourceFingerprint;
+    assert.equal(spans()[1]!.blockout, true, "legacy pins use Bench's existing metadata check");
+    artifacts.push({ ...artifacts[0]!, id: "authored", kind: "image", file: "authored.png" });
+    production.selections[shot.id] = { ...production.selections["sh_12"]!, acceptedTakeId: null, startFrameArtifactId: "authored" };
+    const openingId = shot.staging!.playblast!.openingFrameArtifactId;
+    delete shot.staging!.playblast!.openingFrameArtifactId;
+    assert.equal(spans()[1]!.framePath, "artifacts/authored.png", "legacy pins retain the authored poster fallback");
+    shot.staging!.playblast!.openingFrameArtifactId = openingId;
+    artifacts.find(artifact => artifact.id === openingId)!.retiredAt = "2026-09-01T00:00:00Z";
+    assert.equal(spans()[1]!.framePath, "artifacts/authored.png", "retiring the opening frame does not erase the shot's own picture");
+    artifacts.find(artifact => artifact.id === "blast-sh_13")!.retiredAt = "2026-09-01T00:00:00Z";
+    assert.equal(spans()[1]!.clipPath, null, "retired artifacts are not resurrected by a pin");
+  });
+
+  it("plays a staged scene in order, labels blockouts and withdraws changed footage from a mounted Preview (#1050)", async () => {
+    const { state, scene, production } = stagedScene();
+    production.selections = {};
+    production.reviews = [];
+    const mounted = await mountState(state);
+    await click(all(mounted, ".fy-sw__tab").find(tab => tab.textContent === "Preview")!);
+    // The browser hashes the same source bytes as filing before it offers the clip.
+    await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+    const video = q(mounted, ".fy-swpreview__stage video")! as HTMLVideoElement;
+    assert.match(video.src, /artifacts\/sh_12.mp4/);
+    assert.match(video.getAttribute("poster")!, /artifacts\/sh_12.png/);
+    assert.match(q(mounted, ".fy-swpreview__kind")!.textContent!, /motion · blockout/);
+    await click(q(mounted, '[aria-label="Seek to shot 13"]')!);
+    assert.match(video.src, /artifacts\/sh_13.mp4/);
+    assert.match(q(mounted, ".fy-swpreview__transport")!.textContent!, /4.0s \/ 10.0s/);
+    const changed = structuredClone(state);
+    orderedShots(changed.world!.productions[0]!.scenes[0]!)[1]!.staging!.keys[0]!.p[0] = 8;
+    await act(async () => __setStateForTest(changed));
+    assert.equal(video.style.opacity, "0", "an old verification cannot admit a changed source");
+    await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
+    assert.equal(video.style.opacity, "0", "the new hash disagrees with the filed pin");
+    assert.doesNotMatch(q(mounted, ".fy-swpreview__kind")!.textContent!, /blockout/);
+    assert.equal(orderedShots(scene)[1]!.staging!.keys[0]!.p[0], 0);
+  });
+
   it("fits landscape and portrait stages inside both available dimensions", () => {
     assert.deepEqual(fitPreviewStage(900, 300, "9:16"), { width: 168.75, height: 300 });
     assert.deepEqual(fitPreviewStage(300, 900, "16:9"), { width: 300, height: 168.75 });
