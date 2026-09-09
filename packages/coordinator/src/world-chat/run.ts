@@ -65,6 +65,8 @@ import { describeCoordinatorError } from "../errors/user-message.js";
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
+  /** Closing the owning world retires this runner and aborts every request it admitted. */
+  closingSignal?: AbortSignal;
   setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
   adapter: HarnessAdapter | null;
   /**
@@ -239,6 +241,7 @@ async function askOnce(
   /** Every tool the confinement refused this turn, by harness name, as it happens (#506). */
   onRefused?: (tool: string) => void,
 ): Promise<string> {
+  if (signal.aborted) throw new Error("cancelled");
   let finalText = "";
   const abort = new AbortController();
   const onAbort = () => abort.abort();
@@ -310,7 +313,11 @@ async function askOnce(
 export class WorldChatRunner {
   private readonly cancelling = new Map<string, AbortController>();
 
-  constructor(private readonly deps: RunDeps) {}
+  constructor(private readonly deps: RunDeps) {
+    deps.closingSignal?.addEventListener("abort", () => {
+      for (const controller of this.cancelling.values()) controller.abort("world-closed");
+    }, { once: true });
+  }
 
   /**
    * Whether a turn is in flight for this conversation, right now.
@@ -322,7 +329,7 @@ export class WorldChatRunner {
    * turn that is actually happening.
    */
   isRunning(conversationId: ConversationId): boolean {
-    return this.cancelling.has(conversationId);
+    return !this.deps.closingSignal?.aborted && this.cancelling.has(conversationId);
   }
 
   /**
@@ -332,14 +339,16 @@ export class WorldChatRunner {
    * stop it, so it outlives a stale store rather than taking an in-flight answer down with it.
    */
   hasRunning(): boolean {
-    return this.cancelling.size > 0;
+    // Aborted requests may still be draining, but the cache must give a reopened world a fresh
+    // runner. This runner's callbacks belong to the closed owner and can admit no more work.
+    return !this.deps.closingSignal?.aborted && this.cancelling.size > 0;
   }
 
-  /** Stop a run now. Local and immediate: the log says interrupted without waiting for a model. */
+  /** Stop a run now. Local and immediate: the log says cancelled without waiting for a model. */
   cancel(conversationId: ConversationId): boolean {
     const controller = this.cancelling.get(conversationId);
     if (!controller) return false;
-    controller.abort();
+    controller.abort("cancelled");
     return true;
   }
 
@@ -408,6 +417,12 @@ export class WorldChatRunner {
     replyOnly = false,
   ): Promise<TurnOutcome> {
     const adapter = this.deps.adapter;
+    if (this.deps.closingSignal?.aborted) {
+      return { status: "unavailable", reason: "This world closed. Reopen the conversation to continue." };
+    }
+    if (this.cancelling.has(conversationId)) {
+      return { status: "unavailable", reason: "Arke is already working on this conversation. Wait for it to finish, or stop the turn." };
+    }
     if (!adapter || !adapter.readiness().ready) {
       return { status: "unavailable", reason: adapter?.readiness().reason ?? "the studio is not available" };
     }
@@ -417,7 +432,27 @@ export class WorldChatRunner {
     // already started.
     const controller = new AbortController();
     this.cancelling.set(conversationId, controller);
+    try {
+      return await this.runRegisteredTurn(controller, store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly);
+    } finally {
+      // Include preflight reads and model selection: their failures must release the same slot
+      // as a model failure, or the overlap guard would lock this conversation indefinitely.
+      this.cancelling.delete(conversationId);
+    }
+  }
 
+  private async runRegisteredTurn(
+    controller: AbortController,
+    store: WorldChatStore,
+    conversationId: ConversationId,
+    text: string,
+    attachmentIds: readonly string[],
+    existingTurnId: TurnId | undefined,
+    subject: WorldChatSubject | undefined,
+    modelId: string | undefined,
+    replyOnly: boolean,
+  ): Promise<TurnOutcome> {
+    const adapter = this.deps.adapter!;
     const at = this.deps.now();
     const turnId = existingTurnId ?? (newId("turn") as TurnId);
     const runId = newId("run") as RunId;
@@ -544,38 +579,30 @@ export class WorldChatRunner {
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
     const constrained = !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
-    try {
-      if (constrained) {
-        await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
-        await store.append(
-          { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
-          { at },
-        );
-      }
-      // The user's words are durable before the model is asked. Whatever happens next, they said it.
-      // On a retry they already are, so only the new run is recorded.
+    if (constrained) {
+      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
-        existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+        { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
         { at },
       );
-    } catch (err) {
-      // A write the world refuses — the boundary, with an external edit waiting to be reconciled,
-      // or the log itself — ends the turn before it began (codex on PR 903, round four): the
-      // controller registered above is let go, or the conversation would stay live with no run
-      // and no way to send again until the app restarted.
-      this.cancelling.delete(conversationId);
-      throw err;
+    }
+    // The user's words are durable before the model is asked. Whatever happens next, they said it.
+    // On a retry they already are, so only the new run is recorded.
+    if (this.deps.closingSignal?.aborted) {
+      return { status: "unavailable", reason: "The world closed before this message could be sent. Reopen the conversation to continue." };
+    }
+    await store.append(
+      existingTurnId ? { type: "run.retry-started", run } : { type: "turn.started", message, run },
+      { at },
+    );
+    if (controller.signal.aborted) {
+      await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
+      return { status: "cancelled" };
     }
     if (modelChoice.reason !== undefined) {
       const reason = `rejected: ${modelChoice.reason}`;
       await this.finish(store, run, "failed", reason);
-      this.cancelling.delete(conversationId);
       return { status: "failed", reason };
-    }
-    if (controller.signal.aborted) {
-      await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
-      this.cancelling.delete(conversationId);
-      return { status: "cancelled" };
     }
 
     const linked = attachmentIds as readonly ChatAttachmentId[];
@@ -595,7 +622,7 @@ export class WorldChatRunner {
         brief = await this.deps.setupBrief({ leaseToken, draft: view.productionSetup.draft, budgetChars: setupBudget });
       }
       if (controller.signal.aborted) {
-        await this.finish(store, run, "interrupted", "cancelled before the studio was asked");
+        await this.finish(store, run, controller.signal.reason === "world-closed" ? "interrupted" : "cancelled", "cancelled before the studio was asked");
         return { status: "cancelled" };
       }
       const session = this.deps.createSession
@@ -721,7 +748,9 @@ export class WorldChatRunner {
     } catch (err) {
       const cancelled = controller.signal.aborted;
       const timedOut = err instanceof Error && err.message === "timeout";
-      const status = cancelled ? "interrupted" : timedOut ? "timeout" : "failed";
+      const status = cancelled
+        ? controller.signal.reason === "world-closed" ? "interrupted" : "cancelled"
+        : timedOut ? "timeout" : "failed";
       if (status === "failed") {
         // The raw error, once, where an operator can read it. It never leaves this process and it
         // never reaches the screen — `safeDetail` still decides what the person is told.
@@ -736,7 +765,6 @@ export class WorldChatRunner {
       if (timedOut) return { status: "timeout" };
       return { status: "failed", reason: safeDetail(err) };
     } finally {
-      this.cancelling.delete(conversationId);
       // `prepare` may fail after minting a lease; release is idempotent and owns partial cleanup.
       await this.deps.release({ conversationId, runId }).catch((error) => {
         if (prepared) throw error;

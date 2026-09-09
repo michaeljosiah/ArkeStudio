@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { newId, ulid, type ConversationId, type HarnessAdapter, type WorldChatMessage } from "@arke-studio/contracts";
-import { WorldChatRunner } from "../../src/world-chat/run.js";
+import { WorldChatRunner, type RunDeps } from "../../src/world-chat/run.js";
+import { WorldChatRunnerCache } from "../../src/world-chat/runner-cache.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
+import { recoverConversations } from "../../src/world-chat/recovery.js";
+import { foldConversation } from "../../src/world-chat/fold.js";
+import { checkpointPath } from "../../src/world-chat/checkpoint.js";
 import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
@@ -15,12 +19,12 @@ import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 const AT = "2026-09-08T10:00:00Z";
-async function setup(answer: () => string | Promise<string>) {
-  const world = await WorldStore.open(await makeTempWorld(), { clock: () => AT });
+async function setup(answer: () => string | Promise<string>, existing?: { world: WorldStore; id: ConversationId }, resolveLanguageModel?: RunDeps["resolveLanguageModel"]) {
+  const world = existing?.world ?? await WorldStore.open(await makeTempWorld(), { clock: () => AT });
   closeOnCleanup(() => world.close());
   const service = new ProductionSetupService(world);
-  const id = newId("cv") as ConversationId;
-  await service.start(id);
+  const id = existing?.id ?? newId("cv") as ConversationId;
+  if (!existing) await service.start(id);
   const log = new ProductionSetupConversationStore(world, id);
   const prompts: string[] = [];
   const adapter = {
@@ -30,6 +34,8 @@ async function setup(answer: () => string | Promise<string>) {
     streamEvents: () => (async function* () { yield { type: "message.completed", sessionId: "s1", text: await answer() }; })(),
   } as unknown as HarnessAdapter;
   const runner = new WorldChatRunner({
+    closingSignal: world.closingSignal,
+    ...(resolveLanguageModel ? { resolveLanguageModel } : {}),
     adapter, prepare: async () => ({ cwd: world.dir, leaseToken: "test" }), release: async () => {},
     receiptsFor: () => [], runCheckPlan: async () => { throw new Error("Setup cannot check world mutations."); },
     evidenceSources: (messages: readonly WorldChatMessage[]) => ({ messages, bundle: world.getBundle(), attachments: [], attachmentText: new Map() }),
@@ -46,6 +52,121 @@ const reply = (setupUpdate?: unknown) => JSON.stringify({
 });
 
 describe("setup turns share conversation durability but no world-mutation authority", () => {
+  it("recovers a world-close interruption as retryable and lets the retained draft be reviewed (#1030)", async () => {
+    let respond!: (text: string) => void;
+    let asked!: () => void;
+    const requested = new Promise<void>(resolve => { asked = resolve; });
+    const answer = new Promise<string>(resolve => { respond = resolve; });
+    const h = await setup(() => { asked(); return answer; });
+    const cache = new WorldChatRunnerCache<WorldChatRunner>();
+    cache.remember(h.world.worldId, h.world, h.runner);
+    await h.service.update(h.id, { expectedRevision: 1, fields: { title: "The crossing" } });
+    const running = handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "send", text: "Develop the crossing." } },
+    () => h.runner, async () => {});
+    const refused = assert.rejects(running, /world closed.*saved conversation.*continuing/i);
+    await requested;
+    await assert.rejects(h.service.review(h.id, 2), /Wait for Arke/);
+    await h.world.close();
+    await refused;
+    assert.equal(h.runner.isRunning(h.id), false);
+
+    const reopened = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => reopened.close());
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, [h.id]);
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, []);
+    const log = new ProductionSetupConversationStore(reopened, h.id);
+    const recovered = foldConversation(h.id, AT, (await log.read()).events).view;
+    await reopened.ownedWrite(() => writeFile(checkpointPath(log.dir), JSON.stringify({
+      schemaVersion: 1, throughSeq: recovered.seq,
+      view: { ...recovered, activeRun: recovered.lastFailedRun, lastFailedRun: null },
+    })));
+    const view = (await h.view())!;
+    assert.equal(view.activeRun, null, "a same-tail checkpoint from the old fold must be rebuilt");
+    assert.equal(view.lastFailedRun?.status, "interrupted");
+    assert.equal(view.messages.length, 1, "the original message survives without a fabricated reply");
+    assert.equal(view.productionSetup!.draft.title, "The crossing", "a late result cannot write through the closed owner");
+    const service = new ProductionSetupService(reopened);
+    const review = await service.review(h.id, 2);
+    assert.equal(review.status, "reviewed");
+
+    assert.equal(cache.runnerFor(reopened.worldId, reopened, h.id), undefined, "a closed runner cannot serve Retry");
+    let retryAsked!: () => void;
+    let retryRespond!: (text: string) => void;
+    const retryRequested = new Promise<void>(resolve => { retryAsked = resolve; });
+    const retryAnswer = new Promise<string>(resolve => { retryRespond = resolve; });
+    const fresh = await setup(() => { retryAsked(); return retryAnswer; }, { world: reopened, id: h.id });
+    cache.remember(reopened.worldId, reopened, fresh.runner);
+    const retry = fresh.runner.retry(fresh.log, h.id, view.lastFailedRun!.turnId);
+    await retryRequested;
+    assert.equal((await fresh.runner.retry(fresh.log, h.id, view.lastFailedRun!.turnId)).status, "unavailable", "a second Retry cannot replace the live controller");
+    assert.equal((await h.runner.send(h.log, h.id, "Use the closed owner")).status, "unavailable");
+    respond(reply({ expectedRevision: 2, fields: { title: "A late model title" } }));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(cache.runnerFor(reopened.worldId, reopened, h.id), fresh.runner);
+    assert.equal(fresh.runner.isRunning(h.id), true, "the old response cannot clear the retry's controller");
+    await handleProductionSetupCommand(reopened, { kind: "production-setup", worldId: reopened.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "cancel" } }, () => fresh.runner, async () => {});
+    assert.equal((await retry).status, "cancelled");
+    assert.equal((await fresh.log.read()).events.filter(({ event }) => event.type === "run.finished" && event.run.status === "cancelled").length, 1,
+      "the Stop command and runner cleanup share one terminal cancellation");
+    retryRespond(reply());
+    assert.equal((await fresh.view())!.productionSetup!.draft.title, "The crossing");
+    assert.equal((await fresh.view())!.messages.length, 1, "Retry keeps the original user message");
+    await reopened.close();
+    const again = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => again.close());
+    assert.deepEqual(await new ProductionSetupService(again).resume(h.id), review);
+  });
+
+  it("Stop survives an immediate world close and later turns keep Review available (#1030)", async () => {
+    let respond!: (text: string) => void;
+    let asked!: () => void;
+    const requested = new Promise<void>(resolve => { asked = resolve; });
+    const answer = new Promise<string>(resolve => { respond = resolve; });
+    const h = await setup(() => { asked(); return answer; });
+    await h.service.update(h.id, { expectedRevision: 1, fields: { title: "The crossing" } });
+    const running = h.runner.send(h.log, h.id, "Develop the crossing.");
+    const refused = assert.rejects(running, /world is closed/);
+    await requested;
+    const stopped = handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "cancel" } }, () => h.runner, async () => {});
+    const closed = h.world.close();
+    await stopped;
+    await closed;
+    await refused;
+    const reopened = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => reopened.close());
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, []);
+    const fresh = await setup(() => reply(), { world: reopened, id: h.id });
+    assert.equal((await fresh.view())!.activeRun, null);
+    assert.equal((await fresh.view())!.lastFailedRun, null, "Stop does not offer a failure retry after reopening");
+    const terminals = (await fresh.log.read()).events.filter(({ event }) => event.type === "run.finished");
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0]!.event.type === "run.finished" && terminals[0]!.event.run.status, "cancelled");
+    assert.equal((await fresh.service.review(h.id, 2)).status, "reviewed");
+    respond(reply());
+    assert.equal((await fresh.runner.send(fresh.log, h.id, "Keep the title.")).status, "completed");
+    const view = (await fresh.view())!;
+    assert.equal(view.activeRun, null);
+    assert.equal(view.lastFailedRun, null);
+    assert.equal((await fresh.service.review(h.id, 2)).status, "reviewed");
+  });
+
+  it("refuses a setup send closed during preflight without promising a saved message or Retry (#1030)", async () => {
+    let h: Awaited<ReturnType<typeof setup>>;
+    h = await setup(() => { throw new Error("The closed world must not ask the model"); }, undefined,
+      async () => { await h.world.close(); return {}; });
+    await assert.rejects(handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "send", text: "A new idea" } },
+    () => h.runner, async () => {}), /world closed before this message could be sent/i);
+    const reopened = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => reopened.close());
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, []);
+    assert.equal((await h.view())!.messages.length, 0);
+    assert.equal((await h.view())!.lastFailedRun, null);
+  });
+
   it("carries conversational episode bounds and seeded delivery defaults into the created season (#1012)", async () => {
     const h = await setup(() => reply({ expectedRevision: 1, fields: {
       title: "The dead air", kind: "microdrama", aspect: "9:16",

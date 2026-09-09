@@ -24,6 +24,14 @@ export class ProductionSetupConversationStore extends WorldChatStore {
       const { events } = await super.read();
       const state = foldConversation(this.id, meta.createdAt, events).view.productionSetup;
       if (!state || state.draft.worldId !== this.world.worldId) throw new Error("This setup belongs to another world.");
+      if (event.type === "run.finished" || event.type === "turn.completed") {
+        const cancelled = events.find(({ event: previous }) => previous.type === "run.finished" &&
+          previous.run.id === event.run.id && previous.run.status === "cancelled");
+        if (cancelled) {
+          if (event.type === "turn.completed") throw new Error("This turn was stopped.");
+          return { envelope: cancelled, deduplicated: true };
+        }
+      }
       if ((event.type === "turn.started" || event.type === "run.retry-started") && !["draft", "reviewed"].includes(state.status)) {
         throw new Error("Finish resolving this production's creation before continuing the conversation.");
       }

@@ -645,9 +645,11 @@ export function failureLine(failure: { status: string; detail?: string }): strin
   const opening =
     failure.status === "timeout"
       ? "That took too long and stopped."
-      : failure.status === "budget-exceeded"
-        ? "That turn ran past its budget and stopped."
-        : "That did not go through.";
+      : failure.status === "interrupted"
+        ? "That turn was interrupted. You can retry it."
+        : failure.status === "budget-exceeded"
+          ? "That turn ran past its budget and stopped."
+          : "That did not go through.";
   return `${opening} Nothing was lost — your message is still here.`;
 }
 

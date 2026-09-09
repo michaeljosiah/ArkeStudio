@@ -198,6 +198,35 @@ describe("taking a turn", () => {
     assert.ok((await store.read()).events.some((e) => e.event.type === "turn.started"), "the conversation is still live");
   });
 
+  it("releases the turn slot after a preflight failure so the overlap guard cannot lock it (#1030)", async () => {
+    let fail = true;
+    const { runner, store, conversationId } = await setup(fakeAdapter([
+      JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] }),
+    ]), { resolveLanguageModel: async () => {
+      if (fail) { fail = false; throw new Error("model selection failed"); }
+      return {};
+    } });
+    await assert.rejects(runner.send(store, conversationId, "First attempt"), /model selection failed/);
+    assert.equal(runner.isRunning(conversationId), false);
+    assert.equal((await runner.send(store, conversationId, "Try again")).status, "completed");
+  });
+
+  it("Stop wins over a model-selection refusal returned after cancellation (#1030)", async () => {
+    let selecting!: () => void;
+    let selected!: (choice: { reason: string }) => void;
+    const started = new Promise<void>(resolve => { selecting = resolve; });
+    const choice = new Promise<{ reason: string }>(resolve => { selected = resolve; });
+    const h = await setup(fakeAdapter([]), { resolveLanguageModel: () => { selecting(); return choice; } });
+    const running = h.runner.send(h.store, h.conversationId, "Find a direction");
+    await started;
+    h.runner.cancel(h.conversationId);
+    selected({ reason: "That writing model is unavailable." });
+    assert.equal((await running).status, "cancelled");
+    assert.equal((await h.view()).lastFailedRun, null);
+    const finished = (await h.store.read()).events.find(({ event }) => event.type === "run.finished")!.event;
+    assert.equal(finished.type === "run.finished" && finished.run.status, "cancelled");
+  });
+
   it("keeps the user's message even when the turn fails", async () => {
     const { runner, store, conversationId, view } = await setup(fakeAdapter(["not json at all", "still not json"]));
     const outcome = await runner.send(store, conversationId, "Her aunt taught her the bells.");
@@ -516,6 +545,23 @@ describe("a turn that never answers", () => {
     );
   });
 
+  it("does not dispatch after Stop arrives during session creation (#1030)", async () => {
+    let creating!: () => void;
+    let created!: () => void;
+    const started = new Promise<void>(resolve => { creating = resolve; });
+    const session = new Promise<void>(resolve => { created = resolve; });
+    const prompts: string[] = [];
+    const adapter = fakeAdapter([JSON.stringify({ reply: "Too late", candidateOperations: [], groupOperations: [] })], { prompts });
+    adapter.createSession = async () => { creating(); await session; return { sessionId: "s1" } as never; };
+    const h = await setup(adapter);
+    const running = h.runner.send(h.store, h.conversationId, "Find a direction");
+    await started;
+    h.runner.cancel(h.conversationId);
+    created();
+    assert.equal((await running).status, "cancelled");
+    assert.deepEqual(prompts, [], "a stopped turn cannot start a paid model request");
+  });
+
   it("stops immediately when cancelled, without waiting for the model", async () => {
     const { runner, store, conversationId } = await setup(fakeAdapter([], { hang: true }), { timeoutMs: 30_000 });
     const inFlight = runner.send(store, conversationId, "hello");
@@ -528,7 +574,7 @@ describe("a turn that never answers", () => {
     assert.equal(outcome.status, "cancelled");
     const { events } = await store.read();
     const run = (events.find((e) => e.event.type === "run.finished")!.event as { run: { status: string } }).run;
-    assert.equal(run.status, "interrupted");
+    assert.equal(run.status, "cancelled");
   });
 
   it("reports nothing to cancel when no turn is running", async () => {
@@ -833,7 +879,7 @@ it("puts the leased chapter brief into the model prompt and preserves the chapte
 });
 
 
-it("durably interrupts a turn cancelled while its chapter brief is being read", async () => {
+it("durably cancels a turn stopped while its chapter brief is being read", async () => {
   let releaseBrief!: () => void;
   let briefStarted!: () => void;
   const started = new Promise<void>((resolve) => { briefStarted = resolve; });
@@ -855,7 +901,7 @@ it("durably interrupts a turn cancelled while its chapter brief is being read", 
   assert.equal(folded.needsInterruptedRunRepair, false);
   const finished = (await h.store.read()).events.find((e) => e.event.type === "run.finished")!.event;
   assert.ok(finished.type === "run.finished");
-  assert.equal(finished.run.status, "interrupted");
+  assert.equal(finished.run.status, "cancelled");
   assert.equal(h.released.length, 1);
   assert.equal((await h.runner.send(h.store, h.conversationId, "Continue")).status, "completed");
 });
