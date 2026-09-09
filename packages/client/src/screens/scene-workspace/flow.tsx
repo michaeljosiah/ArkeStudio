@@ -170,7 +170,7 @@ export function SceneFlow({
   onShowBoards?: () => void;
 }) {
   const sequence = useMemo(() => linearizeSceneFlow(scene), [scene]);
-  const lineFindings = useMemo(() => stageLineCrossings(scene, productionAspect(production.meta)), [scene, production.meta]);
+  const lineFindings = useMemo(() => sequence.kind === "linear" ? stageLineCrossings(scene, productionAspect(production.meta)) : [], [sequence, scene, production.meta]);
   const { subject, select } = useWorkspaceSelection();
   const canvas = useRef<HTMLDivElement | null>(null);
   const nodeControls = useRef(new Map<string, HTMLDivElement>());

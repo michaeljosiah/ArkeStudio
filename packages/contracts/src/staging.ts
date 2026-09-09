@@ -621,12 +621,15 @@ function figureAt(figure: StagingFigure, u: number): [number, number] {
  * that no longer fit are pulled in ahead of the end, in order. Returns the same object when
  * nothing needs to move.
  */
-export function stagingRetimed(staging: ShotStaging, durationSec: number): ShotStaging {
+export function stagingRetimed(staging: ShotStaging, durationSec: number, previousDurationSec?: number): ShotStaging {
   if (staging.keys.length === 0) return staging;
   const last = staging.keys.length - 1;
-  const oldDuration = staging.keys[last]!.t;
+  const oldDuration = staging.keys[last]!.t || previousDurationSec || 0;
   if (staging.objectMotions && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, objectMotions: staging.objectMotions.map(motion => ({ ...motion, keys: motion.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration })) })) };
   if (staging.performances && oldDuration > 0 && oldDuration !== durationSec) staging = { ...staging, performances: staging.performances.map(performance => ({ ...performance, keys: performance.keys.map(key => ({ ...key, t: key.t * durationSec / oldDuration, ...(key.hold === undefined ? {} : { hold: key.hold * durationSec / oldDuration }) })) })) };
+  // A single mark is a static camera, not an end pose. Give it equivalent endpoints so a
+  // subsequent draft retime has a duration even when its action finishes before the shot does.
+  if (staging.keys.length === 1) return { ...staging, keys: [{ ...staging.keys[0]!, t: 0 }, { ...staging.keys[0]!, t: durationSec }] };
   if (staging.keys[last]!.t === durationSec && staging.keys.every((key, index) => index === last || key.t < durationSec)) return staging;
   // Interior keys that still fit stay where they are; if any no longer does, the whole move is
   // scaled to the new length instead of clamped, so no two keys land on one moment.
@@ -682,7 +685,9 @@ export function stagingPromptClause(
     ...(staging.performances ?? []).flatMap(performance => performance.keys.map((key, index) => {
       const next = performance.keys[index + 1];
       const departure = next ? stagePerformanceDeparture(key, next) : key.t;
-      return `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}, ${key.gait ?? "walk"}${departure > key.t ? `, hold until ${departure.toFixed(2)}s` : ""}${key.easeIn === undefined ? "" : `, ease in ${Math.round(key.easeIn * 100)}%`}${key.easeOut === undefined ? "" : `, ease out ${Math.round(key.easeOut * 100)}%`}`;
+      const y = staging.cast.find(figure => figure.sheetId === performance.sheetId)?.y ?? 0;
+      const moving = next && Math.hypot(next.x - key.x, next.z - key.z, (next.y ?? y) - (key.y ?? y)) >= .05;
+      return `${key.t.toFixed(2)}s — ${nameOf(performance.sheetId)} at (${key.x.toFixed(2)}, ${(key.y ?? 0).toFixed(2)}, ${key.z.toFixed(2)})m, facing ${key.facing ?? 0}°, ${key.pose ?? "standing"}${moving ? `, ${key.gait ?? "walk"}` : ", holds position"}${departure > key.t ? `, hold until ${departure.toFixed(2)}s` : ""}${key.easeIn === undefined ? "" : `, ease in ${Math.round(key.easeIn * 100)}%`}${key.easeOut === undefined ? "" : `, ease out ${Math.round(key.easeOut * 100)}%`}`;
     })),
     ...(staging.objectMotions ?? []).flatMap(motion=>motion.keys.map(key=>`${key.t.toFixed(2)}s — ${motion.group} at (${key.p.join(", ")})m, rotation (${(key.rotation??[0,0,0]).join(", ")})°.`)),
     ...stagingBeats(staging, nameOf, durationSec),
@@ -805,6 +810,7 @@ export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: 
       const pair: [string, string] = [cast[a]!.sheetId, cast[b]!.sheetId];
       const sides = samples.flatMap(sample => {
         const first = sample.figures[a]!, second = sample.figures[b]!;
+        if (!first.visible || !second.visible) return [];
         const dx = second.x - first.x, dz = second.z - first.z;
         const length = Math.hypot(dx, dz);
         if (length < .05) return [];

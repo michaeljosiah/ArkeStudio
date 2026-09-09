@@ -105,7 +105,7 @@ it("constructs, inspects, revises and returns an editable draft without writing 
         events.push(event);
         if (event.status === "inspect")
           constructor.inspect(store.worldId, request.requestId, event.round, [
-            { at: 0, view: "camera", png },
+            { at: 0, view: "camera", png, observations: Array.from({ length: 40 }, (_, index) => `frame-observation-${index}`) },
             { at: 3.99, view: "camera", png },
             { at: 0, view: "overview", png },
           ]);
@@ -119,6 +119,7 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     assert.match(prompts[0]!, /verse, under the water/);
     assert.match(prompts[1]!, /round-1-0-camera.png/);
     assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
+    assert.match(prompts[1]!, /frame-observation-39/, "line warnings must not displace any measured frame observations");
     assert.equal(
       store
         .getBundle()

@@ -110,3 +110,32 @@ it("holds before eased travel, turns by the same progress, steps posture and sca
   assert.equal(stagePerformanceDeparture(keys[0]!, keys[1]!), 2.9);
   assert.equal(stagePerformanceDeparture(keys[0]!, { ...keys[1]!, t: 1.05 }), 1, "short legs still travel");
 });
+
+it("does not infer screen direction from a camera turned away from the pair (#1045)", () => {
+  const scene = coverageScene();
+  const end = scene.shots[0]!.staging!.keys[1]!;
+  end.p = [0, 1.5, -4];
+  end.l = [0, 1, -8];
+  assert.deepEqual(stageLineCrossings(scene), [], "the unseen side cannot warn within a move or across coverage");
+});
+
+it("describes stationary performance marks without adding a walking instruction (#1044)", () => {
+  const staging = stage();
+  staging.performances![0]!.keys[2]!.pose = "sit";
+  const brief = stagingPromptClause(staging, id => id, 4);
+  assert.match(brief, /1.00s .* walk/);
+  assert.match(brief, /3.00s .* sit, holds position/);
+  assert.match(brief, /4.00s .* holds position/);
+  assert.doesNotMatch(brief, /sit, walk/);
+});
+
+it("retimes a static camera's action from the prior shot duration, not its last action mark (#1046)", () => {
+  const staging = stage();
+  staging.keys = [staging.keys[0]!];
+  staging.performances![0]!.keys = [{ t: 0, x: 0, z: 0, hold: 1 }, { t: 2, x: 1, z: 0 }];
+  const retimed = stagingRetimed(staging, 8, 4);
+  assert.deepEqual(retimed.keys.map(key => key.t), [0, 8]);
+  assert.deepEqual(retimed.performances![0]!.keys.map(key => key.t), [0, 4], "action ended halfway through the shot");
+  assert.equal(retimed.performances![0]!.keys[0]!.hold, 2);
+  assert.equal(stagingRetimed(retimed, 4).performances![0]!.keys[0]!.hold, 1);
+});

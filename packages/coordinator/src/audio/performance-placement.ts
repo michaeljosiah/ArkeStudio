@@ -127,7 +127,7 @@ export async function proposePerformanceDuration(store: WorldStore, request: Ext
   if (!calculated.ok) throw new Error(calculated.reason);
   const durationSec=calculated.timing.requiredMinimumSec;
   if (durationSec===resolvedAuthoredDuration(shot)) throw new Error("The authored duration already fits this performance and handle exactly.");
-  const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec) : undefined;
+  const retimed=shot.staging ? stagingRetimed(shot.staging,durationSec,resolvedAuthoredDuration(shot)) : undefined;
   const next=editShot(record,{shotId:shot.id,change:{durationSec,...(retimed ? {staging:{...retimed,version:retimed.version+1}} : {})}});
   return new ProposalManager(store).stage({kind:"scene-edit",summary:`Set ${shot.id} to ${durationSec}s for reviewed dialogue timing`,source:"performance-timing",production:request.productionId,
     targets:[{path,content:JSON.stringify(next,null,2)+"\n",expectedBaseHash:sha256(raw)}]});

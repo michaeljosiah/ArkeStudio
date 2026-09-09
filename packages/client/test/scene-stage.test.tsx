@@ -301,10 +301,11 @@ it("clears a motion selection when its mark is removed or an earlier mark is ins
   assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
 });
 
-it("edits gait, ease and hold through retiming and Keep (#1044, #1046)", async () => {
+it("edits gait, ease and hold with a single-key camera through retiming and Keep (#1044, #1046)", async () => {
   const { q, sent, shot, render } = await mount(shot => {
     shot.staging!.cast = [{ sheetId: "maren-kest", x: 0, z: 0 }];
     shot.staging!.performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 1, x: 5, z: 0 }] }];
+    shot.staging!.keys = [shot.staging!.keys[0]!];
   });
   assert.match(q('.fy-swstage__mover').textContent ?? "", /walk.*too fast/);
   const select = q('[aria-label="Maren Kest 0s gait"]');
