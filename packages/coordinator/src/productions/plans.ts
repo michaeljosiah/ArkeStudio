@@ -13,11 +13,18 @@ import { join } from "node:path";
 import {
   bindPassFrame,
   chainedDependencies,
+  CharacterAudioPlanSchema,
   compilePasses,
   DispatchPlanSchema,
   foldPlan,
+  orderedShots,
+  resolveCast,
+  shotSpeakers,
   ulid,
+  type CompiledDrop,
+  type CompiledPass,
   type DispatchPlan,
+  type PassCarries,
   type ManifestModel,
   type PlanEventLike,
   type PlanJobFacts,
@@ -117,6 +124,87 @@ export interface CreatePlanInput {
   clock: () => string;
 }
 
+/** A drop's reason as the card says it: the compiled record keeps the sentence, the card a clause. */
+function dropClause(drop: CompiledDrop): string {
+  if (drop.reason.startsWith("the frame route")) return "this route takes one image";
+  return drop.role === "secondary" ? "the photo is over the reference budget" : "over the reference budget";
+}
+
+/**
+ * What a pass sends and what it will not (SPEC-044 §2.3), read off the compiled pass and the
+ * plan at the moment they are recorded, so the card words nothing of its own: a look is the
+ * scoped look that rode, the kit's own portrait is the kit, a drop is its own reason, and a voice
+ * is the audio reference that rode or the clause that says why none did. The cast named is the
+ * pass's — cited by its shots, riding, dropped or speaking — never the whole scene's.
+ */
+function passCarries(
+  pass: CompiledPass,
+  input: CreatePlanInput,
+  castNotSent: readonly { sheetId: string; name: string; reason: string }[],
+  timing: PassCarries["timing"],
+): PassCarries {
+  const sheets = input.world.sheets;
+  const shots = orderedShots(input.scene).filter((shot) => pass.target.coversShots.includes(shot.id));
+  const audio = CharacterAudioPlanSchema.safeParse(pass.params["audioReferences"]);
+  const audioPlan = audio.success ? audio.data : undefined;
+  const voiced = new Set(audioPlan?.references.flatMap((ref) => ("sheetId" in ref && ref.sheetId !== undefined ? [ref.sheetId] : [])) ?? []);
+  const speakers = shotSpeakers(input.scene, shots).speakers;
+  const characters = [
+    ...new Set([
+      ...shots.flatMap((shot) => resolveCast(shot.description, sheets).cast.map((entry) => entry.sheet.id)),
+      ...pass.references.map((ref) => ref.sheetId),
+      ...pass.dropped.map((drop) => drop.sheetId),
+      ...speakers,
+      ...castNotSent.map((entry) => entry.sheetId),
+    ]),
+  ].filter((id) => sheets.find((sheet) => sheet.id === id)?.type === "character");
+  const cast = characters.map((sheetId) => {
+    const bound = pass.references.find((ref) => ref.sheetId === sheetId);
+    const drop = pass.dropped.find((entry) => entry.sheetId === sheetId);
+    const look = bound?.mode === "scoped-look" ? "rides" : bound === undefined && drop !== undefined ? "not-sent" : "kit";
+    const notSent = castNotSent.find((entry) => entry.sheetId === sheetId);
+    const hasVoice =
+      input.world.referenceKits.find((kit) => kit.sheetId === sheetId)?.designatedVoiceSample !== undefined ||
+      input.scene.cast?.[sheetId]?.voice !== undefined;
+    // A speaker with a voice on a pass that takes no audio is said as not sent, once, on the
+    // voice (R-24, R-31) — the reason the arm recorded for a read, or the route's own.
+    const silenced = speakers.includes(sheetId) && hasVoice && audioPlan !== undefined && (audioPlan.disabled || audioPlan.route === null);
+    const voice = voiced.has(sheetId) ? "rides" : notSent !== undefined || silenced ? "not-sent" : "none";
+    return {
+      sheetId,
+      name: sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId,
+      voice,
+      look,
+      ...(look === "not-sent" && drop !== undefined ? { reason: dropClause(drop) } : {}),
+      ...(voice === "not-sent" ? { voiceReason: notSent?.reason ?? (audioPlan?.route === null ? "takes no audio" : "audio off") } : {}),
+    } as const;
+  });
+  const location = input.scene.inherits?.location;
+  const locationSheet = location === undefined ? undefined : sheets.find((sheet) => sheet.id === location && sheet.type === "location");
+  const bound = locationSheet === undefined ? undefined : pass.references.find((ref) => ref.sheetId === locationSheet.id);
+  const dropped = locationSheet === undefined ? undefined : pass.dropped.find((entry) => entry.sheetId === locationSheet.id);
+  const place =
+    locationSheet === undefined
+      ? undefined
+      : {
+          sheetId: locationSheet.id,
+          name: locationSheet.name,
+          rides: bound !== undefined,
+          ...(bound === undefined
+            ? { reason: dropped !== undefined ? dropClause(dropped) : pass.route.kind === "frame" || pass.route.kind === "continuation" ? "this route takes one image" : "no plate" }
+            : {}),
+        };
+  return {
+    shotIds: pass.target.coversShots,
+    // A chained pass opens on the previous pass's boundary frame, bound at materialisation; it
+    // is a frame on this pass's first shot as surely as a selected one is.
+    ...(pass.frame !== undefined || pass.route.kind === "frame" ? { frame: { shotId: pass.target.coversShots[0]! } } : {}),
+    ...(place !== undefined ? { place } : {}),
+    cast,
+    ...(timing !== undefined && timing.length > 0 ? { timing } : {}),
+  };
+}
+
 /**
  * Create the durable plan (R-12..R-15): compile, write the aggregate atomically, append
  * `authorized` — all before any pass may reach a provider. Idempotent by requestId.
@@ -143,6 +231,19 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
   }
   if (compiled.length === 0) throw new Error("nothing to dispatch — the plan compiled no passes");
   const dependencies = chainFrames ? chainedDependencies(input.plan.mode, input.model, compiled.length) : compiled.map(() => []);
+  // A timing clause sits on the pass it changes (R-25). A shot whole-scene packing left out is
+  // in no pass; its clause files with the pass carrying the nearest earlier shot, so it sits
+  // where the gap is rather than vanishing with the shot.
+  const authored = orderedShots(input.scene);
+  const passOf = (shotId: string) => compiled.findIndex((pass) => pass.target.coversShots.includes(shotId));
+  const timingByPass = new Map<number, NonNullable<PassCarries["timing"]>>();
+  for (const entry of input.plan.timing ?? []) {
+    let index = passOf(entry.shotId);
+    for (let at = authored.findIndex((shot) => shot.id === entry.shotId) - 1; index === -1 && at >= 0; at -= 1) index = passOf(authored[at]!.id);
+    const slot = timingByPass.get(Math.max(index, 0)) ?? [];
+    slot.push(entry);
+    timingByPass.set(Math.max(index, 0), slot);
+  }
   const aggregate: DispatchPlan = DispatchPlanSchema.parse({
     planId: `pl_${ulid()}`,
     requestId: input.requestId,
@@ -171,6 +272,7 @@ export async function createDispatchPlan(store: WorldStore, input: CreatePlanInp
       idempotencyKey: ulid(),
       dependsOn: dependencies[passIndex]!,
       compiled: pass,
+      carries: passCarries(pass, input, input.castNotSent ?? [], timingByPass.get(passIndex)),
     })),
     ...(input.castNotSent?.length ? { castNotSent: input.castNotSent } : {}),
     createdAt: input.clock(),

@@ -974,7 +974,19 @@ describe("scene detail owns the workspace", () => {
           policy: "review-gated",
           capMicroUsd: 120_000,
           status: "authorized",
-          passes: [{ passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000 }],
+          passes: [{
+            passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000, askedSec: 7,
+            carries: {
+              shotIds: ["sh_12", "sh_13"],
+              frame: { shotId: "sh_12" },
+              place: { sheetId: "the-vigil", name: "The Vigil", rides: true },
+              cast: [
+                { sheetId: "maren-kest", name: "Maren Kest", voice: "rides", look: "rides" },
+                { sheetId: "bray-half-hitch", name: "Bray Half-Hitch", voice: "not-sent", look: "kit", voiceReason: "takes no audio" },
+              ],
+              timing: [{ shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 }],
+            },
+          }],
           spentEstimateMicroUsd: 80_000,
           next: { kind: "await-continue", passIndex: 0 },
         },
@@ -993,6 +1005,13 @@ describe("scene detail owns the workspace", () => {
       ],
     });
 
+    // The card's line comes from the recorded summary alone (SPEC-044 R-24, R-25): what rides,
+    // what will not and why, and timing as one clause on the pass — while the header, which
+    // computes nothing for a dispatch any more (R-3, T-13), carries no shot id at all.
+    const card = q(mounted, ".fy-boardcard__mono")?.textContent ?? "";
+    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: sheet · Bray Half-Hitch: voice not sent · takes no audio · materialised/);
+    assert.match(card, /shot 14 · not on the Cut · left out/);
+    assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /sh_\d+|unanchored|Generation timing/);
     const optionButtons = all(mounted, "button").filter((button) => button.textContent?.trim() === "Generation options");
     assert.equal(optionButtons.length, 1, "another scene's plan is not actionable here");
     const options = optionButtons[0];

@@ -370,7 +370,7 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
    */
   it("persists a plan for a scene that carries references, look and all", async () => {
     const fixture = await open();
-    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "@maren-kest at the rail")] };
+    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "@maren-kest at the rail"), shot(2, 6, "@maren-kest turns from @the-vigil")] };
     const kits = fixture.bundle.referenceKits.map((kit) =>
       kit.sheetId === "maren-kest"
         ? {
@@ -417,6 +417,23 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     assert.equal(maren.subject, "Maren Kest");
     assert.equal(maren.mode, "scoped-look");
     assert.ok(maren.file.includes("council-coat"));
+
+    // The pass summary (SPEC-044 §2.3), recorded from the compiled passes: the first pass sends
+    // the look and the place; the chained second opens on a frame and sends neither, each said
+    // with its reason — and nothing about a voice, because nobody speaks.
+    assert.equal(plan.passes.length, 2, "6s + 6s against a 10s cap is two passes");
+    assert.deepEqual(plan.passes[0]!.carries, {
+      shotIds: ["sh_1"],
+      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
+      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "rides" }],
+    });
+    assert.deepEqual(plan.passes[1]!.carries, {
+      shotIds: ["sh_2"],
+      frame: { shotId: "sh_2" },
+      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "this route takes one image" },
+      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "not-sent", reason: "this route takes one image" }],
+    });
+    assert.equal(foldPlan(plan, [], []).passes[1]!.carries?.frame?.shotId, "sh_2", "the fold hands the summary to the card");
 
     // And it survives the round trip the reader takes, which is a second strict parse.
     const plans = await listPlans(fixture.store, fixture.production.meta.id);

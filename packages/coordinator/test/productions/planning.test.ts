@@ -2155,3 +2155,37 @@ describe("authored shot prompts (issue 942)", () => {
     await store.close();
   });
 });
+
+describe("structured timing (SPEC-044 §2.3, R-25)", () => {
+  const VIDEO: ManifestModel = {
+    id: "clip-like", provider: "fal", capability: "video", displayName: "Clip-like",
+    accepts: { referenceImages: 4, startFrame: false, endFrame: false },
+    limits: { maxDurationSec: 10, durations: { "5": "5", "10": "10" } },
+    pricing: { kind: "perSecond", microUsdPerSecond: 20000 },
+  };
+  const anchored = (anchors: Record<string, { startSec: number; endSec: number }>) => ({
+    schemaVersion: 1 as const, revision: 1, trackArtifactId: "ar_01J8E0000000000000000000A1", markers: [], updatedAt: CLOCK(),
+    anchors: Object.fromEntries(Object.entries(anchors).map(([id, span]) => [id, { ...span, clipAudio: { mode: "mute" as const } }])),
+  });
+
+  it("names the shots the Cut does not place with the length the fallback uses, and words a refusal by number", async (t) => {
+    const { store } = await open();
+    t.after(() => store.close());
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = legacySceneView(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    const planWith = (anchors: Record<string, { startSec: number; endSec: number }>, mode: "per-shot" | "whole-scene") =>
+      planScene({ world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits: bundle.referenceKits, scene,
+        selections: {}, model: VIDEO, timingProduction: { ...production, spine: anchored(anchors) } }, mode);
+    const placed = planWith({ sh_12: { startSec: 0, endSec: 4 }, sh_13: { startSec: 4, endSec: 10 } }, "per-shot");
+    assert.deepEqual(placed.timingProblems, []);
+    assert.deepEqual(placed.timing, [
+      { shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 },
+      { shotId: "sh_15", number: 15, kind: "unanchored", durationSec: 4.5 },
+    ]);
+    assert.ok(!JSON.stringify(placed.timing).includes("unanchored;"), "no sentence rides along for a screen to print");
+    const overlapping = planWith({ sh_12: { startSec: 0, endSec: 5 }, sh_13: { startSec: 3, endSec: 9 } }, "whole-scene");
+    assert.deepEqual(overlapping.timingProblems, ["shots 12 and 13 · overlap on the Cut · fix the timing first"]);
+    assert.deepEqual(planWith({}, "whole-scene").timingProblems, ["no shot on the Cut · place one first"]);
+  });
+});

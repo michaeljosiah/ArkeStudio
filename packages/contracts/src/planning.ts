@@ -1536,8 +1536,10 @@ export interface ShotDispatchPlan {
 }
 
 export interface ScenePlan {
+  /** What stops the plan, worded for the refusal (SPEC-044 §2.3): shots by number, never by id. */
   timingProblems?: string[];
-  timingWarnings?: string[];
+  /** Shots the Cut does not place, each with the length the per-shot fallback uses (R-25). */
+  timing?: Array<{ shotId: string; number: number; kind: "unanchored"; durationSec: number }>;
   mode: "per-shot" | "whole-scene";
   /** The effective production/world visual language frozen into every assembled prompt. */
   effectiveStyle: string;
@@ -1958,31 +1960,47 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const hasClock = timingProduction !== undefined && (timingProduction.spine !== null || timingProduction.timeline?.status === "ready" || timingProduction.timeline?.status === "invalid");
   const slots = hasClock ? dialogueSlots(timingProduction!) : [];
   const byShot = new Map<string, DialogueSlot>();
-  const timingProblems: string[] = [], timingWarnings: string[] = [];
+  const timingProblems: string[] = [], timing: NonNullable<ScenePlan["timing"]> = [];
+  // Shots by number (SPEC-044 R-25): a problem is read on the plan card and in the refusal, and
+  // a shot id there is exactly what the header used to leak. A shot of another scene keeps its
+  // scene's number beside it, because "shot 3" alone names a different shot in every scene.
+  const shotLabel = (id: string): string => {
+    const own = authored.find(shot => shot.id === id);
+    if (own) return `shot ${own.number}`;
+    for (const other of timingProduction?.scenes ?? []) {
+      const found = orderedShots(other).find(shot => shot.id === id);
+      if (found) return `scene ${other.number} shot ${found.number}`;
+    }
+    return "a shot elsewhere";
+  };
+  const pairLabel = (a: string, b: string): string => {
+    const na = authored.find(shot => shot.id === a)?.number, nb = authored.find(shot => shot.id === b)?.number;
+    return na !== undefined && nb !== undefined ? `shots ${Math.min(na, nb)} and ${Math.max(na, nb)}` : `${shotLabel(a)} and ${shotLabel(b)}`;
+  };
   for (const slot of slots) {
-    if (byShot.has(slot.shotId)) timingProblems.push(`${slot.shotId}: multiple picture placements make generation timing ambiguous.`);
+    if (byShot.has(slot.shotId)) timingProblems.push(`${shotLabel(slot.shotId)} · placed twice on the Cut · fix the timing first`);
     byShot.set(slot.shotId,slot);
   }
-  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("Repair the invalid production timeline before generation.");
-  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timingWarnings.push(`${shot.id}: unanchored; per-shot generation uses authored fallback and whole-scene packing excludes it.`);
+  if (timingProduction?.timeline?.status === "invalid") timingProblems.push("the Cut is invalid · repair it first");
+  for (const shot of authored) if (hasClock && !byShot.has(shot.id)) timing.push({ shotId: shot.id, number: shot.number, kind: "unanchored", durationSec: resolvedAuthoredDuration(shot) });
   const ordered = authored.filter(shot => mode !== "whole-scene" || !hasClock || byShot.has(shot.id)).map(shot => {
     const slot = byShot.get(shot.id);
     return slot ? { ...shot, durationSec: slot.endSec-slot.startSec } : shot;
   });
-  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("Place at least one scene shot on the timeline before whole-scene generation.");
+  if (mode === "whole-scene" && hasClock && !ordered.length) timingProblems.push("no shot on the Cut · place one first");
   if (mode === "whole-scene" && hasClock) ordered.sort((a,b)=>byShot.get(a.id)!.startSec-byShot.get(b.id)!.startSec);
   const chronologicalSlots = [...slots].sort((a,b) => a.startSec-b.startSec);
   const sceneShotIds = new Set(authored.map(shot => shot.id));
   let furthest = chronologicalSlots[0];
   for (const slot of chronologicalSlots.slice(1)) {
-    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${slot.shotId} / ${furthest.shotId}: picture slots overlap across the production.`);
+    if (furthest && slot.startSec < furthest.endSec && (sceneShotIds.has(slot.shotId) || sceneShotIds.has(furthest.shotId))) timingProblems.push(`${pairLabel(slot.shotId, furthest.shotId)} · overlap on the Cut · fix the timing first`);
     if (!furthest || slot.endSec > furthest.endSec) furthest = slot;
   }
   const timingBreaks = new Set<string>();
   if (hasClock) for (let i=1;i<ordered.length;i++) {
     const previous=byShot.get(ordered[i-1]!.id), next=byShot.get(ordered[i]!.id);
     if (!previous || !next || previous.endSec!==next.startSec) timingBreaks.add(ordered[i]!.id);
-    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${ordered[i]!.id}: picture slots overlap; repair the timing before dispatch.`);
+    if (previous && next && previous.endSec>next.startSec) timingProblems.push(`${pairLabel(ordered[i-1]!.id, ordered[i]!.id)} · overlap on the Cut · fix the timing first`);
   }
 
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
@@ -2430,7 +2448,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   return {
     mode,
-    ...(hasClock ? { timingProblems, timingWarnings } : {}),
+    ...(hasClock ? { timingProblems: [...new Set(timingProblems)], timing } : {}),
     effectiveStyle,
     ...(productionStyleOverride !== undefined ? { productionStyleOverride } : {}),
     shots,

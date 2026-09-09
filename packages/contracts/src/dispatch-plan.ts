@@ -138,6 +138,41 @@ export const CompiledPassRecordSchema = z
   })
   .strict();
 
+/**
+ * What a pass sends and what it will not (SPEC-044 §2.3), said once when the plan is recorded:
+ * the card reads it and words nothing of its own. A member's `reason` is the look's, and
+ * `voiceReason` the voice's, because a chained pass on a model with no audio route loses both
+ * for different reasons and one clause cannot carry two.
+ */
+export const PassCarriesSchema = z
+  .object({
+    shotIds: z.array(z.string().min(1)),
+    frame: z.object({ shotId: z.string().min(1) }).strict().optional(),
+    place: z
+      .object({ sheetId: z.string().min(1), name: z.string().min(1), rides: z.boolean(), reason: z.string().min(1).optional() })
+      .strict()
+      .optional(),
+    cast: z.array(
+      z
+        .object({
+          sheetId: z.string().min(1),
+          name: z.string().min(1),
+          voice: z.enum(["rides", "not-sent", "none"]),
+          look: z.enum(["rides", "not-sent", "kit"]),
+          reason: z.string().min(1).optional(),
+          voiceReason: z.string().min(1).optional(),
+        })
+        .strict(),
+    ),
+    timing: z
+      .array(
+        z.object({ shotId: z.string().min(1), number: z.number().int().min(1), kind: z.literal("unanchored"), durationSec: z.number().min(0) }).strict(),
+      )
+      .optional(),
+  })
+  .strict();
+export type PassCarries = z.infer<typeof PassCarriesSchema>;
+
 export const PlanPassSchema = z
   .object({
     passIndex: z.number().int().min(0),
@@ -145,6 +180,8 @@ export const PlanPassSchema = z
     idempotencyKey: UlidSchema,
     dependsOn: z.array(PassDependencySchema),
     compiled: CompiledPassRecordSchema,
+    /** Optional because plans outlive the build that wrote them, as the compiled fields are. */
+    carries: PassCarriesSchema.optional(),
   })
   .strict();
 export type PlanPass = z.infer<typeof PlanPassSchema>;
@@ -314,6 +351,10 @@ export interface PassState {
   boundFrame?: { artifactId: string; hash: string; file: string };
   reason?: string;
   estimatedMicroUsd: number;
+  /** The seconds the pass asks of the route, when it has a length at all. */
+  askedSec?: number;
+  /** The pass summary the plan recorded (SPEC-044 §2.3); absent on plans written before it. */
+  carries?: PassCarries;
 }
 
 export type PlanNextAction =
@@ -386,6 +427,8 @@ export function foldPlan(
     const base = {
       passIndex: pass.passIndex,
       estimatedMicroUsd: pass.compiled.estimatedMicroUsd,
+      ...(pass.compiled.askedSec !== undefined ? { askedSec: pass.compiled.askedSec } : {}),
+      ...(pass.carries !== undefined ? { carries: pass.carries } : {}),
       ...(jobId !== undefined ? { jobId } : {}),
       ...(boundFrame !== undefined ? { boundFrame } : {}),
     };
