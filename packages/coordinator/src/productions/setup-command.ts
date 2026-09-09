@@ -35,6 +35,9 @@ export async function handleProductionSetupCommand(
       // A progress refresh can fail independently. Always drain the turn and publish its
       // terminal transcript before answering, including the durable failure and Retry action.
       const [outcome] = await Promise.allSettled([running, publish(id)]);
+      // Closing fences setup writes. Recovery records the interrupted run on the next open;
+      // a result from the old store must neither update the draft nor expose an internal error.
+      if (world.isClosed()) throw new Error("The world closed before Arke finished. Your setup is saved; reopen it to retry the turn.");
       await publish(id);
       if (outcome.status === "rejected") throw outcome.reason;
       const result = outcome.value;

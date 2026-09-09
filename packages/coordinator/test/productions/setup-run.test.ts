@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { newId, ulid, type ConversationId, type HarnessAdapter, type WorldChatMessage } from "@arke-studio/contracts";
 import { WorldChatRunner } from "../../src/world-chat/run.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
+import { recoverConversations } from "../../src/world-chat/recovery.js";
 import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
@@ -46,6 +47,63 @@ const reply = (setupUpdate?: unknown) => JSON.stringify({
 });
 
 describe("setup turns share conversation durability but no world-mutation authority", () => {
+  it("recovers a world-close interruption as retryable and lets the retained draft be reviewed (#1030)", async () => {
+    let respond!: (text: string) => void;
+    let asked!: () => void;
+    const requested = new Promise<void>(resolve => { asked = resolve; });
+    const answer = new Promise<string>(resolve => { respond = resolve; });
+    const h = await setup(() => { asked(); return answer; });
+    await h.service.update(h.id, { expectedRevision: 1, fields: { title: "The crossing" } });
+    const running = handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId,
+      setupId: h.id, requestId: ulid(), action: { operation: "send", text: "Develop the crossing." } },
+    () => h.runner, async () => {});
+    const refused = assert.rejects(running, /world closed.*setup is saved.*retry/i);
+    await requested;
+    await assert.rejects(h.service.review(h.id, 2), /Wait for Arke/);
+    await h.world.close();
+    respond(reply({ expectedRevision: 2, fields: { title: "A late model title" } }));
+    await refused;
+    assert.equal(h.runner.isRunning(h.id), false);
+
+    const reopened = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => reopened.close());
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, [h.id]);
+    assert.deepEqual((await reopened.ownedWrite(() => recoverConversations(reopened.dir))).repaired, []);
+    const view = (await h.view())!;
+    assert.equal(view.activeRun, null);
+    assert.equal(view.lastFailedRun?.status, "interrupted");
+    assert.equal(view.messages.length, 1, "the original message survives without a fabricated reply");
+    assert.equal(view.productionSetup!.draft.title, "The crossing", "a late result cannot write through the closed owner");
+    const service = new ProductionSetupService(reopened);
+    const review = await service.review(h.id, 2);
+    assert.equal(review.status, "reviewed");
+    await reopened.close();
+    const again = await WorldStore.open(h.world.dir, { clock: () => AT });
+    closeOnCleanup(() => again.close());
+    assert.deepEqual(await new ProductionSetupService(again).resume(h.id), review);
+  });
+
+  it("Stop releases Review and a subsequent successful turn does not resurrect the interruption (#1030)", async () => {
+    let respond!: (text: string) => void;
+    let asked!: () => void;
+    const requested = new Promise<void>(resolve => { asked = resolve; });
+    const answer = new Promise<string>(resolve => { respond = resolve; });
+    const h = await setup(() => { asked(); return answer; });
+    await h.service.update(h.id, { expectedRevision: 1, fields: { title: "The crossing" } });
+    const running = h.runner.send(h.log, h.id, "Develop the crossing.");
+    await requested;
+    h.runner.cancel(h.id);
+    assert.equal((await running).status, "cancelled");
+    assert.equal((await h.view())!.activeRun, null);
+    assert.equal((await h.service.review(h.id, 2)).status, "reviewed");
+    respond(reply());
+    assert.equal((await h.runner.send(h.log, h.id, "Keep the title.")).status, "completed");
+    const view = (await h.view())!;
+    assert.equal(view.activeRun, null);
+    assert.equal(view.lastFailedRun, null);
+    assert.equal((await h.service.review(h.id, 2)).status, "reviewed");
+  });
+
   it("carries conversational episode bounds and seeded delivery defaults into the created season (#1012)", async () => {
     const h = await setup(() => reply({ expectedRevision: 1, fields: {
       title: "The dead air", kind: "microdrama", aspect: "9:16",

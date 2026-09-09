@@ -166,6 +166,24 @@ describe("world chat fold", () => {
       "nothing renders a spinner that will never stop",
     );
     assert.equal(folded.needsInterruptedRunRepair, true, "and the caller is told to make that durable");
+
+    await s.append({ type: "run.finished", run: { ...folded.view.activeRun!, endedAt: AT } }, { at: AT });
+    const finished = foldConversation(CV, AT, (await s.read()).events);
+    assert.equal(finished.needsInterruptedRunRepair, false);
+    assert.equal(finished.view.activeRun, null, "pending harness cleanup is not a live turn (#1030)");
+    assert.equal(finished.view.lastFailedRun?.turnId, turnId);
+
+    const later = turn("A later reply");
+    if (later.type !== "turn.completed") throw new Error("Expected a completed turn");
+    await s.append({ type: "turn.started", message: { ...later.message, role: "user" },
+      run: { ...later.run, status: "running", endedAt: undefined } }, { at: AT });
+    const live = foldConversation(CV, AT, (await s.read()).events);
+    assert.equal(live.view.activeRun?.id, later.run.id, "an old interruption cannot conceal a newer live run");
+    assert.equal(live.view.lastFailedRun, null);
+    await s.append(later, { at: AT });
+    const completed = foldConversation(CV, AT, (await s.read()).events);
+    assert.equal(completed.view.activeRun, null);
+    assert.equal(completed.view.lastFailedRun, null);
   });
 
   it("resolves a proposal once, however many times reconciliation runs", async () => {
