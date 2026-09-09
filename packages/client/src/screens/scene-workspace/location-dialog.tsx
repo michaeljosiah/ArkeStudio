@@ -37,12 +37,14 @@ export function LocationDialog({ world, production, scene, onClose, onChangeLoca
   const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
   const name = sheet?.name ?? sheetId;
+  // The establishing view leads the ordered views; without one the kit's main photo is the plate,
+  // which is the same fallback every other screen takes for a location's picture.
   const views = kit === null ? [] : orderedLocationViews(kit);
-  const establishing = views.find((view) => view.id === kit?.establishingViewId) ?? views[0];
+  const establishing = views[0];
   const photo = kit === null ? null : mainPhotoFor(kit);
   const sceneLook = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id });
-  const inUse = sceneLook?.file ?? establishing?.file ?? photo?.file;
-  const picture = inUse === undefined ? locationPortraitPath(world, sheetId) : `references/${sheetId}/${inUse}`;
+  const picture = sceneLook === undefined ? locationPortraitPath(world, sheetId) : `references/${sheetId}/${sceneLook.file}`;
+  const hasPlate = establishing !== undefined || photo !== null;
   // A shot cannot override the scene's place today (a shot's overrides are its framing), so the
   // plate is every shot's; R-21's "shots set here" waits for a shot-level place to exist.
   const facts = ["location", sheet === undefined ? null : `sheet v${sheet.version}`, "every shot in the scene", scene.inherits?.timeOfDay ?? null]
@@ -74,14 +76,16 @@ export function LocationDialog({ world, production, scene, onClose, onChangeLoca
           <div className="fy-chardialog__row" aria-label="Plate">
             <div className="fy-chardialog__label">Plate</div>
             <div className="fy-chardialog__cards">
-              <Card
-                on={sceneLook === undefined}
-                label={establishing?.name ?? "Establishing view"}
-                sub="kit"
-                thumb={establishing !== undefined ? thumb(establishing.file) : photo !== null ? thumb(photo.file) : undefined}
-                disabled={establishing === undefined && photo === null}
-                onPress={() => { if (sceneLook !== undefined) attachCharacterLook(worldId, sheetId, sceneLook.id, null); }}
-              />
+              {/* No kit, no view, no photo: nothing rides, and nothing is ringed as if it did. */}
+              {hasPlate ? (
+                <Card
+                  on={sceneLook === undefined}
+                  label={establishing?.name ?? "Establishing view"}
+                  sub="kit"
+                  thumb={establishing !== undefined ? thumb(establishing.file) : photo !== null ? thumb(photo.file) : undefined}
+                  onPress={() => { if (sceneLook !== undefined) attachCharacterLook(worldId, sheetId, sceneLook.id, null); }}
+                />
+              ) : null}
               {others.map((view) => (
                 <Card
                   key={view.id}
@@ -92,7 +96,7 @@ export function LocationDialog({ world, production, scene, onClose, onChangeLoca
                   onPress={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId, sceneId: scene.id })}
                 />
               ))}
-              <Card door label="Add a plate" sub="Location page" onPress={() => { onClose(); navigate(`/w/${worldId}/locations/${sheetId}/reference`); }} />
+              <Card door label="Add a plate" sub="Location page" onPress={() => { onClose(); navigate(`/w/${worldId}/locations/${sheetId}/reference?attach=scene:${productionId}:${scene.id}`); }} />
             </div>
           </div>
           <span className="fy-chardialog__spacer" />

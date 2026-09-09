@@ -38,8 +38,9 @@ export function worldImageReferences(world: WorldBundle): WorldImageReference[] 
     image(kit.designatedCompilation, "Character sheet");
     for (const compilation of kit.compilations) image(compilation.file, "Character sheet");
     for (const tile of kit.tiles) image(tile.file, tile.angle);
-    for (const look of kit.looks ?? []) image(look.file, `Look · ${look.kind}`);
+    // A view first, so a view a scene took as its plate keeps its own name (SPEC-044 R-18).
     for (const view of kit.locationViews ?? []) image(view.file, view.name);
+    for (const look of kit.looks ?? []) image(look.file, `Look · ${look.kind}`);
   }
   for (const [sheetId, files] of Object.entries(world.referenceCandidates)) {
     const sheet = world.sheets.find((s) => s.id === sheetId);

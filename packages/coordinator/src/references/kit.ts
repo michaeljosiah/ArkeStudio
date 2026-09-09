@@ -368,6 +368,14 @@ export async function acceptLocationView(
     // Replacing the establishing view leaves the additional views' order untouched: they are
     // ordered by their own acceptance, and this one was not theirs.
     establishingViewId: establishing ? accepted.id : kit.establishingViewId,
+    // A view a scene took as its plate rides as a look keyed by the view (SPEC-044 R-18): a
+    // replacement takes over that look too, or the scene would keep dispatching a picture no
+    // panel shows any more.
+    ...(kit.looks === undefined ? {} : {
+      looks: kit.looks.map((look) => supersededByThis.has(look.id)
+        ? { ...look, id: accepted.id, file: accepted.file, prompt: accepted.name, sourceTakeId: accepted.sourceTakeId, artDirectionVersion: accepted.artDirectionVersion, acceptedAt: now }
+        : look),
+    }),
   };
 
   const sheetFile = await rebuildLocationSheet(store, sheet, nextKit);

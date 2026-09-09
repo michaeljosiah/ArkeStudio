@@ -95,16 +95,16 @@ export function SceneWorkspace({
   // open their dialogs. Session state, like the lightbox — a door is not an address.
   const [picker, setPicker] = useState<CastPickerMode | null>(null);
   const [openMember, setOpenMember] = useState<string | null>(null);
-  const [placeOpen, setPlaceOpen] = useState(false);
+  const [openPlace, setOpenPlace] = useState<string | null>(null);
   // A closed picker or dialog is unmounted, and a removed modal drops focus on the body; the
   // door that opened it takes focus back, as the Generate frames dialog's does.
   const doorFocus = useRef<HTMLElement | null>(null);
-  const closeDoor = () => { setPicker(null); setOpenMember(null); setPlaceOpen(false); };
+  const closeDoor = () => { setPicker(null); setOpenMember(null); setOpenPlace(null); };
   // Once the modal is gone, not while it still holds the top layer: a focus() under a modal
   // dialog is ignored, and the removal then drops focus on the body.
   useEffect(() => {
-    if (picker === null && openMember === null && !placeOpen) doorFocus.current?.focus();
-  }, [picker, openMember, placeOpen]);
+    if (picker === null && openMember === null && openPlace === null) doorFocus.current?.focus();
+  }, [picker, openMember, openPlace]);
   const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
@@ -475,7 +475,7 @@ export function SceneWorkspace({
                   <Plus size={10} />Add a location
                 </button>
               ) : (
-                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={placeOpen} onClick={(event) => { doorFocus.current = event.currentTarget; setPlaceOpen(true); }}>
+                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={openPlace !== null} onClick={(event) => { doorFocus.current = event.currentTarget; setOpenPlace(scene.inherits?.location ?? null); }}>
                   {locationSheet === undefined ? null : <span className="fy-sw__plate" aria-hidden="true"><SheetPicture world={world} sheet={locationSheet} /></span>}
                   {locationName}
                 </button>
@@ -783,16 +783,16 @@ export function SceneWorkspace({
             onWrite={write}
           />
         )}
-        {placeOpen && scene.inherits?.location !== undefined ? (
+        {/* Held by the place's id: a place that leaves under the dialog takes the dialog with it. */}
+        {openPlace !== null && openPlace === scene.inherits?.location ? (
           <LocationDialog
-            key={scene.inherits.location}
             world={world}
             production={production}
             scene={scene}
             onClose={closeDoor}
             // Change location is the picker in its third title (R-19); the dialog steps aside
             // for it and the door's focus comes back when the picker closes.
-            onChangeLocation={() => { setPlaceOpen(false); setPicker("change-location"); }}
+            onChangeLocation={() => { setOpenPlace(null); setPicker("change-location"); }}
           />
         ) : null}
         {picker === null ? null : (

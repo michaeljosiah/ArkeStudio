@@ -1249,7 +1249,16 @@ describe("location views and the sheet they assemble (#243)", () => {
     await attachCharacterLook(store, VIGIL.id, "v2", null);
     const detached = (await readKit(store, VIGIL.id))!.kit;
     assert.deepEqual(detached.looks?.map((look) => [look.id, look.attachedTo]), [["v2", undefined]], "detaching keeps the look and drops the scope");
+    await attachCharacterLook(store, VIGIL.id, "v2", scope);
+    assert.equal((await readKit(store, VIGIL.id))!.kit.looks?.length, 1, "a second attachment finds the look rather than making another");
     await assert.rejects(attachCharacterLook(store, VIGIL.id, "v9", scope), /no accepted look/);
+    // A replacement takes the plate with it: the look follows the view that took over the panel.
+    await acceptView(store, dir, 3, "From the door", { replaceExistingName: true });
+    const replaced = (await readKit(store, VIGIL.id))!.kit;
+    const newDoor = orderedLocationViews(replaced).find((candidate) => candidate.name === "From the door")!;
+    assert.equal(newDoor.id, "v3");
+    assert.deepEqual(replaced.looks?.map((look) => [look.id, look.file, look.attachedTo]), [["v3", newDoor.file, scope]]);
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v2", scope), /no accepted look/, "a superseded view is no plate");
     await store.close();
   });
 

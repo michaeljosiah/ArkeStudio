@@ -27,9 +27,10 @@ Object.assign(globalThis, {
 const AT = "2026-09-09T10:00:00.000Z";
 const view = (id: string, name: string, file: string) => ({ id, name, file, sourceTakeId: "tk_01J8E0000000000000000000T1", sheetVersion: 2, artDirectionVersion: 3, acceptedAt: AT, status: "active" });
 
-function stateFor(options: { sceneView?: boolean } = {}): ClientState {
+function stateFor(options: { sceneView?: boolean; kit?: false } = {}): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const world = state.world!;
+  if (options.kit === false) return state;
   world.referenceKits.push({
     sheetId: "the-vigil", tiles: [], compilations: [], establishingViewId: "v-establishing",
     locationViews: [view("v-establishing", "Establishing view", "views/establishing.png"), view("v-door", "From the door", "views/door.png")],
@@ -86,6 +87,11 @@ describe("the location dialog (SPEC-044 R-18, R-19, R-21)", () => {
     await click([...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Done") ?? null);
     assert.equal(closes.count, 1);
     assert.doesNotMatch(container.textContent ?? "", /sha256|sh_\d+/, "no hash or shot id on the dialog");
+  });
+
+  it("rings nothing when the place has no kit: only the door stands in the row", async () => {
+    const { container } = await mount(stateFor({ kit: false }));
+    assert.deepEqual(cards(container), [["Add a plate · Location page", null]]);
   });
 
   it("rings the view attached to this scene, shows it as the plate, and the establishing view's press detaches it", async () => {
