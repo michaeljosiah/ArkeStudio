@@ -6914,7 +6914,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-sw__tile--add { border-style: dashed; border-color: var(--neutral-300); background: transparent; }
 /* The picker (R-4), a dialog on the app frame like the lightbox. */
 .fy-castpicker { border: 0; padding: 0; background: transparent; max-width: none; max-height: none; }
-.fy-castpicker::backdrop { background: rgba(10, 10, 10, .42); }
+.fy-castpicker::backdrop { background: var(--media-overlay-bg); opacity: .42; }
 .fy-castpicker__panel { box-sizing: border-box; width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 68px); overflow-y: auto; background: var(--background); color: var(--foreground); border: 1px solid var(--border); border-radius: 16px; box-shadow: var(--shadow-xl); padding: 20px 22px 22px; display: flex; flex-direction: column; gap: 16px; animation: fy-swlightbox-in 0.16s var(--ease-out) both; }
 .fy-castpicker__head { display: flex; align-items: center; gap: 10px; }
 .fy-castpicker__title { flex: 1; font: 650 17px var(--font-sans); letter-spacing: -0.02em; }

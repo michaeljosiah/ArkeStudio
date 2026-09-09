@@ -982,7 +982,8 @@ describe("scene detail owns the workspace", () => {
               place: { sheetId: "the-vigil", name: "The Vigil", rides: true },
               cast: [
                 { sheetId: "maren-kest", name: "Maren Kest", voice: "rides", look: "rides" },
-                { sheetId: "bray-half-hitch", name: "Bray Half-Hitch", voice: "not-sent", look: "kit", voiceReason: "takes no audio" },
+                { sheetId: "bray-half-hitch", name: "Bray Half-Hitch", voice: "not-sent", look: "none", voiceReason: "takes no audio" },
+                { sheetId: "the-chorister", name: "The Chorister", voice: "rides", look: "kit", voiceReason: "read missing" },
               ],
               timing: [{ shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 }],
             },
@@ -1009,9 +1010,15 @@ describe("scene detail owns the workspace", () => {
     // what will not and why, and timing as one clause on the pass — while the header, which
     // computes nothing for a dispatch any more (R-3, T-13), carries no shot id at all.
     const card = q(mounted, ".fy-boardcard__mono")?.textContent ?? "";
-    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: sheet · Bray Half-Hitch: voice not sent · takes no audio · materialised/);
+    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: voice not sent · takes no audio · The Chorister: voice, sheet · The Chorister: read not sent · read missing · the sample rides · materialised/);
     assert.match(card, /shot 14 · not on the Cut · left out/);
     assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /sh_\d+|unanchored|Generation timing/);
+    // A refusal is the same plain clause in the callout, and nowhere else (R-25).
+    await apply({ at: "2026-08-31T12:01:00Z", type: "production.plan-result", requestId: create.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight",
+      disposition: "failed", reason: "shots 12 and 13 · overlap on the Cut · fix the timing first" });
+    const refused = all(mounted, ".ui-callout, [role=alert]").find((node) => node.textContent?.includes("Plan refused"));
+    assert.match(refused?.textContent ?? "", /shots 12 and 13 · overlap on the Cut · fix the timing first/);
+    assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /overlap on the Cut/);
     const optionButtons = all(mounted, "button").filter((button) => button.textContent?.trim() === "Generation options");
     assert.equal(optionButtons.length, 1, "another scene's plan is not actionable here");
     const options = optionButtons[0];

@@ -158,7 +158,7 @@ export const PassCarriesSchema = z
           sheetId: z.string().min(1),
           name: z.string().min(1),
           voice: z.enum(["rides", "not-sent", "none"]),
-          look: z.enum(["rides", "not-sent", "kit"]),
+          look: z.enum(["rides", "not-sent", "kit", "none"]),
           reason: z.string().min(1).optional(),
           voiceReason: z.string().min(1).optional(),
         })

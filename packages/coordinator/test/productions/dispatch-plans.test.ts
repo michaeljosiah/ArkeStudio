@@ -430,8 +430,8 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     assert.deepEqual(plan.passes[1]!.carries, {
       shotIds: ["sh_2"],
       frame: { shotId: "sh_2" },
-      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "this route takes one image" },
-      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "not-sent", reason: "this route takes one image" }],
+      place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
+      cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "not-sent", reason: "this model takes one image" }],
     });
     assert.equal(foldPlan(plan, [], []).passes[1]!.carries?.frame?.shotId, "sh_2", "the fold hands the summary to the card");
 
@@ -443,6 +443,28 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
       reread!.passes.flatMap((pass) => pass.compiled.references).find((r) => r.sheetId === "maren-kest")!.mode,
       "scoped-look",
     );
+  });
+
+  it("files a timing clause with the pass it changes, and a shot packing left out with the nearest earlier pass (SPEC-044 R-25)", async () => {
+    const fixture = await open();
+    const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "the pier"), shot(2, 6, "the bell"), shot(3, 6, "the rail")] };
+    const spine = (anchors: Record<string, { startSec: number; endSec: number }>) => ({
+      schemaVersion: 1 as const, revision: 1, trackArtifactId: "ar_01J8E0000000000000000000A1", markers: [], updatedAt: CLOCK(),
+      anchors: Object.fromEntries(Object.entries(anchors).map(([id, span]) => [id, { ...span, clipAudio: { mode: "mute" as const } }])),
+    });
+    const planWith = async (anchors: Record<string, { startSec: number; endSec: number }>, requestId: string) =>
+      createDispatchPlan(fixture.store, {
+        worldId: WORLD_ID, productionId: fixture.production.meta.id, scene, model: CHAINING, world: fixture.bundle, policy: "review-gated", requestId, clock: CLOCK,
+        plan: planScene({ world: fixture.bundle.meta, productionId: fixture.production.meta.id, sheets: fixture.bundle.sheets, kits: fixture.bundle.referenceKits,
+          scene, selections: {}, model: CHAINING, timingProduction: { ...fixture.production, spine: spine(anchors) } }, "whole-scene"),
+      });
+    // Shot 2 sits between two packed shots: its clause files with the pass carrying shot 1.
+    const between = await planWith({ sh_1: { startSec: 0, endSec: 6 }, sh_3: { startSec: 6, endSec: 12 } }, "01J8E0000000000000000000T1");
+    assert.deepEqual(between.passes.map((pass) => pass.compiled.target.coversShots), [["sh_1"], ["sh_3"]]);
+    assert.deepEqual(between.passes.map((pass) => pass.carries?.timing), [[{ shotId: "sh_2", number: 2, kind: "unanchored", durationSec: 6 }], undefined]);
+    // Shot 1 sits before every packed shot: nothing earlier carries it, so the first pass does.
+    const before = await planWith({ sh_2: { startSec: 0, endSec: 6 }, sh_3: { startSec: 6, endSec: 12 } }, "01J8E0000000000000000000T2");
+    assert.deepEqual(before.passes.map((pass) => pass.carries?.timing), [[{ shotId: "sh_1", number: 1, kind: "unanchored", durationSec: 6 }], undefined]);
   });
 
   /* Plans outlive the build that wrote them. Requiring the fields an older build never wrote

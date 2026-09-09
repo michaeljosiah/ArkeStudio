@@ -54,6 +54,8 @@ export function PlansPanel({
       ...(riding.length > 0 ? [`${member.name}: ${riding.join(", ")}`] : []),
       ...(member.look === "not-sent" ? [`${member.name}: look not sent${member.reason === undefined ? "" : ` · ${member.reason}`}`] : []),
       ...(member.voice === "not-sent" ? [`${member.name}: voice not sent${member.voiceReason === undefined ? "" : ` · ${member.voiceReason}`}`] : []),
+      // The read that did not ride is said even though the sample did (R-28).
+      ...(member.voice === "rides" && member.voiceReason !== undefined ? [`${member.name}: read not sent · ${member.voiceReason} · the sample rides`] : []),
     ];
   };
   const passLine = (state: PlanState, pass: PlanState["passes"][number]): string => {

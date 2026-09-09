@@ -21,7 +21,6 @@ import {
   resolveCast,
   shotSpeakers,
   ulid,
-  type CompiledDrop,
   type CompiledPass,
   type DispatchPlan,
   type PassCarries,
@@ -124,10 +123,9 @@ export interface CreatePlanInput {
   clock: () => string;
 }
 
-/** A drop's reason as the card says it: the compiled record keeps the sentence, the card a clause. */
-function dropClause(drop: CompiledDrop): string {
-  if (drop.reason.startsWith("the frame route")) return "this route takes one image";
-  return drop.role === "secondary" ? "the photo is over the reference budget" : "over the reference budget";
+/** A drop's reason as the card says it (R-24): the route decides, the compiled sentence does not. */
+function dropClause(route: CompiledPass["route"]): string {
+  return route.kind === "frame" ? "this model takes one image" : route.kind === "continuation" ? "this model takes one video" : "over the reference budget";
 }
 
 /**
@@ -149,20 +147,18 @@ function passCarries(
   const audioPlan = audio.success ? audio.data : undefined;
   const voiced = new Set(audioPlan?.references.flatMap((ref) => ("sheetId" in ref && ref.sheetId !== undefined ? [ref.sheetId] : [])) ?? []);
   const speakers = shotSpeakers(input.scene, shots).speakers;
+  const cited = new Set(shots.flatMap((shot) => resolveCast(shot.description, sheets).cast.map((entry) => entry.sheet.id)));
   const characters = [
-    ...new Set([
-      ...shots.flatMap((shot) => resolveCast(shot.description, sheets).cast.map((entry) => entry.sheet.id)),
-      ...pass.references.map((ref) => ref.sheetId),
-      ...pass.dropped.map((drop) => drop.sheetId),
-      ...speakers,
-      ...castNotSent.map((entry) => entry.sheetId),
-    ]),
+    ...new Set([...cited, ...pass.references.map((ref) => ref.sheetId), ...pass.dropped.map((drop) => drop.sheetId), ...speakers]),
   ].filter((id) => sheets.find((sheet) => sheet.id === id)?.type === "character");
   const cast = characters.map((sheetId) => {
     const bound = pass.references.find((ref) => ref.sheetId === sheetId);
     const drop = pass.dropped.find((entry) => entry.sheetId === sheetId);
-    const look = bound?.mode === "scoped-look" ? "rides" : bound === undefined && drop !== undefined ? "not-sent" : "kit";
-    const notSent = castNotSent.find((entry) => entry.sheetId === sheetId);
+    // A speaker the pass's shots do not cite sends no sheet at all — nothing rode, nothing dropped.
+    const look = bound?.mode === "scoped-look" ? "rides" : bound !== undefined ? "kit" : drop !== undefined ? "not-sent" : cited.has(sheetId) ? "kit" : "none";
+    // The scene-wide clauses belong to the passes where the member speaks (R-27): a read that
+    // was never going to ride here is not "not sent" here.
+    const notSent = speakers.includes(sheetId) ? castNotSent.find((entry) => entry.sheetId === sheetId) : undefined;
     const hasVoice =
       input.world.referenceKits.find((kit) => kit.sheetId === sheetId)?.designatedVoiceSample !== undefined ||
       input.scene.cast?.[sheetId]?.voice !== undefined;
@@ -170,13 +166,16 @@ function passCarries(
     // voice (R-24, R-31) — the reason the arm recorded for a read, or the route's own.
     const silenced = speakers.includes(sheetId) && hasVoice && audioPlan !== undefined && (audioPlan.disabled || audioPlan.route === null);
     const voice = voiced.has(sheetId) ? "rides" : notSent !== undefined || silenced ? "not-sent" : "none";
+    // The read's clause survives the sample riding in its place (R-28): said beside "voice",
+    // never dropped because something else rode.
+    const voiceReason = voice === "not-sent" ? (notSent?.reason ?? (audioPlan?.route === null ? "takes no audio" : "audio off")) : notSent?.reason;
     return {
       sheetId,
       name: sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId,
       voice,
       look,
-      ...(look === "not-sent" && drop !== undefined ? { reason: dropClause(drop) } : {}),
-      ...(voice === "not-sent" ? { voiceReason: notSent?.reason ?? (audioPlan?.route === null ? "takes no audio" : "audio off") } : {}),
+      ...(look === "not-sent" ? { reason: dropClause(pass.route) } : {}),
+      ...(voiceReason !== undefined ? { voiceReason } : {}),
     } as const;
   });
   const location = input.scene.inherits?.location;
@@ -190,9 +189,7 @@ function passCarries(
           sheetId: locationSheet.id,
           name: locationSheet.name,
           rides: bound !== undefined,
-          ...(bound === undefined
-            ? { reason: dropped !== undefined ? dropClause(dropped) : pass.route.kind === "frame" || pass.route.kind === "continuation" ? "this route takes one image" : "no plate" }
-            : {}),
+          ...(bound === undefined ? { reason: dropped !== undefined ? dropClause(pass.route) : "no plate" } : {}),
         };
   return {
     shotIds: pass.target.coversShots,
