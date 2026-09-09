@@ -606,6 +606,7 @@ export function SceneWorkspace({
               }}
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
               onStageShot={openStage}
               onPreviewShot={setLightboxShotId}
               onTalkToArke={talkToArke}
@@ -628,6 +629,7 @@ export function SceneWorkspace({
               onCommand={write}
               generatorPending={generatorPending}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
               onOpenStage={openStage}
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onViewBoardSheet={(memberShotIds, trigger) => {

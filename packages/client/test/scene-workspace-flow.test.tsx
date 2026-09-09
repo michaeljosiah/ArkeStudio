@@ -413,6 +413,30 @@ describe("Flow cards follow the prototype (§11.1)", () => {
     assert.match(clip.querySelector(".fy-swnode__run")?.textContent ?? "", /^(Render clip|Re-render)$/);
   });
 
+  it("draws the character card with what she brings and an Open pill, no node for the place, and a member without a citation joined to nothing (SPEC-044 R-17, R-23)", async () => {
+    const world = FIXTURE_STATE.world!;
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const opened: string[] = [];
+    const mounted = await mountFlow({
+      scene: { ...scene, cast: { odile: { added: "2026-09-09T10:00:00.000Z" } } } as never,
+      sheets: [...world.sheets, { id: "odile", type: "character", name: "Odile", version: 1, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never],
+      onOpenCharacter: (sheetId) => { opened.push(sheetId); },
+    });
+    const refs = all(mounted, '.fy-swnode[data-kind="ref"]');
+    assert.deepEqual(
+      refs.map((node) => [node.querySelector(".fy-swnode__name")?.textContent, node.querySelector(".fy-swnode__meta")?.textContent]),
+      [["Maren Kest", "voice · look · in 1 shot"], ["Odile", "in no shot yet"]],
+    );
+    assert.ok(!refs.some((node) => node.textContent?.includes("The Vigil")), "the place is context, not cast");
+    assert.equal(refs[0]!.style.width, "200px");
+    assert.equal(refs[0]!.style.height, "72px");
+    assert.match(mounted.container.textContent ?? "", /Maren Kest is cited by shot 12/, "a soft edge to the citing shot");
+    assert.doesNotMatch(mounted.container.textContent ?? "", /Odile is cited/, "a member no shot cites is joined to nothing");
+    await click(refs[1]!.querySelector(".fy-swnode__open") as HTMLElement);
+    assert.deepEqual(opened, ["odile"]);
+  });
+
   it("a reference card shows the sheet's portrait above its caption", async () => {
     const mounted = await openFlow();
     const ref = all(mounted, '.fy-swnode[data-kind="ref"]').find((node) => node.textContent?.includes("Maren Kest"));

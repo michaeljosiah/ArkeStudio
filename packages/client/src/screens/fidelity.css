@@ -7319,6 +7319,10 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   border: 1px solid var(--border); border-radius: 999px; font-size: 10.5px; color: var(--muted-foreground);
 }
 .fy-swrow__refthumb { width: 15px; height: 15px; flex: none; border-radius: 99px; overflow: hidden; }
+/* What the character brings to this shot, and the chip as a door to the dialog (SPEC-044 R-22). */
+.fy-swrow__ref--door { background: transparent; font: inherit; cursor: pointer; }
+.fy-swrow__ref--door:hover { border-color: var(--neutral-400); color: var(--foreground); }
+.fy-swrow__refwords { margin-left: 3px; font: 400 9px var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
 .fy-swrow__overrides { display: flex; flex-wrap: wrap; gap: 6px; }
 .fy-swrow__override { font-size: 9.5px; font-family: var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
 
@@ -7400,7 +7404,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swnode[data-kind="entry"] { border-color: var(--success); }
 .fy-swnode[data-kind="exit"] { border-color: var(--muted-foreground); }
 .fy-swnode:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.fy-swnode[data-kind="ref"] { gap: 7px; padding: 9px 9px 8px; border-radius: 12px; text-align: center; }
+/* The character card (SPEC-044 R-23): 200×72, the portrait, the name, what she brings, and Open. */
+.fy-swnode[data-kind="ref"] { flex-direction: row; align-items: center; gap: 9px; padding: 9px 11px; border-color: var(--foreground); border-radius: 11px; box-shadow: var(--shadow-sm); text-align: left; }
+.fy-swnode[data-kind="ref"] .fy-swnode__thumb { flex: none; width: 30px; height: 30px; min-height: 0; border-radius: 999px; }
+.fy-swnode[data-kind="ref"] .fy-swnode__text { padding: 0; gap: 3px; }
+.fy-swnode__open { position: absolute; right: 9px; top: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); padding: 3px 7px; font: 500 9px var(--font-sans); color: var(--foreground); cursor: pointer; }
+.fy-swnode__open:hover { border-color: var(--neutral-400); }
 .fy-swnode[data-kind="ref"] .fy-swnode__meta { font-family: var(--font-mono, ui-monospace, monospace); color: var(--neutral-400); }
 .fy-swnode__thumb { display: block; flex: 1; min-height: 0; border-radius: 9px; background: var(--accent); background-size: cover; background-position: center; }
 .fy-swnode__name { font-size: 11px; font-weight: 600; letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
