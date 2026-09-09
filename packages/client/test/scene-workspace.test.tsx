@@ -164,6 +164,21 @@ describe("scene detail owns the workspace", () => {
     assert.doesNotMatch(text, /Master playback for performance shots/, "and with a label, not a sentence");
   });
 
+  it("shows a repeated generation timing finding only once (#1064)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find(p => p.meta.id === "saltlight")!;
+    const timeline = seedStoryPictureTimeline(production);
+    const track = timeline.tracks.find(track => track.kind === "picture")!;
+    const clip = track.clips.find(clip => clip.source.kind === "shot" && clip.source.shotId === "sh_12")!;
+    const end = Math.max(...track.clips.map(clip => clip.startFrame + clip.durationFrames));
+    track.clips.push({ ...clip, id: "cl_repeat-1", startFrame: end }, { ...clip, id: "cl_repeat-2", startFrame: end + clip.durationFrames });
+    production.timeline = { status: "ready", timeline };
+    const mounted = await mountState(state);
+    const message = "sh_12: multiple picture placements make generation timing ambiguous.";
+    const findings = all(mounted, '[aria-label="Generation timing"] [role="alert"]');
+    assert.equal(findings.filter(finding => finding.textContent === message).length, 1);
+  });
+
   it("mounts the workspace and compact production rail by default", async () => {
     const mounted = await mount();
     assert.ok(q(mounted, '[data-testid="scene-workspace"]'));
