@@ -143,10 +143,12 @@ export async function backfillArtifactPosters(
      * The budget binds the wait, not only the start. A maker stuck on a corrupt file has its own
      * timeout, fifteen seconds, and the open this pass sits in front of would otherwise wait it
      * out. The extraction runs on unwatched: the file it leaves is found next time, or nothing is.
+     * The timer stays referenced on purpose: against a maker that never settles it is the only
+     * thing keeping the loop alive, and Node 22 resolves an empty loop out from under the await.
      */
     const outcome = await Promise.race([
       writeArtifactPoster(store, artifact, maker, (reason) => options.onUnavailable?.(artifact.id, reason)),
-      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining).unref(); }),
+      new Promise<null>((resolve) => { setTimeout(() => resolve(null), remaining); }),
     ]);
     if (outcome === null) break;
     if (outcome) drawn += 1;
