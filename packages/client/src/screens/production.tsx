@@ -4245,8 +4245,9 @@ export function formatBytes(bytes: number): string {
 /** A row's picture: the file's own, its poster, or the kind's mark when neither arrives (issue 1037). */
 function MediaThumb({ slug, path, fallback }: { slug: string | undefined; path: string | null; fallback: React.ReactNode }) {
   const [failed, setFailed] = useState<string | null>(null);
-  if (path === null || slug === undefined || failed === path) return <>{fallback}</>;
-  return <img className="fy-artrow__img" src={mediaUrl(slug, path)} alt="" draggable={false} onError={() => setFailed(path)} />;
+  const pictureKey = `${slug ?? ""}|${path ?? ""}`;
+  if (path === null || slug === undefined || failed === pictureKey) return <>{fallback}</>;
+  return <img className="fy-artrow__img" src={mediaUrl(slug, path)} alt="" draggable={false} onError={() => setFailed(pictureKey)} />;
 }
 
 type LibraryFilter = "all" | "unused" | "needs-take" | "audio";
