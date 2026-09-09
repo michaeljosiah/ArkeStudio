@@ -13,7 +13,7 @@ Inspected 5 September 2026 against the local working tree, including existing un
 
 The repository has substantial product specifications, architectural explanations and useful operational guidance. The gap is a concise developer entry point that connects those documents to implementation, tests and change boundaries. A fresh session currently has to reconstruct those connections through source searches.
 
-There is no root or package-level `AGENTS.md` in the inspected repository. [CLAUDE.md](../../CLAUDE.md) contains valuable cross-agent guidance, but explicitly says it is not an architecture tour. The [README](../../README.md) maps packages at a high level. The illustrated architecture guide explains the system well, but is longer than a first-read navigation guide and is aimed at a broader audience. (It has since moved to the private document set; the link is dropped rather than the finding, which described the repository as it stood on the date above.)
+There is no root or package-level `AGENTS.md` in the inspected repository. [CLAUDE.md](../../CLAUDE.md) contains valuable cross-agent guidance, but explicitly says it is not an architecture tour. The [README](../../README.md) maps packages at a high level. The [illustrated architecture guide](../architecture/index.html) explains the system well, but is longer than a first-read navigation guide and is aimed at a broader audience.
 
 ## Prioritized gaps
 

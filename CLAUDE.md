@@ -10,8 +10,14 @@ rather than duplicating them in package guides.
 ## The specs are not in this repository
 
 The code is public under AGPL. The specification set is not: the master spec, the capability
-specs, the ADRs and the architecture guides live in the private document set beside vision and
-scope, at `%USERPROFILE%\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs`.
+specs and the ADRs live in the private document set beside vision and scope, at
+`%USERPROFILE%\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs`.
+
+The line is *design record* versus *explanation of what is built*, not "internal" versus
+"external". `docs/architecture/` is public and stays in the repository — those guides describe
+the shipped product to a reader without a background in code, and the open source is less useful
+without them. Its one exception is `character-audio-foundation.md`, integration and recovery
+notes for a half-built subsystem, which is private and hard-linked like the master spec.
 
 Every spec path in this file and in AGENTS.md still resolves, because those paths are junctions
 into that folder rather than tracked files. They are gitignored, so nothing you do at
@@ -24,16 +30,17 @@ linked yet. From the checkout root, in PowerShell:
 
 ```powershell
 $specs = "$env:USERPROFILE\OneDrive\Documents\04_AI_Projects\Arke Worlds\arke-studio-specs"
-foreach ($n in @("specifications", "decisions", "architecture")) {
+foreach ($n in @("specifications", "decisions")) {
   New-Item -ItemType Junction -Path "docs\$n" -Target "$specs\$n"
 }
 New-Item -ItemType HardLink -Path "docs\specification.md" -Target "$specs\specification.md"
+New-Item -ItemType HardLink -Path "docs\architecture\character-audio-foundation.md" -Target "$specs\architecture\character-audio-foundation.md"
 ```
 
-`specification.md` is a single file, so it is a hard link rather than a junction — and OneDrive
-can break a hard link by replacing the file on sync, which leaves the checkout holding a stale
-copy that looks fine. If the master spec disagrees with what you last wrote there, re-run the
-last line before believing it.
+The two hard links are files rather than directories, which is why they are not junctions — and
+OneDrive can break a hard link by replacing the file on sync, leaving the checkout holding a
+stale copy that looks fine. If either disagrees with what you last wrote there, re-create it
+before believing it.
 
 Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
 of those citations sit in `packages/`, they are the only record of why a great deal of this code

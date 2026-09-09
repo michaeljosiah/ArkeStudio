@@ -130,9 +130,13 @@ it constantly: `SPEC-014 §3` in a comment or a test name is a real reference to
 just not one in this repository. Read those as markers of where a decision was made, not as
 dead links.
 
-[`docs/filesystem-operations.md`](docs/filesystem-operations.md) is read off the source rather
-than off the specs: the exact list of what each operation creates, replaces, appends, moves or
-removes.
+Two references are read off the source rather than off the specs, and both are here.
+[`docs/architecture/`](docs/architecture/index.html) is an illustrated guide to how Arke is built —
+the files on disk, the model behind worlds and productions, the accept gate, generation and spend,
+and the program itself — written to be readable without a background in code. It explains the
+product that exists, which is why it stays public while the specs do not.
+[`docs/filesystem-operations.md`](docs/filesystem-operations.md) is the exact list of what each
+operation creates, replaces, appends, moves or removes.
 
 | | |
 |---|---|
