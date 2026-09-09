@@ -379,12 +379,11 @@ export function ConversationPermissionCard({
                         <img className="fy-actioncard__media" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} alt={result.description} />
                       </a>
                     ) : result.medium === "video" ? (
-                      <PosterVideo
-                        className="fy-actioncard__media"
-                        src={mediaUrl(state.world!.meta.slug, result.mediaPath)}
-                        label={result.description}
-                        {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})}
-                      />
+                      /* The one place the platform's player stays (SPEC-041 R-81): a generation
+                         result SHALL provide native playback controls, so seeking, volume and
+                         fullscreen are the requirement rather than an accident. The take-review
+                         card below owes only playable media (R-26) and uses the house player. */
+                      <video className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} {...(result.posterPath ? { poster: mediaUrl(state.world!.meta.slug, result.posterPath) } : {})} />
                     ) : result.medium === "audio" ? (
                       <audio className="fy-actioncard__media" controls preload="metadata" src={mediaUrl(state.world!.meta.slug, result.mediaPath)} />
                     ) : (

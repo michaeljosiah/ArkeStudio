@@ -114,6 +114,20 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
 });
 
 describe("a designed screen draws its own controls (U2)", () => {
+  /*
+   * With one exception, and it is a requirement rather than a taste: SPEC-041 R-81 binds a
+   * *generation result* to native playback controls, so seeking, volume and fullscreen survive.
+   * A `take-review` card owes only playable media (R-26), which is where the house player goes.
+   */
+  it("keeps the platform's player on a generation result and nowhere else", () => {
+    const source = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../src/components/conversation.tsx"),
+      "utf8",
+    );
+    assert.match(source, /receipt\.generation\.results[\s\S]{0,1400}<video[^>]*controls/);
+    assert.match(source, /R-81/, "and says which requirement holds it there");
+  });
+
   it("wears the house select on Settings, chevron and all", () => {
     const html = renderRoute("/settings/notifications");
     assert.match(html, /<span class="ui-select"><select class="ui-select__control"/);
