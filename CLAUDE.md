@@ -24,6 +24,14 @@ into that folder rather than tracked files. They are gitignored, so nothing you 
 `docs/specifications/` can commit a spec back into the public repository by accident — which is
 the point, and the reason for junctions rather than a second clone somewhere else.
 
+**This removes the specs from the tree, not from history.** Every version up to 2026-09-09 is
+still reachable in a normal clone (`git show <commit>^:docs/specification.md`), and a fork taken
+before that date holds a complete copy that no change here can reclaim. Rewriting 1,766 commits
+would break every clone and all 47 published releases and still would not reach that fork, so
+the history is deliberately left alone. What the arrangement buys is that everything from
+2026-09-09 forward is private — which for documents still being written is where the value is.
+Do not repeat the claim that the specs "were never public"; say they are no longer published.
+
 **A fresh checkout or worktree has no junctions.** The paths are simply absent, and every spec
 link in this file dead-ends. That is not a broken repository; it is a checkout that has not been
 linked yet. From the checkout root, in PowerShell:
@@ -39,8 +47,18 @@ New-Item -ItemType HardLink -Path "docs\architecture\character-audio-foundation.
 
 The two hard links are files rather than directories, which is why they are not junctions — and
 OneDrive can break a hard link by replacing the file on sync, leaving the checkout holding a
-stale copy that looks fine. If either disagrees with what you last wrote there, re-create it
-before believing it.
+stale copy that looks fine. If either disagrees with what you last wrote there, re-link it:
+
+```powershell
+Remove-Item "docs\specification.md" -Force
+New-Item -ItemType HardLink -Path "docs\specification.md" -Target "$specs\specification.md"
+```
+
+**The `Remove-Item` is not optional and it is not dangerous.** `New-Item -ItemType HardLink`
+fails outright when the destination exists, so re-running the setup line over a stale file
+errors and leaves you attached to the old inode — still reading an obsolete spec, now with the
+belief that you repaired it. Deleting first is safe because the OneDrive file has its own
+directory entry: removing the checkout-side name drops one link, never the content.
 
 Do not resolve a `SPEC-nnn` citation by guessing when the specs are absent. Roughly two thousand
 of those citations sit in `packages/`, they are the only record of why a great deal of this code
