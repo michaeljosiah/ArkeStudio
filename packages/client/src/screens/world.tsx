@@ -2685,7 +2685,7 @@ function NewSheetScreen({
                 <>
                   <Input placeholder="Their name" value={name} onChange={(e) => setName(e.target.value)} />
                   <Textarea
-                    placeholder="A ferryman who refuses payment in coin, only in secrets."
+                    placeholder="Who are they, and what do they want?"
                     value={sentence}
                     onChange={(e) => setSentence(e.target.value)}
                     style={{ minHeight: 96, font: "400 15px/1.6 var(--font-sans)" }}
@@ -3687,7 +3687,7 @@ export function CanonThreadScreen() {
               The settled statement
             </div>
             <Textarea
-              placeholder="The Chorister was taught by the god itself, in the winter it walked in…"
+              placeholder="What is now established as true in this world?"
               value={statement}
               onChange={(e) => setStatement(e.target.value)}
             />
