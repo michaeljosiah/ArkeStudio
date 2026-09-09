@@ -274,6 +274,7 @@ const VIDEO_CONTENT_TYPES: Record<string, "video/mp4" | "video/quicktime" | "vid
 import type { TakeQcAnalyzer } from "./takes/qc.js";
 import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/poster.js";
 import { backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
+import { listBorrowableArtifacts } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
 import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
@@ -353,7 +354,7 @@ import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./wor
 import { describeCoordinatorError } from "./errors/user-message.js";
 import { MarkdownFile } from "./world/text-files.js";
 import { WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
-import { WorldOpenError } from "./world/scan.js";
+import { WorldOpenError, scanWorld } from "./world/scan.js";
 import { checkPathBudget, fromPortable, toExtendedLength } from "./world/paths.js";
 import { chapterDraftingBrief } from "./world-chat/chapter-brief.js";
 import type { ArkeExportReadRecord } from "./world-chat/target-reads.js";
@@ -12276,6 +12277,84 @@ export class Coordinator {
         } catch (error) {
           this.emit({ at: this.nowIso(), type: "reference.images", requestId: msg.requestId, slug: msg.slug, images: [],
             error: error instanceof Error ? error.message : "Images could not be read." });
+        }
+        return;
+      }
+      /*
+       * Another world's shelf, for the Cut's Library (issue 1033). Read, never opened: the open
+       * store answers for its own world, and any other world is scanned from its directory the
+       * way the reference picker lists its images. Names, kinds, lengths and pictures travel;
+       * no path does.
+       */
+      case "browse-world-artifacts": {
+        try {
+          const world = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === msg.slug);
+          if (!world) throw new Error("That world is unavailable.");
+          const open = this.opts.provider.openStore?.();
+          const source = open && open.worldId === world.worldId
+            ? { bundle: open.getBundle(), dir: open.dir }
+            : await (async () => {
+                if (!this.opts.provider.worldDir) throw new Error("Browsing another world is unavailable.");
+                const dir = await this.opts.provider.worldDir(world.worldId);
+                return { bundle: (await scanWorld(dir)).bundle, dir };
+              })();
+          const artifacts = await listBorrowableArtifacts(source.bundle, source.dir);
+          this.emit({ at: this.nowIso(), type: "world.artifacts", requestId: msg.requestId, slug: msg.slug, artifacts });
+        } catch (error) {
+          this.emit({ at: this.nowIso(), type: "world.artifacts", requestId: msg.requestId, slug: msg.slug, artifacts: [],
+            error: error instanceof Error ? error.message : "That world could not be read." });
+        }
+        return;
+      }
+      /*
+       * Copy files from another world into this one (issue 1033), as the reference picker borrows
+       * an image (#972). The source world's own media guard resolves each file — a registered
+       * world, a file inside its `artifacts/`, a kind the route serves — and the bytes then go
+       * through ordinary filing, deduplicated by hash, with `world:<slug>` as their provenance,
+       * before being listed or placed exactly as an upload would be.
+       */
+      case "borrow-artifacts": {
+        const store = this.opts.provider.openStore?.();
+        if (!store || store.worldId !== msg.worldId) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is no longer open.");
+          return;
+        }
+        const source = (await this.opts.provider.listWorlds()).find((candidate) => candidate.slug === msg.slug);
+        if (!source || source.worldId === msg.worldId || !this.opts.provider.serveMedia) {
+          this.rejectEnqueue(msg.requestId, msg.kind, "That world is unavailable.");
+          return;
+        }
+        const failures: Array<{ index: number; reason: string }> = [];
+        const sources: string[] = [];
+        const origins: number[] = [];
+        for (const [index, file] of msg.files.entries()) {
+          const media = basename(file) === file && file !== ".." ? await this.opts.provider.serveMedia(msg.slug, `artifacts/${file}`) : null;
+          if (media === null) {
+            failures.push({ index, reason: `${file}: not in ${source.name} any more` });
+            continue;
+          }
+          sources.push(media.path);
+          origins.push(index);
+        }
+        try {
+          if (sources.length > 0) {
+            const outcome = await importEditorMedia(store, sources, msg.editor, {
+              ...(this.opts.mediaProbe ? { mediaProbe: this.opts.mediaProbe } : {}),
+              ...(this.opts.takePosterMaker ? { poster: this.opts.takePosterMaker } : {}),
+              ...(this.opts.confirmLargeMediaImport ? { confirmLarge: this.opts.confirmLargeMediaImport } : {}),
+              importedFrom: `world:${msg.slug}`,
+              onPosterUnavailable: (artifactId, reason) => {
+                void this.appLog?.append({ kind: "artifact.poster-unavailable", artifactId, reason });
+              },
+              abandoned: () => !this.stillOpen(store) || this.stopping,
+            });
+            for (const failure of outcome) failures.push({ index: origins[failure.index] ?? failure.index, reason: failure.reason });
+          }
+          await this.refreshWorldSnapshot(msg.worldId);
+          this.emitEnqueueResult(msg.requestId, msg.kind, msg.files.length, [], failures.sort((a, b) => a.index - b.index), true);
+        } catch (error) {
+          this.rejectEnqueue(msg.requestId, msg.kind, describeCoordinatorError(error));
+          if (this.stillOpen(store)) await this.refreshWorldSnapshot(msg.worldId);
         }
         return;
       }

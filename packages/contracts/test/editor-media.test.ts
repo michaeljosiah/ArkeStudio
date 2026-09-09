@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  ClientMessageSchema,
+  DomainEventSchema,
   TimelineOperationRefused,
   applyTimelineCommands,
   laneRefusal,
   mediaPlacementCommands,
   seedEmptyPictureTimeline,
+  storyTimelineFingerprint,
   type ArtifactSidecar,
   type ProductionBundle,
 } from "../src/index.js";
@@ -141,5 +144,28 @@ describe("the older forms are what they were", () => {
     assert.equal(laneRefusal(PLATE, true), "has no sound");
     assert.equal(laneRefusal(SONG, false), "has no picture");
     assert.equal(laneRefusal(PLATE, false), null);
+  });
+});
+
+describe("borrowing from another world (issue 1033)", () => {
+  it("carries names, kinds, lengths and pictures on the wire, and never a path", () => {
+    const event = DomainEventSchema.parse({
+      at: AT, type: "world.artifacts", requestId: "01J8G0000000000000000000RQ", slug: "the-other-one",
+      artifacts: [{ id: FILM.id, kind: "video", file: "film.mp4", name: "The Vigil", durationSec: 2, picture: ".index/posters/" + FILM.id + ".png" }],
+    });
+    assert.equal(event.type, "world.artifacts");
+    assert.throws(() => DomainEventSchema.parse({
+      at: AT, type: "world.artifacts", requestId: "01J8G0000000000000000000RQ", slug: "the-other-one",
+      artifacts: [{ id: FILM.id, kind: "video", file: "film.mp4", name: "x", picture: null, path: "C:/somewhere/film.mp4" }],
+    }), "a host path is not a field the row has");
+    const borrow = ClientMessageSchema.parse({
+      kind: "borrow-artifacts", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", requestId: "01J8G0000000000000000000RQ", slug: "the-other-one",
+      files: ["film.mp4"], editor: { productionId: "footage", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library" },
+    });
+    assert.equal(borrow.kind, "borrow-artifacts");
+    assert.throws(() => ClientMessageSchema.parse({
+      kind: "borrow-artifacts", worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC", requestId: "01J8G0000000000000000000RQ", slug: "the-other-one",
+      files: [], editor: { productionId: "footage", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production()), destination: "library" },
+    }), "nothing to copy is not a request");
   });
 });

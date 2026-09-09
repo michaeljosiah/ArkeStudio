@@ -1,4 +1,6 @@
-import type { ArtifactSidecar } from "./artifact.js";
+import { z } from "zod";
+import { ArtifactIdSchema } from "./ids.js";
+import { ArtifactKindSchema, type ArtifactSidecar } from "./artifact.js";
 import {
   AUDIO_TRACK_KINDS, PICTURE_TRACK_ID, TimelineOperationRefused, applyTimelineCommands,
   basePictureTrack, newAudioTrack, secondsToFrames, trackEndFrame,
@@ -121,3 +123,20 @@ export function mediaPlacementCommands(
   }
   return commands;
 }
+
+/**
+ * A file another world offers the Library (issue 1033): what a row needs and nothing a renderer
+ * should hold. `picture` is world-relative to the source world — its own file for a still, its
+ * poster for a video when one has been drawn — and is served under that world's slug.
+ */
+export const BorrowableArtifactSchema = z.object({
+  id: ArtifactIdSchema,
+  kind: ArtifactKindSchema,
+  /** Filename within the source world's `artifacts/`; the borrow names it by this. */
+  file: z.string().min(1),
+  /** The name the Artifacts page gives it there (issue 1005). */
+  name: z.string().min(1),
+  durationSec: z.number().positive().optional(),
+  picture: z.string().nullable(),
+}).strict();
+export type BorrowableArtifact = z.infer<typeof BorrowableArtifactSchema>;

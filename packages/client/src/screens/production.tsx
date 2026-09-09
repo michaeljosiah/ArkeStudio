@@ -18,6 +18,7 @@ import {
   mediaCanvasSec,
   MEDIA_CANVAS_HEADROOM_SEC,
   placedExtentSec,
+  type BorrowableArtifact,
   type MediaDestination,
   placedFilmSec,
   trimCeilingSec,
@@ -234,6 +235,9 @@ import {
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   subscribeQueueResults,
+  subscribeWorldArtifacts,
+  browseWorldArtifacts,
+  borrowArtifacts,
   subscribeSceneCreateResults,
   subscribeTimelineRefusals,
   subscribeVoiceUploadConfirmations,
@@ -4320,6 +4324,8 @@ function ArtifactPanel({
   onImport,
   onAddShot,
   onLocate,
+  worlds = [],
+  onBorrow = null,
   initialFilter = "all",
   open,
   onClose,
@@ -4356,6 +4362,10 @@ function ArtifactPanel({
   onAddShot: ((shotId: string) => void) | null;
   /** Select one use and bring the playhead to it (R-11, R-16). */
   onLocate: (clipId: TimelineClipId, startFrame: number) => void;
+  /** The worlds this studio holds, so the Library can browse another one's shelf (issue 1033). */
+  worlds?: readonly { worldId: string; slug: string; name: string }[];
+  /** Copy a file from another world into this one, as the reference picker borrows an image (issue 972). */
+  onBorrow?: ((slug: string, file: string) => void) | null;
   initialFilter?: LibraryFilter;
   open: boolean;
   onClose: () => void;
@@ -4368,6 +4378,27 @@ function ArtifactPanel({
   const [kindFilter, setKindFilter] = useState<LibraryKind>("all");
   const [picked, setPicked] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  /*
+   * Another world's shelf, read-only, while it is chosen (issue 1033). The rows arrive by event
+   * under a request id, like the reference picker's images; choosing this world again drops them.
+   */
+  const [browseSlug, setBrowseSlug] = useState<string | null>(null);
+  const [foreign, setForeign] = useState<{ slug: string; rows: BorrowableArtifact[] | null; error: string | null } | null>(null);
+  useEffect(() => {
+    if (browseSlug === null) {
+      setForeign(null);
+      return;
+    }
+    const requestId = ulid();
+    setForeign({ slug: browseSlug, rows: null, error: null });
+    const unsubscribe = subscribeWorldArtifacts((result) => {
+      if (result.requestId !== requestId) return;
+      setForeign({ slug: browseSlug, rows: result.artifacts, error: result.error ?? null });
+    });
+    browseWorldArtifacts(browseSlug, requestId);
+    return unsubscribe;
+  }, [browseSlug]);
+  const worldName = (slug: string): string => worlds.find((world) => world.slug === slug)?.name ?? slug;
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
    * last use wraps to the first. View state, never written — Locate selects and seeks only.
@@ -4470,10 +4501,12 @@ function ArtifactPanel({
     const still = artifact.kind === "image" || artifact.kind === "board";
     const glyph = artifact.kind === "audio" ? <Wave seed={artifact.file} width={34} height={12} /> : artifact.kind === "video" ? <VideoMark size={12} /> : still ? <Film size={12} /> : <Scroll size={12} />;
     const item: TimelineLibraryItem = { kind: "artifact", artifactId: artifact.id };
+    // Where a borrow came from (issue 1033): filing's provenance, spelled with the world's name.
+    const from = artifact.origin.by === "user" && artifact.origin.importedFrom?.startsWith("world:") ? `from ${worldName(artifact.origin.importedFrom.slice(6))}` : null;
     return {
       key: `artifact:${artifact.id}`,
       name,
-      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : [artifact.kind, duration !== undefined ? runtimeSeconds(duration) : null].filter((part) => part !== null).join(" · ")),
+      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : [artifact.kind, duration !== undefined ? runtimeSeconds(duration) : null, from].filter((part) => part !== null).join(" · ")),
       subTone: why === null ? "muted" : "destructive",
       thumb: <MediaThumb slug={slug} path={why !== null ? null : artifactPicturePath(artifact)} fallback={glyph} />,
       lane,
@@ -4549,6 +4582,15 @@ function ArtifactPanel({
   };
   const items = [...shotItems, ...lineItems, ...artifactItems].filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
   const narrowed = normalQuery !== "" || filter !== "all" || kindFilter !== "all" || sceneScope !== "all";
+  const foreignRows = (foreign?.rows ?? []).filter((row) => {
+    if (kindFilter === "shots") return false;
+    if (kindFilter === "video" && row.kind !== "video") return false;
+    if (kindFilter === "image" && row.kind !== "image" && row.kind !== "board") return false;
+    if (kindFilter === "audio" && row.kind !== "audio") return false;
+    return normalQuery === "" || `${row.name} ${row.file} ${row.kind}`.toLocaleLowerCase().includes(normalQuery);
+  });
+  const browsing = foreign !== null;
+  const shown = browsing ? foreignRows.length : items.length;
   const locate = (item: LibraryItem) => {
     if (item.uses.length === 0) return;
     const last = located.current.get(item.key);
@@ -4585,7 +4627,7 @@ function ArtifactPanel({
       )}
       <div className="fy-artpanel__head">
         <span className="fy-artpanel__title">Library</span>
-        <span className="fy-mono fy-artpanel__count">{items.length} item{items.length === 1 ? "" : "s"}</span>
+        <span className="fy-mono fy-artpanel__count">{shown} item{shown === 1 ? "" : "s"}</span>
         <span className="fy-h1row__push" />
         <button
           type="button"
@@ -4631,6 +4673,14 @@ function ArtifactPanel({
               {label}
             </button>
           ))}
+          {worlds.length > 1 && (
+            <select className="fy-artpanel__kind" aria-label="Browse world" value={browseSlug ?? "here"} onChange={(event) => setBrowseSlug(event.target.value === "here" ? null : event.target.value)}>
+              <option value="here">This world</option>
+              {worlds.filter((world) => world.worldId !== worldId).map((world) => (
+                <option key={world.worldId} value={world.slug}>{world.name}</option>
+              ))}
+            </select>
+          )}
           <select className="fy-artpanel__kind" aria-label="Kind" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as LibraryKind)}>
             <option value="all">All kinds</option>
             {hasShots && <option value="shots">Shots</option>}
@@ -4661,7 +4711,7 @@ function ArtifactPanel({
                   <span className="fy-artrow__swatch"><Upload size={12} /></span>
                   <span className="fy-artrow__body">
                     <span className="fy-artrow__name">{file.name}</span>
-                    <span className={cx("fy-artrow__meta", failure !== null && "fy-artrow__meta--destructive")}>{formatBytes(file.sizeBytes)} · {state}</span>
+                    <span className={cx("fy-artrow__meta", failure !== null && "fy-artrow__meta--destructive")}>{[file.sizeBytes > 0 ? formatBytes(file.sizeBytes) : null, state].filter((part) => part !== null).join(" · ")}</span>
                   </span>
                   {pending.failures !== null && (
                     <button type="button" className="fy-artrow__dismiss" aria-label={`Dismiss ${file.name}`} onClick={() => onDismissImport(pending.requestId)}>&times;</button>
@@ -4671,7 +4721,42 @@ function ArtifactPanel({
             );
           }),
         )}
-        {items.length === 0 && pendingImports.length === 0 ? (
+        {browsing ? (
+          foreign.rows === null || foreign.error !== null || foreignRows.length === 0 ? (
+            <div className="fy-artpanel__empty">
+              <span className="fy-artpanel__emptymark">
+                <Folder size={14} />
+              </span>
+              <span>{foreign.error ?? (foreign.rows === null ? "Reading…" : narrowed ? "Nothing here matches." : `Nothing to copy from ${worldName(foreign.slug)}.`)}</span>
+            </div>
+          ) : (
+            foreignRows.map((row) => {
+              const key = `borrow:${row.id}`;
+              const selected = picked === key;
+              const glyph = row.kind === "audio" ? <Wave seed={row.file} width={34} height={12} /> : row.kind === "video" ? <VideoMark size={12} /> : <Film size={12} />;
+              return (
+                <div key={key} className={cx("fy-artrow", selected && "fy-artrow--picked")} data-library-item={key}>
+                  <button type="button" className="fy-artrow__pick" aria-pressed={selected} title={row.file} onClick={() => setPicked(selected ? null : key)}>
+                    <span className="fy-artrow__swatch"><MediaThumb slug={foreign.slug} path={row.picture} fallback={glyph} /></span>
+                    <span className="fy-artrow__body">
+                      <span className="fy-artrow__name">{row.name}</span>
+                      <span className="fy-artrow__meta">{[row.kind, row.durationSec !== undefined ? runtimeSeconds(row.durationSec) : null, `from ${worldName(foreign.slug)}`].filter((part) => part !== null).join(" · ")}</span>
+                    </span>
+                    <span className="fy-artrow__lane">{row.kind === "audio" ? "Audio" : "Picture"}</span>
+                  </button>
+                  {selected && (
+                    <div className="fy-artrow__actions" role="group" aria-label={`${row.name} actions`}>
+                      <button type="button" className="fy-tlbtn fy-tlbtn--text" disabled={onBorrow === null} onClick={() => onBorrow?.(foreign.slug, row.file)}>
+                        <Plus size={11} />
+                        Copy into this world
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )
+        ) : items.length === 0 && pendingImports.length === 0 ? (
           <div className="fy-artpanel__empty">
             <span className="fy-artpanel__emptymark">
               <Folder size={14} />
@@ -6552,7 +6637,8 @@ function useFileDrag(): DroppedKind[] | null {
 
 export function CutScreen() {
   const { worldId, prodId } = useParams();
-  const connection = useStore().connection;
+  const { connection, state: studio } = useStore();
+  const worlds = studio?.worlds ?? [];
   const { world, production } = useProduction(worldId, prodId);
   const timelineState = production?.timeline ?? { status: "absent" as const };
   const frameRate: FrameRate = production ? productionFrameRate(production.meta) : 24;
@@ -6993,6 +7079,18 @@ export function CutScreen() {
       setPendingImports((current) => [...current, { requestId, files: files.map((file) => ({ name: file.name, sizeBytes: file.size })), failures: null, destination }]);
     }
   };
+  /** Copy a file from another world into this one and list it (issue 1033); answered like an upload. */
+  const borrow = (slug: string, file: string) => {
+    if (commandsDisabled || !worldId || !prodId || !fence) return;
+    setTimelineCommandError(null);
+    const result = borrowArtifacts(worldId, slug, [file], { productionId: prodId, baseRevision: timelineRevision, sourceFingerprint: fence, destination: "library" });
+    importRequest.current = result.requestId; setImporting(result.requestId !== null);
+    if (result.reason) setTimelineCommandError(result.reason);
+    if (result.requestId !== null) {
+      const requestId = result.requestId;
+      setPendingImports((current) => [...current, { requestId, files: [{ name: file, sizeBytes: 0 }], failures: null, destination: "library" }]);
+    }
+  };
   /** The frame a point on a lane strip names, the same arithmetic the lanes use. */
   const stripFrame = (laneWidth: number, x: number): number => Math.max(0, Math.round((x / Math.max(laneWidth, 1)) * Math.max(totalFrames, 1)));
   const appendArtifact = (artifact: ArtifactSidecar) => {
@@ -7398,6 +7496,8 @@ export function CutScreen() {
         onAddLine={editableTimeline !== null && !commandsDisabled ? placeVoiceTake : null}
         onAddArtifact={commandsDisabled ? null : appendArtifact}
         onPlaceAtPlayhead={commandsDisabled ? null : placeAtPlayhead}
+        worlds={worlds}
+        onBorrow={commandsDisabled ? null : borrow}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled ? null : files => importMedia("library", files)}

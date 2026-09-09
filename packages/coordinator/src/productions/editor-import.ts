@@ -19,6 +19,8 @@ export async function importEditorMedia(store: WorldStore, sources: readonly (st
   /** Draws a video artifact's picture as it lands (issue 1037); absent on a build without ffmpeg. */
   poster?: TakePosterMaker;
   onPosterUnavailable?: (artifactId: string, reason: TakePosterUnavailableReason) => void;
+  /** Where a borrow came from (`world:<slug>`), recorded on the sidecar as filing's provenance (issue 1033). */
+  importedFrom?: string;
   abandoned: () => boolean;
   confirmLarge?: (file: { name: string; sizeBytes: number }) => Promise<boolean>;
 }): Promise<Array<{ index: number; reason: string }>> {

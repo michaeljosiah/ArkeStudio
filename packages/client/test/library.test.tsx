@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { applyTimelineCommands, seedStoryPictureTimeline, type ClientMessage, type ClientState } from "@arke-studio/contracts";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { CutScreen } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -221,6 +221,52 @@ describe("the Library (SPEC-039 T-3)", () => {
       const place = sent.commands.find((command) => command.kind === "place");
       assert.ok(place && place.kind === "place", "it places the artifact");
       assert.equal(place.clip.source.kind, "artifact");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("browses another world's shelf read-only and copies a file in with its provenance (issue 1033, #972)", async () => {
+    const state = stateWithBells();
+    state.worlds.push({ worldId: "01J8F3K2QW9VZX4N7M0RTYB6ZZ", slug: "the-other-one", name: "The Other One", counts: { characters: 0, locations: 0, factions: 0, canonEntries: 0, productions: 0 }, updated: "2026-09-01T12:00:00Z" } as (typeof state.worlds)[number]);
+    const screen = await mount(state);
+    try {
+      const browse = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]');
+      assert.ok(browse, "another world can be browsed");
+      // linkedom clears the selected option whenever any option's `selected` is set, even to
+      // false, so only the chosen one is touched; its setter deselects the rest.
+      const choose = async (value: string) => act(async () => {
+        const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+        [...select.querySelectorAll("option")].find((option) => option.value === value)!.selected = true;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await choose("the-other-one");
+      const asked = screen.sent.find((message) => message.kind === "browse-world-artifacts");
+      assert.ok(asked && asked.kind === "browse-world-artifacts" && asked.slug === "the-other-one", "the coordinator is asked for that world's shelf");
+      await act(async () => __applyEventForTest({
+        type: "world.artifacts", at: "2026-09-09T12:00:00Z", requestId: asked.requestId, slug: "the-other-one",
+        artifacts: [{ id: "ar_01J8G0000000000000000000B9", kind: "video", file: "clip.mp4", name: "Halima Sadiq", durationSec: 6, picture: ".index/posters/ar_01J8G0000000000000000000B9.png" }],
+      }));
+      const row = screen.container.querySelector<HTMLElement>('[data-library-item="borrow:ar_01J8G0000000000000000000B9"]');
+      assert.ok(row, "the other world's file is a row");
+      assert.match(row.querySelector(".fy-artrow__name")?.textContent ?? "", /Halima Sadiq/, "named as its own shelf names it");
+      assert.match(row.querySelector(".fy-artrow__meta")?.textContent ?? "", /video · 6s · from The Other One/);
+      assert.match(row.querySelector(".fy-artrow__swatch img")?.getAttribute("src") ?? "", /\/media\/the-other-one\/\.index\/posters\//, "its picture is served under its own world");
+      assert.equal(row.getAttribute("draggable"), null, "read-only: nothing here drags onto a lane");
+      await act(async () => row.querySelector<HTMLButtonElement>(".fy-artrow__pick")!.click());
+      await act(async () => action(screen, "Copy into this world")!.click());
+      const borrow = screen.sent.find((message) => message.kind === "borrow-artifacts");
+      assert.ok(borrow && borrow.kind === "borrow-artifacts");
+      assert.deepEqual([borrow.slug, borrow.files, borrow.editor.destination], ["the-other-one", ["clip.mp4"], "library"]);
+      const pending = screen.container.querySelector("[data-testid='pending-import']")?.textContent ?? "";
+      assert.match(pending, /clip\.mp4/, "listed here while it copies");
+      assert.match(pending, /importing…/);
+      assert.doesNotMatch(pending, /KB|MB/, "a borrow has no size to state");
+      // Back home: the bells are this world's, and a borrowed file would say where it came from.
+      // Browsing stays available while the copy runs; only copying waits.
+      assert.equal(action(screen, "Copy into this world")?.disabled, true);
+      await choose("here");
+      assert.ok(rows(screen).includes(`artifact:${BELLS}`));
     } finally {
       await close(screen);
     }
