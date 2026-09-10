@@ -459,6 +459,24 @@ describe("the Inbox's order and its history (R-22)", () => {
     __setStateForTest(FIXTURE_STATE);
   });
 
+  it("keeps a result still being prepared, or one that could not be, out of Earlier (codex P2, PR 1087)", () => {
+    const state = quiet();
+    const preparing = job({ id: "jb_01J8E0000000000000000000L4", status: "succeeded", error: null, finalization: { status: "pending", error: null, updatedAt: TODAY } });
+    state.app.jobs = [preparing];
+    const running = render(state, "inbox");
+    assert.ok(running.includes("preparing result"), "it is Running");
+    assert.equal(running.includes("look ready"), false, "and not ready");
+    const failed = job({ ...preparing, finalization: { status: "failed", error: "the file could not be filed", updatedAt: TODAY } });
+    state.app.jobs = [failed];
+    const attention = render(state, "inbox");
+    assert.ok(attention.includes("output needs attention"), "it is Needs you");
+    assert.equal(attention.includes("look ready"), false);
+    const done = job({ ...preparing, finalization: { status: "complete", error: null, updatedAt: TODAY } });
+    state.app.jobs = [done];
+    assert.ok(render(state, "inbox").includes("look ready"), "complete is history");
+    __setStateForTest(FIXTURE_STATE);
+  });
+
   it("puts Needs you before Running", () => {
     const state = structuredClone(FIXTURE_STATE);
     state.app.jobs = [job({ status: "running", error: null })];

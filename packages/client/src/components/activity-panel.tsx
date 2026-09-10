@@ -269,8 +269,13 @@ function Inbox({
     scope === "all" || activeWorldId === null || worldId === undefined || worldId === activeWorldId;
   const jobs = [...state.app.jobs].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const cutoff = Date.now() - HISTORY_DAYS * 86_400_000;
+  // A job whose generation succeeded but whose result is still being prepared is Running, and
+  // one whose preparation failed is Needs you (class 1); neither is finished, and a `ready`
+  // row beside either would say the output is there to use (codex, PR 1087).
+  const settled = (job: Job): boolean =>
+    TERMINAL.has(job.status) && !(job.status === "succeeded" && job.finalization !== undefined && job.finalization.status !== "complete");
   const history = jobs
-    .filter((job) => TERMINAL.has(job.status) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff)
+    .filter((job) => settled(job) && inScope(job.worldId) && Date.parse(job.updatedAt) >= cutoff)
     .slice(0, HISTORY_ROWS);
   // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build record's
   // own keys, so an item never dispatched — no route, no credential — is as visible and as
@@ -288,7 +293,7 @@ function Inbox({
     }
     return null;
   };
-  const settled = running.length === 0 && needsYou.length === 0;
+  const quiet = running.length === 0 && needsYou.length === 0;
   const worldSlug = state.world?.meta.slug ?? null;
 
   const rows: ReactNode[] = [];
@@ -296,7 +301,7 @@ function Inbox({
   for (const job of history) {
     const label = dayLabel(job.updatedAt);
     if (label !== day) {
-      rows.push(<Eyebrow key={`day:${label}`} first={settled && rows.length === 0 && buildMissing.length === 0 && false}>{label}</Eyebrow>);
+      rows.push(<Eyebrow key={`day:${label}`}>{label}</Eyebrow>);
       day = label;
     }
     rows.push(
@@ -320,7 +325,7 @@ function Inbox({
           {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
         </Callout>
       )}
-      {settled ? (
+      {quiet ? (
         <div className="fy-ap__empty">Nothing running, nothing waiting on you</div>
       ) : (
         <>

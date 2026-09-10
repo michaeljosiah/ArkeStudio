@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,6 +72,12 @@ describe("the release cards a build carries", () => {
     assert.match(code, /\{ tag: "v0\.5\.47", notes: "---\\ntitle: T\\n---\\nwords", picture: picture0 \}/);
     assert.match(code, /\{ tag: "v0\.5\.41", notes: "---\\ntitle: U\\n---\\nmore", picture: null \}/);
     assert.match(code, /^export const RELEASE_CARDS = \[/m);
+  });
+
+  it("imports nothing from the client or from contracts — Vite loads its config in plain Node", async () => {
+    const source = await readFile(fileURLToPath(new URL("../release-cards-plugin.ts", import.meta.url)), "utf8");
+    assert.equal(/from "@arke-studio\//.test(source), false, "contracts' .js specifiers cannot be resolved outside the bundler");
+    assert.equal(/from "\.\/src\//.test(source), false, "and the client's own modules import contracts");
   });
 
   it("answers for the stub module alone", async () => {
