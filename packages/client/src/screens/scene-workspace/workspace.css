@@ -46,7 +46,7 @@
 .fy-swrows { padding: 1px 3px 20px 1px; align-items: stretch; scrollbar-gutter: stable; }
 .fy-swrow, .fy-swaddshot { width: 100%; }
 .fy-swrow { flex: none; }
-.fy-swrow__band { grid-template-columns: 48px min(300px, calc(208px * var(--shot-aspect, 16 / 9))) minmax(0, 1fr); align-items: stretch; min-height: 208px; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
+.fy-swrow__band { grid-template-columns: 54px 285px minmax(0, 1fr); align-items: stretch; min-height: 208px; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
 .fy-swrow__band:hover { box-shadow: none; border-color: color-mix(in srgb, var(--muted-foreground) 35%, var(--border)); }
 .fy-swrow__band[data-selected="true"] { background: color-mix(in srgb, var(--secondary) 70%, var(--background)); }
 .fy-swrow__ring { border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, var(--border)); border-radius: 12px; }
@@ -54,14 +54,16 @@
 .fy-swrow__grip > svg { width: 20px; height: 24px; }
 .fy-swrow__grip[draggable="true"] { cursor: grab; }
 .fy-swrow__grip[draggable="true"]:active { cursor: grabbing; }
-.fy-swrow__frame { width: 100%; height: auto; align-self: start; }
-.fy-swrow__img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* List previews match the approved image box; Expand keeps the full source composition. */
+.fy-swrow__frame { width: 100%; height: auto; aspect-ratio: 285 / 208; align-self: start; }
+.fy-swrow__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.fy-swlightbox__frame > img { object-fit: contain; }
 .fy-swrow__label { min-width: 32px; height: 34px; box-sizing: border-box; display: grid; place-items: center; padding: 0 5px; background: var(--media-overlay-bg); color: var(--media-overlay-fg); border-color: color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); border-radius: 6px; font: 400 16px var(--font-sans); }
 .fy-swrow__chipmeta { font: 400 13px var(--font-sans); bottom: 9px; top: auto; left: 9px; }
 .fy-swrow__frame:hover .fy-swrow__chipmeta, .fy-swrow__frame:focus-within .fy-swrow__chipmeta { opacity: 0; }
 .fy-swrow__hatch { position: absolute; inset: 0; background: var(--muted); }
 .fy-swrow__nofr { font: 400 11px var(--font-sans); }
-.fy-swrow__body { padding: 18px 24px; gap: 6px; }
+.fy-swrow__body { padding: 18px 30px; gap: 6px; }
 .fy-swrow__titleline { min-height: 30px; padding-right: 168px; flex-wrap: wrap; }
 .fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--foreground); cursor: text; text-align: left; }
 .fy-swrow__title-edit svg { flex: none; color: var(--muted-foreground); }
@@ -98,8 +100,8 @@
 .fy-sw__back:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* All four controls stay in the same place on reveal; keyboard focus and touch have equal access. */
-.fy-swrow__frameactions { left: 50%; right: auto; bottom: 8px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 8px); justify-content: center; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--media-overlay-bg) 90%, transparent); backdrop-filter: blur(8px); pointer-events: none; }
-.fy-swrow__frameactions > button { position: static; transform: none; opacity: 1; pointer-events: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 30px; padding: 0; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); background: transparent; border-radius: 6px; color: var(--media-overlay-fg); backdrop-filter: none; }
+.fy-swrow__frameactions { left: auto; right: 8px; bottom: 8px; transform: none; width: max-content; max-width: calc(100% - 16px); justify-content: center; flex-wrap: wrap; gap: 6px; padding: 5px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--media-overlay-bg) 90%, transparent); backdrop-filter: blur(8px); pointer-events: none; }
+.fy-swrow__frameactions > button { position: static; transform: none; opacity: 1; pointer-events: none; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); background: transparent; border-radius: 6px; color: var(--media-overlay-fg); backdrop-filter: none; }
 .fy-swrow__frame:hover .fy-swrow__frameactions,
 .fy-swrow__frame:focus-within .fy-swrow__frameactions,
 .fy-swrow__frameactions[data-open] { opacity: 1; pointer-events: auto; }
@@ -116,7 +118,8 @@
 .fy-swrows[data-layout="grid"] .fy-swrow:first-child { padding-top: 18px; }
 .fy-swrows[data-layout="grid"] .fy-swrow:first-child .fy-swrow__band { height: 100%; }
 .fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 0; left: 10px; z-index: 1; }
-.fy-swrows[data-layout="grid"] .fy-swrow__frame { align-self: center; height: auto; width: min(100%, calc(272px * var(--shot-aspect))); max-width: 100%; }
+.fy-swrows[data-layout="grid"] .fy-swrow__frame { align-self: center; height: auto; aspect-ratio: var(--shot-aspect); width: min(100%, calc(272px * var(--shot-aspect))); max-width: 100%; }
+.fy-swrows[data-layout="grid"] .fy-swrow__img { object-fit: contain; }
 .fy-swrows[data-layout="grid"] .fy-swrow__body { flex: 1; width: 100%; padding: 14px 16px; }
 .fy-swrows[data-layout="grid"] .fy-swrow__titleline { padding-right: 0; }
 .fy-swrows[data-layout="grid"] .fy-swrow__actions { position: static; padding: 0 16px 14px; }
@@ -165,7 +168,7 @@
 }
 @container (max-width: 560px) {
   .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
-  .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, clamp(152px, calc(208px * var(--shot-aspect)), 300px)); }
+  .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, 285px); }
   .fy-swrow__body { grid-column: 2; padding-left: 0; }
   .fy-swrow__actions { grid-column: 2; padding-left: 0; }
   .fy-sw__headline { flex-wrap: wrap; }

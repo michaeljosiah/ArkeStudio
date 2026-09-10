@@ -1144,7 +1144,7 @@ function Row({
       ><Grip size={14} /></span>
       {selected ? <span className="fy-swrow__ring" aria-hidden="true" /> : null}
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
-      <div className="fy-swrow__frame fy-imghost" style={{ aspectRatio: aspect.replace(":", " / ") }}>
+      <div className="fy-swrow__frame fy-imghost">
         {src === null ? (
           <div className="fy-swrow__hatch"><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
         ) : (
