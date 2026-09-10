@@ -23,7 +23,7 @@ import { Portrait } from "../components/portrait.js";
 import { Composer } from "../components/composer.js";
 import { Loading } from "../components/loading.js";
 import { relativeDate, shortDateTime } from "../lib/format.js";
-import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
+import { setThemePreference, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
   checkUpdates,
@@ -1876,55 +1876,40 @@ export function SettingsNotificationsScreen() {
   );
 }
 
-const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string; detail: string }> = [
-  { preference: "system", title: "System", detail: "Follow Windows appearance" },
-  { preference: "light", title: "Light", detail: "Always use the light theme" },
-  { preference: "dark", title: "Dark", detail: "Always use the dark theme" },
+const APPEARANCE_OPTIONS: Array<{ preference: ThemePreference; title: string }> = [
+  { preference: "dark", title: "Dark" },
+  { preference: "light", title: "Light" },
+  { preference: "system", title: "System" },
 ];
 
 export function SettingsAppearanceScreen() {
   const preference = useThemePreference();
-  const resolved = useResolvedTheme();
   return (
     <div data-screen="settings-appearance" className="fy-set fy-set--appearance">
-      <div className="fy-set__eyebrow">THEME</div>
-      <fieldset className="fy-theme-options">
-        <legend className="fy-sr-only">Theme</legend>
-        {APPEARANCE_OPTIONS.map((option) => (
-          <label key={option.preference} className="fy-theme-option">
-            <span className="fy-theme-option__copy">
-              <span className="fy-set__title">{option.title}</span>
-              <span className="fy-set__caps">{option.detail}</span>
-            </span>
-            <input
-              type="radio"
-              name="appearance-theme"
-              value={option.preference}
-              checked={preference === option.preference}
-              onChange={() => setThemePreference(option.preference)}
-            />
-          </label>
-        ))}
-      </fieldset>
-      <div className="fy-set__note">currently using {resolved}</div>
-      {/*
-       * The two themes, side by side. Fixed swatches rather than a live preview of the current
-       * one: the point is to show what the choice above would look like, and a card that followed
-       * the active theme would only ever show you what you can already see.
-       */}
-      <div className="fy-themeswatches" aria-hidden="true">
-        {(["light", "dark"] as const).map((theme) => (
-          <div key={theme} className={`fy-themeswatch fy-themeswatch--${theme}`}>
-            <div className="fy-themeswatch__frame">
-              <span className="fy-themeswatch__block" />
-              <span className="fy-themeswatch__lines">
-                <i />
-                <i />
-              </span>
-            </div>
-            <div className="fy-themeswatch__caption">{theme.toUpperCase()}</div>
-          </div>
-        ))}
+      <div className="fy-set__eyebrow">APPEARANCE</div>
+      <div className="fy-appearance__theme">
+        <div className="fy-appearance__copy">
+          <h2 className="fy-appearance__title">Theme</h2>
+          <p id="appearance-theme-description" className="fy-appearance__description">
+            Choose how the Arke Studio window looks.
+          </p>
+        </div>
+        <fieldset className="fy-theme-options" aria-describedby="appearance-theme-description">
+          <legend className="fy-sr-only">Theme</legend>
+          {APPEARANCE_OPTIONS.map((option) => (
+            <label key={option.preference} className="fy-theme-option">
+              <input
+                className="fy-sr-only"
+                type="radio"
+                name="appearance-theme"
+                value={option.preference}
+                checked={preference === option.preference}
+                onChange={() => setThemePreference(option.preference)}
+              />
+              <span>{option.title}</span>
+            </label>
+          ))}
+        </fieldset>
       </div>
     </div>
   );
