@@ -192,6 +192,23 @@ function passCarries(
           ...(bound === undefined ? { reason: dropped !== undefined ? dropClause(pass.route) : "no plate" } : {}),
         };
   const first = shots.find((shot) => shot.id === pass.target.coversShots[0]) ?? shots[0]!;
+  /*
+   * The words that actually travel, held against the model's published cap (issue 1085).
+   *
+   * Nothing on the planning path measured this. The bench holds the cap twice — against the
+   * brief the author can shorten, and against the wire prompt, because naming a reference the
+   * way a model reads it grows the mention and a preamble rides ahead of it — and production
+   * held it against neither. So a body at the cap composed a durable plan and a queued job, and
+   * was then refused by the recipe's own limit at generation: a terminal failure after the
+   * authorization said yes.
+   *
+   * Read off the compiled pass, which IS the request: `params.prompt` is the string the adapter
+   * sends, so the number named is the one the model refuses rather than a re-derivation of it.
+   */
+  const cap = input.model.limits.maxPromptChars;
+  const wirePrompt = typeof pass.params["prompt"] === "string" ? pass.params["prompt"] : "";
+  const promptOverCap =
+    cap !== undefined && wirePrompt.length > cap ? { chars: wirePrompt.length, limit: cap } : undefined;
   return {
     shots: shots.map((shot) => ({ shotId: shot.id, number: shot.number })),
     // A chained pass opens on the previous pass's boundary frame, bound at materialisation; it
@@ -200,6 +217,7 @@ function passCarries(
     ...(place !== undefined ? { place } : {}),
     cast,
     ...(timing !== undefined && timing.length > 0 ? { timing } : {}),
+    ...(promptOverCap !== undefined ? { promptOverCap } : {}),
   };
 }
 

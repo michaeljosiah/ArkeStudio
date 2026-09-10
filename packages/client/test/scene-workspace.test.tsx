@@ -992,6 +992,7 @@ describe("scene detail owns the workspace", () => {
                 { sheetId: "the-chorister", name: "The Chorister", voice: "rides", look: "kit", voiceReason: "read missing" },
               ],
               timing: [{ shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 }],
+              promptOverCap: { chars: 5120, limit: 4000 },
             },
           }],
           spentEstimateMicroUsd: 80_000,
@@ -1016,7 +1017,7 @@ describe("scene detail owns the workspace", () => {
     // what will not and why, and timing as one clause on the pass — while the header, which
     // computes nothing for a dispatch any more (R-3, T-13), carries no shot id at all.
     const card = q(mounted, ".fy-boardcard__mono")?.textContent ?? "";
-    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: voice not sent · takes no audio · The Chorister: voice, sheet · The Chorister: read not sent · read missing · the sample rides · materialised/);
+    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: voice not sent · takes no audio · The Chorister: voice, sheet · The Chorister: read not sent · read missing · the sample rides · prompt too long · 5120 of 4000 characters · materialised/);
     assert.match(card, /shot 14 · not on the Cut · left out/);
     assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /sh_\d+|unanchored|Generation timing/);
     // A refusal is the same plain clause in the callout, and nowhere else (R-25).

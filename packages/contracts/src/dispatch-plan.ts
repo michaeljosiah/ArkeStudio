@@ -170,6 +170,19 @@ export const PassCarriesSchema = z
         z.object({ shotId: z.string().min(1), number: z.number().int().min(1), kind: z.literal("unanchored"), durationSec: z.number().min(0) }).strict(),
       )
       .optional(),
+    /**
+     * The wire prompt measured against the model's published cap (issue 1085), present only
+     * when it is over. `chars` is the composed prompt's own length, not the body's: the body
+     * grows on the way out — `@Image 1` becomes `Picture 1` on Krea 2 and `<Picture 1>` on H3,
+     * and the preamble, the structure line and the negatives all ride outside it — so a body
+     * under the cap can leave a prompt over it, and the body's number would name a length
+     * nothing refuses.
+     *
+     * Recorded rather than thrown. Composition refusing here would be a terminal failure after
+     * the plan was authorized; named, the pass still runs and the card says which number the
+     * model will not take.
+     */
+    promptOverCap: z.object({ chars: z.number().int().min(1), limit: z.number().int().min(1) }).strict().optional(),
   })
   .strict();
 export type PassCarries = z.infer<typeof PassCarriesSchema>;
