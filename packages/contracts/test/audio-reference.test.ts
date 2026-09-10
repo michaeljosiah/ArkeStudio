@@ -66,6 +66,9 @@ it("the cast authority says why a read will not be asked for, in the card's word
   assert.deepEqual(reason(production({ performanceReview: { reviews: [], selections: {} } }), castScene(chosen)), ["Maren Kest: read not accepted"]);
   assert.deepEqual(reason(production({ performances: [{ ...RECORD, attestations: [] }] }), castScene(chosen)), ["Maren Kest: attest one speaker and no music"]);
   assert.deepEqual(reason(production({ performances: [{ ...RECORD, cloudBasis: undefined }] }), castScene(chosen)), ["Maren Kest: no permission to send it"]);
+  // A local route sends nothing anywhere, so a read kept for local use rides it without a cloud basis (codex round 3).
+  const localOnly = castVoiceRequests(SHEETS, production({ performances: [{ ...RECORD, cloudBasis: undefined }] }), castScene(chosen), undefined, true);
+  assert.deepEqual([localOnly.notSent, localOnly.requests.map(r => [r.performanceId, r.cloudBasis])], [[], [[RECORD.id, undefined]]]);
   assert.deepEqual(reason(production(), castScene({ kind: "sample" })), [], "the sample asks for nothing");
   // Narrowed to a subject's shots (codex round 2): asked for where the member speaks, silent elsewhere.
   assert.equal(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_1"]).requests.length, 1);

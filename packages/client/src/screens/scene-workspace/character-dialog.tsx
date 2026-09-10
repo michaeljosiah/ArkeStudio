@@ -5,6 +5,7 @@ import {
   estimateMicroUsd,
   formatMicroUsd,
   lookHoldingScope,
+  legacyVoiceModel,
   normalizeSpeechText,
   orderedShots,
   resolveCast,
@@ -170,8 +171,13 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
     reviewPending.current = null;
     setVoiceNotice(result.status === "refused" || result.reason?.startsWith("Accepted, but") ? result.reason ?? "" : "");
   }), []);
+  // The character's assigned voice model, never the provider's first that can (codex round 3):
+  // a legacy assignment resolves the way the Voice page resolves it, and a model that takes no
+  // cadence leaves the door pointing at the Voice page.
+  const assignedModel = sheet?.voice === undefined ? undefined
+    : sheet.voice.model ?? legacyVoiceModel(sheet.voice.provider, sheet.voice.voiceId, world.clonedVoices ?? []);
   const voiceModel = sheet?.voice === undefined ? undefined
-    : state?.app.manifest?.models.find((model) => model.capability === "voice-tts" && model.provider === sheet.voice?.provider && model.cadence);
+    : state?.app.manifest?.models.find((model) => model.id === assignedModel && model.capability === "voice-tts" && model.provider === sheet.voice?.provider && model.cadence);
   const firstLine = lines[0];
   const price = voiceModel !== undefined && firstLine !== undefined
     ? formatMicroUsd(estimateMicroUsd(voiceModel, { characters: normalizeSpeechText(firstLine.text).length }))

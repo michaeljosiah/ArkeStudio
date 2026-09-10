@@ -247,6 +247,13 @@ describe("Play lines (SPEC-044 R-33; T-14)", () => {
     await act(async () => { __applyEventForTest({ at: "2026-09-09T10:01:00.000Z", type: "rehearsal.result", requestId: prepare.requestId, worldId: FIXTURE_WORLD_ID, status: "refused", reason: "Preparation changed while local lines were being synthesized." } as never); });
     assert.match(q(mounted, '[aria-label="Lines"] [role="status"]')?.textContent ?? "", /Preparation changed/);
     assert.equal(asks(), before + 1);
+    // Lines the queue would not take are said too, though the plan went through (codex round 3).
+    const replan = sent.filter((message) => message.kind === "plan-table-read").at(-1)!;
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:02:00.000Z", type: "rehearsal.result", requestId: replan.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan: plan("cloud") } as never); });
+    await click([...lines.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Prepare"))!);
+    const again = sent.filter((message) => message.kind === "prepare-table-read").at(-1)!;
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:03:00.000Z", type: "rehearsal.result", requestId: again.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "Some cloud lines were not queued: the provider is offline. Other prepared lines remain available.", plan: plan("cloud") } as never); });
+    assert.match(q(mounted, '[aria-label="Lines"] [role="status"]')?.textContent ?? "", /not queued/);
   });
 
   it("plays a cached line beside a selected read, in shot order, and hides the door when nothing is missing (T-18)", async () => {

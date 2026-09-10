@@ -29,7 +29,9 @@ export const PerformanceAudioRequestSchema = z.object({
   prepared: z.object({ operationId: z.string().uuid(), hash: FullSha256Schema }).strict().optional(),
   performanceId: PerformanceIdSchema, hash: FullSha256Schema, acceptedReviewAt: IsoDateTimeSchema,
   intent: z.enum(["voice-reference", "performance-sync"]), warningCodes: z.array(z.string()),
-  singleSpeaker: z.literal(true), noMusic: z.literal(true), cloudBasis: z.enum(["self", "authorized", "licensed"]),
+  singleSpeaker: z.literal(true), noMusic: z.literal(true),
+  /** Absent only for a read asked for by a local route, where no bytes leave the machine (SPEC-028). */
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
   /** Where the choice was made: per dispatch (the Bench), or once on the scene's cast (SPEC-044 R-26). */
   source: z.enum(["explicit", "scene-cast"]).optional(),
 }).strict();
@@ -45,7 +47,9 @@ export const FrozenPerformanceAudioSchema = z.object({
   intent: z.enum(["voice-reference", "performance-sync"]), sheetId: SlugSchema, characterName: z.string().min(1),
   prepared: PreparedReferenceAudioSchema.optional(),
   label: z.string().regex(/^@Audio[1-3]$/), performance: PerformanceRecordSchema, acceptedReviewAt: IsoDateTimeSchema,
-  warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema), acknowledgementId: z.string().min(1),
+  warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema),
+  /** Absent for a read resolved for a local route: no cloud-upload right was written, and a cloud route finds none. */
+  acknowledgementId: z.string().min(1).optional(),
   source: z.enum(["explicit", "scene-cast"]).optional(),
 }).strict();
 export type FrozenPerformanceAudio = z.infer<typeof FrozenPerformanceAudioSchema>;
@@ -141,7 +145,7 @@ export interface CastVoiceNotSent { sheetId: string; name: string; reason: strin
  * is returned with one clause, never thrown; the plan card and the Bench both say it from here,
  * so the two cannot drift.
  */
-export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord, shotIds?: readonly string[]):
+export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord, shotIds?: readonly string[], local = false):
   { requests: PerformanceAudioRequest[]; notSent: CastVoiceNotSent[] } {
   const requests: PerformanceAudioRequest[] = [], notSent: CastVoiceNotSent[] = [];
   // Asked for a subject narrower than the scene (a Bench shot or board; codex round 2), only the
@@ -159,13 +163,15 @@ export function castVoiceRequests(sheets: readonly Sheet[], production: Producti
     if (review?.decision !== "accept") { skip("read not accepted"); continue; }
     const attested = new Set(record.attestations?.filter(a => a.audioHash === record.provenance.outputHash).map(a => a.kind));
     if (!attested.has("single-speaker") || !attested.has("no-music")) { skip("attest one speaker and no music"); continue; }
-    if (!record.cloudBasis) { skip("no permission to send it"); continue; }
+    // A read kept for local use only rides a local route, where no bytes leave the machine
+    // (SPEC-028; codex round 3); a cloud route needs the basis it was kept under.
+    if (!record.cloudBasis && !local) { skip("no permission to send it"); continue; }
     // Choosing the read is the acknowledgement of its QC report: the person kept it after hearing
     // it and made it the voice in the same press (R-15). A second sign-off on the same warnings,
     // asked at every dispatch, is what the per-dispatch picker was retired for.
     requests.push({ performanceId: record.id, hash: record.provenance.outputHash, acceptedReviewAt: review.ts, intent: "voice-reference",
       warningCodes: Object.values(record.provenance.qualityReport.checks).filter(c => c.outcome === "warning").map(c => c.code),
-      singleSpeaker: true, noMusic: true, cloudBasis: record.cloudBasis, source: "scene-cast" });
+      singleSpeaker: true, noMusic: true, ...(record.cloudBasis === undefined ? {} : { cloudBasis: record.cloudBasis }), source: "scene-cast" });
   }
   return { requests, notSent };
 }

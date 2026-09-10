@@ -4,6 +4,7 @@ import {
   orderedShots,
   pickableSheets,
   resolveCast,
+  shotSpeakers,
   type ProductionBundle,
   type SceneRecord,
   type Sheet,
@@ -22,9 +23,11 @@ function shotsOf(scene: SceneRecord) {
 }
 
 /**
- * The scene's cast, in the order the tiles draw it (SPEC-044 R-1): the characters its shots cite,
- * by first appearance, then the members added by hand in the order they were added. A member
- * whose citing shot is gone stays a member (R-5), so the explicit half is every cast key.
+ * The scene's cast, in the order the tiles draw it (SPEC-044 R-1): the characters its shots cite
+ * or name as speakers, by first appearance, then the members added by hand in the order they
+ * were added. A member whose citing shot is gone stays a member (R-5), so the explicit half is
+ * every cast key. A speaker the shot names in its audio or a covered block is in the scene as
+ * surely as a face in its description (codex round 3): without a tile there is no door to a read.
  */
 export function sceneCast(scene: SceneRecord, sheets: readonly Sheet[]): string[] {
   const order: string[] = [];
@@ -32,6 +35,7 @@ export function sceneCast(scene: SceneRecord, sheets: readonly Sheet[]): string[
     for (const entry of resolveCast(shot.description, sheets as Sheet[]).cast) {
       if (entry.sheet.type === "character" && !order.includes(entry.sheet.id)) order.push(entry.sheet.id);
     }
+    for (const sheetId of shotSpeakers(scene, [shot]).speakers) if (!order.includes(sheetId)) order.push(sheetId);
   }
   for (const sheetId of Object.keys(scene.cast ?? {})) if (!order.includes(sheetId)) order.push(sheetId);
   return order;

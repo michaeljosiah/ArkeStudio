@@ -7795,7 +7795,7 @@ export class Coordinator {
         const castVoices = audioReferencesDisabled
           ? { references: [], notSent: takesNoAudio ? Object.entries(scene.cast ?? {}).filter(([, member]) => member.voice?.kind === "performance")
               .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find((s) => s.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
-          : await resolveCastVoices(store, production, scene, msg.requestId);
+          : await resolveCastVoices(store, production, scene, msg.requestId, undefined, characterAudioRoute(model)?.local === true);
         let performanceReferences, masterReferences;
         try {
           if (msg.audioReferencesDisabled && msg.masterAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
@@ -9945,8 +9945,9 @@ export class Coordinator {
         // to show; what only the bytes or the ledger refused is refused here, in the same words,
         // with the Bench's checkbox as the way past it.
         const benchParams = bench.session.composer.params;
+        const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
         const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined
-          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId)
+          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchModel !== undefined && characterAudioRoute(benchModel)?.local === true)
           : { references: [], notSent: [], refused: [] };
         if (castVoices.refused.length > 0) {
           this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
@@ -13304,10 +13305,22 @@ export class Coordinator {
             const failures = this.voiceService ? await prepareLocalTableRead(store, this.voiceService, prepared.local) : prepared.local.map(() => "Local synthesis is unavailable.");
             const scene = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.scenes.find(s => s.id === msg.sceneId);
             if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
-            if (prepared.cloud.length) await this.enqueueBatch(msg.requestId, msg.kind, prepared.cloud);
+            // What the queue would not take is said here (codex round 3): the enqueue result goes
+            // out under this request too, but the page reads the rehearsal result, and one that
+            // said "planned" over a refused batch cleared the words and offered the same press.
+            const queued = prepared.cloud.length ? await this.enqueueBatch(msg.requestId, msg.kind, prepared.cloud) : undefined;
+            if (queued !== undefined && !queued.accepted) {
+              this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused",
+                reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
+              return;
+            }
             const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+            const notices = [
+              failures.length ? `${failures.length} local lines could not be prepared.` : null,
+              queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,
+            ].filter((notice): notice is string => notice !== null);
             this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: refreshed.plan,
-              reason: failures.length ? `${failures.length} local lines could not be prepared. Other prepared lines remain available.` : "Preparation processed. Ready cache audio remains separate from performance review." });
+              reason: notices.length ? `${notices.join(" ")} Other prepared lines remain available.` : "Preparation processed. Ready cache audio remains separate from performance review." });
           } else this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan, reason: "Review missing lines and the aggregate estimate." });
         } catch {
           this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused", reason: "Table read preparation could not complete. Refresh the authored lines, voices and provider readiness. Existing work is retained." });

@@ -175,12 +175,14 @@ export function GenerateLineSheet({ world, production, scene, sheet, model, line
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState("");
   const pending = useRef<string | null>(null);
   const normalized = normalizeSpeechText(line?.text ?? "");
+  // The quote follows the line as well as its wording (codex round 3): two lines that read the
+  // same would otherwise keep a quote whose target names the other shot.
   useEffect(() => {
     let active = true;
     setHash(""); setQuote(null);
     if (normalized) void textHash(normalized).then((value) => { if (active) setHash(value); });
     return () => { active = false; };
-  }, [normalized]);
+  }, [lineId, normalized]);
   useEffect(() => subscribePerformanceResults((result) => {
     if (result.requestId !== pending.current) return;
     pending.current = null; setBusy(false);

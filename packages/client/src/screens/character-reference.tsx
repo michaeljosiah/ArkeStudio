@@ -1224,7 +1224,7 @@ export function CharacterLooksScreen() {
                     ))}
                   </select>
                 </label>
-                {preset !== null && (selectedLook.attachedTo?.kind !== "scene" || selectedLook.attachedTo.sceneId !== preset.sceneId) ? (
+                {preset !== null && (selectedLook.attachedTo?.kind !== "scene" || selectedLook.attachedTo.productionId !== preset.productionId || selectedLook.attachedTo.sceneId !== preset.sceneId) ? (
                   <Button
                     variant="outline"
                     size="sm"

@@ -261,7 +261,7 @@ export function LocationReferenceScreen() {
                   accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
-                {preset !== null && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.sceneId === preset.sceneId) ? (
+                {preset !== null && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
                   <Button
                     variant="outline"
                     size="sm"

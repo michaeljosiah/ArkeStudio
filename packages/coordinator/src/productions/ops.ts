@@ -50,6 +50,7 @@ import { posterNameFor } from "../takes/poster.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readChanges } from "../world/change-writer.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { sceneLookReleases } from "../references/kit.js";
 import { slugify, uniqueSlug } from "../world/slug.js";
 import { JsonFile, MarkdownFile, sha256 } from "../world/text-files.js";
 import { CommitStaleError, type CommitFileInput, type CommitResult } from "../world/commit.js";
@@ -1388,6 +1389,14 @@ export async function deleteScene(
     });
   }
 
+  // Every look this scene held — a member's, or the place's plate — is released in the same
+  // commit (codex round 3): once the scene is gone nothing on screen can detach it, and a plate
+  // reading occupied for a scene that no longer exists is a claim nobody can clear.
+  for (const kit of store.getBundle().referenceKits) {
+    if (kit.looks?.some((look) => look.attachedTo?.kind === "scene" && look.attachedTo.productionId === input.productionId && look.attachedTo.sceneId === scene.id)) {
+      files.push(...(await sceneLookReleases(store, kit.sheetId, { productionId: input.productionId, sceneId: scene.id })));
+    }
+  }
   await store.commit({
     kind: "scene-delete",
     source: input.source ?? "editor",

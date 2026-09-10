@@ -167,9 +167,10 @@ export function ScenePreview({
     if (result.requestId !== planRequest.current && result.requestId !== prepareRequest.current) return;
     if (result.requestId === prepareRequest.current) {
       prepareRequest.current = null; setPreparing(false);
-      // A preparation that went through says itself through the refreshed plan; only a refusal
-      // needs words, and its token is spent, so the plan is asked for again.
-      setLinesNotice(result.status === "refused" ? result.reason : "");
+      // A preparation that went through whole says itself through the refreshed plan; what did
+      // not — a refusal, or lines the queue or the local engine would not take — is said in the
+      // result's own words (codex round 3). A refusal's token is spent, so the plan is asked again.
+      setLinesNotice(result.status === "refused" || /could not be prepared|not queued/.test(result.reason) ? result.reason : "");
       if (result.status === "refused") requestPlan();
     } else planRequest.current = null;
     if (result.plan) setPlan(result.plan);

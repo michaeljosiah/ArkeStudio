@@ -59,15 +59,17 @@ async function writeKit(
   review?: ReviewDecision,
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
-  const files: import("../world/commit.js").CommitFileInput[] = [
-    {
-      path: kitPath(sheetId),
-      action: baseRaw === null ? "create" : "replace",
-      content: JSON.stringify(kit, null, 2) + "\n",
-      baseHash: baseRaw === null ? null : sha256(baseRaw),
-    },
-  ];
-  await commitReferenceRecord(store, files, review, options);
+  await commitReferenceRecord(store, [kitFile(sheetId, kit, baseRaw)], review, options);
+}
+
+/** The kit as one commit file, fenced on the bytes it was read from. */
+function kitFile(sheetId: string, kit: ReferenceKit, baseRaw: string | null): import("../world/commit.js").CommitFileInput {
+  return {
+    path: kitPath(sheetId),
+    action: baseRaw === null ? "create" : "replace",
+    content: JSON.stringify(kit, null, 2) + "\n",
+    baseHash: baseRaw === null ? null : sha256(baseRaw),
+  };
 }
 
 /**
@@ -496,53 +498,63 @@ export async function attachCharacterLook(
   scope: NonNullable<ReferenceKit["looks"]>[number]["attachedTo"] | null,
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
-  // A plate is the scene's current place's, or nothing (codex round 2): the attach message
-  // carries no scene version, so a press still in flight when the place changes would land its
-  // claim on the old location's kit — released by nobody, and reading as occupied from then on.
-  if (scope?.kind === "scene" && store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "location")) {
-    const scene = store.getBundle().productions.find((p) => p.meta.id === scope.productionId)?.scenes.find((s) => s.id === scope.sceneId);
-    if (scene?.inherits?.location !== sheetId) throw new Error(`scene ${scope.sceneId} is not set at ${sheetId}`);
-  }
-  const { kit, raw } = await loadOrEmpty(store, sheetId);
-  const looks = [...(kit.looks ?? [])];
-  let index = looks.findIndex((look) => look.id === lookId);
-  if (index === -1) {
-    // A location's views are not looks, but a view chosen as a scene's plate rides as one
-    // (SPEC-044 R-18, §2.6): the first attachment makes the look, keyed by the view, so the
-    // planner's one scoping rule covers places without a second record of the choice.
-    const view = (kit.locationViews ?? []).find((candidate) => candidate.id === lookId && candidate.status === "active");
-    if (view === undefined) throw new Error(`no accepted look "${lookId}"`);
-    looks.push({ id: view.id, file: view.file, kind: "view", prompt: view.name, sourceTakeId: view.sourceTakeId, artDirectionVersion: view.artDirectionVersion, acceptedAt: view.acceptedAt });
-    index = looks.length - 1;
-  }
-  const previous = looks[index]!.attachedTo;
-  const next = { ...looks[index]! };
-  if (scope) next.attachedTo = scope;
-  else delete next.attachedTo;
-  looks[index] = next;
-  /*
-   * One look per scope (design 67), enforced in both directions.
-   *
-   * Two looks claiming one production is a question the resolver has no answer to, and the
-   * production's cast row offers exactly one choice per character — so attaching displaces the
-   * incumbent rather than joining it, and detaching empties the scope the look was holding
-   * rather than leaving a second claimant behind it (codex round 2). Worlds written before this
-   * rule can hold such a pair, and clearing one of two left the row still showing a look after
-   * the reader had asked for the identity package.
-   */
-  const emptied = scope ?? previous;
-  if (emptied) {
-    for (let other = 0; other < looks.length; other += 1) {
-      if (other === index) continue;
-      const held = looks[other]!.attachedTo;
-      if (!held || held.productionId !== emptied.productionId || held.kind !== emptied.kind) continue;
-      if (held.kind === "scene" && emptied.kind === "scene" && held.sceneId !== emptied.sceneId) continue;
-      const cleared = { ...looks[other]! };
-      delete cleared.attachedTo;
-      looks[other] = cleared;
+  // Checked, read and written inside one gate (codex round 3): a place change committing
+  // between the check and the write would otherwise slip the claim onto the old kit after the
+  // scene's own commit had found nothing to release.
+  await store.gateOp(async () => {
+    // A plate is the scene's current place's, or nothing (codex round 2): the attach message
+    // carries no scene version, so a press still in flight when the place changes would land its
+    // claim on the old location's kit — released by nobody, and reading as occupied from then on.
+    if (scope?.kind === "scene" && store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "location")) {
+      const scene = store.getBundle().productions.find((p) => p.meta.id === scope.productionId)?.scenes.find((s) => s.id === scope.sceneId);
+      if (scene?.inherits?.location !== sheetId) throw new Error(`scene ${scope.sceneId} is not set at ${sheetId}`);
     }
-  }
-  await writeKit(store, sheetId, { ...kit, looks }, raw, undefined, options);
+    const { kit, raw } = await loadOrEmpty(store, sheetId);
+    const looks = [...(kit.looks ?? [])];
+    let index = looks.findIndex((look) => look.id === lookId);
+    if (index === -1) {
+      // A location's views are not looks, but a view chosen as a scene's plate rides as one
+      // (SPEC-044 R-18, §2.6): the first attachment makes the look, keyed by the view, so the
+      // planner's one scoping rule covers places without a second record of the choice.
+      const view = (kit.locationViews ?? []).find((candidate) => candidate.id === lookId && candidate.status === "active");
+      if (view === undefined) throw new Error(`no accepted look "${lookId}"`);
+      looks.push({ id: view.id, file: view.file, kind: "view", prompt: view.name, sourceTakeId: view.sourceTakeId, artDirectionVersion: view.artDirectionVersion, acceptedAt: view.acceptedAt });
+      index = looks.length - 1;
+    }
+    const previous = looks[index]!.attachedTo;
+    const next = { ...looks[index]! };
+    if (scope) next.attachedTo = scope;
+    else delete next.attachedTo;
+    looks[index] = next;
+    /*
+     * One look per scope (design 67), enforced in both directions.
+     *
+     * Two looks claiming one production is a question the resolver has no answer to, and the
+     * production's cast row offers exactly one choice per character — so attaching displaces the
+     * incumbent rather than joining it, and detaching empties the scope the look was holding
+     * rather than leaving a second claimant behind it (codex round 2). Worlds written before this
+     * rule can hold such a pair, and clearing one of two left the row still showing a look after
+     * the reader had asked for the identity package.
+     */
+    const emptied = scope ?? previous;
+    if (emptied) {
+      for (let other = 0; other < looks.length; other += 1) {
+        if (other === index) continue;
+        const held = looks[other]!.attachedTo;
+        if (!held || held.productionId !== emptied.productionId || held.kind !== emptied.kind) continue;
+        if (held.kind === "scene" && emptied.kind === "scene" && held.sceneId !== emptied.sceneId) continue;
+        const cleared = { ...looks[other]! };
+        delete cleared.attachedTo;
+        looks[other] = cleared;
+      }
+    }
+    await store.commitUnserialised({
+      kind: "kit-edit",
+      source: options.source ?? "form",
+      files: [kitFile(sheetId, { ...kit, looks }, raw)],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+  }, options.precondition);
 }
 
 /**

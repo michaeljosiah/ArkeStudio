@@ -18,6 +18,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, choosePerformance } from "../../src/audio/performance-review.js";
 import { purgePerformance } from "../../src/audio/performance-purge.js";
 import { keepPerformanceRecording, currentPerformanceTarget } from "../../src/audio/performances.js";
+import { readAudioRights } from "../../src/audio/rights.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "./helpers.js";
@@ -388,6 +389,12 @@ it("the scene's cast resolves into voice references that ride wherever the chara
   assert.equal(resolved.references.length, 1);
   assert.equal(resolved.references[0]!.source, "scene-cast");
   assert.equal(resolved.references[0]!.performance.id, record.id);
+  // A local route writes no cloud-upload right and needs none (SPEC-028; codex round 3).
+  const rightsBefore = (await readAudioRights(store)).length;
+  const local = await resolveCastVoices(store, currentProduction, currentScene, ulid(), undefined, true);
+  assert.equal(local.references.length, 1);
+  assert.equal(local.references[0]!.acknowledgementId, undefined, "no acknowledgement for bytes that never leave the machine");
+  assert.equal((await readAudioRights(store)).length, rightsBefore, "and none written");
   // The read rides in a pass where the character speaks, even one that is not the shot it was recorded against.
   const model = SHIPPED_MANIFEST.models.find(m => m.id === "seedance-2.0")!;
   const speaker = record.target.speakerSheetId;

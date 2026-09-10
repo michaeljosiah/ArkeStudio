@@ -15,7 +15,14 @@ import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "./helpers.js";
 
 it("quotes exact decorated wording and keeps paid output with unknown duration through replay and restart", async t => {
-  const dir = await makeTempWorld(); let store = await WorldStore.open(dir); t.after(() => store.close());
+  const dir = await makeTempWorld();
+  // The fixture's assignment predates model choice and resolves to the multilingual model, which
+  // takes no pause; the generation is for the model the sheet names (codex round 3), so the sheet
+  // names the one this test decorates for.
+  const sheetPath = join(dir, "characters", "maren-kest.md");
+  await writeFile(sheetPath, (await readFile(sheetPath, "utf8")).replace(/(  voiceId: v_8Kq2\r?\n)/, "$1  model: eleven-v3\n"));
+  let store = await WorldStore.open(dir); t.after(() => store.close());
+  assert.equal(store.getBundle().sheets.find(s => s.id === "maren-kest")?.voice?.model, "eleven-v3");
   const production = store.getBundle().productions.find(p => p.scenes.some(s => orderedShots(s).some(shot => {
     const line = resolvePerformanceLine(s, shot.id); return line.ok && line.speakerSheetId === "maren-kest";
   })))!;

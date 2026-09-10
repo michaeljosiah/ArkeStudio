@@ -123,5 +123,9 @@ describe("the cast picker (SPEC-044 R-4)", () => {
     assert.deepEqual(sceneCast(scene, bundle.sheets), ["maren-kest", "bray-half-hitch"], "the first shot cites Maren, the second Bray");
     const withMembers = { ...scene, cast: { odile: { added: "2026-09-09T10:00:00.000Z" }, "maren-kest": { voice: { kind: "sample" as const } }, gone: {} } };
     assert.deepEqual(sceneCast(withMembers, bundle.sheets), ["maren-kest", "bray-half-hitch", "odile", "gone"]);
+    // A speaker the shot names without showing is in the scene too (codex round 3): the tile is the door to a read.
+    const spoken = structuredClone(scene);
+    (orderedShots(spoken)[1] as { audio?: unknown }).audio = { kind: "dialogue", speaker: "odile" };
+    assert.deepEqual(sceneCast(spoken, bundle.sheets), ["maren-kest", "bray-half-hitch", "odile"]);
   });
 });
