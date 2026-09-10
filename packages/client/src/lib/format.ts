@@ -11,9 +11,19 @@ export function usdPrecise(microUsd: number | null | undefined): string {
   return `$${(microUsd / 1_000_000).toFixed(4)}`;
 }
 
+/**
+ * A date alone (`2026-08-23`) is a calendar day and is read as one, locally; anything else is
+ * an instant. `new Date("2026-08-23")` is UTC midnight, which is the evening before west of
+ * Greenwich — a release card read that way sat under `today` with yesterday's date beside it.
+ */
+export function parseDay(iso: string): Date {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(iso);
+}
+
 export function shortDate(iso: string | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = parseDay(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
@@ -105,14 +115,10 @@ export function generatedOriginLabel(artifact: { origin: { by: string; producedB
 
 /**
  * Which day a stamp falls on, said the way a feed groups its rows: today, yesterday, then a
- * count. A date alone (`2026-08-23`) is read as a local day rather than as UTC midnight, or a
- * release cut in the evening would sit under the wrong label west of Greenwich.
+ * count. A date alone is a local day, as `parseDay` reads it.
  */
 export function dayLabel(iso: string, now: Date = new Date()): string {
-  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  const d = dateOnly
-    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
-    : new Date(iso);
+  const d = parseDay(iso);
   if (Number.isNaN(d.getTime())) return "earlier";
   const start = (at: Date) => new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
   const days = Math.round((start(now) - start(d)) / 86_400_000);

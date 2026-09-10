@@ -392,11 +392,17 @@ export function failedNote(
 export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote {
   if (job.status === "succeeded") return readyNote(job, manifest, undefined);
   if (job.status === "cancelled") {
+    // The queue's own distinction (SPEC-009 §cancel): cancelled before anything reached the
+    // provider is not charged; once a request was submitted the provider may still complete or
+    // charge, the queue records that warning as the job's error, and the row says `charge
+    // unknown` and carries the warning rather than promising a zero nobody measured.
+    const remote = job.providerJobId !== null || (job.error !== null && job.error.length > 0);
     return {
       id: `job:${job.id}`,
-      tone: "queued",
+      tone: remote ? "warning" : "queued",
       title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
-      meta: `${modelName(job, manifest)} · not charged`,
+      meta: `${modelName(job, manifest)} · ${remote ? "charge unknown" : "not charged"}`,
+      ...(job.error ? { reason: job.error } : {}),
     };
   }
   return failedNote(job, manifest, undefined);

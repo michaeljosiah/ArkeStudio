@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
-import { enqueueNote, failedNote, readyNote, subjectOf } from "../src/components/queue-note.js";
+import { enqueueNote, failedNote, historyNote, readyNote, subjectOf } from "../src/components/queue-note.js";
 import type { Job, ModelManifest } from "@arke-studio/contracts";
 
 const result = (overrides: Partial<QueueEnqueueResult> = {}): QueueEnqueueResult => ({
@@ -355,5 +355,28 @@ describe("queue notification", () => {
     assert.match(enqueueNote(result(), [job()], manifest)!.meta, /^GPT Image 2 · /);
     // An unknown row still says something true rather than nothing.
     assert.match(enqueueNote(result(), [job({ model: "unlisted-1" })], manifest)!.meta, /^unlisted-1 · /);
+  });
+});
+
+describe("the row a finished job gets in Activity's Earlier (design turn 136)", () => {
+  it("says what the receipt said for work that came back or failed", () => {
+    const ready = job({ status: "succeeded" });
+    assert.equal(historyNote(ready, manifest).title, readyNote(ready, manifest, undefined).title);
+    const failed = job({ status: "failed", error: "openai: refused" });
+    assert.deepEqual(historyNote(failed, manifest), failedNote(failed, manifest, undefined));
+  });
+
+  it("calls a cancellation not charged only when nothing reached the provider (codex P1, PR 1087)", () => {
+    const early = historyNote(job({ status: "cancelled", providerJobId: null, error: null }), manifest);
+    assert.match(early.title, /cancelled$/);
+    assert.match(early.meta, /not charged$/);
+    assert.equal(early.reason, undefined);
+    const warning = "Cancelled in Arke. The provider may still complete or charge for this request.";
+    const late = historyNote(job({ status: "cancelled", providerJobId: "prov-1", error: warning }), manifest);
+    assert.match(late.meta, /charge unknown$/);
+    assert.equal(late.reason, warning, "the queue's own warning rides on the row");
+    assert.equal(late.tone, "warning");
+    const submitting = historyNote(job({ status: "cancelled", providerJobId: null, error: warning }), manifest);
+    assert.match(submitting.meta, /charge unknown$/, "a request in flight at the cancel is as unknown as one acknowledged");
   });
 });

@@ -53,7 +53,13 @@ jobs:
             echo "::error::tag $tag does not match apps/desktop/package.json version $version"
             exit 1
           fi
-          node scripts/release-notes.mjs check "$tag"
+          # The checkout is the tag's own tree, so a tag cut before the cards existed has neither
+          # the checker nor a card; a manual rebuild of one is still allowed, from its annotation.
+          if [ -f scripts/release-notes.mjs ]; then
+            node scripts/release-notes.mjs check "$tag"
+          else
+            echo "::warning::$tag predates release cards; its notes come from the tag's annotation"
+          fi
           echo "releasing $tag"
 
       - run: npm ci
@@ -84,8 +90,12 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "$tag already exists — replacing verified assets"
           else
-            node scripts/release-notes.mjs body "$tag" > release-body.md
-            gh release create "$tag" --title "$(node scripts/release-notes.mjs title "$tag")" --notes-file release-body.md
+            if [ -f scripts/release-notes.mjs ]; then
+              node scripts/release-notes.mjs body "$tag" > release-body.md
+              gh release create "$tag" --title "$(node scripts/release-notes.mjs title "$tag")" --notes-file release-body.md
+            else
+              gh release create "$tag" --title "$tag" --notes "$(git tag -l --format='%(contents)' "$tag")"
+            fi
           fi
           gh release upload "$tag" apps/desktop/release/*.exe apps/desktop/release/*.blockmap apps/desktop/release/latest*.yml --clobber
 

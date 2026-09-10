@@ -25,18 +25,17 @@ function gather(): ReleaseCard[] {
     import: "default",
     eager: true,
   }) as Record<string, string>;
-  const pictures = import.meta.glob("../../../../docs/releases/*/picture.{jpg,jpeg,png,webp}", {
+  const pictures = import.meta.glob("../../../../docs/releases/*/*.{jpg,jpeg,png,webp}", {
     query: "?url",
     import: "default",
     eager: true,
   }) as Record<string, string>;
-  const pictureOf = (dir: string): string | null =>
-    Object.entries(pictures).find(([path]) => path.startsWith(`${dir}/`))?.[1] ?? null;
   const cards: ReleaseCard[] = [];
   for (const [path, raw] of Object.entries(notes)) {
     const dir = path.slice(0, path.lastIndexOf("/"));
     const tag = dir.slice(dir.lastIndexOf("/") + 1);
-    const card = parseReleaseCard(tag, raw, pictureOf(dir));
+    // The file the front matter names, beside the notes; a name the build did not carry is no picture.
+    const card = parseReleaseCard(tag, raw, (file) => pictures[`${dir}/${file}`] ?? null);
     if (card) cards.push(card);
   }
   return orderReleases(cards).slice(0, BUNDLED);

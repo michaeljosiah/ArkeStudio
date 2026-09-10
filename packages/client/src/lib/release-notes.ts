@@ -12,14 +12,22 @@ export interface ReleaseCard {
   /** `YYYY-MM-DD`. */
   date: string;
   paragraphs: string[];
-  /** A URL the page can load, or null when the card has no picture. */
+  /** A URL the page can load, or null when the card names no picture the build carries. */
   picture: string | null;
 }
 
 const FRONT_MATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
-/** Null when the card cannot be read: a missing title or date, or no paragraph at all. */
-export function parseReleaseCard(tag: string, raw: string, picture: string | null): ReleaseCard | null {
+/**
+ * Null when the card cannot be read: a missing title or date, or no paragraph at all. The
+ * picture is the file the front matter names, resolved by the caller to whatever the build
+ * carries it as — never the first image that happens to sit in the folder.
+ */
+export function parseReleaseCard(
+  tag: string,
+  raw: string,
+  resolvePicture: (file: string) => string | null,
+): ReleaseCard | null {
   const match = FRONT_MATTER.exec(raw);
   if (!match) return null;
   const fields: Record<string, string> = {};
@@ -35,14 +43,22 @@ export function parseReleaseCard(tag: string, raw: string, picture: string | nul
     .map((paragraph) => paragraph.replace(/\s*\r?\n\s*/g, " ").trim())
     .filter((paragraph) => paragraph.length > 0);
   if (paragraphs.length === 0) return null;
+  const named = fields["picture"];
+  const picture = named ? resolvePicture(named) : null;
   return { version: tag.replace(/^v/, ""), tag, title, date, paragraphs, picture };
 }
 
-/** Dotted numbers compare numerically; a pre-release suffix sorts below the release it precedes. */
+/**
+ * Dotted numbers compare numerically; a pre-release sorts below the release it precedes, and
+ * its identifiers compare the way SemVer says — numeric ones by number, numeric below
+ * alphanumeric, and a shorter set below a longer one that matches it — so `beta.10` outranks
+ * `beta.2` (codex, PR 1087).
+ */
 export function compareVersions(a: string, b: string): number {
   const split = (version: string) => {
-    const [core = "", pre] = version.replace(/^v/, "").split("-", 2);
-    return { parts: core.split(".").map((part) => Number.parseInt(part, 10) || 0), pre: pre ?? null };
+    const [core = "", ...rest] = version.replace(/^v/, "").split("-");
+    const pre = rest.length > 0 ? rest.join("-") : null;
+    return { parts: core.split(".").map((part) => Number.parseInt(part, 10) || 0), pre };
   };
   const left = split(a);
   const right = split(b);
@@ -53,7 +69,23 @@ export function compareVersions(a: string, b: string): number {
   if (left.pre === right.pre) return 0;
   if (left.pre === null) return 1;
   if (right.pre === null) return -1;
-  return left.pre.localeCompare(right.pre);
+  const ours = left.pre.split(".");
+  const theirs = right.pre.split(".");
+  for (let i = 0; i < Math.min(ours.length, theirs.length); i += 1) {
+    const x = ours[i]!;
+    const y = theirs[i]!;
+    const xNumeric = /^\d+$/.test(x);
+    const yNumeric = /^\d+$/.test(y);
+    if (xNumeric && yNumeric) {
+      const difference = Number(x) - Number(y);
+      if (difference !== 0) return difference;
+    } else if (xNumeric !== yNumeric) {
+      return xNumeric ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return ours.length - theirs.length;
 }
 
 /** Newest first. */
