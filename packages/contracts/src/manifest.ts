@@ -187,8 +187,13 @@ export const ModelLimitsSchema = z
     maxReferenceVideoFileSec: z.number().positive().optional(),
     maxReferenceAudioFileSec: z.number().positive().optional(),
     maxCombinedReferences: z.number().int().positive().optional(),
-    /** Native prompt vocabulary, rendered before review as well as before submission. */
-    referenceSyntax: z.literal("minimax-h3").optional(),
+    /**
+     * Native prompt vocabulary, rendered before review as well as before submission.
+     * `minimax-h3` is H3's own tag grammar. `picture-labels` is the Qwen-Image-Edit convention
+     * the Krea 2 rebalance node reuses: each picture is handed to the encoder behind a
+     * `Picture N:` label ahead of the prompt, so the prose has to call it that (issue 1083).
+     */
+    referenceSyntax: z.enum(["minimax-h3", "picture-labels"]).optional(),
     /**
      * The longest output the *reference* route will make, where it is shorter than the text
      * route's (probed 2026-08-16).

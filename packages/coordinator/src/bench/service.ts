@@ -845,10 +845,33 @@ export function planBenchDispatch(
   const wirePrompt = [preamble ? referencePrompt(preamble, model, videoPaths.length, 0, true) : null,
     referencePrompt(body, model, videoPaths.length),
     audioReferences ? referencePrompt(characterAudioInstructions(audioReferences), model, videoPaths.length, standaloneAudioCount) : null].filter(Boolean).join("\n\n");
+  // The cap was held against the brief, which is what the author can shorten; the words that
+  // travel can be longer, because naming a reference the way this model reads it grows the
+  // mention ("@Image 1" becomes "Picture 1", or H3's "<Picture 1>") and a subject's preamble
+  // rides ahead of it. Over the cap here, the take would be reserved and then refused by the
+  // recipe's own limit (raised on review, issue 1083).
+  if (cap !== undefined && wirePrompt.length > cap) {
+    return {
+      ok: false,
+      reason: `With its references named, the prompt is ${wirePrompt.length} characters; ${model.displayName} takes ${cap}.`,
+    };
+  }
 
   // A re-run dispatches the take's own snapshot (R-15): the version it was made with is what
   // that take means, so it is carried forward rather than re-resolved against today's catalogue.
-  const recipeVersion = options.fromTake?.request.recipeVersion ?? options.recipeVersionOf?.(model.id);
+  // When the catalogue no longer holds that version, nothing can run it: dispatching would run
+  // today's recipe and file the take under the old number, the provenance lie R-13 exists to
+  // prevent (raised on review, issue 1083 — Krea 2's picture labels changed what the recipe
+  // sends without touching its graph). Refused by name, the way older timing is below.
+  const current = options.recipeVersionOf?.(model.id);
+  const frozen = options.fromTake?.request.recipeVersion;
+  if (frozen !== undefined && current !== undefined && current !== frozen) {
+    return {
+      ok: false,
+      reason: `This take was made with another version of ${model.displayName}. Generate a current take instead.`,
+    };
+  }
+  const recipeVersion = frozen ?? current;
   const snapshotBase: Omit<BenchRequestSnapshot, "params"> = {
     ...(audioReferences ? { audioReferences } : {}),
     mode: composer.mode,

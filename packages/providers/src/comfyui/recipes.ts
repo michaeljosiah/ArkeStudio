@@ -1000,6 +1000,10 @@ export const COMFYUI_MANIFEST_MODELS: ManifestModel[] = [
       resolutions: ["2048"],
       tiers: { "2K": "2048" },
       aspects: Object.keys(KREA2_BUCKETS),
+      // The rebalance node labels each picture "Picture N:" ahead of the prompt, so a brief's
+      // "@Image N" has to arrive as "Picture N" or it names something the encoder never saw
+      // (issue 1083). The H3 row declares its grammar the same way.
+      referenceSyntax: "picture-labels",
     },
     pricing: { kind: "unmetered" },
     requires: { vramMb: KREA2_IMAGE.hardware.minVramMb, memMb: KREA2_IMAGE.hardware.minMemMb },

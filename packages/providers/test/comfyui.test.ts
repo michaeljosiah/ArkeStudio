@@ -9,6 +9,7 @@ import {
   estimateMicroUsd,
   frameDispatchFor,
   modelCapabilityCopy,
+  referencePrompt,
 } from "@arke-studio/contracts";
 import { ComfyUiClient, COMFYUI_VERSION_FLOOR, meetsVersionFloor, type ProgressSocket } from "../src/clients/comfyui.js";
 import {
@@ -193,6 +194,7 @@ describe("the recipe catalogue projects into the manifest like any other model",
     assert.deepEqual(row.limits.tiers, { "2K": "2048" });
     assert.equal(row.accepts.referenceImages, krea.referenceImages!.length);
     assert.equal(row.accepts.referenceImages, 4);
+    assert.equal(row.limits.referenceSyntax, "picture-labels", "the rebalance node's own picture labels (issue 1083)");
     for (const attachment of krea.referenceImages!) {
       assert.equal(krea.params[attachment.param]!.internal, true);
       assert.ok(attachment.nodes.every((id) => krea.graph[id] !== undefined));
@@ -202,6 +204,20 @@ describe("the recipe catalogue projects into the manifest like any other model",
     const changed = structuredClone(krea);
     changed.referenceConditioning!.textOnly = ["13", 0];
     assert.notEqual(recipeTemplateDigest(changed), recipeTemplateDigest(krea), "conditioning routing is provenance");
+  });
+  it("Krea 2 mentions arrive as the rebalance node's own picture labels (issue 1083)", () => {
+    const row = COMFYUI_MANIFEST_MODELS.find((model) => model.id === "comfyui-krea2-image")!;
+    // Authored briefs cite with an @; the label the encoder was given is "Picture N".
+    assert.equal(referencePrompt("@Image 2 wears the coat from @Image 1.", row), "Picture 2 wears the coat from Picture 1.");
+    // Generated binding prose cites without one, and names a same-subject picture in lower case.
+    assert.equal(
+      referencePrompt("Image 1: Ada — the lead, same subject as image 2.", row, 0, 0, true),
+      "Picture 1: Ada — the lead, same subject as Picture 2.",
+    );
+    // Prose that merely says "image" keeps its words, and a kind this route cannot carry is
+    // left for the gate rather than renamed into something the engine would look for.
+    assert.equal(referencePrompt("The image 1 look, with @Video 1 for motion.", row), "The image 1 look, with @Video 1 for motion.");
+    assert.equal(referencePrompt("Picture 1 already.", row), "Picture 1 already.");
   });
   it("every recipe has exactly one manifest row, and no row leaks a graph", () => {
     for (const recipe of COMFYUI_RECIPES) {

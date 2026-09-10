@@ -26,7 +26,7 @@ import {
 } from "../../src/bench/service.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
-import { SHIPPED_MANIFEST } from "@arke-studio/providers";
+import { comfyUiRecipeById, SHIPPED_MANIFEST } from "@arke-studio/providers";
 
 const CLOCK = () => "2026-08-16T12:00:00.000Z";
 
@@ -70,6 +70,86 @@ it("local H3 bench references freeze multimedia identities and use native ordere
   assert.deepEqual(params.videoReferences, ["artifacts/motion.mp4"]);
   assert.deepEqual((params.referenceMedia as Array<{ kind: string }>).map(ref => ref.kind), ["video", "audio"]);
   assert.equal(plan.reserved[0]!.request.brief, "Use @Image 1 for color, @Video 1 for motion and @Audio 1 for sound.");
+});
+
+/** A world holding two pictures and a Krea 2 bench over both, built the way the H3 test builds its own. */
+async function kreaBench() {
+  const { dir, store } = await open();
+  const model = SHIPPED_MANIFEST.models.find(row => row.id === "comfyui-krea2-image")!;
+  await store.ownedWrite(async () => {
+    await mkdir(join(dir, "artifacts"), { recursive: true });
+    for (const file of ["coat.png", "ada.png"]) {
+      const bytes = Buffer.from(`fixture ${file}`);
+      await writeFile(join(dir, "artifacts", file), bytes);
+      await writeFile(join(dir, "artifacts", `${file}.json`), JSON.stringify({ id: newId("ar"), kind: "image", file,
+        hash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, origin: { by: "user" }, links: [], created: CLOCK() }));
+    }
+  });
+  const opened = await openBenchSession(dir, CLOCK, { fresh: true, defaultModel: { provider: "comfyui", model: model.id } });
+  assert.ok(opened);
+  for (const file of ["coat.png", "ada.png"]) {
+    const artifact = store.getBundle().artifacts.find(row => row.file === file)!;
+    const outcome = await addBenchReference((await refolded(opened))!, store.getBundle(), model,
+      { source: { source: "artifact", artifactId: artifact.id }, requestId: `attach-${file}`, at: CLOCK() });
+    assert.notEqual(outcome.outcome, "refused", JSON.stringify(outcome));
+  }
+  const compose = async (brief: string) => {
+    await opened.store.append({ type: "composer-set", mode: "image", provider: "comfyui", model: model.id,
+      params: { kind: "image", count: 1 }, brief }, { at: CLOCK() });
+    return (await opened.store.fold())!;
+  };
+  return { store, opened, model, compose, version: comfyUiRecipeById(model.id)!.recipeVersion };
+}
+
+it("Krea 2 bench references arrive under the rebalance node's picture labels (issue 1083)", async () => {
+  const { store, compose, version } = await kreaBench();
+  const plan = planBenchDispatch(await compose("@Image 2 wears the coat from @Image 1, in the rain."), store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "dispatch", at: CLOCK(), recipeVersionOf: () => version });
+  assert.ok(plan.ok, plan.ok ? undefined : plan.reason);
+  if (!plan.ok) return;
+  const params = plan.inputs[0]!.params;
+  // The words point where the bytes go: reference1 is the first picture, which the encoder
+  // labels "Picture 1" — and the snapshot keeps the author's own tokens for a re-run.
+  assert.equal(params.prompt, "Picture 2 wears the coat from Picture 1, in the rain.");
+  assert.deepEqual(params.references, ["artifacts/coat.png", "artifacts/ada.png"]);
+  assert.equal(plan.reserved[0]!.request.brief, "@Image 2 wears the coat from @Image 1, in the rain.");
+  assert.equal(plan.reserved[0]!.request.recipeVersion, version);
+});
+
+it("a Krea 2 re-run means the version its take was made with, and refuses another (issue 1083)", async () => {
+  const { store, opened, compose, version } = await kreaBench();
+  const first = planBenchDispatch(await compose("@Image 1 in the rain."), store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "first", at: CLOCK(), recipeVersionOf: () => version });
+  assert.ok(first.ok, first.ok ? undefined : first.reason);
+  if (!first.ok) return;
+  const reserved = first.reserved[0]!;
+  await opened.store.append(
+    { type: "takes-reserved", takes: [{ id: reserved.id, n: reserved.n, requestId: "first", request: reserved.request, createdAt: CLOCK() }] },
+    { at: CLOCK() },
+  );
+  const made = (await opened.store.fold())!;
+  const rerun = planBenchDispatch(made, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "again", at: CLOCK(), fromTake: made.takes[0]!, recipeVersionOf: () => version });
+  assert.ok(rerun.ok, rerun.ok ? undefined : rerun.reason);
+  if (rerun.ok) assert.equal(rerun.inputs[0]!.params.prompt, "Picture 1 in the rain.");
+  // The catalogue has moved on: today's recipe would run under the take's old number. Refused
+  // by name, the way a take of older production timing is.
+  const advanced = planBenchDispatch(made, store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "later", at: CLOCK(), fromTake: made.takes[0]!, recipeVersionOf: () => version + 1 });
+  assert.equal(advanced.ok, false);
+  if (!advanced.ok) assert.match(advanced.reason, /another version of Krea 2/);
+});
+
+it("the prompt cap is held against the words that travel, not only the brief (issue 1083)", async () => {
+  const { store, model, compose } = await kreaBench();
+  const cap = model.limits.maxPromptChars!;
+  // Exactly at the cap as written; one over once "@Image 1" is named the way Krea 2 reads it.
+  const brief = `@Image 1 ${"x".repeat(cap - "@Image 1 ".length)}`;
+  assert.equal(brief.length, cap);
+  const plan = planBenchDispatch(await compose(brief), store.getBundle(), SHIPPED_MANIFEST,
+    { worldId: store.worldId, requestId: "capped", at: CLOCK() });
+  assert.equal(plan.ok, false);
+  if (!plan.ok) assert.match(plan.reason, new RegExp(`${cap + 1} characters; Krea 2 takes ${cap}`));
 });
 
 const IMAGE_MODEL: ManifestModel = {
