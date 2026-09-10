@@ -931,6 +931,8 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
     await acceptCharacterLook(store, "maren-kest", { id: "council-coat", file: "looks/council-coat.png", kind: "costume",
       prompt: "Formal council coat", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
     await attachCharacterLook(store, "maren-kest", "council-coat", { kind: "scene", productionId: PRODUCTION, sceneId: SCENE_ID });
+    // A scene that is gone takes no claim (codex round 4).
+    await assert.rejects(attachCharacterLook(store, "maren-kest", "council-coat", { kind: "scene", productionId: PRODUCTION, sceneId: "sc_99" }), /is gone/);
     const before = await sceneOnDisk(store);
     await applySceneCommand(store, {
       productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,

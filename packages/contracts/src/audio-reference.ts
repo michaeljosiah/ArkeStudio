@@ -9,7 +9,7 @@ import type { ManifestModel } from "./manifest.js";
 import type { ReferenceKit } from "./reference.js";
 import type { Shot } from "./scene.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
-import type { Sheet } from "./world.js";
+import type { Sheet, VoiceAssignment } from "./world.js";
 import type { WorldBundle } from "./client-state.js";
 
 const performanceSource = z.object({ kind: z.literal("performance"), performanceId: PerformanceIdSchema, hash: FullSha256Schema }).strict();
@@ -145,6 +145,11 @@ export interface CastVoiceNotSent { sheetId: string; name: string; reason: strin
  * is returned with one clause, never thrown; the plan card and the Bench both say it from here,
  * so the two cannot drift.
  */
+/** The assignment a read was made with is the sheet's current one: provider, voice, model and the version it was assigned at. */
+export function sameVoiceAssignment(current: VoiceAssignment | undefined, made: VoiceAssignment): boolean {
+  return current !== undefined && current.provider === made.provider && current.voiceId === made.voiceId
+    && current.model === made.model && current.assignedAtVersion === made.assignedAtVersion;
+}
 export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord, shotIds?: readonly string[], local = false):
   { requests: PerformanceAudioRequest[]; notSent: CastVoiceNotSent[] } {
   const requests: PerformanceAudioRequest[] = [], notSent: CastVoiceNotSent[] = [];
@@ -161,6 +166,9 @@ export function castVoiceRequests(sheets: readonly Sheet[], production: Producti
     if (!record || record.provenance.outputHash !== voice.hash) { skip("read missing"); continue; }
     const review = production.performanceReview.reviews.filter(r => r.performanceId === record.id).at(-1);
     if (review?.decision !== "accept") { skip("read not accepted"); continue; }
+    // A read made with an earlier voice assignment is another voice's (codex round 4): the
+    // resolver would refuse it at clearance, so it is said here, in the card's words.
+    if (record.kind !== "scratch" && !sameVoiceAssignment(sheets.find(s => s.id === sheetId)?.voice, record.voiceAssignment)) { skip("voice changed"); continue; }
     const attested = new Set(record.attestations?.filter(a => a.audioHash === record.provenance.outputHash).map(a => a.kind));
     if (!attested.has("single-speaker") || !attested.has("no-music")) { skip("attest one speaker and no music"); continue; }
     // A read kept for local use only rides a local route, where no bytes leave the machine

@@ -261,7 +261,8 @@ export function LocationReferenceScreen() {
                   accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
-                {preset !== null && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
+                {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
+                {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
                   <Button
                     variant="outline"
                     size="sm"

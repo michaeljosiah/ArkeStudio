@@ -9,6 +9,7 @@ import {
   normalizeSpeechText,
   orderedShots,
   resolveCast,
+  sameVoiceAssignment,
   shotSpeakers,
   ulid,
   type ClientMessage,
@@ -141,7 +142,9 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
   // to be refused at dispatch, with the sample riding in its place and nothing saying so.
   const current = (record: PerformanceRecord) => lines.some((line) => line.shotId === record.target.shotId
     && (line.blockId ?? null) === (record.target.blockId ?? null)
-    && (hashes[line.id] === undefined || hashes[line.id] === record.target.authoredTextHash));
+    && (hashes[line.id] === undefined || hashes[line.id] === record.target.authoredTextHash))
+    // A read made with an earlier voice assignment is another voice's (codex round 4).
+    && (record.kind === "scratch" || sameVoiceAssignment(sheet?.voice, record.voiceAssignment));
   const reads = production.performances
     .filter((record) => record.target.sceneId === scene.id && record.target.speakerSheetId === sheetId && current(record))
     .map((record) => ({ record, decision: latestReview(record) }))

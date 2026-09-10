@@ -1,4 +1,4 @@
-import { stageProblems, resolvedShotStaging } from "@arke-studio/contracts";
+import { sameVoiceAssignment, stageProblems, resolvedShotStaging } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -311,6 +311,9 @@ async function candidateFor(
         if (read.provenance.outputHash !== voice.hash) throw new SceneCommandRefused([`${sheetId}: that read changed`]);
         if (production?.performanceReview.reviews.filter((review) => review.performanceId === read.id).at(-1)?.decision !== "accept") {
           throw new SceneCommandRefused([`${sheetId}: that read is not accepted`]);
+        }
+        if (read.kind !== "scratch" && !sameVoiceAssignment(store.getBundle().sheets.find((sheet) => sheet.id === sheetId)?.voice, read.voiceAssignment)) {
+          throw new SceneCommandRefused([`${sheetId}: that read is an earlier voice's`]);
         }
         if (!currentPerformanceTarget(store, read.target)) throw new SceneCommandRefused([`${sheetId}: that read no longer matches its line`]);
       }

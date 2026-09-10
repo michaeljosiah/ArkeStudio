@@ -9945,9 +9945,12 @@ export class Coordinator {
         // to show; what only the bytes or the ledger refused is refused here, in the same words,
         // with the Bench's checkbox as the way past it.
         const benchParams = bench.session.composer.params;
+        // A route that takes no audio takes no read (SPEC-044 R-31; codex round 4): nothing is
+        // resolved, so a read that could not clear refuses nothing, as the planned-scene arm holds.
         const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
-        const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined
-          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchModel !== undefined && characterAudioRoute(benchModel)?.local === true)
+        const benchRoute = benchModel === undefined ? null : characterAudioRoute(benchModel);
+        const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined && benchRoute !== null
+          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchRoute.local === true)
           : { references: [], notSent: [], refused: [] };
         if (castVoices.refused.length > 0) {
           this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));

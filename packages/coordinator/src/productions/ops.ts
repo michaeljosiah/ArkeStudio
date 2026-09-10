@@ -1352,57 +1352,63 @@ export async function deleteScene(
   },
 ): Promise<void> {
   const stem = sceneStemOrThrow(input.sceneFile);
-  const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
-  if (!production) throw new Error(`production ${input.productionId} is not in this world`);
-  const path = `productions/${input.productionId}/scenes/${stem}.json`;
-  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
-  const { record, scene } = readSceneRecord(raw);
+  // Read, refuse, discover and commit inside one gate (codex round 4): a plate attached to an
+  // unclaimed kit between the look scan and the commit would otherwise stay owned by a scene
+  // that no longer exists. The attachment's own gate lets it in before this one, where the scan
+  // finds it, or after, where the scene is gone and the claim is refused.
+  await store.gateOp(async () => {
+    const production = store.getBundle().productions.find((p) => p.meta.id === input.productionId);
+    if (!production) throw new Error(`production ${input.productionId} is not in this world`);
+    const path = `productions/${input.productionId}/scenes/${stem}.json`;
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+    const { record, scene } = readSceneRecord(raw);
 
-  const blockers = sceneDeleteBlockers(production, scene);
-  if (blockers.length > 0) throw new SceneDeleteRefused(blockers);
+    const blockers = sceneDeleteBlockers(production, scene);
+    if (blockers.length > 0) throw new SceneDeleteRefused(blockers);
 
-  const files: CommitFileInput[] = [{ path, action: "delete", baseHash: sha256(raw) }];
+    const files: CommitFileInput[] = [{ path, action: "delete", baseHash: sha256(raw) }];
 
-  for (const episode of production.episodes) {
-    if (!episode.scenes.includes(scene.id)) continue;
-    const episodeStem = production.episodeFiles[episode.id];
-    if (episodeStem === undefined) continue;
-    const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
-    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
-    const doc = JsonFile.parse(live);
-    doc.set({ scenes: episode.scenes.filter((id) => id !== scene.id) });
-    files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
-  }
-
-  const shotIds = new Set(orderedShots(record).map((shot) => shot.id));
-  const remaining = Object.fromEntries(
-    Object.entries(production.selections).filter(([shotId]) => !shotIds.has(shotId)),
-  );
-  if (Object.keys(remaining).length !== Object.keys(production.selections).length) {
-    const selectionsPath = `productions/${input.productionId}/selections.json`;
-    const live = await readFile(toExtendedLength(join(store.dir, fromPortable(selectionsPath))), "utf8");
-    files.push({
-      path: selectionsPath,
-      action: "replace",
-      content: JSON.stringify(remaining, null, 2) + "\n",
-      baseHash: sha256(live),
-    });
-  }
-
-  // Every look this scene held — a member's, or the place's plate — is released in the same
-  // commit (codex round 3): once the scene is gone nothing on screen can detach it, and a plate
-  // reading occupied for a scene that no longer exists is a claim nobody can clear.
-  for (const kit of store.getBundle().referenceKits) {
-    if (kit.looks?.some((look) => look.attachedTo?.kind === "scene" && look.attachedTo.productionId === input.productionId && look.attachedTo.sceneId === scene.id)) {
-      files.push(...(await sceneLookReleases(store, kit.sheetId, { productionId: input.productionId, sceneId: scene.id })));
+    for (const episode of production.episodes) {
+      if (!episode.scenes.includes(scene.id)) continue;
+      const episodeStem = production.episodeFiles[episode.id];
+      if (episodeStem === undefined) continue;
+      const episodePath = `productions/${input.productionId}/episodes/${episodeStem}.json`;
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(episodePath))), "utf8");
+      const doc = JsonFile.parse(live);
+      doc.set({ scenes: episode.scenes.filter((id) => id !== scene.id) });
+      files.push({ path: episodePath, action: "replace", content: doc.serialize(), baseHash: sha256(live) });
     }
-  }
-  await store.commit({
-    kind: "scene-delete",
-    source: input.source ?? "editor",
-    files,
-    ...(input.requestId ? { requestId: input.requestId } : {}),
-  }, undefined, input.precondition);
+
+    const shotIds = new Set(orderedShots(record).map((shot) => shot.id));
+    const remaining = Object.fromEntries(
+      Object.entries(production.selections).filter(([shotId]) => !shotIds.has(shotId)),
+    );
+    if (Object.keys(remaining).length !== Object.keys(production.selections).length) {
+      const selectionsPath = `productions/${input.productionId}/selections.json`;
+      const live = await readFile(toExtendedLength(join(store.dir, fromPortable(selectionsPath))), "utf8");
+      files.push({
+        path: selectionsPath,
+        action: "replace",
+        content: JSON.stringify(remaining, null, 2) + "\n",
+        baseHash: sha256(live),
+      });
+    }
+
+    // Every look this scene held — a member's, or the place's plate — is released in the same
+    // commit (codex round 3): once the scene is gone nothing on screen can detach it, and a plate
+    // reading occupied for a scene that no longer exists is a claim nobody can clear.
+    for (const kit of store.getBundle().referenceKits) {
+      if (kit.looks?.some((look) => look.attachedTo?.kind === "scene" && look.attachedTo.productionId === input.productionId && look.attachedTo.sceneId === scene.id)) {
+        files.push(...(await sceneLookReleases(store, kit.sheetId, { productionId: input.productionId, sceneId: scene.id })));
+      }
+    }
+    await store.commitUnserialised({
+      kind: "scene-delete",
+      source: input.source ?? "editor",
+      files,
+      ...(input.requestId ? { requestId: input.requestId } : {}),
+    });
+  }, input.precondition);
 }
 
 /** Undo (turn 97): v<n> back as a new version; everything between it and now stays in history. */
