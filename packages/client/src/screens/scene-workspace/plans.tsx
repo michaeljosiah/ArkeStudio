@@ -68,6 +68,11 @@ export function PlansPanel({
         : carries.place.rides ? `${carries.place.name}: plate`
         : `${carries.place.name}: plate not sent${carries.place.reason === undefined ? "" : ` · ${carries.place.reason}`}`,
       ...(carries?.cast.flatMap(castClauses) ?? []),
+      // The prompt the model will not take (issue 1085), as its own clause: the length that
+      // travels, and the length that is allowed. Named, never blocking — the pass still runs.
+      carries?.promptOverCap === undefined
+        ? null
+        : `prompt too long · ${carries.promptOverCap.chars} of ${carries.promptOverCap.limit} characters`,
     ].filter((part): part is string => part !== null);
     const status =
       pass.state === "blocked" ? `blocked — ${pass.reason ?? "extraction failed"}`
