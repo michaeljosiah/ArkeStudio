@@ -1997,7 +1997,6 @@ export function ProductionChatScreen() {
                   worldId={worldId}
                   subject={stagedStyle ? "the style" : shape?.isEpisodic ? "the season" : "the overview"}
                   staged={staged}
-                  writes={`the gate writes ${stagedStyle ? "prose-style.json" : file}`}
                   onAccepted={() => navigate(detailsPath)}
                 />
               ),

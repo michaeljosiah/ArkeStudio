@@ -220,7 +220,8 @@ export function GenerationDialog({
     note?: ReactNode;
     /**
      * What pressing leaves behind, when a person must know it first — on the control itself, as
-     * its tooltip, never as a line on the surface (design turn 137).
+     * its tooltip, never as a line on the surface (design turn 137). Drawn on hover and on
+     * focus alike; see `Button`'s own `hint` for why one of the two is not enough.
      */
     hint?: string;
     /**
@@ -543,7 +544,7 @@ export function GenerationDialog({
                   variant="primary"
                   disabled={commit.disabled === true || selected === null}
                   onClick={commit.onCommit}
-                  title={commit.hint}
+                  {...(commit.hint === undefined ? {} : { hint: commit.hint })}
                 >
                   {commit.label}
                 </Button>

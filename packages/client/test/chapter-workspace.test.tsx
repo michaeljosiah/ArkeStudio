@@ -517,7 +517,7 @@ describe("the craft loop (turn 128)", () => {
     assert.doesNotMatch(text(m), /draft waiting/);
     assert.match(text(m), /Locked while a passage waits · v4/);
     assert.match(text(m), /chapter 02 · passage/, "the card names the passage");
-    assert.match(text(m), /Replaces one passage · the rest of the chapter is untouched/);
+    assert.doesNotMatch(text(m), /the rest of the chapter is untouched/, "no caption under the gate (turn 137)");
     assert.doesNotMatch(text(m), /waits for your yes/, "no caption under the composer (turn 137)");
     const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
     assert.deepEqual(marked, ["Maren counted the seven bells."], "only the paragraph the span falls in is marked");

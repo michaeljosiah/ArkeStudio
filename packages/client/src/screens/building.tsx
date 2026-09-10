@@ -153,7 +153,7 @@ export function BuildingScreen() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, marginTop: 6 }}>
           <Button
             variant="ghost"
-            title="Stops the build. What is made is kept."
+            hint="Stops the build. What is made is kept."
             onClick={() => worldId && stopFoundingBuild(worldId)}
           >
             Stop

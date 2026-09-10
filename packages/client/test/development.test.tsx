@@ -486,7 +486,8 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, />Discard</);
     assert.match(html, /The season, as it stands/, "the thing the gate would make");
     assert.match(html, /Who is ringing the drowned bell\?/);
-    assert.match(html, /the gate writes season\.json/);
+    assert.match(html, /season\.json/, "the file is the fact under the buttons, with no sentence around it");
+    assert.doesNotMatch(html, /the gate writes/, "no caption under the gate (turn 137)");
     // The rail has two states and never both at once (turns 89, 91).
     assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
   });
@@ -503,7 +504,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /the gate writes story\.json/);
+    assert.match(html, /story\.json/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
   });
 
@@ -519,7 +520,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /the gate writes prose-style\.json/);
+    assert.match(html, /prose-style\.json/);
     assert.match(html, /the style/, "named as what it is");
     assert.match(html, /close third/);
   });
@@ -801,7 +802,7 @@ describe("Arke is docked on the thing it is about (design turns 99, 100)", () =>
     );
     assert.match(html, />Accept</, "the yes is in the panel");
     assert.match(html, />Discard</, "the ordinary gate actions stay together");
-    assert.match(html, /nothing else changes/, "and says what it does not touch");
+    assert.doesNotMatch(html, /nothing else changes/, "no caption under the gate's buttons (turn 137)");
     assert.match(html, /Who is ringing the drowned bell\?/);
     // The two rail states are still never up together (turn 91): a point is not a proposal.
     assert.doesNotMatch(html, /What it understood/, "the understanding gives way to the decision");

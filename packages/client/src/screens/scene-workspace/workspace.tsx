@@ -781,7 +781,6 @@ export function SceneWorkspace({
                         worldId={world.meta.worldId}
                         subject={`scene ${scene.number}`}
                         staged={staged}
-                        writes="Updates this scene and its board boundaries."
                         items={[
                           ...workingShots
                             .filter((shot) => stagedShotIds.has(shot.id))

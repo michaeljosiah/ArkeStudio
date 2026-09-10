@@ -344,7 +344,7 @@ export function LocationReferenceScreen() {
                         <p>This location already has an active view by that name.</p>
                         <Button
                           variant="secondary"
-                          title="The old view becomes superseded and keeps its place in history."
+                          hint="The old view becomes superseded and keeps its place in history."
                           onClick={() =>
                             setNaming({
                               key: candidate.key,

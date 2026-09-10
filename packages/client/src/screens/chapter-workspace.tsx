@@ -1450,7 +1450,6 @@ export function ChapterWorkspace({
                     worldId={worldId}
                     subject={chapterLabel}
                     staged={stagedDraft.staged}
-                    writes={passageChange !== null ? "Replaces one passage · the rest of the chapter is untouched" : "Replaces the chapter's prose."}
                     items={[
                       passageChange !== null
                         ? {
