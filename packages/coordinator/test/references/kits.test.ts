@@ -1287,6 +1287,23 @@ describe("location views and the sheet they assemble (#243)", () => {
     await store.close();
   });
 
+  it("a replacement that also takes the establishing seat consolidates the plates it takes over (codex round 1)", async () => {
+    const { dir, store } = await openTicking();
+    await acceptView(store, dir, 1, "Establishing view");
+    await acceptView(store, dir, 2, "From the door");
+    const first = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
+    const second = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_05" };
+    await attachCharacterLook(store, VIGIL.id, "v1", first);
+    await attachCharacterLook(store, VIGIL.id, "v2", second);
+    await acceptView(store, dir, 3, "From the door", { replaceExistingName: true, establishing: true });
+    const kit = (await readKit(store, VIGIL.id))!.kit;
+    assert.equal(kit.establishingViewId, "v3");
+    // One look id, one claim: the scene that named the door keeps its plate; the scene that held
+    // the old establishing view falls back to the sheet, which now opens on this picture.
+    assert.deepEqual(kit.looks?.map((look) => [look.id, look.attachedTo]), [["v3", second]]);
+    await store.close();
+  });
+
   it("asks before replacing a name, then supersedes without reordering the rest", async () => {
     const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");

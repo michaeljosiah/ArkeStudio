@@ -371,11 +371,7 @@ export async function acceptLocationView(
     // A view a scene took as its plate rides as a look keyed by the view (SPEC-044 R-18): a
     // replacement takes over that look too, or the scene would keep dispatching a picture no
     // panel shows any more.
-    ...(kit.looks === undefined ? {} : {
-      looks: kit.looks.map((look) => supersededByThis.has(look.id)
-        ? { ...look, id: accepted.id, file: accepted.file, prompt: accepted.name, sourceTakeId: accepted.sourceTakeId, artDirectionVersion: accepted.artDirectionVersion, acceptedAt: now }
-        : look),
-    }),
+    ...(kit.looks === undefined ? {} : { looks: takenOverLooks(kit.looks, supersededByThis, collision?.id, accepted, now) }),
   };
 
   const sheetFile = await rebuildLocationSheet(store, sheet, nextKit);
@@ -540,6 +536,56 @@ export async function attachCharacterLook(
     }
   }
   await writeKit(store, sheetId, { ...kit, looks }, raw, undefined, options);
+}
+
+/**
+ * The looks a replacement view takes over, as one record. Replacing a view by name while making
+ * the new one establishing supersedes two views at once, and one look id cannot hold two scenes'
+ * claims (one look per scope, design 67; codex round 1): the claim on the view named for
+ * replacement survives — that scene chose that side of the room — the old establishing view's
+ * claim is released, and its scene falls back to the sheet, which now opens on this picture.
+ */
+function takenOverLooks(
+  looks: NonNullable<ReferenceKit["looks"]>,
+  superseded: ReadonlySet<string>,
+  namedId: string | undefined,
+  accepted: LocationView,
+  now: string,
+): NonNullable<ReferenceKit["looks"]> {
+  const taken = looks.filter((look) => superseded.has(look.id));
+  if (taken.length === 0) return looks;
+  const kept = taken.find((look) => look.id === namedId && look.attachedTo !== undefined)
+    ?? taken.find((look) => look.attachedTo !== undefined)
+    ?? taken[0]!;
+  return looks.flatMap((look) => look === kept
+    ? [{ ...look, id: accepted.id, file: accepted.file, prompt: accepted.name, sourceTakeId: accepted.sourceTakeId, artDirectionVersion: accepted.artDirectionVersion, acceptedAt: now }]
+    : superseded.has(look.id) ? [] : [look]);
+}
+
+/**
+ * The kit write that releases this scene's claims on a sheet's looks, as a file for the commit
+ * that carries the scene's own write (SPEC-044 §2.6; codex round 1). A member removed, or a place
+ * changed, with the look still attached is a claim nobody can see — the plate reads occupied,
+ * the old place's plate comes back with it — and two commits would leave exactly that behind a
+ * crash between them. Empty when the kit holds no such claim, so nothing is written for it.
+ */
+export async function sceneLookReleases(
+  store: WorldStore,
+  sheetId: string,
+  scope: { productionId: string; sceneId: string },
+): Promise<import("../world/commit.js").CommitFileInput[]> {
+  const existing = await readKit(store, sheetId);
+  const looks = existing?.kit.looks;
+  const held = (look: NonNullable<ReferenceKit["looks"]>[number]) =>
+    look.attachedTo?.kind === "scene" && look.attachedTo.productionId === scope.productionId && look.attachedTo.sceneId === scope.sceneId;
+  if (existing === null || looks === undefined || !looks.some(held)) return [];
+  const released = looks.map((look) => {
+    if (!held(look)) return look;
+    const free = { ...look };
+    delete free.attachedTo;
+    return free;
+  });
+  return [{ path: kitPath(sheetId), action: "replace", content: JSON.stringify({ ...existing.kit, looks: released }, null, 2) + "\n", baseHash: sha256(existing.raw) }];
 }
 
 export async function setStyleOverride(

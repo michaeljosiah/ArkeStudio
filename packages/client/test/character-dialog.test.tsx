@@ -169,6 +169,7 @@ describe("the character dialog (SPEC-044 R-11..R-16)", () => {
     assert.deepEqual(cards(container, "Voice")[1], ["read missing · the sample rides", "true"]);
     assert.equal(card(container, "read missing · the sample rides").disabled, true, "the next press on another card replaces it");
     assert.match(container.querySelector(".fy-chardialog__line")?.textContent ?? "", /read · earlier wording/);
+    assert.ok(!cards(container, "Voice").some(([label]) => label === "Line 12 · read · 3.1s"), "a read of earlier wording is not offered as the voice");
   });
 
   it("closes on Done and on Escape, with nothing to save; a member with nothing chosen here cannot be removed (R-9, R-11)", async () => {

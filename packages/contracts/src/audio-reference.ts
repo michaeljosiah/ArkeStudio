@@ -81,10 +81,6 @@ export function masterAudioBinding(production: ProductionBundle, shotId: string)
     timelineRevision: timeline.revision, sourceClipId: source.id, artifactId: source.source.artifactId,
     range: { inSec, outSec: inSec + picture.durationFrames / timeline.frameRate } });
 }
-export function masterPerformanceShotIds(production?: ProductionBundle): string[] {
-  return production?.timeline?.status === "ready" ? (basePictureTrack(production.timeline.timeline)?.clips ?? [])
-    .flatMap(c => c.source.kind === "shot" && c.performanceSourceClipId ? [c.source.shotId] : []) : [];
-}
 export const AudioReferenceEffectsSchema = z.object({
   wording: z.literal("prompt-guided"), timing: z.literal("not-preserved"), identity: z.literal("guidance"),
   cadence: z.literal("guidance"), lipSync: z.literal("generated"), generatedAudio: z.boolean(),
@@ -172,14 +168,15 @@ export function castVoiceRequests(sheets: readonly Sheet[], production: Producti
 
 /** Resolve authored speaking roles, never incidental mentions. Ordering follows reviewed script coverage. */
 export function planCharacterAudio(input: { scene: SceneRecord; shots: readonly Shot[]; sheets: readonly Sheet[];
-  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[]; requiredMasterShots?: readonly string[] }): CharacterAudioPlan {
+  kits: readonly ReferenceKit[]; model: ManifestModel; imageCount: number; taskMode?: string; disabled?: boolean; performanceReferences?: readonly FrozenPerformanceAudio[]; masterReferences?: readonly FrozenMasterAudio[] }): CharacterAudioPlan {
   const route = characterAudioRoute(input.model, input.taskMode);
   const plan: CharacterAudioPlan = { version: 1, disabled: input.disabled === true, route: route?.endpoint ?? null, references: [], problems: [] };
-  if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length && !input.masterReferences?.length && !input.requiredMasterShots?.length)) return plan;
+  if (plan.disabled || input.model.capability !== "video" || (!input.kits.some(k => k.designatedVoiceSample) && !input.performanceReferences?.length && !input.masterReferences?.length)) return plan;
+  // A master slice rides when a caller supplies one; a cut clip that came from a read no longer
+  // demands its slice (SPEC-044; codex round 1). The scene page sends none and offers no way to,
+  // so the demand refused every dispatch of such a scene with nothing to press. The scene's cast
+  // voice is what rides by default.
   const masters = (input.masterReferences ?? []).filter(ref => input.shots.some(shot => shot.id === ref.master.shotId));
-  for (const shot of input.shots) {
-    if (input.requiredMasterShots?.includes(shot.id) && !masters.some(ref => ref.master.shotId === shot.id)) plan.problems.push("An enabled performance shot needs its prepared master slice. Prepare it or explicitly disable audio references.");
-  }
   const spoken = shotSpeakers(input.scene, input.shots.filter(shot => !masters.some(ref => ref.master.shotId === shot.id)));
   const speakers = spoken.speakers;
   plan.problems.push(...spoken.problems);
@@ -269,5 +266,5 @@ export function planSubjectCharacterAudio(input: { world: WorldBundle; subject: 
   const scene = production?.scenes.find(s => s.id === input.subject.sceneId);
   if (!scene) return { version: 1, disabled: input.disabled === true, route: null, references: [], problems: ["The scene is no longer available."] };
   const ids = new Set(input.subject.shotId ? [input.subject.shotId] : input.subject.members?.map(m => m.shotId) ?? []);
-  return planCharacterAudio({ ...input, requiredMasterShots: masterPerformanceShotIds(production), scene, shots: orderedShots(scene).filter(s => ids.has(s.id)), sheets: input.world.sheets, kits: input.world.referenceKits });
+  return planCharacterAudio({ ...input, scene, shots: orderedShots(scene).filter(s => ids.has(s.id)), sheets: input.world.sheets, kits: input.world.referenceKits });
 }

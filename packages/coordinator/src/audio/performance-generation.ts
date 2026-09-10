@@ -1,14 +1,14 @@
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { PerformanceGenerationQuoteSchema, PerformanceRecordSchema, PerformanceIdSchema, AudioAssetProvenanceSchema,
-  estimateMicroUsd, mapCadence, normalizeSpeechText, type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost } from "@arke-studio/contracts";
+  estimateMicroUsd, mapCadence, normalizeSpeechText, voiceSourceFor, type AudioAssetProvenance, type ClientMessage, type ManifestModel, type PerformanceGenerationQuote, type Job, type TakeCost } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { audioWorldPath, prepareAudio, acceptPreparedAudio } from "./storage.js";
 import { performanceTarget, currentPerformanceTarget, readPerformance } from "./performances.js";
 import { audioHash, analyzePcmWav, unavailableAudioReport } from "./qc.js";
 import { requireUnpurgedPerformance } from "./performance-purge.js";
-import { readAudioRights } from "./rights.js";
+import { effectiveAudioRights, readAudioRights } from "./rights.js";
 import { readAudioBytes, type AudioMediaTools } from "./media-tools.js";
 import { verifyArtifact } from "../queue/verify.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -74,20 +74,15 @@ export async function finalizeGeneratedPerformance(store: WorldStore, tools: Aud
   if (tools) { try { candidate = await prepareAudio(store, tools, { kind: "performance-recording", productionId: quote.target.productionId, performanceId: id }); } catch { /* Preserve verified provider output; unavailable QC is truthful. */ } }
   if (signal.aborted) throw new Error("Performance generation cancelled.");
   // A synthesized line speaks with one voice and no music by construction (SPEC-044 R-14), so it
-  // attests both without being asked. Its cloud basis is the voice's: the basis the character's
-  // sample was acknowledged under, when the voice was cloned from one, else a provider's licensed
-  // stock voice — generate-performance asks nothing, and a read that said nothing would never ride.
-  const sample = store.getBundle().referenceKits.find(k => k.sheetId === quote.target.speakerSheetId)?.designatedVoiceSample;
-  const sampleAcknowledgement = sample && "acknowledgementId" in sample ? sample.acknowledgementId : undefined;
-  const acknowledged = sampleAcknowledgement === undefined ? undefined
-    : (await readAudioRights(store)).find(e => e.action === "acknowledge" && e.id === sampleAcknowledgement);
-  const cloudBasis = (acknowledged?.action === "acknowledge" ? acknowledged.basis : undefined) ?? "licensed";
+  // attests both without being asked. Its cloud basis is the voice's own; a read with none is
+  // said as not sendable at dispatch rather than sent — generate-performance asks nothing.
+  const cloudBasis = await generatedVoiceCloudBasis(store, quote);
   const makeRecord = (file: string, provenance: AudioAssetProvenance) => PerformanceRecordSchema.parse({
     id, kind: "generated-tts", operationId: quote.operationId, target: quote.target, authoredText: quote.authoredText,
     voiceAssignment: quote.voiceAssignment, cadencePlan: quote.cadencePlan, cadencePlanHash: quote.cadencePlanHash,
     mapping: quote.mapping, file, provenance, cost, ...(jobId ? { jobId } : {}), createdAt: store.now(),
     attestations: (["single-speaker", "no-music"] as const).map(kind => ({ kind, audioHash: provenance.outputHash, statementVersion: 1, acknowledgedAt: store.now() })),
-    cloudBasis });
+    ...(cloudBasis === undefined ? {} : { cloudBasis }) });
   let record: ReturnType<typeof makeRecord>;
   if (candidate) {
     await acceptPreparedAudio(store, candidate, prefix, (file, provenance) => {
@@ -111,6 +106,27 @@ export async function finalizeGeneratedPerformance(store: WorldStore, tools: Aud
     await store.commitUnserialised({ kind: "performance-generated", source: "system", files: [{ path: `${prefix}/performance.json`, action: "create", baseHash: null, content: JSON.stringify(record, null, 2) + "\n" }] });
   });
   return record;
+}
+/**
+ * The basis a synthesized read may be sent to a cloud model under (SPEC-044 R-14; codex round 1).
+ * A catalogue voice is a provider's licensed stock. A cloned voice speaks with the person whose
+ * recording made it, so it carries what that recording holds today: the character's sample was
+ * acknowledged for cloud upload under a basis, and that basis reaches the read only when the
+ * sample is the clone's own recording and the acknowledgement still stands — a withdrawal folds
+ * it away, and a sample unrelated to the voice says nothing about it. Anything else is no basis.
+ */
+export async function generatedVoiceCloudBasis(store: WorldStore, quote: PerformanceGenerationQuote): Promise<"self" | "authorized" | "licensed" | undefined> {
+  const source = voiceSourceFor(store.getBundle().clonedVoices ?? [], quote.mapping.provider, quote.mapping.model, quote.voiceAssignment.voiceId);
+  if (source.kind === "catalogue") return "licensed";
+  if (source.kind === "missing-clone") return undefined;
+  const sample = store.getBundle().referenceKits.find(k => k.sheetId === quote.target.speakerSheetId)?.designatedVoiceSample;
+  if (sample === undefined || !("schemaVersion" in sample)) return undefined;
+  let clipHash: string;
+  try { clipHash = audioHash(await readAudioBytes(await audioWorldPath(store.dir, source.voice.clip), store.closingSignal)); } catch { return undefined; }
+  const recording = sample.provenance.source;
+  if (clipHash !== sample.provenance.outputHash && !("sourceMediaHash" in recording && recording.sourceMediaHash === clipHash)) return undefined;
+  let events; try { events = await readAudioRights(store); } catch { return undefined; }
+  return effectiveAudioRights(events, sample.provenance.outputHash, "cloud-reference-upload").at(-1)?.basis;
 }
 export async function finalizePerformanceGenerationJob(store: WorldStore, tools: AudioMediaTools | undefined, job: Job, cost: TakeCost) {
   const quote = PerformanceGenerationQuoteSchema.parse(job.params.performanceGeneration);

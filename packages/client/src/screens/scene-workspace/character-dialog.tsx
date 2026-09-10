@@ -120,12 +120,29 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
   };
   const kitHeldByProduction = sceneLook === undefined && productionLook !== undefined;
 
+  // A line's read is stale when the wording moved (R-16): the target's hash is the text's own.
+  const [hashes, setHashes] = useState<Record<string, string>>({});
+  const lineKey = JSON.stringify(lines.map((line) => [line.id, line.text]));
+  useEffect(() => {
+    let active = true;
+    void Promise.all(lines.map(async (line) => [line.id, await textHash(line.text)] as const)).then((entries) => {
+      if (active) setHashes(Object.fromEntries(entries));
+    });
+    return () => { active = false; };
+  }, [lineKey]);
+
   // The voice: the kit's sample by default (R-8), or one read chosen for this scene (R-13).
   const sample = kit?.designatedVoiceSample;
   const sampleSeconds = sample !== undefined && "schemaVersion" in sample ? seconds(sample.provenance.outputTechnical.durationSec) : null;
   const latestReview = (record: PerformanceRecord) => production.performanceReview.reviews.filter((review) => review.performanceId === record.id).at(-1)?.decision;
+  // A read is offered while its line is still there to speak, in the wording it read (R-16;
+  // codex round 1): one whose shot went or whose text moved would be written to the cast only
+  // to be refused at dispatch, with the sample riding in its place and nothing saying so.
+  const current = (record: PerformanceRecord) => lines.some((line) => line.shotId === record.target.shotId
+    && (line.blockId ?? null) === (record.target.blockId ?? null)
+    && (hashes[line.id] === undefined || hashes[line.id] === record.target.authoredTextHash));
   const reads = production.performances
-    .filter((record) => record.target.sceneId === scene.id && record.target.speakerSheetId === sheetId)
+    .filter((record) => record.target.sceneId === scene.id && record.target.speakerSheetId === sheetId && current(record))
     .map((record) => ({ record, decision: latestReview(record) }))
     .filter((entry) => entry.decision !== "reject");
   const choice = member?.voice;
@@ -161,16 +178,6 @@ export function CharacterDialog({ world, production, scene, sheetId, locked = fa
     : null;
   const voicePage = () => { onClose(); navigate(`/w/${worldId}/cast/${sheetId}/voice`); };
 
-  // A line's read is stale when the wording moved (R-16): the target's hash is the text's own.
-  const [hashes, setHashes] = useState<Record<string, string>>({});
-  const lineKey = lines.map((line) => `${line.id}${line.text}`).join("");
-  useEffect(() => {
-    let active = true;
-    void Promise.all(lines.map(async (line) => [line.id, await textHash(line.text)] as const)).then((entries) => {
-      if (active) setHashes(Object.fromEntries(entries));
-    });
-    return () => { active = false; };
-  }, [lineKey]);
   const readFor = (line: SpokenLine) => {
     const selection = production.performanceReview.selections[line.id];
     return selection?.performanceId ? production.performances.find((record) => record.id === selection.performanceId) : undefined;

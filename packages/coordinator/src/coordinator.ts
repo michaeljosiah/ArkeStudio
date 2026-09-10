@@ -277,7 +277,7 @@ import { backfillPosters, writePosterFor, type TakePosterMaker } from "./takes/p
 import { IMPORT_POSTER_BUDGET_MS, backfillArtifactPosters, writeArtifactPoster } from "./artifacts/poster.js";
 import { listBorrowableArtifacts, resolveBorrowedFile } from "./artifacts/borrow.js";
 import { chainBoundaryFrame, clearShotFrame, type BoundaryFrameMaker } from "./takes/boundary.js";
-import { applySceneCommand, detachRemovedCastLooks, sceneCommandFrom } from "./productions/scene-commands.js";
+import { applySceneCommand, sceneCommandFrom } from "./productions/scene-commands.js";
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { assembleTimelineScene, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
 import { importEditorMedia } from "./productions/editor-import.js";
@@ -7289,18 +7289,7 @@ export class Coordinator {
             // comes from here rather than from the write path reaching for the dispatcher.
             activePlans: (productionId) => this.activeScenePlans(store, productionId),
           },
-        ).then(() => detachRemovedCastLooks(store, msg.productionId, msg.sceneId, sceneCommandFrom(msg.command)).catch((err: unknown) => {
-          // The edit is on disk; only the look's attachment did not follow it. Said as that,
-          // rather than as a refusal of a write that landed.
-          this.emit({
-            at: new Date().toISOString(),
-            type: "scene.write-refused",
-            worldId: msg.worldId,
-            productionId: msg.productionId,
-            sceneFile: msg.sceneFile,
-            reason: `removed from the scene, but the scene look stayed attached: ${describeCoordinatorError(err)}`,
-          });
-        })).catch((err: unknown) => {
+        ).catch((err: unknown) => {
           // Said, never swallowed: the surfaces repaint from the snapshot, so a silent refusal
           // throws away the edit with nothing to show for it (the save-scene lesson).
           this.emit({

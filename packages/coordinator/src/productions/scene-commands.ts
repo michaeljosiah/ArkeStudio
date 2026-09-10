@@ -28,7 +28,8 @@ import {
   type ShotStageEdit,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import { attachCharacterLook } from "../references/kit.js";
+import { sceneLookReleases } from "../references/kit.js";
+import { currentPerformanceTarget } from "../audio/performances.js";
 import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
 import type { CommitFileInput } from "../world/commit.js";
@@ -290,6 +291,33 @@ async function candidateFor(
       if (location && !store.getBundle().sheets.some((sheet) => sheet.id === location && sheet.type === "location")) {
         throw new SceneCommandRefused([`location ${location} is not in this world`]);
       }
+      // A read chosen for the cast must be this production's, accepted, the bytes the pointer
+      // names, and current for its line (codex round 1): the reducer takes any pointer, and a
+      // stale one would land here only to be refused at dispatch, the sample riding in its place
+      // with nothing on the page saying so.
+      const production = store.getBundle().productions.find((candidate) => candidate.meta.id === input.productionId);
+      for (const [sheetId, member] of Object.entries(command.cast ?? {})) {
+        const voice = member?.voice;
+        if (voice?.kind !== "performance") continue;
+        const read = production?.performances.find((candidate) => candidate.id === voice.performanceId);
+        if (read === undefined) throw new SceneCommandRefused([`${sheetId}: read ${voice.performanceId} is not in this production`]);
+        if (read.target.sceneId !== input.sceneId || read.target.speakerSheetId !== sheetId) throw new SceneCommandRefused([`${sheetId}: that read is another line's`]);
+        if (read.provenance.outputHash !== voice.hash) throw new SceneCommandRefused([`${sheetId}: that read changed`]);
+        if (production?.performanceReview.reviews.filter((review) => review.performanceId === read.id).at(-1)?.decision !== "accept") {
+          throw new SceneCommandRefused([`${sheetId}: that read is not accepted`]);
+        }
+        if (!currentPerformanceTarget(store, read.target)) throw new SceneCommandRefused([`${sheetId}: that read no longer matches its line`]);
+      }
+      // The kit writes that release this scene's claims ride in this commit (codex round 1): a
+      // member removed, or the place changed, with its look still attached is a claim nobody can
+      // see, and a second commit is a gap a crash can fall into that no retry repairs.
+      for (const [sheetId, member] of Object.entries(command.cast ?? {})) {
+        if (member === null) files.push(...(await sceneLookReleases(store, sheetId, { productionId: input.productionId, sceneId: input.sceneId })));
+      }
+      const previousLocation = record.inherits?.location;
+      if (typeof previousLocation === "string" && command.inherits?.location !== undefined && command.inherits.location !== previousLocation) {
+        files.push(...(await sceneLookReleases(store, previousLocation, { productionId: input.productionId, sceneId: input.sceneId })));
+      }
       return editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),
         // Null on the wire is the clear; the operation reads present-with-undefined as the clear.
@@ -464,24 +492,4 @@ export function stemOrThrow(sceneFile: string): string {
  * empties the scope it held (design 67), so a look-by-look loop rewrote the kit for nothing.
  * Called after the scene write landed, by every arm that applies the wire command.
  */
-export async function detachRemovedCastLooks(
-  store: WorldStore,
-  productionId: string,
-  sceneId: string,
-  command: SceneCommand,
-): Promise<void> {
-  if (command.kind !== "edit-scene" || command.cast === undefined) return;
-  for (const [sheetId, member] of Object.entries(command.cast)) {
-    if (member !== null) continue;
-    const look = store
-      .getBundle()
-      .referenceKits.find((kit) => kit.sheetId === sheetId)
-      ?.looks?.find((candidate) => {
-        const held = candidate.attachedTo;
-        return held?.kind === "scene" && held.productionId === productionId && held.sceneId === sceneId;
-      });
-    if (look !== undefined) await attachCharacterLook(store, sheetId, look.id, null);
-  }
-}
-
 export { SceneOperationRefused };

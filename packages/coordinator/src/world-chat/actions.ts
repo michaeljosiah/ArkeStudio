@@ -190,7 +190,7 @@ import {
   landBoard,
 } from "../productions/ops.js";
 import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
-import { applySceneCommand, detachRemovedCastLooks, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySceneCommand, sceneCommandFrom } from "../productions/scene-commands.js";
 import { filePlayblast } from "../productions/stage-playblast.js";
 import {
   acceptCharacterLook,
@@ -3591,9 +3591,6 @@ async function executeSharedResource(
         command,
         requestId: action.actionId,
       }, deps.activePlans ? { activePlans: deps.activePlans } : {});
-      await detachRemovedCastLooks(store, payload.action.productionId, payload.action.sceneId, command).catch((error: unknown) => {
-        throw new Error(`The member left the scene, but its scene look stayed attached: ${error instanceof Error ? error.message : String(error)}`);
-      });
       return { status: "completed", receipt: { kind: "scene-version", id: `${scene.id}-v${scene.version + 1}`, summary: "The semantic scene command was applied." } };
     }
     case "world-chat-production-board-compile":
