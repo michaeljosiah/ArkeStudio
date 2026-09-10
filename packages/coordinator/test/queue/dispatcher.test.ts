@@ -1881,7 +1881,12 @@ describe("retry classification (R-7, R-9, D5)", () => {
     fake.submitError = new Error("HTTP 503 unavailable");
     fake.submitErrorTimes = 1;
     fake.submitDelayMs = 10;
-    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 300, backoffCapMs: 300, rng: () => 1 });
+    // Same clock as the two tests below: the sibling has to be enqueued before the retry's
+    // backoff runs out, and every transition between the failure and that enqueue is an fsync'd
+    // journal append. At 300 ms a loaded windows-latest shard ran the backoff out first and sent
+    // the first job again ahead of the sibling (CI run 34441542230, once three more real-store
+    // suites landed on the same shard), so the backoff is widened to dwarf that latency.
+    const h = await makeHarness({ fake }, { baseConcurrency: 1, backoffBaseMs: 1500, backoffCapMs: 1500, rng: () => 1 });
     await h.queue.start();
     const first = await h.queue.enqueue(INPUT);
     await until(
@@ -1896,7 +1901,7 @@ describe("retry classification (R-7, R-9, D5)", () => {
     assert.notEqual(b, a, "the sibling went out while the first job waited");
     assert.equal(aAgain, a, "the first job went out last, after its backoff");
     const held = fake.submitStartedAt[2]! - fake.submitStartedAt[0]!;
-    assert.ok(held >= 300, `the retry waited ${held} ms; the backoff is 300 ms`);
+    assert.ok(held >= 1500, `the retry waited ${held} ms; the backoff is 1500 ms`);
     h.queue.dispose();
   });
 
