@@ -41,11 +41,10 @@ import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast
 import { CharacterDialog } from "./character-dialog.js";
 import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
-import { Maximize2, Minimize2, Pin, Plus } from "../../components/icons.js";
+import { Grid2x2, ListBullet, Maximize2, Minimize2, Pin, Plus } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { SceneStage } from "./stage.js";
-import { sceneIsComplete } from "./completion.js";
 import { PlansPanel } from "./plans.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
@@ -53,9 +52,8 @@ type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 /**
  * The scene authoring shell (SPEC-029 R-21..R-29), mounted for every scene detail route.
  *
- * `scene index | Storyboard or Flow | Arke` — the three columns turn 103 binds, with Storyboard
- * the default. Read-only at this step: it lands where it can be walked before it replaces the
- * horizontal strip, and every write arrives with the editing step.
+ * Storyboard is the default, with the cast and place above it and Arke beside it (design 138).
+ * List and Grid share the same rows so changing the layout preserves an unfinished edit.
  *
  * The selection lives HERE, above the tabs, which is the whole of why switching views keeps it
  * (T-18). A per-view selection is unmounted with its view; that is not a bug you can patch
@@ -104,6 +102,7 @@ export function SceneWorkspace({
     };
   }, [fullscreen]);
   const [showBoards, setShowBoards] = useState(false);
+  const [storyboardLayout, setStoryboardLayout] = useState<"list" | "grid">("list");
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
@@ -273,7 +272,6 @@ export function SceneWorkspace({
     ? null
     : boardPack.boards.find((board) => subjectMatchesBoard(subject, board.memberShotIds)) ?? null;
   const episode = production.episodes.find((candidate) => candidate.scenes.includes(scene.id));
-  const complete = sceneIsComplete(scene, production, artifacts, digests);
   const locationSheet = scene.inherits?.location === undefined
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
@@ -508,44 +506,46 @@ export function SceneWorkspace({
               scene={legacySceneView(scene)}
               onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
             />
-            <div className="fy-sw__context" aria-label="Scene context" title="Every shot inherits these unless it overrides them">
-              {locationName === null ? (
-                <button type="button" className="fy-sw__door" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("location"); }}>
-                  <Plus size={10} />Add a location
+            <div className="fy-sw__context" aria-label="Scene context">
+              <div className="fy-sw__cast" aria-label="Cast">
+                <span className="fy-sw__context-label">Cast</span>
+                {sceneCast(scene, world.sheets).map((sheetId) => {
+                  const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
+                  const name = sheet?.name ?? sheetId;
+                  return (
+                    <button
+                      type="button"
+                      key={sheetId}
+                      className="fy-sw__tile"
+                      title={name}
+                      aria-label={name}
+                      aria-haspopup="dialog"
+                      aria-expanded={openMember === sheetId}
+                      onClick={(event) => { doorFocus.current = event.currentTarget; setOpenMember(sheetId); }}
+                    >
+                      {sheet === undefined ? <span aria-hidden="true">{initials(name).slice(0, 1)}</span> : <SheetPicture world={world} sheet={sheet} />}
+                    </button>
+                  );
+                })}
+                <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("character"); }}>
+                  <Plus size={16} />
                 </button>
-              ) : (
-                <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={openPlace !== null} onClick={(event) => { doorFocus.current = event.currentTarget; setOpenPlace(scene.inherits?.location ?? null); }}>
-                  {locationSheet === undefined ? null : <span className="fy-sw__plate" aria-hidden="true"><SheetPicture world={world} sheet={locationSheet} /></span>}
-                  {locationName}
-                </button>
-              )}
+              </div>
+              <div className="fy-sw__location">
+                {locationName === null ? (
+                  <button type="button" className="fy-sw__door" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("location"); }}>
+                    <Plus size={15} />Add a location
+                  </button>
+                ) : (
+                  <button type="button" className="fy-sw__place" title={locationName} aria-haspopup="dialog" aria-expanded={openPlace !== null} onClick={(event) => { doorFocus.current = event.currentTarget; setOpenPlace(scene.inherits?.location ?? null); }}>
+                    <span className="fy-sw__plate" aria-hidden="true">{locationSheet === undefined ? initials(locationName).slice(0, 1) : <SheetPicture world={world} sheet={locationSheet} />}</span>
+                    <span className="fy-sw__place-name"><span className="fy-sw__context-label">Location</span><span>{locationName}</span></span>
+                  </button>
+                )}
+              </div>
+              <div className="fy-sw__metrics" aria-label="Scene metrics"><span>{aspect}</span><span>{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span>{seconds(totalSec)}</span></div>
               {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
               {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
-              <span>{aspect}</span>
-              <span className="fy-sw__metrics">{shots.length} shot{shots.length === 1 ? "" : "s"} · {seconds(totalSec)} · {framed} frame{framed === 1 ? "" : "s"} filed</span>
-            </div>
-            <div className="fy-sw__cast" aria-label="Cast">
-              {sceneCast(scene, world.sheets).map((sheetId) => {
-                const sheet = world.sheets.find((candidate) => candidate.id === sheetId);
-                const name = sheet?.name ?? sheetId;
-                return (
-                  <button
-                    type="button"
-                    key={sheetId}
-                    className="fy-sw__tile"
-                    title={name}
-                    aria-label={name}
-                    aria-haspopup="dialog"
-                    aria-expanded={openMember === sheetId}
-                    onClick={(event) => { doorFocus.current = event.currentTarget; setOpenMember(sheetId); }}
-                  >
-                    {sheet === undefined ? <span aria-hidden="true">{initials(name).slice(0, 1)}</span> : <SheetPicture world={world} sheet={sheet} />}
-                  </button>
-                );
-              })}
-              <button type="button" className="fy-sw__tile fy-sw__tile--add" title="Add a character" aria-label="Add a character" aria-haspopup="dialog" disabled={locked} onClick={(event) => { doorFocus.current = event.currentTarget; setPicker("character"); }}>
-                <Plus size={12} />
-              </button>
             </div>
             {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}
@@ -591,8 +591,8 @@ export function SceneWorkspace({
                 {...(reviewShotId === null ? {} : { onReview: () => setLightboxShotId(reviewShotId) })}
               />
             ) : shots.length === 0 ? null : (
-              <span className="fy-sw__coverage">
-                {shots.length - framed === 0 ? "every shot has a frame" : `${shots.length - framed} of ${shots.length} without a frame`}
+              <span className="fy-sw__coverage" data-ready={framed > 0 || undefined}>
+                <span aria-hidden="true" />{framed} of {shots.length} frames ready
               </span>
             )}
             {frameRun === null || frameRun.status === "completed" ? (
@@ -605,6 +605,15 @@ export function SceneWorkspace({
               >
                 {showBoards ? "Boards on" : "Show boards"}
               </button>
+            ) : null}
+            {view === "storyboard" ? (
+              <div className="fy-sw__layouts" role="group" aria-label="Storyboard layout">
+                {(["list", "grid"] as const).map((layout) => (
+                  <button key={layout} type="button" aria-pressed={(boardsVisible ? "list" : storyboardLayout) === layout} disabled={layout === "grid" && frameRun?.run.mode === "board"} onClick={() => { setStoryboardLayout(layout); if (layout === "grid") setShowBoards(false); }}>
+                    {layout === "list" ? <ListBullet size={14} /> : <Grid2x2 size={14} />}{layout === "list" ? "List" : "Grid"}
+                  </button>
+                ))}
+              </div>
             ) : null}
             {view === "flow" || view === "stage" ? (
               <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
@@ -623,6 +632,7 @@ export function SceneWorkspace({
 
           {view === "storyboard" ? (
             <StoryboardRows
+              layout={boardsVisible ? "list" : storyboardLayout}
               scene={workingScene}
               acceptedScene={scene}
               world={world}
@@ -729,15 +739,12 @@ export function SceneWorkspace({
             sceneId={scene.id}
             refused={planError}
           />
-          {complete && episode !== undefined ? (
-            <button
-              type="button"
-              className="fy-sw__done"
-              onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}
-            >
-              Done · back to the episode
-            </button>
-          ) : null}
+          <footer className="fy-sw__footer">
+            <span className="fy-sw__save" role="status" data-pending={commandPending || staged !== undefined || connection !== "open" || undefined}>
+              <span aria-hidden="true" />{connection !== "open" ? "Disconnected" : commandPending ? "Saving…" : staged !== undefined ? "Changes awaiting review" : `Saved · v${scene.version}`}
+            </span>
+            {episode === undefined ? null : <button type="button" className="fy-sw__back" onClick={() => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/episodes/${episode.id}`)}>Back to episode <span aria-hidden="true">→</span></button>}
+          </footer>
         </main>
 
         {dock ? (
@@ -770,7 +777,7 @@ export function SceneWorkspace({
             }}
             openingNote="opening…"
             emptyLine={`Nothing written with Arke for scene ${scene.number} yet.`}
-            placeholder={`Ask about ${focused === undefined ? `scene ${scene.number}` : `shot ${focused.number}`}`}
+            placeholder={`Ask Arke about ${focused === undefined ? "this scene" : `shot ${focused.number}`}…`}
             onSelectShot={(shotId) => setSubject({ kind: "shot", shotId })}
             {...(staged === undefined
               ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the scene appears here." }

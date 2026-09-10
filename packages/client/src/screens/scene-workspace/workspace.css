@@ -1,0 +1,163 @@
+/* Scene workspace · design turn 138. After fidelity.css; shell and other views keep their rules. */
+.fy-sw { grid-template-columns: minmax(0, 1fr) clamp(300px, 23vw, 364px); }
+.fy-sw__centre { padding-inline: 24px; }
+.fy-sw__head { padding: 24px 0 16px; animation: none; }
+.fy-sw__breadcrumb { font: 400 12px/1.5 var(--font-sans); color: var(--muted-foreground); margin-bottom: 10px; }
+.fy-sw__headline { align-items: center; }
+.fy-sw__title { font-size: 28px; line-height: 1.25; }
+.fy-sw__head .fy-sbsynopsis { margin: 5px 0 10px; }
+.fy-sw__context { gap: 14px 18px; margin-top: 14px; }
+.fy-sw__context-label { color: var(--muted-foreground); font: 400 11px/1.4 var(--font-sans); }
+.fy-sw__cast { margin: 0; gap: 8px; flex-wrap: wrap; }
+.fy-sw__cast > .fy-sw__context-label { margin-right: 4px; }
+.fy-sw__tile { width: 40px; height: 40px; flex: none; border-radius: 9px; }
+.fy-sw__tile--add { border-style: solid; border-color: var(--border); }
+.fy-sw__tile:hover, .fy-sw__tile:focus-visible { border-color: var(--muted-foreground); color: var(--foreground); }
+.fy-sw__tile:disabled, .fy-sw__door:disabled { opacity: .45; cursor: default; }
+.fy-sw__location { border-left: 1px solid var(--border); padding-left: 18px; min-width: 0; max-width: 100%; }
+.fy-sw__place { display: flex; align-items: center; gap: 12px; padding: 0; border: 0; background: transparent; color: var(--foreground); cursor: pointer; text-align: left; max-width: 100%; }
+.fy-sw__plate { width: 68px; height: 40px; border-radius: 8px; font-size: 16px; }
+.fy-sw__place-name { display: flex; flex-direction: column; gap: 3px; min-width: 0; font: 400 12px/1.4 var(--font-sans); }
+.fy-sw__place-name > span:last-child { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-sw__place:hover .fy-sw__place-name > span:last-child { text-decoration: underline; text-underline-offset: 3px; }
+.fy-sw__door { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 10px; border: 1px dashed var(--border); border-radius: 8px; background: transparent; color: var(--muted-foreground); font: 400 12px var(--font-sans); cursor: pointer; }
+.fy-sw__metrics { display: flex; align-items: center; gap: 14px; padding: 0; color: var(--muted-foreground); font: 400 12px var(--font-sans); }
+.fy-sw__metrics > span { padding-left: 14px; border-left: 1px solid var(--border); white-space: nowrap; }
+.fy-sw__toolbar { max-width: none; gap: 12px; padding-bottom: 16px; flex-wrap: wrap; }
+.fy-sw__tabs { border-radius: 10px; padding: 3px; }
+.fy-sw__tab { padding: 8px 16px; font-size: 12px; border-radius: 8px; }
+.fy-sw__coverage { display: inline-flex; align-items: center; gap: 7px; font: 400 12px var(--font-sans); }
+.fy-sw__coverage > span { width: 7px; height: 7px; border-radius: 50%; background: var(--neutral-400); }
+.fy-sw__coverage[data-ready] > span { background: var(--success); }
+.fy-sw__layouts { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 10px; }
+.fy-sw__layouts button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font: 400 12px var(--font-sans); cursor: pointer; }
+.fy-sw__layouts button[aria-pressed="true"] { background: var(--secondary); color: var(--foreground); box-shadow: var(--shadow-xs); }
+.fy-sw__layouts button:hover:not(:disabled) { color: var(--foreground); background: var(--accent); }
+.fy-sw__layouts button:disabled { opacity: .4; cursor: default; }
+
+.fy-swrows { padding: 1px 3px 20px 1px; align-items: stretch; scrollbar-gutter: stable; }
+.fy-swrow, .fy-swaddshot { width: 100%; }
+.fy-swrow { flex: none; }
+.fy-swrow__band { grid-template-columns: 32px clamp(152px, calc(208px * var(--shot-aspect, 16 / 9)), 300px) minmax(0, 1fr); align-items: stretch; min-height: 208px; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--card) 78%, var(--background)); }
+.fy-swrow__band:hover { box-shadow: none; border-color: color-mix(in srgb, var(--muted-foreground) 35%, var(--border)); }
+.fy-swrow__band[data-selected="true"] { background: var(--secondary); }
+.fy-swrow__ring { border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, var(--border)); border-radius: 12px; }
+.fy-swrow__grip { padding-top: 18px; display: flex; justify-content: center; color: var(--muted-foreground); }
+.fy-swrow__grip[draggable="true"] { cursor: grab; }
+.fy-swrow__grip[draggable="true"]:active { cursor: grabbing; }
+.fy-swrow__frame { width: 100%; height: auto; align-self: start; }
+.fy-swrow__img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.fy-swrow__label { min-width: 26px; height: 26px; box-sizing: border-box; display: grid; place-items: center; padding: 0 5px; background: var(--media-overlay-bg); color: var(--media-overlay-fg); border-color: color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); border-radius: 6px; font: 500 12px var(--font-sans); }
+.fy-swrow__chipmeta { font: 400 11px var(--font-sans); bottom: auto; top: 42px; left: 9px; }
+.fy-swrow__hatch { position: absolute; inset: 0; background: var(--muted); }
+.fy-swrow__nofr { font: 400 11px var(--font-sans); }
+.fy-swrow__body { padding: 18px 20px; gap: 10px; }
+.fy-swrow__titleline { min-height: 30px; padding-right: 168px; flex-wrap: wrap; }
+.fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--foreground); cursor: text; text-align: left; }
+.fy-swrow__title-edit svg { flex: none; color: var(--muted-foreground); }
+.fy-swrow__title-edit:hover svg { color: var(--foreground); }
+.fy-swrow__title-edit:disabled { cursor: default; }
+.fy-swrow__title { font: 600 16px/1.4 var(--font-sans); }
+.fy-swrow__title-input { width: 100%; min-width: 80px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); font: 600 16px/1.4 var(--font-sans); }
+.fy-swrow__timing { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted-foreground); font: 400 12px/1.4 var(--font-sans); }
+.fy-swrow__timing > button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: text; text-underline-offset: 3px; }
+.fy-swrow__timing > button:hover { text-decoration: underline; }
+.fy-swrow__timing > input { width: 72px; border: 1px solid var(--border); border-radius: 4px; background: var(--background); color: var(--foreground); font: inherit; }
+.fy-swrow__timing .fy-swchip { border-left: 1px solid var(--border); padding-left: 10px; font: 400 11px var(--font-sans); }
+.fy-swrow__scripteditor { margin-top: 5px; }
+.fy-swrow__scripteditor .fy-bench__briefunder,
+.fy-swrow__scripteditor .fy-bench__briefmirror,
+.fy-swrow__scripteditor .fy-bench__brieftext { font: 400 13px/1.65 var(--font-sans); }
+.fy-swrow__prompt-toggle { display: flex; align-items: center; gap: 7px; align-self: flex-start; margin-top: auto; padding: 4px 0; border: 0; background: transparent; color: var(--muted-foreground); font: 400 12px var(--font-sans); cursor: pointer; }
+.fy-swrow__prompt-toggle:hover:not(:disabled) { color: var(--foreground); }
+.fy-swrow__prompt-toggle:disabled { cursor: default; opacity: .45; }
+.fy-swrow__prompt-toggle > span { font-size: 10px; color: var(--muted-foreground); }
+.fy-swrow__prompt { margin-top: 8px; }
+.fy-swrow__actions { position: absolute; top: 17px; right: 16px; border: 0; padding: 0; }
+.fy-swrow__actionline { align-items: center; gap: 10px; }
+.fy-swrow__generate { flex: none; padding: 6px 13px; min-height: 30px; font-size: 11px; }
+.fy-swrow__more { height: 30px; }
+.fy-swaddshot button { height: 50px; border-radius: 12px; }
+.fy-swready { padding: 8px 0; font-size: 11px; }
+.fy-sw__footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; min-height: 42px; border-top: 1px solid var(--border); font: 400 11px var(--font-sans); }
+.fy-sw__save { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+.fy-sw__save > span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.fy-sw__save[data-pending] > span { background: var(--neutral-400); }
+.fy-sw__back { display: inline-flex; align-items: center; gap: 12px; border: 0; background: transparent; color: var(--foreground); font: 500 11px var(--font-sans); cursor: pointer; padding: 8px 0; }
+.fy-sw__back:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* All four controls stay in the same place on reveal; keyboard focus and touch have equal access. */
+.fy-swrow__frameactions { left: 50%; right: auto; bottom: 8px; transform: translateX(-50%); width: max-content; max-width: calc(100% - 8px); justify-content: center; flex-wrap: wrap; gap: 3px; padding: 4px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--media-overlay-bg) 90%, transparent); backdrop-filter: blur(8px); pointer-events: none; }
+.fy-swrow__frameactions > button { position: static; transform: none; opacity: 1; pointer-events: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); background: transparent; border-radius: 6px; color: var(--media-overlay-fg); backdrop-filter: none; }
+.fy-swrow__frame:hover .fy-swrow__frameactions,
+.fy-swrow__frame:focus-within .fy-swrow__frameactions,
+.fy-swrow__frameactions[data-open] { opacity: 1; pointer-events: auto; }
+.fy-swrow__frame:hover .fy-swrow__frameactions > button, .fy-swrow__frame:focus-within .fy-swrow__frameactions > button, .fy-swrow__frameactions[data-open] > button { pointer-events: auto; }
+.fy-swrow__frameactions > button:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 1px; }
+.fy-swimage-menu { position: fixed; z-index: 100; min-width: 168px; display: flex; flex-direction: column; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); }
+.fy-swimage-menu button { border: 0; border-radius: 5px; padding: 8px 10px; background: transparent; color: inherit; font: 400 12px var(--font-sans); text-align: left; cursor: pointer; }
+.fy-swimage-menu button:hover:not(:disabled), .fy-swimage-menu button:focus-visible { background: var(--accent); }
+.fy-swimage-menu button:disabled { opacity: .45; cursor: default; }
+
+/* The overview reuses the same rows and editors, so switching layout preserves drafts and selection. */
+.fy-swrows[data-layout="grid"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-content: start; gap: 18px; }
+.fy-swrows[data-layout="grid"] .fy-swrow__band { display: flex; flex-direction: column; height: calc(100% - 18px); min-height: 0; }
+.fy-swrows[data-layout="grid"] .fy-swrow:first-child { padding-top: 18px; }
+.fy-swrows[data-layout="grid"] .fy-swrow:first-child .fy-swrow__band { height: 100%; }
+.fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 0; left: 10px; z-index: 1; }
+.fy-swrows[data-layout="grid"] .fy-swrow__frame { align-self: center; height: auto; width: min(100%, calc(272px * var(--shot-aspect))); max-width: 100%; }
+.fy-swrows[data-layout="grid"] .fy-swrow__body { flex: 1; width: 100%; padding: 14px 16px; }
+.fy-swrows[data-layout="grid"] .fy-swrow__titleline { padding-right: 0; }
+.fy-swrows[data-layout="grid"] .fy-swrow__actions { position: static; padding: 0 16px 14px; }
+.fy-swrows[data-layout="grid"] .fy-swrow__actionline { justify-content: space-between; }
+.fy-swrows[data-layout="grid"] .fy-swaddshot { align-self: start; }
+
+/* Completed generation reports collapse by run; failures and their retry controls remain visible. */
+.fy-chat__runsummary { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); }
+.fy-chat__runsummary > summary { display: flex; align-items: center; gap: 9px; padding: 12px; font: 400 12px var(--font-sans); cursor: pointer; list-style: none; }
+.fy-chat__runsummary > summary::-webkit-details-marker { display: none; }
+.fy-chat__runsummary > summary::after { content: "⌄"; margin-left: auto; color: var(--muted-foreground); }
+.fy-chat__runsummary[open] > summary::after { transform: rotate(180deg); }
+.fy-chat__runsummary > summary > span { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--success); }
+.fy-chat__runsummary[data-state="attention"] > summary > span { background: var(--warning); }
+.fy-chat__runsummary[data-state="pending"] > summary > span { background: var(--muted-foreground); }
+.fy-chat__runsummary .fy-chat__runreport { margin: 0; border: 0; border-top: 1px solid var(--border); border-radius: 0; box-shadow: none; }
+.fy-sw > .fy-arke { background: var(--background); border-left: 1px solid var(--border); }
+.fy-sw .fy-arke__pin::after { left: auto; right: 0; transform: none; }
+.fy-sw .fy-chat__bubble { border-radius: 12px; background: var(--secondary); font-size: 12px; line-height: 1.65; }
+.fy-sw .fy-cx__send { width: 32px; height: 32px; border-radius: 8px; }
+
+@container (max-width: 780px) {
+  .fy-sw__actions { flex-wrap: wrap; }
+  .fy-swrow__frame { grid-row: span 2; }
+  .fy-swrow__body { padding: 14px 16px 12px; }
+  .fy-swrow__titleline { padding-right: 0; }
+  .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
+  .fy-swrow__actionline { justify-content: space-between; }
+}
+@container (max-width: 560px) {
+  .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
+  .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, clamp(152px, calc(208px * var(--shot-aspect)), 300px)); }
+  .fy-swrow__body { grid-column: 2; padding-left: 0; }
+  .fy-swrow__actions { grid-column: 2; padding-left: 0; }
+  .fy-sw__headline { flex-wrap: wrap; }
+  .fy-sw__headline > .fy-sw__title { flex-basis: 100%; font-size: 24px; }
+  .fy-sw__context { gap: 12px; }
+  .fy-sw__location { border: 0; padding-left: 0; }
+  .fy-sw__metrics { gap: 12px; }
+  .fy-sw__metrics > span:first-child { border: 0; padding-left: 0; }
+  .fy-sw__tab { padding-inline: 11px; }
+  .fy-sw__toolbar { gap: 8px; }
+  .fy-swrows[data-layout="grid"] { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px) {
+  .fy-sw__headline { align-items: stretch; }
+}
+@media (hover: none) {
+  .fy-swrow__frameactions { opacity: 1; pointer-events: auto; }
+  .fy-swrow__frameactions > button { pointer-events: auto; }
+}
+@media (pointer: coarse) {
+  .fy-swrow__frameactions > button { width: 44px; height: 44px; }
+  .fy-sw__tile { width: 44px; height: 44px; }
+}

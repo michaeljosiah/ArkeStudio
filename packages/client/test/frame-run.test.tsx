@@ -910,6 +910,8 @@ describe("durable frame-run reports in Arke", () => {
     const sent: ClientMessage[] = [];
     const selected: string[] = [];
     const item = await mountReport([failed], sent, selected);
+    assert.equal(one(item, ".fy-chat__runsummary")?.hasAttribute("open"), true, "unresolved failures stay expanded");
+    assert.equal(one(item, ".fy-chat__runsummary > summary")?.textContent, "1 frame generated · needs attention");
     assert.equal(all(item, '.fy-chat__runreport-row[data-kind="step"]').length, 2);
     const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
     assert.match(failure.textContent ?? "", /provider timed out/);
@@ -927,6 +929,8 @@ describe("durable frame-run reports in Arke", () => {
 
   it("keeps the original failure words after a successful retry without offering it again", async () => {
     const item = await mountReport([retriedFrameState()]);
+    assert.equal(one(item, ".fy-chat__runsummary")?.hasAttribute("open"), false, "resolved reports collapse while retaining their history");
+    assert.equal(one(item, ".fy-chat__runsummary > summary")?.textContent, "2 frames generated", "retries count each shot once");
     const failure = one(item, '.fy-chat__runreport-row[data-kind="failure"]')!;
     assert.equal(failure.getAttribute("data-state"), "complete");
     assert.match(failure.textContent ?? "", /provider timed out · retried/);

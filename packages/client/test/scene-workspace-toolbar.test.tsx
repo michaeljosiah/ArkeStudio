@@ -228,7 +228,7 @@ const click = async (element: HTMLElement) => act(async () => element.click());
 describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
   it("reads the coverage line and a text-pill boards toggle while no run exists", async () => {
     const item = await mount(stateWith());
-    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "2 of 2 without a frame");
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "0 of 2 frames ready");
     const toggle = one(item, ".fy-sw__boards-toggle")!;
     assert.equal(toggle.textContent?.trim(), "Show boards");
     assert.equal(toggle.getAttribute("aria-pressed"), "false");
@@ -236,13 +236,13 @@ describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
     await click(toggle);
     assert.equal(toggle.textContent?.trim(), "Boards on");
     assert.equal(toggle.getAttribute("aria-pressed"), "true");
-    assert.equal(one(item, ".fy-sw__context")?.getAttribute("title"), "Every shot inherits these unless it overrides them");
+    assert.ok(one(item, ".fy-sw__context .fy-sw__cast"), "cast shares the compact context row");
     assert.ok(named(item, "Review scene").classList.contains("ui-btn--sm"));
     assert.ok(named(item, "Generate frames").classList.contains("ui-btn--sm"));
     assert.equal(one(item, ".fy-sw__toolbar .fy-sw__spacer") !== null, true);
 
     const framed = await mount(stateWith({ allFramed: true }));
-    assert.equal(one(framed, ".fy-sw__coverage")?.textContent, "every shot has a frame");
+    assert.equal(one(framed, ".fy-sw__coverage")?.textContent, "2 of 2 frames ready");
   });
 
   it("hands the row to the run bar while a run is active and keeps the header primary live", async () => {
@@ -309,7 +309,7 @@ describe("the toolbar row (SPEC-036 R-4, R-17)", () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith({ runs: [cancelled] }), sent);
     assert.equal(one(item, '[data-testid="frame-run-bar"]'), null);
-    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "2 of 2 without a frame");
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "0 of 2 frames ready");
     assert.ok(one(item, ".fy-sw__boards-toggle"));
     const dismissals = () => sent.filter((message) => message.kind === "frame-run-dismiss");
     assert.deepEqual(dismissals(), [{ kind: "frame-run-dismiss", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", runId: RUN_ID }]);
@@ -365,7 +365,8 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
 
   it("uses singular labels throughout a one-shot scene", async () => {
     const item = await mount(stateWith({ singleShot: true, allFramed: true }));
-    assert.match(one(item, ".fy-sw__metrics")?.textContent ?? "", /^1 shot · .* · 1 frame filed$/);
+    assert.match(one(item, ".fy-sw__metrics")?.textContent ?? "", /1 shot/);
+    assert.equal(one(item, ".fy-sw__coverage")?.textContent, "1 of 1 frames ready");
     await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Flow") as HTMLElement);
     assert.equal(one(item, '.fy-swnode[data-kind="board"] .fy-swnode__meta')?.textContent, "shot 12 · 1 cell");
     await click([...item.container.querySelectorAll("button")].find((button) => button.textContent === "Storyboard") as HTMLElement);

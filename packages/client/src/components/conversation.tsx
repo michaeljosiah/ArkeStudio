@@ -605,11 +605,17 @@ function FrameRunReport({
       );
     }
   });
+  const generated = new Set(run.steps.flatMap((step) => step.shots.filter((shot) => REPORT_RETURNED_STATUSES.has(shot.status)).map((shot) => shot.shotId))).size;
+  // Reconciled failures stay in the history, but a successful retry needs no more attention.
+  const needsAttention = run.steps.some((step) => step.shots.some((shot) => REPORT_FAILURE_STATUSES.has(shot.status)));
   return (
-    <div className="fy-chat__runreport" aria-label="Frame run report">
-      {stepRows}
-      {failureRows}
-    </div>
+    <details className="fy-chat__runsummary" data-state={needsAttention ? "attention" : generated > 0 ? "complete" : "pending"} open={needsAttention || run.status !== "completed" ? true : undefined}>
+      <summary><span aria-hidden="true" />{generated} frame{generated === 1 ? "" : "s"} generated{needsAttention ? " · needs attention" : ""}</summary>
+      <div className="fy-chat__runreport" aria-label="Frame run report">
+        {stepRows}
+        {failureRows}
+      </div>
+    </details>
   );
 }
 

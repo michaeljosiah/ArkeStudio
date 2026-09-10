@@ -27,6 +27,7 @@ import "./components/editor/editor.css";
 import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
+import "./screens/scene-workspace/workspace.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
