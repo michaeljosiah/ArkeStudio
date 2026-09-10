@@ -897,6 +897,35 @@ describe("durable run projections", () => {
 });
 
 describe("durable frame-run reports in Arke", () => {
+  it("keeps entirely overtaken runs complete and names the newer frames preserved", async () => {
+    const run = frameState({
+      first: { status: "succeeded", finalization: "complete", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      firstLanding: "superseded",
+      secondLanding: "superseded",
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "complete");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, "2 newer frames kept");
+    assert.equal(report.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
+  it("counts filed and overtaken shots separately in a mixed run summary", async () => {
+    const run = frameState({
+      first: { status: "succeeded", finalization: "complete", etaSec: null },
+      second: { status: "succeeded", finalization: "complete", etaSec: null },
+      firstLanding: "filed",
+      secondLanding: "superseded",
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "complete");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, "1 frame generated · 1 newer frame kept");
+  });
+
   it("joins only the exact causal run and exposes its steps, failure, selection, and retry", async () => {
     const failed = frameState({
       first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null },
