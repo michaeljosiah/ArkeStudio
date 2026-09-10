@@ -181,7 +181,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       urgency: 2,
       kind: "spend-over-threshold",
       title: "Over the spend alert",
-      detail: `${formatMicroUsd(spend.rollingMicroUsd)} against ${formatMicroUsd(spend.settings.thresholdMicroUsd)} / ${spend.settings.periodDays}d · nothing is blocked`,
+      detail: `${formatMicroUsd(spend.rollingMicroUsd)} against ${formatMicroUsd(spend.settings.thresholdMicroUsd)} / ${spend.settings.periodDays}d`,
       at: "9999-12-31T00:00:00Z", // the status carries no instant; newest within class, like a pause
       actions: ["spend"],
       ref: "spend-threshold",

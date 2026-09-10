@@ -1472,7 +1472,6 @@ function WrapUp({
 export function StagedDecision({
   subject,
   staged,
-  writes,
   items,
   onAccepted,
 }: {
@@ -1480,8 +1479,6 @@ export function StagedDecision({
   /** What is being decided, in the words of the level — "season", "episode 03". */
   subject: string;
   staged: StagedProposal;
-  /** What applying does, said plainly under the buttons. */
-  writes: string;
   /** A dock can name the concrete things this draft would touch instead of repeating its file. */
   items?: readonly { label: string; meta?: string }[];
   /**
@@ -1492,16 +1489,18 @@ export function StagedDecision({
 }) {
   const world = useStore().state?.world;
   if (!world || proposalDecisionOf(staged.proposal, world.conversations).mode !== "attended") return null;
+  // Under the buttons goes a fact, never a promise (design turn 137): the file the gate would
+  // write, or — where the caller can be more concrete than a path — the things it would touch.
+  const files = staged.proposal.targets.map((target) => target.path.split("/").pop() ?? target.path);
   return (
     <div aria-label={`Changes to ${subject}`} style={{ display: "grid", gap: 8 }}>
       <ConnectedProposalPanel
         staged={staged}
         onAccepted={onAccepted}
       />
-      {items !== undefined && items.length > 0 && (
-        <div className="fy-mono">{items.map((item) => item.label).join(" · ")}</div>
-      )}
-      <div className="fy-mono">{writes}</div>
+      <div className="fy-mono">
+        {items !== undefined && items.length > 0 ? items.map((item) => item.label).join(" · ") : files.join(" · ")}
+      </div>
     </div>
   );
 }

@@ -511,7 +511,10 @@ describe("screen inventory", () => {
     }
 
     const replace = renderAt(`${base}/main-photo`);
-    assert.ok(replace.includes("Replacing the main photo makes the current character sheet stale."));
+    assert.equal(replace.includes(">Replacing the main photo makes the current character sheet stale.<"), false, "no consequence line on the card (turn 137)");
+    assert.ok(replace.includes('title="Replacing the main photo makes the current character sheet stale."'), "the consequence rides on the commit control");
+    // And reaches a keyboard: `title` is drawn under a cursor and nowhere else (round two on 1089).
+    assert.ok(replace.includes('data-tip="Replacing the main photo makes the current character sheet stale."'), "and is drawn on focus, not only on hover");
     assert.ok(replace.includes("World look · v"));
 
     const looks = renderAt(`${base}/looks`);

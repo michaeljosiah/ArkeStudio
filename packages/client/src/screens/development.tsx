@@ -357,7 +357,6 @@ function SeasonDock({ onPutAway }: { onPutAway: () => void }) {
                 worldId={worldId}
                 subject="the season"
                 staged={staged}
-                writes="nothing else changes"
               />
             ),
           }
@@ -395,7 +394,6 @@ function EpisodeDock({ episode, onPutAway }: { episode: Episode; onPutAway: () =
                 worldId={worldId}
                 subject={`episode ${pad(episode.order)}`}
                 staged={staged}
-                writes="the scenes come with it · nothing else changes"
               />
             ),
           }
@@ -647,7 +645,6 @@ export function EpisodeChatScreen() {
                   worldId={worldId}
                   subject={`episode ${pad(episode.order)}`}
                   staged={staged}
-                  writes="the scenes come with it · nothing else changes"
                   onAccepted={() => navigate(`/w/${worldId}/p/${prodId}/episodes/${episode.id}`)}
                 />
               ),

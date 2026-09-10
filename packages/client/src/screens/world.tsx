@@ -315,7 +315,7 @@ function WorldConditionBanners() {
       )}
       {world.problems.length > 0 && (
         <Callout tone="danger" title={`${world.problems.length} file(s) could not be read`}>
-          The rest of the world is open and usable; these files are skipped until fixed:
+          These files are skipped until fixed:
           <div style={{ display: "grid", gap: "var(--space-1)", marginTop: "var(--space-2)" }}>
             {world.problems.map((p) => (
               <span key={p.path} className="mono" style={{ fontSize: "var(--text-xs)" }}>
@@ -4378,16 +4378,6 @@ export function ProductionsScreen() {
             <Plus size={18} />
           </span>
           <span style={{ font: "600 14px var(--font-sans)" }}>New production</span>
-          <span
-            style={{
-              font: "400 12px/1.5 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-              maxWidth: 140,
-            }}
-          >
-            Same cast. Any format: film, stills, book.
-          </span>
         </button>
       </div>
     </div>
@@ -4702,9 +4692,6 @@ export function NewProductionScreen() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
           />
-          {isMicrodrama && (
-            <span className="fy-mono">names the series · Season 1 created with it</span>
-          )}
           {/*
             Everything the kind can answer, under one label that says what it is (turn 99). What
             is not here is ENDING: it sat in this row as though how a season ends were a setting,
@@ -4784,11 +4771,6 @@ export function NewProductionScreen() {
                     : "Create and open it"}
             </Button>
           </div>
-          {/* The promise the action needs beside it: pressing this spends nothing. Right-aligned
-              because it belongs to the button above it, not to the joins line on the left. */}
-          <span className="fy-mono" style={{ textAlign: "right" }}>
-            nothing generates
-          </span>
         </div>
       </div>
     );

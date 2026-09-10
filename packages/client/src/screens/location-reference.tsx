@@ -341,12 +341,10 @@ export function LocationReferenceScreen() {
                     </label>
                     {clash && !active?.confirmReplace && (
                       <Callout tone="warning" title={`Replace “${name.trim()}”?`}>
-                        <p>
-                          This location already has an active view by that name. Accepting replaces it: the old one
-                          becomes superseded, keeps its place in history, and leaves the panel order unchanged.
-                        </p>
+                        <p>This location already has an active view by that name.</p>
                         <Button
                           variant="secondary"
+                          hint="The old view becomes superseded and keeps its place in history."
                           onClick={() =>
                             setNaming({
                               key: candidate.key,
@@ -455,8 +453,8 @@ export function LocationReferenceScreen() {
             title={establishing || replacingEstablishing ? "Generate the establishing view" : "Add a view"}
             lede={
               establishing || replacingEstablishing
-                ? `${sheet.name} · the view every later angle is generated against`
-                : `${sheet.name} · anchored to the establishing view, so it stays the same room`
+                ? `${sheet.name} · establishing view`
+                : `${sheet.name} · anchored to the establishing view`
             }
             promptLabel="Where is the camera?"
             prompt={angle}
@@ -542,7 +540,7 @@ export function LocationReferenceScreen() {
                   downloadName={`${sheet.name} location sheet`}
                 />
               </div>
-              <p className="fy-mono">{sheetFile} · rebuilt on every acceptance</p>
+              <p className="fy-mono">{sheetFile}</p>
               {/* The same function dispatch composes the preamble from, so what this promises and
                   what a request states cannot drift into disagreeing. */}
               <div className="fy-locref__carries">

@@ -52,6 +52,7 @@ export function AgentsPanel() {
               <select
                 className="fy-set__pill"
                 aria-label={`Model for ${a.name}`}
+                title="A running session keeps the model it started with; the next one picks this up"
                 value={a.model ?? ""}
                 disabled={models.length === 0}
                 onChange={(e) => setAgentConfig(a.name, { model: e.target.value === "" ? null : e.target.value })}
@@ -90,12 +91,8 @@ export function AgentsPanel() {
                   onChange={(e) => setDraft(e.target.value)}
                   style={{ minHeight: 160, font: "400 12px/1.6 var(--font-mono)" }}
                   aria-label={`What ${a.name} is for`}
+                  title="A running session keeps the brief it started with; the next one picks this up"
                 />
-                <div className="fy-set__note" style={{ marginTop: 8 }}>
-                  This is what the agent is for. The rules that keep it inside its folder, off
-                  the version fields and away from restating canon are not editable — they are
-                  what the accept gate assumes.
-                </div>
                 <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                   <Button
                     disabled={draft.trim().length === 0 || draft === a.brief}
@@ -124,10 +121,7 @@ export function AgentsPanel() {
           </div>
         );
       })}
-      <div className="fy-set__note">
-        a session already running keeps the settings it started with · the next one picks these
-        up{models.length > 0 ? ` · ${models.length} models offered by the harness` : ""}
-      </div>
+      {models.length > 0 && <div className="fy-set__note">{models.length} models offered by the harness</div>}
     </>
   );
 }

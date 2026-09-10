@@ -216,8 +216,14 @@ export function GenerationDialog({
     label: string;
     onCommit: () => void;
     disabled?: boolean;
-    /** One line under the previews — the consequence, or the reason it just failed. */
+    /** One line under the previews: the reason it just failed, and nothing else (design turn 137). */
     note?: ReactNode;
+    /**
+     * What pressing leaves behind, when a person must know it first — on the control itself, as
+     * its tooltip, never as a line on the surface (design turn 137). Drawn on hover and on
+     * focus alike; see `Button`'s own `hint` for why one of the two is not enough.
+     */
+    hint?: string;
     /**
      * The other answer, where saying no is a decision rather than an absence — rejecting a take,
      * throwing a set away. It sits beside the primary as a quiet button rather than hiding in the
@@ -538,6 +544,7 @@ export function GenerationDialog({
                   variant="primary"
                   disabled={commit.disabled === true || selected === null}
                   onClick={commit.onCommit}
+                  {...(commit.hint === undefined ? {} : { hint: commit.hint })}
                 >
                   {commit.label}
                 </Button>

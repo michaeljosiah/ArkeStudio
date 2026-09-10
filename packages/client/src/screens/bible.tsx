@@ -323,7 +323,7 @@ export function BibleScreen() {
           <section className="fy-bible__panel">
             <h2 className="fy-bible__paneltitle">Earlier versions</h2>
             {history.length === 0 ? (
-              <p className="fy-bible__empty">Nothing here yet — this is still v{bible?.version ?? 1}.</p>
+              <p className="fy-bible__empty">Nothing here yet.</p>
             ) : (
               <>
                 <ul className="fy-bible__versions">

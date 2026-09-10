@@ -1280,7 +1280,7 @@ export function ChapterWorkspace({
                 <p className="fy-ch__style">
                   {[...(style.pov !== undefined ? [style.pov] : []), ...(style.tense !== undefined ? [style.tense] : []), `v${style.version}`].join(" · ")}
                 </p>
-                <p className="fy-bible__empty fy-mono">settled in Develop · read by every draft</p>
+                <p className="fy-bible__empty fy-mono">settled in Develop</p>
               </section>
             )}
 
@@ -1389,7 +1389,6 @@ export function ChapterWorkspace({
                       </li>
                     ))}
                   </ul>
-                  <p className="fy-bible__empty fy-mono">restoring makes a new version</p>
                 </>
               )}
             </section>
@@ -1439,8 +1438,6 @@ export function ChapterWorkspace({
               ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
               : `About ${chapterLabel}:`,
             ...(passage !== null ? { subjectLine: `about this passage · ${countWords(passage).toLocaleString()} words` } : {}),
-            // What is waiting, not what talking does not do (issue 1008).
-            ...(waiting !== null ? { note: waiting === "passage" ? "a passage waits for your yes" : "a draft waits for your yes" } : {}),
           }}
           openingNote="opening…"
           emptyLine={`Nothing written with Arke for ${chapterLabel} yet.`}
@@ -1453,7 +1450,6 @@ export function ChapterWorkspace({
                     worldId={worldId}
                     subject={chapterLabel}
                     staged={stagedDraft.staged}
-                    writes={passageChange !== null ? "Replaces one passage · the rest of the chapter is untouched" : "Replaces the chapter's prose."}
                     items={[
                       passageChange !== null
                         ? {

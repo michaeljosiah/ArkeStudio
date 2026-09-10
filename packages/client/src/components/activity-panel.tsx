@@ -767,7 +767,7 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
   // A zero threshold stays `off` throughout: an alert that is off asks nothing of the ledger.
   const alertWindow = `Alert at ${formatMicroUsd(spendThreshold)} / ${spend.periodDays}d`;
   const alertNote = spendStatus?.alerted
-    ? `Over the threshold: ${formatMicroUsd(spendStatus.rollingMicroUsd)} against ${formatMicroUsd(spendThreshold)}. Nothing is blocked.`
+    ? `Over the threshold: ${formatMicroUsd(spendStatus.rollingMicroUsd)} against ${formatMicroUsd(spendThreshold)}.`
     : spendThreshold === 0
       ? `${alertWindow} · off`
       : spendStatus?.ledgerUnavailable
@@ -797,7 +797,7 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
         ))}
       {spend.unmeteredRuns > 0 && (
         <div className="fy-mono" style={{ marginTop: 12 }}>
-          {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"} — no provider charge
+          {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"}
         </div>
       )}
       <div className="fy-notecard" style={{ background: "var(--background)" }}>
@@ -839,9 +839,6 @@ function Spend({ state, scope, activeWorldId }: { state: ClientState; scope: "ac
           </Callout>
         </div>
       ))}
-      <div className="fy-mono" style={{ marginTop: 12 }}>
-        unmetered runtimes report no provider charge
-      </div>
       <div className="fy-ap__doors">
         <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
         <Button variant="ghost" onClick={() => inspectProviderCalls(null)}>

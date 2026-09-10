@@ -373,7 +373,7 @@ export function CharacterVoiceScreen() {
         </section>
         <div className="fy-voiceways__head">
           <h2>Get a voice</h2>
-          <span className="fy-mono">versions the sheet · {usage}</span>
+          <span className="fy-mono">{usage}</span>
         </div>
         <div className="fy-voiceways">
           <EntranceTile
@@ -705,7 +705,6 @@ function ChooseVoiceDialog({
           })}
         </div>
         <footer className="fy-voicesheet__foot">
-          <span className="fy-mono">sets reads · versions the sheet</span>
           <span className="fy-voicesheet__push" />
           <Button variant="ghost" onClick={onClose}>
             Cancel

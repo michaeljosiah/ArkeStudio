@@ -61,7 +61,7 @@ describe("the style the book is written in, on the Overview (turn 128)", () => {
     const html = overview(saltlight(STYLE));
     assert.match(html, /The story, as it stands/);
     assert.match(html, /LOGLINE/, "the overview's own cards come first");
-    assert.match(html, /v2 · settled in Develop · read by every draft and every revision/);
+    assert.match(html, /v2 · settled in Develop/);
     assert.match(html, /POINT OF VIEW/);
     assert.match(html, /close third/);
     assert.match(html, /TENSE/);

@@ -15,11 +15,22 @@ export function Button({
   size = "default",
   className,
   type = "button",
+  hint,
   ref,
   ...rest
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /**
+   * What pressing leaves behind, when a person must know it before pressing (design turn 137).
+   *
+   * It rides on the control instead of on a line beneath it, and it has to reach whoever is
+   * about to press. `title` on its own answers the pointer: Chromium draws it under a cursor
+   * and never on focus, so tabbing to the button meets the consequence stripped out — the hole
+   * `IconButton` opened `.fy-tip` for. So both. `.fy-tip` draws the bubble on `:hover` and
+   * `:focus-visible` alike, and `title` is what a screen reader reads out as the description.
+   */
+  hint?: string;
   /** For the callers that have to put focus back on this button — a dialog returning it, say. */
   ref?: Ref<HTMLButtonElement>;
 }) {
@@ -27,7 +38,8 @@ export function Button({
     <button
       ref={ref}
       type={type}
-      className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, className)}
+      className={cx("ui-btn", `ui-btn--${variant}`, `ui-btn--${size}`, hint === undefined ? undefined : "fy-tip", className)}
+      {...(hint === undefined ? {} : { "data-tip": hint, title: hint })}
       {...rest}
     />
   );
@@ -240,12 +252,13 @@ export function Callout({
 }: {
   tone?: "neutral" | "warning" | "danger" | "success";
   title?: string;
-  children: ReactNode;
+  /** A refusal is one clause, and that clause is the title; the body is for what a person answers (turn 137). */
+  children?: ReactNode;
 }) {
   return (
     <div className={cx("ui-callout", `ui-callout--${tone}`)} role={tone === "danger" ? "alert" : "note"}>
       {title && <div className="ui-callout__title">{title}</div>}
-      <div className="ui-callout__body">{children}</div>
+      {children !== undefined && <div className="ui-callout__body">{children}</div>}
     </div>
   );
 }
