@@ -77,6 +77,7 @@ describe("the building screen (SPEC-031 §1.8)", () => {
     assert.ok(html.includes("Nadia · main photo"), "the working line names the item, not the stage (R-41)");
     assert.ok(html.includes("Stop"), "Stop is offered (R-42)");
     assert.equal(html.includes("what is made is kept"), false, "no caption under Stop (turn 137)");
+    assert.ok(html.includes('title="Stops the build. What is made is kept."'), "what stopping keeps rides on the control (R-42)");
     assert.ok(!html.includes("CRAFTING YOUR UNIVERSE"), "the build speaks in the same concrete voice as the studio (#930)");
     assert.ok(
       !html.includes("Our world builder") && !html.includes("Every great story"),

@@ -789,10 +789,8 @@ export function ReplaceMainPhotoScreen() {
         )}
       </div>
       {carryIdentity && !carriesReferences && model && (
-        <Callout tone="warning" title={`${model.displayName} accepts no reference images`}>
-          {sheet.name}&apos;s main photo will not ride along. The generation sees the written
-          description and the world look as text, and nothing of the face.
-        </Callout>
+        // The refusal is its one clause; what the generation sees instead is not explained (turn 137).
+        <Callout tone="warning" title={`${model.displayName} accepts no reference images`} />
       )}
     </>
   );
@@ -803,7 +801,7 @@ export function ReplaceMainPhotoScreen() {
         open
         onClose={back}
         title="Replace main photo"
-        lede={`${sheet.name} · the accepted identity anchor · World look · v${world.artDirection.version}`}
+        lede={`${sheet.name} · World look · v${world.artDirection.version}`}
         promptLabel="Describe the portrait"
         prompt={prompt}
         onPrompt={setPrompt}
@@ -849,7 +847,8 @@ export function ReplaceMainPhotoScreen() {
           onCommit: () => {
             if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
           },
-          // A refusal is the one line the card owes; the consequence lives on the control's hint.
+          // A refusal is the one line the card owes; the consequence rides on the control (turn 137).
+          hint: "Replacing the main photo makes the current character sheet stale.",
           ...(acceptance?.status === "failed" ? { note: acceptance.reason } : {}),
         }}
       />

@@ -151,7 +151,11 @@ export function BuildingScreen() {
 
         {/* Stop is the author's, and the only halt there is (R-35, R-42). */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, marginTop: 6 }}>
-          <Button variant="ghost" onClick={() => worldId && stopFoundingBuild(worldId)}>
+          <Button
+            variant="ghost"
+            title="Stops the build. What is made is kept."
+            onClick={() => worldId && stopFoundingBuild(worldId)}
+          >
             Stop
           </Button>
         </div>

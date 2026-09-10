@@ -240,12 +240,13 @@ export function Callout({
 }: {
   tone?: "neutral" | "warning" | "danger" | "success";
   title?: string;
-  children: ReactNode;
+  /** A refusal is one clause, and that clause is the title; the body is for what a person answers (turn 137). */
+  children?: ReactNode;
 }) {
   return (
     <div className={cx("ui-callout", `ui-callout--${tone}`)} role={tone === "danger" ? "alert" : "note"}>
       {title && <div className="ui-callout__title">{title}</div>}
-      <div className="ui-callout__body">{children}</div>
+      {children !== undefined && <div className="ui-callout__body">{children}</div>}
     </div>
   );
 }

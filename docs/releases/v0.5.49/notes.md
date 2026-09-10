@@ -22,5 +22,5 @@ the panel clears the second one and nothing else.
 The spend alert is a row. It used to live in a side column nobody opened; now it sits in the
 Inbox beside blocked work and leaves on its own when the total drops back under your line.
 
-And the small print is gone. Every line under a button, a field or a composer that explained
-what would happen has come off, here and in the design.
+And the small print is gone. Every line under a button, a field, a composer or a page title
+that explained what would happen has come off, here and in the design.

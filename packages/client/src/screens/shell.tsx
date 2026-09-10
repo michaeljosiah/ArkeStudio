@@ -488,12 +488,13 @@ export function WorldPickerScreen() {
   const sample = useSampleWorld();
   const hour = new Date().getHours();
   const greeting = hour < 5 ? "Working late" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  // A count, and nothing else (turn 137).
   const lede =
     worlds.length === 0
-      ? "Nothing here yet — a first world is a folder and a sentence."
+      ? "Nothing here yet."
       : worlds.length === 1
-        ? "One world, breathing, or start another."
-        : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds, all of them breathing, or start another.`;
+        ? "One world."
+        : `${["", "", "Two", "Three", "Four", "Five"][worlds.length] ?? worlds.length} worlds.`;
   const ROT = [-2.5, 1.8, -1.2, 2.4, -2];
   return (
     <div className="fy-app" data-screen="world-picker">
@@ -968,19 +969,10 @@ export function NewWorldScreen() {
                     <i />
                   </div>
                   <h1 className="fy-artstep__h1">How should {shownName || "this world"} look?</h1>
-                  <p className="fy-artstep__lede">
-                    Pick a starting look. Every image this world makes — characters, locations,
-                    shots — follows it until you change it. Nothing here is permanent: you can edit
-                    the words on the next screen, or set a different look any time from Art
-                    direction.
-                  </p>
+                  <p className="fy-artstep__lede">Pick a starting look.</p>
                 </div>
                 <div className="fy-artstep__aside">
                   <div className="fy-artstep__asidehead">SAME FORMS, NINE TREATMENTS</div>
-                  <div className="fy-artstep__asidenote">
-                    Each preview shows the same forms, so you compare the treatment and
-                    not the subject.
-                  </div>
                 </div>
               </div>
               <ArtStyleGrid
@@ -1132,11 +1124,9 @@ export function NewWorldScreen() {
                           src={genesisMediaUrl(genesisId, previewFile)}
                           alt="The look, previewed"
                         />
-                        <div className="fy-mono" style={{ fontSize: 9.5 }}>
-                          {previewStale
-                            ? "the look changed since this was made · it will not carry"
-                            : "carries in as the master look at Begin"}
-                        </div>
+                        {previewStale && (
+                          <div className="fy-mono" style={{ fontSize: 9.5 }}>the look changed since this was made</div>
+                        )}
                       </>
                     )}
                     {previewRunning && <Loading inline label="making the look" />}

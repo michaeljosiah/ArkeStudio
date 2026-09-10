@@ -177,8 +177,8 @@ describe("the location reference tab (#243)", () => {
     // instead would let this test pass with the confirmation gone entirely.
     assert.ok(html.includes("Replace “reverse   ANGLE”?"), "the collision is named before the press, not after");
     assert.ok(html.includes(">Replace it<"));
-    assert.ok(html.includes("becomes superseded"));
-    assert.ok(html.includes("leaves the panel order unchanged"));
+    assert.ok(html.includes('title="The old view becomes superseded and keeps its place in history."'), "what replacing does rides on the control (turn 137)");
+    assert.equal(html.includes("leaves the panel order unchanged"), false, "and the card no longer explains it");
     const pending = html.slice(html.indexOf("A view is waiting on you"));
     assert.match(pending, /<button[^>]*disabled[^>]*>Accept</, "and Accept waits on the confirmation");
   });

@@ -4378,16 +4378,6 @@ export function ProductionsScreen() {
             <Plus size={18} />
           </span>
           <span style={{ font: "600 14px var(--font-sans)" }}>New production</span>
-          <span
-            style={{
-              font: "400 12px/1.5 var(--font-sans)",
-              color: "var(--muted-foreground)",
-              textAlign: "center",
-              maxWidth: 140,
-            }}
-          >
-            Same cast. Any format: film, stills, book.
-          </span>
         </button>
       </div>
     </div>

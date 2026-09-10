@@ -232,7 +232,6 @@ export function StoryboardRows({
       <div ref={(element) => { rowsRoot.current = element; }} className="fy-sw__empty" data-testid="workspace-empty" tabIndex={-1}>
         <div>
           <h2>Build this scene</h2>
-          <p>Tell Arke what happens, or start adding shots yourself. Nothing here needs the assistant.</p>
           <div>
             <Button variant="primary" size="sm" onClick={onTalkToArke}>Talk to Arke</Button>
             <Button

@@ -153,8 +153,8 @@ export function PropDetailScreen() {
               <span style={{ flex: 1 }}>
                 <p className="fy-mono">
                   {state.reference === undefined
-                    ? `no reference yet for ${state.name} · nothing is superseded`
-                    : `Currently ${state.name} · accepted ${state.reference.acceptedAt.slice(0, 10)} · ${state.reference.sourceTakeId ?? state.reference.id} becomes superseded`}
+                    ? `no reference yet for ${state.name}`
+                    : `Currently ${state.name} · accepted ${state.reference.acceptedAt.slice(0, 10)}`}
                 </p>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <Button
