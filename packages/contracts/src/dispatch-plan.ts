@@ -146,8 +146,9 @@ export const CompiledPassRecordSchema = z
  */
 export const PassCarriesSchema = z
   .object({
-    shotIds: z.array(z.string().min(1)),
-    frame: z.object({ shotId: z.string().min(1) }).strict().optional(),
+    /** Numbered when the plan is written (codex round 2): a shot inserted or moved later renumbers the scene, not this pass. */
+    shots: z.array(z.object({ shotId: z.string().min(1), number: z.number().int().min(1) }).strict()),
+    frame: z.object({ shotId: z.string().min(1), number: z.number().int().min(1) }).strict().optional(),
     place: z
       .object({ sheetId: z.string().min(1), name: z.string().min(1), rides: z.boolean(), reason: z.string().min(1).optional() })
       .strict()

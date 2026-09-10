@@ -961,9 +961,14 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
     assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.id, look.attachedTo]), [["door", undefined]], "the old place holds no claim on this scene");
   });
 
-  it("refuses a read the production does not hold, writing nothing (codex round 1)", async () => {
+  it("refuses a read the production does not hold, or a member who is no character, writing nothing (codex rounds 1 and 2)", async () => {
     const { store } = await open();
     const before = await sceneOnDisk(store);
+    await assert.rejects(
+      applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+        command: { kind: "edit-scene", cast: { "the-vigil": { added: CLOCK() } } } }),
+      /not a character/,
+    );
     await assert.rejects(
       applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
         command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK(), voice: { kind: "performance", performanceId: "pf_01J8E0000000000000000000P9", hash: `sha256:${"9".repeat(64)}` } } } } }),

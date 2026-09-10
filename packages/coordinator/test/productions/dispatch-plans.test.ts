@@ -423,13 +423,13 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     // with its reason — and nothing about a voice, because nobody speaks.
     assert.equal(plan.passes.length, 2, "6s + 6s against a 10s cap is two passes");
     assert.deepEqual(plan.passes[0]!.carries, {
-      shotIds: ["sh_1"],
+      shots: [{ shotId: "sh_1", number: 1 }],
       place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
       cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "rides" }],
     });
     assert.deepEqual(plan.passes[1]!.carries, {
-      shotIds: ["sh_2"],
-      frame: { shotId: "sh_2" },
+      shots: [{ shotId: "sh_2", number: 2 }],
+      frame: { shotId: "sh_2", number: 2 },
       place: { sheetId: "the-vigil", name: "The Vigil", rides: false, reason: "no plate" },
       cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "not-sent", reason: "this model takes one image" }],
     });

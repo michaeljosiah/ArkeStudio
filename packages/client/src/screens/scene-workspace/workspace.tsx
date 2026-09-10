@@ -726,7 +726,7 @@ export function SceneWorkspace({
           <PlansPanel
             worldId={world.meta.worldId}
             prodId={production.meta.id}
-            scene={scene}
+            sceneId={scene.id}
             refused={planError}
           />
           {complete && episode !== undefined ? (

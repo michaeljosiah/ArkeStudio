@@ -191,11 +191,12 @@ function passCarries(
           rides: bound !== undefined,
           ...(bound === undefined ? { reason: dropped !== undefined ? dropClause(pass.route) : "no plate" } : {}),
         };
+  const first = shots.find((shot) => shot.id === pass.target.coversShots[0]) ?? shots[0]!;
   return {
-    shotIds: pass.target.coversShots,
+    shots: shots.map((shot) => ({ shotId: shot.id, number: shot.number })),
     // A chained pass opens on the previous pass's boundary frame, bound at materialisation; it
     // is a frame on this pass's first shot as surely as a selected one is.
-    ...(pass.frame !== undefined || pass.route.kind === "frame" ? { frame: { shotId: pass.target.coversShots[0]! } } : {}),
+    ...(pass.frame !== undefined || pass.route.kind === "frame" ? { frame: { shotId: first.id, number: first.number } } : {}),
     ...(place !== undefined ? { place } : {}),
     cast,
     ...(timing !== undefined && timing.length > 0 ? { timing } : {}),

@@ -1252,6 +1252,8 @@ describe("location views and the sheet they assemble (#243)", () => {
     await attachCharacterLook(store, VIGIL.id, "v2", scope);
     assert.equal((await readKit(store, VIGIL.id))!.kit.looks?.length, 1, "a second attachment finds the look rather than making another");
     await assert.rejects(attachCharacterLook(store, VIGIL.id, "v9", scope), /no accepted look/);
+    // A scene set elsewhere takes no plate from this location (codex round 2), nor does one that is gone.
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v2", { ...scope, sceneId: "sc_99" }), /not set at the-vigil/);
     // A replacement takes the plate with it: the look follows the view that took over the panel.
     await acceptView(store, dir, 3, "From the door", { replaceExistingName: true });
     const replaced = (await readKit(store, VIGIL.id))!.kit;
@@ -1292,7 +1294,7 @@ describe("location views and the sheet they assemble (#243)", () => {
     await acceptView(store, dir, 1, "Establishing view");
     await acceptView(store, dir, 2, "From the door");
     const first = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
-    const second = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_05" };
+    const second = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_06" };
     await attachCharacterLook(store, VIGIL.id, "v1", first);
     await attachCharacterLook(store, VIGIL.id, "v2", second);
     await acceptView(store, dir, 3, "From the door", { replaceExistingName: true, establishing: true });

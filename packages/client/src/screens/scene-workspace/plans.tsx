@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { orderedShots, type PlanState, type SceneRecord } from "@arke-studio/contracts";
+import type { PlanState } from "@arke-studio/contracts";
 import { Button, Callout } from "../../components/ui.js";
 import { usd } from "../../lib/format.js";
 import {
@@ -14,15 +14,14 @@ import {
 export function PlansPanel({
   worldId,
   prodId,
-  scene,
+  sceneId,
   refused,
 }: {
   worldId: string;
   prodId: string;
-  scene: SceneRecord;
+  sceneId: string;
   refused: string | null;
 }) {
-  const sceneId = scene.id;
   const [states, setStates] = useState<PlanState[] | null>(null);
   const [optionsFor, setOptionsFor] = useState<string | null>(null);
   useEffect(() => {
@@ -36,10 +35,9 @@ export function PlansPanel({
     return offStates;
   }, [worldId, prodId, sceneId]);
   if ((!states || states.length === 0) && refused === null) return null;
-  // Shots by number (SPEC-044 R-25): the summary holds ids, the scene says what they are called.
-  const numbers = new Map(orderedShots(scene).map((shot) => [shot.id, shot.number]));
-  const shotsLabel = (ids: readonly string[]): string | null => {
-    const found = ids.map((id) => numbers.get(id)).filter((number): number is number => number !== undefined);
+  // Shots by number (SPEC-044 R-25), as the summary numbered them when the plan was written: a
+  // shot inserted or moved since renumbers the scene, not the pass that was authorized.
+  const shotsLabel = (found: readonly number[]): string | null => {
     if (found.length === 0) return null;
     if (found.length === 1) return `shot ${found[0]}`;
     const contiguous = found.every((number, index) => index === 0 || number === found[index - 1]! + 1);
@@ -62,10 +60,10 @@ export function PlansPanel({
     const carries = pass.carries;
     const head = [
       `pass ${pass.passIndex + 1}`,
-      carries === undefined ? null : shotsLabel(carries.shotIds),
+      carries === undefined ? null : shotsLabel(carries.shots.map((shot) => shot.number)),
       pass.askedSec === undefined ? null : `${pass.askedSec.toFixed(1)}s`,
       usd(pass.estimatedMicroUsd),
-      carries?.frame === undefined ? null : `frame: ${shotsLabel([carries.frame.shotId]) ?? "shot"}`,
+      carries?.frame === undefined ? null : `frame: shot ${carries.frame.number}`,
       carries?.place === undefined ? null
         : carries.place.rides ? `${carries.place.name}: plate`
         : `${carries.place.name}: plate not sent${carries.place.reason === undefined ? "" : ` · ${carries.place.reason}`}`,

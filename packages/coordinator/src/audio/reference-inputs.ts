@@ -120,9 +120,9 @@ function clearanceLabel(error: unknown): string {
  * and `refused` what only the bytes and the rights ledger could. Each read acknowledges rights
  * under its own id, so two reads under one request never share one.
  */
-export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string):
+export async function resolveCastVoices(store: WorldStore, production: ProductionBundle, scene: SceneRecord, requestId: string, shotIds?: readonly string[]):
   Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
-  const { requests, notSent } = castVoiceRequests(store.getBundle().sheets, production, scene);
+  const { requests, notSent } = castVoiceRequests(store.getBundle().sheets, production, scene, shotIds);
   const references: FrozenPerformanceAudio[] = [], refused: CastVoiceNotSent[] = [];
   for (const request of requests) {
     const sheetId = production.performances.find(p => p.id === request.performanceId)!.target.speakerSheetId;
@@ -135,13 +135,20 @@ export async function resolveCastVoices(store: WorldStore, production: Productio
   return { references, notSent, refused };
 }
 
-/** The same resolution for a Bench subject (SPEC-044 R-29), found from its scene; none when the scene is gone. */
-export async function resolveSubjectCastVoices(store: WorldStore, subject: { productionId: string; sceneId: string }, requestId: string):
+/**
+ * The same resolution for a Bench subject (SPEC-044 R-29), found from its scene and narrowed to
+ * the shots the subject covers (codex round 2): a member who speaks elsewhere in the scene is
+ * not cleared, not refused and not acknowledged for a pass that will not carry the read. None
+ * when the scene is gone.
+ */
+export async function resolveSubjectCastVoices(store: WorldStore,
+  subject: { productionId: string; sceneId: string; shotId?: string; members?: readonly { shotId: string }[] }, requestId: string):
   Promise<{ references: FrozenPerformanceAudio[]; notSent: CastVoiceNotSent[]; refused: CastVoiceNotSent[] }> {
   const production = store.getBundle().productions.find(p => p.meta.id === subject.productionId);
   const scene = production?.scenes.find(s => s.id === subject.sceneId);
   if (!production || !scene) return { references: [], notSent: [], refused: [] };
-  return resolveCastVoices(store, production, scene, requestId);
+  const shotIds = subject.shotId !== undefined ? [subject.shotId] : subject.members?.map(m => m.shotId);
+  return resolveCastVoices(store, production, scene, requestId, shotIds);
 }
 
 export async function preparePerformanceAudioRange(store: WorldStore, tools: AudioMediaTools,

@@ -401,6 +401,8 @@ it("the scene's cast resolves into voice references that ride wherever the chara
       performanceReferences: resolved.references });
     assert.ok(!quiet.references.some(r => "performance" in r && r.performance.id === record.id), "and not where nobody speaks");
     assert.ok(!quiet.problems.some(p => p.includes("does not match")), "without calling that a problem");
+    const elsewhere = await resolveCastVoices(store, currentProduction, currentScene, ulid(), silent.map(s => s.id));
+    assert.deepEqual([elsewhere.references, elsewhere.notSent, elsewhere.refused], [[], [], []], "a Bench subject where nobody speaks resolves nothing (codex round 2)");
   }
   // A stale choice becomes a clause, never a refusal (R-10, R-28).
   const stale = { ...currentScene, cast: { [speaker]: { voice: { kind: "performance" as const, performanceId: record.id, hash: `sha256:${"f".repeat(64)}` } } } };

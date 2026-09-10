@@ -983,8 +983,8 @@ describe("scene detail owns the workspace", () => {
           passes: [{
             passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000, askedSec: 7,
             carries: {
-              shotIds: ["sh_12", "sh_13"],
-              frame: { shotId: "sh_12" },
+              shots: [{ shotId: "sh_12", number: 12 }, { shotId: "sh_13", number: 13 }],
+              frame: { shotId: "sh_12", number: 12 },
               place: { sheetId: "the-vigil", name: "The Vigil", rides: true },
               cast: [
                 { sheetId: "maren-kest", name: "Maren Kest", voice: "rides", look: "rides" },

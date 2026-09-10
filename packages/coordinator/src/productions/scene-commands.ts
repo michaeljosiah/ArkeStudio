@@ -297,7 +297,13 @@ async function candidateFor(
       // with nothing on the page saying so.
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === input.productionId);
       for (const [sheetId, member] of Object.entries(command.cast ?? {})) {
-        const voice = member?.voice;
+        if (member === null) continue;
+        // A member is a character this world holds (R-7; codex round 2): the reducer takes any
+        // key, and a place or a slug nobody has would be drawn as a member of the cast.
+        if (!store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "character" && !sheet.retired)) {
+          throw new SceneCommandRefused([`${sheetId} is not a character in this world`]);
+        }
+        const voice = member.voice;
         if (voice?.kind !== "performance") continue;
         const read = production?.performances.find((candidate) => candidate.id === voice.performanceId);
         if (read === undefined) throw new SceneCommandRefused([`${sheetId}: read ${voice.performanceId} is not in this production`]);

@@ -67,4 +67,7 @@ it("the cast authority says why a read will not be asked for, in the card's word
   assert.deepEqual(reason(production({ performances: [{ ...RECORD, attestations: [] }] }), castScene(chosen)), ["Maren Kest: attest one speaker and no music"]);
   assert.deepEqual(reason(production({ performances: [{ ...RECORD, cloudBasis: undefined }] }), castScene(chosen)), ["Maren Kest: no permission to send it"]);
   assert.deepEqual(reason(production(), castScene({ kind: "sample" })), [], "the sample asks for nothing");
+  // Narrowed to a subject's shots (codex round 2): asked for where the member speaks, silent elsewhere.
+  assert.equal(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_1"]).requests.length, 1);
+  assert.deepEqual(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_2"]), { requests: [], notSent: [] });
 });

@@ -141,12 +141,16 @@ export interface CastVoiceNotSent { sheetId: string; name: string; reason: strin
  * is returned with one clause, never thrown; the plan card and the Bench both say it from here,
  * so the two cannot drift.
  */
-export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord):
+export function castVoiceRequests(sheets: readonly Sheet[], production: ProductionBundle, scene: SceneRecord, shotIds?: readonly string[]):
   { requests: PerformanceAudioRequest[]; notSent: CastVoiceNotSent[] } {
   const requests: PerformanceAudioRequest[] = [], notSent: CastVoiceNotSent[] = [];
+  // Asked for a subject narrower than the scene (a Bench shot or board; codex round 2), only the
+  // members who speak in it are asked for: a read nobody there speaks is neither cleared nor
+  // refused, and says nothing on the card.
+  const asked = shotIds === undefined ? undefined : new Set(shotSpeakers(scene, orderedShots(scene).filter(s => shotIds.includes(s.id))).speakers);
   for (const [sheetId, member] of Object.entries(scene.cast ?? {})) {
     const voice = member.voice;
-    if (voice?.kind !== "performance") continue;
+    if (voice?.kind !== "performance" || (asked !== undefined && !asked.has(sheetId))) continue;
     const name = sheets.find(s => s.id === sheetId)?.name ?? sheetId;
     const skip = (reason: string) => notSent.push({ sheetId, name, reason });
     const record = production.performances.find(p => p.id === voice.performanceId);

@@ -496,6 +496,13 @@ export async function attachCharacterLook(
   scope: NonNullable<ReferenceKit["looks"]>[number]["attachedTo"] | null,
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
+  // A plate is the scene's current place's, or nothing (codex round 2): the attach message
+  // carries no scene version, so a press still in flight when the place changes would land its
+  // claim on the old location's kit — released by nobody, and reading as occupied from then on.
+  if (scope?.kind === "scene" && store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "location")) {
+    const scene = store.getBundle().productions.find((p) => p.meta.id === scope.productionId)?.scenes.find((s) => s.id === scope.sceneId);
+    if (scene?.inherits?.location !== sheetId) throw new Error(`scene ${scope.sceneId} is not set at ${sheetId}`);
+  }
   const { kit, raw } = await loadOrEmpty(store, sheetId);
   const looks = [...(kit.looks ?? [])];
   let index = looks.findIndex((look) => look.id === lookId);
