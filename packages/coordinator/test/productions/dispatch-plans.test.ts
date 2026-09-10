@@ -445,6 +445,64 @@ describe("durable scene-dispatch plans (SPEC-024; issue 402)", () => {
     );
   });
 
+  /*
+   * Issue 1085: nothing on this path measured the words that travel. A body at the cap composed
+   * a durable plan and a queued job, and the recipe's own limit refused it at generation — a
+   * terminal failure after the authorization said yes.
+   */
+  it("names the wire prompt over the model's cap, per shot and per pass (issue 1085)", async () => {
+    const fixture = await open();
+    const planWith = (model: ManifestModel, mode: "per-shot" | "whole-scene") =>
+      planScene(
+        {
+          world: fixture.bundle.meta,
+          productionId: fixture.production.meta.id,
+          sheets: fixture.bundle.sheets,
+          kits: fixture.bundle.referenceKits,
+          scene: fixture.scene,
+          selections: {},
+          model,
+        },
+        mode,
+      );
+    const create = (model: ManifestModel, mode: "per-shot" | "whole-scene", requestId: string) =>
+      createDispatchPlan(fixture.store, {
+        worldId: WORLD_ID,
+        productionId: fixture.production.meta.id,
+        scene: fixture.scene,
+        plan: planWith(model, mode),
+        model,
+        world: fixture.bundle,
+        policy: "review-gated",
+        requestId,
+        clock: CLOCK,
+      });
+    // The cap a body would never trip: the longest authored body, exactly. Planning never reads
+    // the cap, so the same parts compose either way — what travels is longer, because the
+    // preamble, the pass's structure line and the derived negatives all ride outside the body.
+    const bodies = planWith(CHAINING, "per-shot").shots.map((entry) => entry.parts.body.length);
+    const cap = Math.max(...bodies);
+    const capped: ManifestModel = { ...CHAINING, limits: { ...CHAINING.limits, maxPromptChars: cap } };
+
+    for (const [mode, requestId] of [["per-shot", "01J8E0000000000000000000P1"], ["whole-scene", "01J8E0000000000000000000P2"]] as const) {
+      const plan = await create(capped, mode, requestId);
+      for (const pass of plan.passes) {
+        const wire = String(pass.compiled.params["prompt"]);
+        assert.ok(wire.length > cap, `${mode} pass ${pass.passIndex}: the composed prompt really is over`);
+        assert.deepEqual(
+          pass.carries?.promptOverCap,
+          { chars: wire.length, limit: cap },
+          `${mode} pass ${pass.passIndex}: the number named is the wire prompt's, not the body's`,
+        );
+      }
+    }
+
+    // And a model with room says nothing — a warning that fires on a prompt the model takes is
+    // a warning nobody reads.
+    const roomy = await create({ ...CHAINING, limits: { ...CHAINING.limits, maxPromptChars: 100_000 } }, "whole-scene", "01J8E0000000000000000000P3");
+    assert.deepEqual(roomy.passes.map((pass) => pass.carries?.promptOverCap), [undefined, undefined]);
+  });
+
   it("files a timing clause with the pass it changes, and a shot packing left out with the nearest earlier pass (SPEC-044 R-25)", async () => {
     const fixture = await open();
     const scene: Scene = { ...fixture.scene, shots: [shot(1, 6, "the pier"), shot(2, 6, "the bell"), shot(3, 6, "the rail")] };
