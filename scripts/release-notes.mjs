@@ -38,6 +38,14 @@ for (const line of match[1].split("\n")) {
 }
 if (!fields.title) fail(`docs/releases/${tag}/notes.md names no title`);
 if (!fields.date || !/^\d{4}-\d{2}-\d{2}$/.test(fields.date)) fail(`docs/releases/${tag}/notes.md needs a date as YYYY-MM-DD`);
+{
+  // `2026-02-31` has the shape and not the day; the client would quietly show March 3.
+  const [year, month, day] = fields.date.split("-").map(Number);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) {
+    fail(`docs/releases/${tag}/notes.md dates itself ${fields.date}, which is not a day on the calendar`);
+  }
+}
 // The client bundles same-folder jpg/jpeg/png/webp files and nothing else (packages/client/src/lib/
 // releases.ts), so a card is fit only when its picture is one of those, by basename, and there.
 if (!fields.picture) fail(`docs/releases/${tag}/notes.md names no picture`);

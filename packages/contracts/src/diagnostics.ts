@@ -138,7 +138,11 @@ export const CONTROL_REGISTRY = {
     route: "/settings/providers",
     targetParam: "provider",
   },
-  /** Resume a paused provider lane — the message is the explicit confirmation (SPEC-009 D7). */
+  /**
+   * Resume a paused provider lane — the message is the explicit confirmation (SPEC-009 D7).
+   * The route is the panel's name, not a page: the client opens Activity over the screen it
+   * is on for it (design turn 136, SPEC-014 R-20).
+   */
   "queue-resume": {
     label: "Resume",
     place: "Activity · Needs you",

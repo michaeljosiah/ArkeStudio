@@ -5,7 +5,7 @@ import { useStore } from "../lib/store.js";
 import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
 import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
-import { unreadReleases } from "../lib/release-notes.js";
+import { unreadCount } from "../lib/release-notes.js";
 import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
 
 /**
@@ -61,8 +61,7 @@ export function AppChrome({
   const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
   const fresh = state
     ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
-      unreadReleases(bundledReleases(), seen.whatsNewSeenVersion).length > 0 ||
-      waitingUpdate(state.app.update) !== null
+      unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
     : false;
   const panel = useActivityPanel();
   // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the

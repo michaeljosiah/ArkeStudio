@@ -57,6 +57,7 @@ import { playClip, type Clip } from "../lib/audio.js";
 import { ClipPlayButton, TextActions } from "../components/player.js";
 import { ReadAloud } from "../components/read-aloud.js";
 import { foundingNote } from "../components/queue-note.js";
+import { followLink } from "../lib/activity-panel.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
 import { SingleActFeedback, useSingleAct } from "../components/single-act.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -283,7 +284,8 @@ function WorldConditionBanners() {
           <span className="fy-buildnotice__title">{notice.title}</span>
           {notice.reason && <span className="fy-buildnotice__cause">{notice.reason}</span>}
           {notice.meta !== "" && <span className="fy-buildnotice__when">{notice.meta}</span>}
-          <button type="button" className="fy-buildnotice__act" onClick={() => navigate(notice.action!.to)}>
+          {/* Activity is a panel over this screen (design turn 136): the notice opens it in place. */}
+          <button type="button" className="fy-buildnotice__act" onClick={() => followLink(navigate, notice.action!.to)}>
             {notice.action!.label}
           </button>
           <button type="button" className="fy-buildnotice__act" onClick={() => dismissBuildNotice(worldId!)}>

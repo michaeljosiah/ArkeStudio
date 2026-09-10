@@ -279,6 +279,10 @@ describe("the bell's two dots (R-24)", () => {
     state.app.update = { status: "available", targetVersion: "0.5.50", progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null };
     withState(state);
     assert.ok(activityControl(chrome()).includes("fy-iconbtn__dot--new"), "a release you do not have yet is unread");
+    state.app.activitySeen = { inboxSeenAt: TODAY, whatsNewSeenVersion: "0.5.50" };
+    withState(state);
+    assert.equal(activityControl(chrome()).includes("fy-iconbtn__dot"), false, "read is read, installed or not");
+    state.app.activitySeen = { inboxSeenAt: TODAY, whatsNewSeenVersion: "0.5.49" };
     state.app.update = { ...state.app.update, status: "none", targetVersion: null };
     withState(state);
     assert.equal(activityControl(chrome()).includes("fy-iconbtn__dot"), false);
@@ -316,6 +320,25 @@ describe("the two remembered facts (R-25)", () => {
         assert.equal(sent.some((m) => m.kind === "mark-whats-new-seen"), false, "What's new was not");
         await act(async () => showActivityTab("new"));
         assert.ok(sent.some((m) => m.kind === "mark-whats-new-seen" && m.version === "0.5.47"));
+      },
+    );
+  });
+
+  it("reading What's new with an update waiting stamps the update's version, so its count clears", async () => {
+    __setReleasesForTest([card("0.5.47", "Newest", "2026-08-23")]);
+    const state = quiet();
+    state.app.activitySeen = { inboxSeenAt: TODAY, whatsNewSeenVersion: "0.5.47" };
+    state.app.update = { status: "available", targetVersion: "0.5.50", progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null };
+    withState(state);
+    const sent = capture();
+    openActivityPanel("new");
+    await mounted(
+      <MemoryRouter>
+        <ActivityPanel />
+      </MemoryRouter>,
+      async (container) => {
+        assert.ok(sent.some((m) => m.kind === "mark-whats-new-seen" && m.version === "0.5.50"), "the update is the newest thing read");
+        assert.ok(container.textContent!.includes("What's new · 1"), "counted until the mark comes back");
       },
     );
   });

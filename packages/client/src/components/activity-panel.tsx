@@ -23,7 +23,7 @@ import { historyNote, type NoteTone } from "./queue-note.js";
 import { mediaUrl } from "../lib/media.js";
 import { dayLabel, shortDate, shortDateTime } from "../lib/format.js";
 import { bundledReleases } from "../lib/releases.js";
-import { RELEASE_PAGE, unreadReleases, type ReleaseCard } from "../lib/release-notes.js";
+import { compareVersions, newestVersion, RELEASE_PAGE, unreadCount, type ReleaseCard } from "../lib/release-notes.js";
 import {
   closeActivityPanel,
   inspectProviderCalls,
@@ -106,6 +106,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   const sidecar = useVoiceSidecar();
   const exportsState = useExports();
   const update = useUpdateStatus();
+  const waiting = waitingUpdate(update);
 
   // Closes when the screen behind it changes — its own actions navigate, and so does the user.
   const path = `${location.pathname}${location.search}`;
@@ -140,15 +141,18 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
   }, []);
 
   // The two remembered facts (R-25), stamped by the coordinator's clock when a tab is looked at.
+  // Reading What's new marks the newest thing on it — the waiting update when there is one, so
+  // its count clears once read rather than standing until it is installed.
   const releases = bundledReleases();
-  const newest = releases[0] ?? null;
   const seen = state.app.activitySeen;
+  const mark = newestVersion(releases, waiting?.targetVersion ?? null);
   useEffect(() => {
     if (panel.tab === "inbox" && panel.calls === undefined) markInboxSeen();
   }, [panel.tab, panel.calls]);
   useEffect(() => {
-    if (panel.tab === "new" && newest && newest.version !== seen.whatsNewSeenVersion) markWhatsNewSeen(newest.version);
-  }, [panel.tab, newest, seen.whatsNewSeenVersion]);
+    if (panel.tab !== "new" || mark === null) return;
+    if (seen.whatsNewSeenVersion === null || compareVersions(mark, seen.whatsNewSeenVersion) > 0) markWhatsNewSeen(mark);
+  }, [panel.tab, mark, seen.whatsNewSeenVersion]);
 
   const activeWorldId = state.world?.meta.worldId ?? null;
   const scoped = <T extends { worldId?: string }>(items: T[]): T[] =>
@@ -157,8 +161,7 @@ function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientS
       : items.filter((item) => item.worldId === undefined || item.worldId === activeWorldId);
   const running = scoped(computeRunning(state, { sidecar, exports: exportsState }));
   const needsYou = scoped(computeNeedsYou(state));
-  const waiting = waitingUpdate(update);
-  const unread = unreadReleases(releases, seen.whatsNewSeenVersion).length + (waiting ? 1 : 0);
+  const unread = unreadCount(releases, seen.whatsNewSeenVersion, waiting?.targetVersion ?? null);
   const needs = needsYou.length;
   const status =
     running.length === 0 && needs === 0
@@ -620,7 +623,7 @@ function WhatsNew({ releases, update }: { releases: ReleaseCard[]; update: Updat
 
 /** A release name often repeats the version it names; the card already says the version. */
 function releaseNameOf(update: UpdateState): string | null {
-  const name = update.releaseName?.replace(/^v?\d+(?:\.\d+)*\s*[—–\-·:]*\s*/, "").trim() ?? "";
+  const name = update.releaseName?.replace(/^v?\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?\s*[—–\-·:]*\s*/, "").trim() ?? "";
   return name.length > 0 ? name : null;
 }
 

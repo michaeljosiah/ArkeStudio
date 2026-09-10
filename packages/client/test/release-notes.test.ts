@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { compareVersions, orderReleases, parseReleaseCard, unreadReleases, type ReleaseCard } from "../src/lib/release-notes.js";
+import {
+  compareVersions,
+  newestVersion,
+  orderReleases,
+  parseReleaseCard,
+  unreadCount,
+  unreadReleases,
+  type ReleaseCard,
+} from "../src/lib/release-notes.js";
 import { dayLabel, shortDate } from "../src/lib/format.js";
 
 /**
@@ -59,6 +67,8 @@ describe("a release card is read from its file", () => {
     assert.equal(parseReleaseCard("v1", "---\ndate: 2026-08-23\n---\nwords", () => null), null);
     assert.equal(parseReleaseCard("v1", "---\ntitle: T\n---\nwords", () => null), null);
     assert.equal(parseReleaseCard("v1", "---\ntitle: T\ndate: 23 Aug\n---\nwords", () => null), null);
+    assert.equal(parseReleaseCard("v1", "---\ntitle: T\ndate: 2026-02-31\n---\nwords", () => null), null, "a day that is not on the calendar");
+    assert.ok(parseReleaseCard("v1", "---\ntitle: T\ndate: 2028-02-29\n---\nwords", () => null), "a leap day is");
     assert.equal(parseReleaseCard("v1", "---\ntitle: T\ndate: 2026-08-23\n---\n\n", () => null), null);
     assert.equal(parseReleaseCard("v1", "no front matter", () => null), null);
   });
@@ -102,6 +112,17 @@ describe("what has not been read (SPEC-014 R-24, R-25)", () => {
 
   it("has nothing to say with no cards", () => {
     assert.deepEqual(unreadReleases([], null), []);
+  });
+
+  it("counts an update the updater has found as unread until it is read (codex, PR 1087)", () => {
+    assert.equal(unreadCount(cards, "0.5.47", "0.5.50"), 1, "newer than anything read");
+    assert.equal(unreadCount(cards, "0.5.50", "0.5.50"), 0, "read, though not yet installed");
+    assert.equal(unreadCount(cards, "0.5.20", "0.5.50"), 3, "two cards and the update");
+    assert.equal(unreadCount(cards, null, null), 1);
+    assert.equal(unreadCount([], null, "0.5.50"), 1, "an update with no cards at all is still news");
+    assert.equal(newestVersion(cards, "0.5.50"), "0.5.50", "reading What's new marks the update");
+    assert.equal(newestVersion(cards, "0.5.45"), "0.5.47", "or the newest card when that is newer");
+    assert.equal(newestVersion([], null), null);
   });
 });
 

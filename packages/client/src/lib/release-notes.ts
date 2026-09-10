@@ -38,6 +38,11 @@ export function parseReleaseCard(
   const title = fields["title"];
   const date = fields["date"];
   if (!title || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  // A date that only looks like one — `2026-02-31` — would be normalised to a day the author
+  // never wrote and grouped under it; the components have to round-trip (codex, PR 1087).
+  const [year, month, day] = date.split("-").map(Number) as [number, number, number];
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
   const paragraphs = match[2]!
     .split(/\r?\n\s*\r?\n/)
     .map((paragraph) => paragraph.replace(/\s*\r?\n\s*/g, " ").trim())
@@ -102,6 +107,24 @@ export function unreadReleases(cards: readonly ReleaseCard[], seenVersion: strin
   if (ordered.length === 0) return [];
   if (seenVersion === null) return [ordered[0]!];
   return ordered.filter((card) => compareVersions(card.version, seenVersion) > 0);
+}
+
+/**
+ * What has not been read, counting an update the updater has found as one more while it is
+ * newer than the last version read — so reading it, before or after installing, clears it
+ * (codex, PR 1087).
+ */
+export function unreadCount(cards: readonly ReleaseCard[], seenVersion: string | null, waitingVersion: string | null): number {
+  const waiting =
+    waitingVersion !== null && (seenVersion === null || compareVersions(waitingVersion, seenVersion) > 0) ? 1 : 0;
+  return unreadReleases(cards, seenVersion).length + waiting;
+}
+
+/** The version reading What's new marks as seen: the newest card, or the waiting update when it is newer. */
+export function newestVersion(cards: readonly ReleaseCard[], waitingVersion: string | null): string | null {
+  const newest = orderReleases(cards)[0]?.version ?? null;
+  if (waitingVersion === null) return newest;
+  return newest === null || compareVersions(waitingVersion, newest) > 0 ? waitingVersion : newest;
 }
 
 export const RELEASE_PAGE = "https://github.com/michaeljosiah/ArkeStudio/releases/tag/";

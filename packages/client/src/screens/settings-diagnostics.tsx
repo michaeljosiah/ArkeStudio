@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router";
+import { followLink } from "../lib/activity-panel.js";
 import {
   CONTROL_REGISTRY,
   consequencesOf,
@@ -96,7 +97,8 @@ function Remedy({ finding, snapshot }: { finding: Finding; snapshot: Diagnostics
   return (
     <>
       <span className="fy-diag__place">{control.place}</span>
-      <button type="button" className="fy-diag__go" onClick={() => navigate(to)}>
+      {/* A remedy that lives in Activity opens the panel over Settings rather than leaving it. */}
+      <button type="button" className="fy-diag__go" onClick={() => followLink(navigate, to)}>
         {control.label}
       </button>
     </>

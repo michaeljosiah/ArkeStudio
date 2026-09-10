@@ -66,6 +66,16 @@ export function takeArrival(): ActivityTab | null {
   return tab;
 }
 
+/**
+ * Where a link to Activity goes now (R-20): the panel, over this screen, on the Inbox. Anything
+ * else is a place. The receipts, the founding build's notice and the diagnostics remedies all
+ * name `/activity`; only an arrival from outside the app should take the retired route.
+ */
+export function followLink(navigate: (to: string) => void, to: string): void {
+  if (to === "/activity" || to.startsWith("/activity?")) openActivityPanel("inbox");
+  else navigate(to);
+}
+
 export function showActivityTab(tab: ActivityTab): void {
   update({ ...state, open: true, tab, calls: undefined });
 }

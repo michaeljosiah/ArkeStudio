@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useRef, type CSSProperties } from "react";
-import { useNavigate, type NavigateFunction } from "react-router";
+import { useNavigate } from "react-router";
 import { toast, Toaster } from "sonner";
 import type { Job, ModelManifest } from "@arke-studio/contracts";
 import {
@@ -18,19 +18,13 @@ import {
 } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
-import { openActivityPanel } from "../lib/activity-panel.js";
+import { followLink, openActivityPanel } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 
 /**
  * The notification that follows a dispatch (design turn 79). It is the Activity row for that
  * work, arriving early — so the bands, the dot and the copy are 26a's.
  */
-
-/** Where a receipt's action goes: Activity is a panel over this screen (R-20); anywhere else is a place. */
-function follow(navigate: NavigateFunction, to: string): void {
-  if (to === "/activity") openActivityPanel("inbox");
-  else navigate(to);
-}
 
 /**
  * Take back the notification raised for one request (issue 507). This one rides above every
@@ -255,7 +249,7 @@ export function QueueToaster() {
 
   useEffect(() => {
     const act = (note: QueueNote, id: string | number) => {
-      if (note.action) follow(navigate, note.action.to);
+      if (note.action) followLink(navigate, note.action.to);
       toast.dismiss(id);
     };
     return subscribeQueueResults((result) => {
@@ -291,7 +285,7 @@ export function QueueToaster() {
         const note = failedNote(job, store.current.manifest, existing);
         toast.custom((id) => (
           <ToastNote note={note} onAct={() => {
-            if (note.action) follow(navigate, note.action.to);
+            if (note.action) followLink(navigate, note.action.to);
             toast.dismiss(id);
           }} onDismiss={() => toast.dismiss(id)} />
         ), { id: note.id, duration: Infinity });
@@ -312,7 +306,7 @@ export function QueueToaster() {
             <ToastNote
               note={note}
               onAct={() => {
-                if (note.action) follow(navigate, note.action.to);
+                if (note.action) followLink(navigate, note.action.to);
                 toast.dismiss(id);
               }}
               onDismiss={() => toast.dismiss(id)}
