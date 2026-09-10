@@ -1366,7 +1366,7 @@ function Row({
             />
           </div>
         ) : null}
-        {refs.length === 0 && overrides.length === 0 ? null : (
+        {!promptOpen || (refs.length === 0 && overrides.length === 0) ? null : (
           <div className="fy-swrow__meta">
             <div className="fy-swrow__refs">
               {refs.map((entry) => {

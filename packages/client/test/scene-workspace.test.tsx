@@ -1656,6 +1656,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.ok(row.querySelector('[aria-label="Frame variants for shot 12"] svg'));
     assert.ok(row.querySelector('[aria-label="More image actions for shot 12"] svg'));
     assert.ok(row.querySelector('[aria-label="Edit title for shot 12"]'));
+    assert.equal(row.querySelector(".fy-swrow__meta"), null, "secondary references are folded with the prompt at rest");
+    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
     assert.ok(row.querySelector(".fy-swchip > span"), "shot status uses a dot rather than a filled pill");
@@ -1694,7 +1696,6 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       }
     }
 
-    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
     assert.equal(prompt?.getAttribute("role"), "combobox", "the image prompt uses the shared @ picker too");
   });

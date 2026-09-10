@@ -41,7 +41,7 @@ import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast
 import { CharacterDialog } from "./character-dialog.js";
 import { LocationDialog } from "./location-dialog.js";
 import { Button } from "../../components/ui.js";
-import { Grid2x2, ListBullet, Maximize2, Minimize2, Pin, Plus } from "../../components/icons.js";
+import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Pin, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { SceneStage } from "./stage.js";
@@ -502,10 +502,6 @@ export function SceneWorkspace({
                 </Button>
               </div>
             </div>
-            <SceneSynopsis
-              scene={legacySceneView(scene)}
-              onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })}
-            />
             <div className="fy-sw__context" aria-label="Scene context">
               <div className="fy-sw__cast" aria-label="Cast">
                 <span className="fy-sw__context-label">Cast</span>
@@ -543,9 +539,20 @@ export function SceneWorkspace({
                   </button>
                 )}
               </div>
-              <div className="fy-sw__metrics" aria-label="Scene metrics"><span>{aspect}</span><span>{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span>{seconds(totalSec)}</span></div>
-              {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
-              {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
+              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span><Timer size={16} />{seconds(totalSec)}</span></div>
+              <details className="fy-sw__details" onKeyDown={(event) => {
+                if (event.key !== "Escape" || event.defaultPrevented) return;
+                event.currentTarget.open = false;
+                event.currentTarget.querySelector("summary")?.focus();
+              }}>
+                <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
+                <div className="fy-sw__detailspanel">
+                  <span className="fy-sw__context-label">What happens</span>
+                  <SceneSynopsis scene={legacySceneView(scene)} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+                  {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
+                  {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
+                </div>
+              </details>
             </div>
             {lengthFindings.map((finding) => <p key={finding.about} className="fy-mono" data-testid="episode-length-note">{finding.message}</p>)}
             {sceneReviewOpen ? <SceneReview scene={legacySceneView(scene)} onClose={() => setSceneReviewOpen(false)} /> : null}

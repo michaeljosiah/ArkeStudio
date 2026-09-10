@@ -236,6 +236,7 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     sceneOf(state).shots[0]!.framing = { size: "MCU", lens: "50mm", movement: "slow push-in" };
     const mounted = await mountState(state);
     const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     const refs = [...row.querySelectorAll(".fy-swrow__ref")] as unknown as HTMLElement[];
     assert.ok(refs.length >= 2);
     for (const ref of refs) {
@@ -388,6 +389,7 @@ describe("the band's chip says what the character brings to the shot (SPEC-044 R
     const mounted = await mountState(state);
     const rows = all(mounted, ".fy-swrow");
     const words = (row: HTMLElement) => [...row.querySelectorAll(".fy-swrow__ref")].map((chip) => chip.querySelector(".fy-swrow__refwords")?.textContent ?? null);
+    for (const row of rows) await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     assert.match(rows[0]!.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.deepEqual(words(rows[0]!), ["voice · look", null], "she speaks in shot 12 and is cited; the place brings no words");
     assert.deepEqual(words(rows[1]!), ["look"], "cited in shot 13, silent there");
