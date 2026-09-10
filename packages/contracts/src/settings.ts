@@ -71,8 +71,11 @@ export type HarnessSettings = z.infer<typeof HarnessSettingsSchema>;
  */
 export const ActivitySeenSchema = z
   .object({
-    inboxSeenAt: z.string().nullable().default(null),
-    whatsNewSeenVersion: z.string().nullable().default(null),
+    // Validated, not merely typed: the guard around this pair only resets what fails to parse,
+    // and a string that is not an instant would compare lexically against every job stamp —
+    // `not-a-date` sorts above `2026-…` forever, and the bell's dot would never light again.
+    inboxSeenAt: IsoDateTimeSchema.nullable().default(null),
+    whatsNewSeenVersion: z.string().regex(/^\d+(?:\.\d+)*(?:-[0-9A-Za-z.-]+)?$/).nullable().default(null),
   })
   .strict();
 export type ActivitySeen = z.infer<typeof ActivitySeenSchema>;

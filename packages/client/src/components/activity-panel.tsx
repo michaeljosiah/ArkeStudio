@@ -32,6 +32,7 @@ import {
   showActivityTab,
   takeArrival,
   useActivityPanel,
+  waitingUpdate,
   type ActivityPanelState,
   type ActivityTab,
 } from "../lib/activity-panel.js";
@@ -77,15 +78,6 @@ const TERMINAL = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
 const HISTORY_DAYS = 7;
 const HISTORY_ROWS = 50;
 const NOT_LANDED = new Set(["failed", "skipped", "unauthorized"]);
-/** An update the panel has something to say about: found, moving, or stuck. */
-const WAITING_UPDATE = new Set<UpdateState["status"]>([
-  "available",
-  "downloading",
-  "ready",
-  "install-on-close",
-  "error",
-  "install-failed",
-]);
 const DOT: Record<NoteTone, string> = {
   queued: "fy-ap__dot--queued",
   warning: "fy-ap__dot--warn",
@@ -105,11 +97,6 @@ export function ActivityPanel() {
   }, [location.pathname]);
   if (!panel.open || !state) return null;
   return <OpenPanel panel={panel} state={state} />;
-}
-
-/** True while an update is worth a card at the top of What's new. */
-export function waitingUpdate(update: UpdateState | null): UpdateState | null {
-  return update && update.targetVersion && WAITING_UPDATE.has(update.status) ? update : null;
 }
 
 function OpenPanel({ panel, state }: { panel: ActivityPanelState; state: ClientState }) {

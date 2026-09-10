@@ -39,4 +39,14 @@ describe("what Activity's panel remembers", () => {
     assert.deepEqual(loaded.activity, { inboxSeenAt: null, whatsNewSeenVersion: null });
     assert.deepEqual(loaded.spend, { thresholdMicroUsd: 7_000_000, periodDays: 3 }, "the rest of the file is kept");
   });
+
+  it("treats a string that is not an instant as nothing seen — it would outsort every job stamp forever", async () => {
+    const { root } = await makeTempRoot();
+    const path = join(root, "settings.json");
+    await writeFile(path, JSON.stringify({ activity: { inboxSeenAt: "not-a-date", whatsNewSeenVersion: "0.5.49" } }), "utf8");
+    const loaded = await new AppSettingsFile(path).load();
+    assert.deepEqual(loaded.activity, { inboxSeenAt: null, whatsNewSeenVersion: null }, "codex, PR 1087");
+    await writeFile(path, JSON.stringify({ activity: { inboxSeenAt: "2026-09-10T12:00:00.000Z", whatsNewSeenVersion: "yesterday" } }), "utf8");
+    assert.deepEqual((await new AppSettingsFile(path).load()).activity, { inboxSeenAt: null, whatsNewSeenVersion: null }, "a version that is not one");
+  });
 });

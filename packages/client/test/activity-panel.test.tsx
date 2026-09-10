@@ -273,6 +273,18 @@ describe("the bell's two dots (R-24)", () => {
     assert.ok(seen.includes('title="Activity"'));
   });
 
+  it("wears the foreground dot for an update the updater has found (codex P2, PR 1087)", () => {
+    const state = quiet();
+    state.app.activitySeen = { inboxSeenAt: TODAY, whatsNewSeenVersion: "0.5.49" };
+    state.app.update = { status: "available", targetVersion: "0.5.50", progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null };
+    withState(state);
+    assert.ok(activityControl(chrome()).includes("fy-iconbtn__dot--new"), "a release you do not have yet is unread");
+    state.app.update = { ...state.app.update, status: "none", targetVersion: null };
+    withState(state);
+    assert.equal(activityControl(chrome()).includes("fy-iconbtn__dot"), false);
+    __setStateForTest(FIXTURE_STATE);
+  });
+
   it("wears the foreground dot for a release not yet read, and clears once it is", () => {
     __setReleasesForTest([card("0.5.47", "A world remembers why it was made", "2026-08-23")]);
     const state = quiet();

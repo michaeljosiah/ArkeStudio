@@ -7,7 +7,7 @@
 //   node scripts/release-notes.mjs check v0.5.49        exits 1 with the reason when the card is unfit
 //   node scripts/release-notes.mjs title v0.5.49        prints "v0.5.49 — <title>"
 //   node scripts/release-notes.mjs body  v0.5.49        prints the notes without the front matter
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,8 +38,14 @@ for (const line of match[1].split("\n")) {
 }
 if (!fields.title) fail(`docs/releases/${tag}/notes.md names no title`);
 if (!fields.date || !/^\d{4}-\d{2}-\d{2}$/.test(fields.date)) fail(`docs/releases/${tag}/notes.md needs a date as YYYY-MM-DD`);
+// The client bundles same-folder jpg/jpeg/png/webp files and nothing else (packages/client/src/lib/
+// releases.ts), so a card is fit only when its picture is one of those, by basename, and there.
 if (!fields.picture) fail(`docs/releases/${tag}/notes.md names no picture`);
-if (!existsSync(join(dir, fields.picture))) fail(`docs/releases/${tag}/${fields.picture} is missing`);
+if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.(jpe?g|png|webp)$/i.test(fields.picture)) {
+  fail(`docs/releases/${tag}/notes.md names "${fields.picture}"; a picture is a jpg, jpeg, png or webp file beside the notes, by basename`);
+}
+const picturePath = join(dir, fields.picture);
+if (!existsSync(picturePath) || !statSync(picturePath).isFile()) fail(`docs/releases/${tag}/${fields.picture} is missing`);
 
 const body = match[2].trim();
 if (body.length === 0) fail(`docs/releases/${tag}/notes.md has no notes under its front matter`);

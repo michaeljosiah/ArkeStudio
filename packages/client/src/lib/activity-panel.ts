@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import type { UpdateState } from "@arke-studio/contracts";
 
 /**
  * The Activity panel's own state (design turn 136): whether it is open, which tab, and whether a
@@ -13,6 +14,24 @@ export interface ActivityPanelState {
   tab: ActivityTab;
   /** `undefined` is the tab's own body; `null` is every recent provider call; an id is one job's. */
   calls: string | null | undefined;
+}
+
+/** An update the panel has something to say about: found, moving, or stuck. */
+const WAITING_UPDATE = new Set<UpdateState["status"]>([
+  "available",
+  "downloading",
+  "ready",
+  "install-on-close",
+  "error",
+  "install-failed",
+]);
+
+/**
+ * The update worth a card at the top of What's new — and the same fact lights the bell (R-24):
+ * a release a person does not have yet is as unread as one they have not opened.
+ */
+export function waitingUpdate(update: UpdateState | null | undefined): UpdateState | null {
+  return update && update.targetVersion && WAITING_UPDATE.has(update.status) ? update : null;
 }
 
 const CLOSED: ActivityPanelState = { open: false, tab: "inbox", calls: undefined };

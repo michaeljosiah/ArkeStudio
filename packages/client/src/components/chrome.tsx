@@ -3,7 +3,7 @@ import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
 import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
-import { closeActivityPanel, openActivityPanel, useActivityPanel } from "../lib/activity-panel.js";
+import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
 import { bundledReleases } from "../lib/releases.js";
 import { unreadReleases } from "../lib/release-notes.js";
 import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
@@ -56,10 +56,13 @@ export function AppChrome({
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
   const attention = state ? computeNeedsYou(state).length > 0 : false;
   // The second dot (design turn 136, R-24): something to read rather than decide — work that came
-  // back since the Inbox was last opened, or a release not yet read. Warning wins when both apply.
+  // back since the Inbox was last opened, a release not yet read, or one the updater has found
+  // and the person does not have yet. Warning wins when both apply.
   const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
   const fresh = state
-    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) || unreadReleases(bundledReleases(), seen.whatsNewSeenVersion).length > 0
+    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
+      unreadReleases(bundledReleases(), seen.whatsNewSeenVersion).length > 0 ||
+      waitingUpdate(state.app.update) !== null
     : false;
   const panel = useActivityPanel();
   // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the

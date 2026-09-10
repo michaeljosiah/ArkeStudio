@@ -80,9 +80,32 @@ describe("queue notification", () => {
     assert.doesNotMatch(note!.title, /Undersong/i);
   });
 
-  it("marks an estimate with a tilde and actual spend without one", () => {
+  it("marks an estimate with a tilde and a provider-reported figure without one", () => {
     assert.match(enqueueNote(result(), [job()], manifest)!.meta, /~\$0\.61$/);
-    assert.equal(readyNote(job({ status: "succeeded" }), manifest, undefined).meta, "GPT Image 2 · $0.61");
+    assert.equal(readyNote(job({ status: "succeeded", providerCostMicroUsd: 610_000 }), manifest, undefined).meta, "GPT Image 2 · $0.61");
+    assert.equal(
+      readyNote(job({ status: "succeeded", providerCostMicroUsd: 540_000 }), manifest, undefined).meta,
+      "GPT Image 2 · $0.54",
+      "the provider's figure, not the estimate it replaced",
+    );
+    assert.equal(
+      readyNote(job({ status: "succeeded" }), manifest, undefined).meta,
+      "GPT Image 2 · ~$0.61",
+      "a manifest-derived actual keeps its tilde (SPEC-014 R-10; codex P2, PR 1087)",
+    );
+  });
+
+  it("says what a failure cost from what the provider said (codex P1, PR 1087)", () => {
+    const refused = failedNote(job({ status: "failed", attempt: 1, submissionRejected: true, error: "401" }), manifest, undefined);
+    assert.match(refused.meta, /not charged$/, "refused before it was taken");
+    const charged = failedNote(job({ status: "failed", providerJobId: "p1", providerCostMicroUsd: 120_000, error: "timeout" }), manifest, undefined);
+    assert.match(charged.meta, /\$0\.12$/, "a reported charge on the failure is believed");
+    const free = failedNote(job({ status: "failed", providerJobId: "p1", providerCostMicroUsd: 0, error: "fault" }), manifest, undefined);
+    assert.match(free.meta, /not charged$/, "a reported zero is a zero");
+    const unknown = failedNote(job({ status: "failed", providerJobId: "p1", error: "fault" }), manifest, undefined);
+    assert.match(unknown.meta, /charge unknown$/, "taken and unreported is unknown, not zero");
+    const inFlight = failedNote(job({ status: "failed", attempt: 1, error: "submit timed out" }), manifest, undefined);
+    assert.match(inFlight.meta, /charge unknown$/);
   });
 
   it("says local where the figure would be, because there is nothing to spend", () => {
@@ -311,7 +334,7 @@ describe("queue notification", () => {
       id: "job:jb_01J8E0000000000000000000J1",
       tone: "back",
       title: "Maren Kest, character sheet ready",
-      meta: "GPT Image 2 · $0.61",
+      meta: "GPT Image 2 · ~$0.61",
       action: { label: "View", to: "/w/01J8F3K2QW9VZX4N7M0RTYB6HC/cast/maren-kest/kit" },
     });
     assert.equal(readyNote(job({ status: "succeeded" }), manifest, undefined).action?.label, "Activity");
