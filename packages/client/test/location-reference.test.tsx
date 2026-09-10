@@ -145,7 +145,7 @@ describe("the location reference tab (#243)", () => {
     const html = render([kit([view(1, "Establishing view", "2026-08-01T10:00:00Z")], "lv_01")]);
     const pane = html.slice(html.indexOf("Location sheet"));
     assert.ok(!/>\s*(Generate|Regenerate)\s*</.test(pane), "the sheet pane must carry no generate control");
-    assert.ok(html.includes("rebuilt on every acceptance"));
+    assert.equal(html.includes("rebuilt on every acceptance"), false, "the file name alone (turn 137)");
   });
 
   it("holds a candidate for a name before it will accept it", () => {

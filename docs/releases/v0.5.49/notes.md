@@ -15,10 +15,12 @@ What's new is the first tab. Each release now ships with a card like this one, a
 the notes, and the last eight ride along, so a fresh install reads as a history rather than one
 announcement. An update waiting for you sits at the top with its own Download.
 
-The bell has two dots. Amber while something needs a decision. Black when something came back
-since you last looked, or a release you have not read. Opening the panel clears the black one
-and nothing else.
+The bell has two dots. Amber while something needs a decision. A second dot, in the text
+colour, when something came back since you last looked or a release you have not read. Opening
+the panel clears the second one and nothing else.
 
 The spend alert is a row. It used to live in a side column nobody opened; now it sits in the
-Inbox beside blocked work, says nothing is blocked, and leaves on its own when the total drops
-back under your line.
+Inbox beside blocked work and leaves on its own when the total drops back under your line.
+
+And the small print is gone. Every line under a button, a field or a composer that explained
+what would happen has come off, here and in the design.

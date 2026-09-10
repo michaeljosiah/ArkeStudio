@@ -849,10 +849,8 @@ export function ReplaceMainPhotoScreen() {
           onCommit: () => {
             if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
           },
-          note:
-            acceptance?.status === "failed"
-              ? acceptance.reason
-              : "Replacing the main photo makes the current character sheet stale.",
+          // A refusal is the one line the card owes; the consequence lives on the control's hint.
+          ...(acceptance?.status === "failed" ? { note: acceptance.reason } : {}),
         }}
       />
     </div>

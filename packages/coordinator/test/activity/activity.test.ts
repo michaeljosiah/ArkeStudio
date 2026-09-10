@@ -360,7 +360,7 @@ describe("a fired spend threshold is a queue entry (R-23, design turn 136)", () 
     assert.equal(entry?.kind, "spend-over-threshold");
     assert.equal(entry?.urgency, 2);
     assert.equal(entry?.title, "Over the spend alert");
-    assert.match(entry?.detail ?? "", /against .* \/ 7d · nothing is blocked$/);
+    assert.match(entry?.detail ?? "", /against .* \/ 7d$/);
     assert.deepEqual(entry?.actions, ["spend"]);
   });
 

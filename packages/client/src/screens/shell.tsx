@@ -703,7 +703,6 @@ function BuildCard({
           Not yet
         </Button>
       </div>
-      <div className="fy-actioncard__audit">yes once · nothing asks again</div>
     </article>
   );
 }
@@ -1042,9 +1041,6 @@ export function NewWorldScreen() {
                   Back
                 </Button>
                 <span style={{ flex: 1 }} />
-                <span className="fy-artstep__note">
-                  recorded as world look v1 · changing it later goes through the accept gate
-                </span>
                 <Button
                   variant="primary"
                   disabled={!canCreate || look.trim().length === 0}
@@ -1456,7 +1452,6 @@ export function NewWorldScreen() {
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <span className="fy-dot fy-dot--warn" style={{ width: 6, height: 6 }} />
                 <span style={{ font: "600 12.5px var(--font-sans)" }}>Open threads</span>
-                <span className="fy-mono">pull one to keep going</span>
               </div>
               <div style={{ font: "400 12px/1.7 var(--font-sans)", color: "var(--muted-foreground)", marginTop: 7 }}>
                 {blueprint!.threads.slice(0, 4).map((t, i) => (

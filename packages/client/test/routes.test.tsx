@@ -511,7 +511,7 @@ describe("screen inventory", () => {
     }
 
     const replace = renderAt(`${base}/main-photo`);
-    assert.ok(replace.includes("Replacing the main photo makes the current character sheet stale."));
+    assert.equal(replace.includes("Replacing the main photo makes the current character sheet stale."), false, "no consequence line on the card (turn 137)");
     assert.ok(replace.includes("World look · v"));
 
     const looks = renderAt(`${base}/looks`);

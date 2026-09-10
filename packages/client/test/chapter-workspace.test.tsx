@@ -460,7 +460,7 @@ describe("the craft loop (turn 128)", () => {
     const m = await mount({ ...styled, world: { ...styled.world!, conversations: [THREAD] } });
     await answerOpen(m);
     assert.match(text(m), /close third · past · v2/, "the side says the style in one line");
-    assert.match(text(m), /settled in Develop · read by every draft/);
+    assert.match(text(m), /settled in Develop/);
     assert.match(text(m), /Hold this against the style/, "with a style settled, holding the chapter against it is offered");
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered before anything is selected");
 
@@ -518,7 +518,7 @@ describe("the craft loop (turn 128)", () => {
     assert.match(text(m), /Locked while a passage waits · v4/);
     assert.match(text(m), /chapter 02 · passage/, "the card names the passage");
     assert.match(text(m), /Replaces one passage · the rest of the chapter is untouched/);
-    assert.match(text(m), /a passage waits for your yes/);
+    assert.doesNotMatch(text(m), /waits for your yes/, "no caption under the composer (turn 137)");
     const marked = [...m.container.querySelectorAll("p.fy-ch__passage")].map((p) => p.textContent);
     assert.deepEqual(marked, ["Maren counted the seven bells."], "only the paragraph the span falls in is marked");
     assert.doesNotMatch(text(m), /Ask Arke · /, "nothing is offered on a locked manuscript");

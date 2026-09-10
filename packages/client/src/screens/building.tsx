@@ -154,9 +154,6 @@ export function BuildingScreen() {
           <Button variant="ghost" onClick={() => worldId && stopFoundingBuild(worldId)}>
             Stop
           </Button>
-          <span className="fy-mono" style={{ fontSize: 9.5, color: "var(--muted-foreground)" }}>
-            what is made is kept
-          </span>
         </div>
       </div>
     </div>

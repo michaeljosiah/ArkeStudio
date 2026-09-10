@@ -1880,9 +1880,6 @@ function DayOne({
             : {})}
           autoFocus
         />
-        <div className="fy-mono" style={{ marginTop: 8 }}>
-          talking writes nothing · you accept what you keep
-        </div>
       </div>
       <div style={{ display: "flex", gap: 12, maxWidth: 640 }}>
         <button type="button" className="fy-radio" style={{ flex: 1 }} disabled={newScene.pending} onClick={() => newScene.create()}>
@@ -2000,7 +1997,7 @@ export function ProductionChatScreen() {
                   worldId={worldId}
                   subject={stagedStyle ? "the style" : shape?.isEpisodic ? "the season" : "the overview"}
                   staged={staged}
-                  writes={`the gate writes ${stagedStyle ? "prose-style.json" : file} · nothing else moves`}
+                  writes={`the gate writes ${stagedStyle ? "prose-style.json" : file}`}
                   onAccepted={() => navigate(detailsPath)}
                 />
               ),
@@ -2194,7 +2191,7 @@ function OverviewStoryScreen() {
                 <>
                   <div className="fy-story__stylehead" data-testid="prose-style">
                     <span style={{ font: "600 13px var(--font-sans)" }}>Style</span>
-                    <span className="fy-mono">v{style.version} · settled in Develop · read by every draft and every revision</span>
+                    <span className="fy-mono">v{style.version} · settled in Develop</span>
                   </div>
                   {style.pov !== undefined && (
                     <div className="fy-draftcard fy-texthost">
@@ -2242,7 +2239,6 @@ function OverviewStoryScreen() {
           ) : (
             <EmptyState
               title="Nothing settled yet"
-              hint="Production Chat is where this gets decided — say what the thing is, and what you settle lands here."
             />
           )}
         </div>

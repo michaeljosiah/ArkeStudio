@@ -797,13 +797,6 @@ export function ArtDirectionProposalScreen() {
             <Sparkle />
           </button>
         </div>
-        <div className="fy-artproposal__seedline">
-          {presetId !== null
-            ? "the preset seeded these words · your edits win"
-            : description === null
-              ? "the current look's words · edit them to draft the change"
-              : "your own words · nothing was seeded"}
-        </div>
         <div className="fy-artproposal__buttons">
           <Button variant="ghost" onClick={cancel}>
             Cancel

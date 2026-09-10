@@ -542,7 +542,7 @@ export function LocationReferenceScreen() {
                   downloadName={`${sheet.name} location sheet`}
                 />
               </div>
-              <p className="fy-mono">{sheetFile} · rebuilt on every acceptance</p>
+              <p className="fy-mono">{sheetFile}</p>
               {/* The same function dispatch composes the preamble from, so what this promises and
                   what a request states cannot drift into disagreeing. */}
               <div className="fy-locref__carries">

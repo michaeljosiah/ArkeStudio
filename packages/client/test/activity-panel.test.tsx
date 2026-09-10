@@ -419,7 +419,7 @@ describe("the spend alert is a queue entry (R-23)", () => {
     assert.deepEqual(entry?.actions, ["spend"]);
     const html = render(state, "inbox");
     assert.ok(html.includes("Over the spend alert"));
-    assert.ok(html.includes("nothing is blocked"));
+    assert.equal(html.includes("nothing is blocked"), false, "figures only; no reassurance on the row (turn 137)");
     withState(state);
     openActivityPanel("inbox");
     await mounted(

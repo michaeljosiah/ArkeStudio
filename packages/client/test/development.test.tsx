@@ -486,7 +486,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
     assert.match(html, />Discard</);
     assert.match(html, /The season, as it stands/, "the thing the gate would make");
     assert.match(html, /Who is ringing the drowned bell\?/);
-    assert.match(html, /the gate writes season\.json · nothing else moves/);
+    assert.match(html, /the gate writes season\.json/);
     // The rail has two states and never both at once (turns 89, 91).
     assert.doesNotMatch(html, /What it understood/, "the points are not up beside a decision");
   });
@@ -503,7 +503,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /the gate writes story\.json · nothing else moves/);
+    assert.match(html, /the gate writes story\.json/);
     assert.match(html, /the overview/, "named as what it is, not as a season");
   });
 
@@ -519,7 +519,7 @@ describe("the season level has a wrap-up and an accept (design turn 92)", () => 
       <ProductionChatScreen />,
       "/w/:worldId/p/:prodId/story",
     );
-    assert.match(html, /the gate writes prose-style\.json · nothing else moves/);
+    assert.match(html, /the gate writes prose-style\.json/);
     assert.match(html, /the style/, "named as what it is");
     assert.match(html, /close third/);
   });
