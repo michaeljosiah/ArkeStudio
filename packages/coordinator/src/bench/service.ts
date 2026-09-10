@@ -1,5 +1,5 @@
 import { stageArtifactProblem } from "../productions/stage-playblast.js";
-import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem } from "@arke-studio/contracts";
+import { planSubjectCharacterAudio, characterAudioInstructions, referencePrompt, referenceInputProblem, type FrozenPerformanceAudio } from "@arke-studio/contracts";
 import { readdir } from "node:fs/promises";
 import {
   DEFAULT_SHOT_SEC,
@@ -638,6 +638,8 @@ export function planBenchDispatch(
     at: string;
     /** Re-run: dispatch this take's immutable snapshot instead of the live composer. */
     fromTake?: BenchTake | undefined;
+    /** The scene cast's reads, resolved by the caller (SPEC-044 R-29): the plan card and the Bench say the same. */
+    performanceReferences?: readonly FrozenPerformanceAudio[] | undefined;
     /**
      * The shipped version of a local recipe, when the chosen model is one (SPEC-021 R-13, R-15).
      * Injected because the recipe catalogue lives in @arke-studio/providers, which this package
@@ -837,7 +839,8 @@ export function planBenchDispatch(
   const preamble = session.subject === undefined || frame !== null ? null : bindingPreamble(bound);
   const resolvedAudio = params.kind === "video" && session.subject ? (options.fromTake ? options.fromTake.request.audioReferences : planSubjectCharacterAudio({
     world: bundle, subject: session.subject, model, imageCount: frame?.paths.length ?? referencePaths.length,
-    taskMode, disabled: params.audioReferencesDisabled })) : undefined;
+    taskMode, disabled: params.audioReferencesDisabled,
+    ...(options.performanceReferences?.length ? { performanceReferences: options.performanceReferences } : {}) })) : undefined;
   const audioReferences = resolvedAudio && (resolvedAudio.disabled || resolvedAudio.references.length || resolvedAudio.problems.length) ? resolvedAudio : undefined;
   if (audioReferences?.problems.length) return { ok: false, reason: audioReferences.problems.join(" ") };
   const referenceProblem = referenceInputProblem(model, { references: referencePaths, videoReferences: videoPaths, referenceMedia: mediaReferences, audioReferences });

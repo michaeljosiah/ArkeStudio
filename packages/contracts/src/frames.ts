@@ -5,7 +5,7 @@ import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { MasterAudioBindingSchema, MasterAudioRequestSchema, PerformanceAudioRequestSchema } from "./audio-reference.js";
 import { DialogueTimingIntentSchema } from "./cut.js";
-import { AudioRangeSchema, FullSha256Schema } from "./audio.js";
+import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./audio.js";
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
@@ -1510,13 +1510,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, lineKey: z.string().min(1).max(300), expectedSelectionHash: z.string().nullable() }).strict(),
   z.object({ kind: z.literal("review-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, decision: z.enum(["accept", "reject"]), note: z.string().max(1000).optional(),
-    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable() }).strict(),
+    expectedReviewHash: z.string().nullable(), expectedSelectionHash: z.string().nullable(),
+    // An accept from the character dialog also chooses the read for the scene (SPEC-044 R-15):
+    // a generated line arrives unreviewed and one press accepts, selects and chooses.
+    select: z.boolean().optional(), expectedSceneVersion: z.number().int().positive().optional() }).strict(),
   z.object({ kind: z.literal("purge-performance"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
   z.object({ kind: z.literal("keep-performance-recording"), requestId: UlidSchema, worldId: UlidSchema,
     productionId: SlugSchema, sceneId: SceneIdSchema, shotId: ShotIdSchema, blockId: z.string().min(1).optional(),
     expectedSceneVersion: z.number().int().positive(), spoolId: z.string().uuid(),
-    captureBasis: z.enum(["self", "authorized", "licensed"]) }).strict(),
+    captureBasis: z.enum(["self", "authorized", "licensed"]),
+    // Keep selects (SPEC-044 R-15): accept, select the line and choose it as the character's
+    // voice in one request. Attestations and the cloud basis are said here, once (R-14).
+    select: z.boolean().optional(),
+    attestations: z.array(AudioAttestationSchema.shape.kind).optional(),
+    cloudBasis: z.enum(["self", "authorized", "licensed"]).optional() }).strict(),
   z.object({ kind: z.literal("resume-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,
     sheetId: SlugSchema, operationId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("prepare-character-voice-sample"), requestId: UlidSchema, worldId: UlidSchema,

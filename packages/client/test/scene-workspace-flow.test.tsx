@@ -413,7 +413,44 @@ describe("Flow cards follow the prototype (§11.1)", () => {
     assert.match(clip.querySelector(".fy-swnode__run")?.textContent ?? "", /^(Render clip|Re-render)$/);
   });
 
-  it("a reference card shows the sheet's portrait above its caption", async () => {
+  it("draws the character card with what she brings and an Open pill, no node for the place, and a member without a citation joined to nothing (SPEC-044 R-17, R-23)", async () => {
+    const world = FIXTURE_STATE.world!;
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const opened: string[] = [];
+    const mounted = await mountFlow({
+      scene: { ...scene, cast: { odile: { added: "2026-09-09T10:00:00.000Z" } } } as never,
+      sheets: [...world.sheets, { id: "odile", type: "character", name: "Odile", version: 1, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never],
+      onOpenCharacter: (sheetId) => { opened.push(sheetId); },
+    });
+    const refs = all(mounted, '.fy-swnode[data-kind="ref"]');
+    assert.deepEqual(
+      refs.map((node) => [node.querySelector(".fy-swnode__name")?.textContent, node.querySelector(".fy-swnode__meta")?.textContent]),
+      [["Maren Kest", "voice · look · in 1 shot"], ["Odile", "in no shot yet"]],
+    );
+    assert.ok(!refs.some((node) => node.textContent?.includes("The Vigil")), "the place is context, not cast");
+    assert.equal(refs[0]!.style.width, "200px");
+    assert.equal(refs[0]!.style.height, "72px");
+    assert.match(mounted.container.textContent ?? "", /Maren Kest is cited by shot 12/, "a soft edge to the citing shot");
+    assert.doesNotMatch(mounted.container.textContent ?? "", /Odile is cited/, "a member no shot cites is joined to nothing");
+    await click(refs[1]!.querySelector(".fy-swnode__open") as HTMLElement);
+    assert.deepEqual(opened, ["odile"]);
+  });
+
+  it("draws a staged shot's blocking below the cast lane, never over a card", async () => {
+    const world = FIXTURE_STATE.world!;
+    const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = structuredClone(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    const first = (scene as unknown as { shots: Array<{ staging?: unknown }> }).shots[0]!;
+    first.staging = { version: 1, cast: [{ sheetId: "maren-kest", x: -1, z: 0 }], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, -4], l: [0, 1, 0] }] };
+    const mounted = await mountFlow({ scene });
+    const card = q(mounted, '.fy-swnode[data-kind="ref"]')!;
+    const block = q(mounted, '.fy-swnode[data-kind="block"]')!;
+    const bottom = parseFloat(card.style.top) + parseFloat(card.style.height);
+    assert.ok(parseFloat(block.style.top) >= bottom, `the staging node (top ${block.style.top}) clears the card (bottom ${bottom})`);
+  });
+
+  it("a reference card shows the sheet's portrait beside its caption", async () => {
     const mounted = await openFlow();
     const ref = all(mounted, '.fy-swnode[data-kind="ref"]').find((node) => node.textContent?.includes("Maren Kest"));
     assert.ok(ref, "the cited character is a reference node");
@@ -421,6 +458,67 @@ describe("Flow cards follow the prototype (§11.1)", () => {
     assert.ok(thumb, "with a portrait");
     assert.match(thumb.getAttribute("style") ?? "", /references\/maren-kest\/head-front\.png/);
     assert.equal(thumb.getAttribute("aria-label"), "Maren Kest");
+  });
+});
+
+describe("full screen keeps the view where it is (SPEC-044 R-38; T-15)", () => {
+  it("enters from the glyph without remounting the canvas, keeps the zoom, and leaves on Escape", async () => {
+    const mounted = await openFlow();
+    const zoomIn = all(mounted, ".fy-swzoom button").find((button) => button.getAttribute("aria-label") === "Zoom in")!;
+    await click(zoomIn);
+    const zoomLabel = () => q(mounted, ".fy-swzoom")?.textContent ?? "";
+    const before = zoomLabel();
+    const node = q(mounted, '.fy-swnode[data-kind="shot"]')!;
+    await click(q(mounted, ".fy-sw__full")!);
+    const workspace = q(mounted, ".fy-sw")!;
+    assert.equal(workspace.getAttribute("data-full"), "true");
+    assert.ok(q(mounted, ".fy-sw__fullpill")?.textContent?.includes("scene 4"));
+    assert.match(q(mounted, ".fy-sw__fullpill")?.textContent ?? "", /Flow$/);
+    assert.ok(q(mounted, '.fy-swnode[data-kind="shot"]') === node, "the same canvas element: nothing remounted");
+    assert.equal(zoomLabel(), before, "the zoom survives the move");
+    assert.ok(q(mounted, ".fy-sw__fullexit"), "the reversed glyph with Esc");
+    await act(async () => {
+      const escape = new dom.window.Event("keydown", { bubbles: true });
+      Object.defineProperty(escape, "key", { value: "Escape" });
+      dom.document.dispatchEvent(escape);
+    });
+    assert.equal(workspace.getAttribute("data-full"), null, "Escape returns");
+    assert.ok(q(mounted, '.fy-swnode[data-kind="shot"]') === node, "and still nothing remounted");
+    assert.equal(zoomLabel(), before);
+  });
+
+  it("leaves Escape to a dialog or the menu above the view, and leaves with a menu entry that changes the view", async () => {
+    const mounted = await openFlow();
+    const workspace = q(mounted, ".fy-sw")!;
+    const escape = async () => {
+      await act(async () => {
+        const event = new dom.window.Event("keydown", { bubbles: true });
+        Object.defineProperty(event, "key", { value: "Escape" });
+        dom.document.dispatchEvent(event);
+      });
+    };
+    await click(q(mounted, ".fy-sw__full")!);
+    // A character's dialog opens from the card (R-23), an inline sibling of the view.
+    await click(q(mounted, '.fy-swnode[data-kind="ref"] .fy-swnode__open')!);
+    assert.ok(q(mounted, "dialog[open].fy-chardialog") !== null, "the dialog is open over full screen");
+    await escape();
+    assert.equal(workspace.getAttribute("data-full"), "true", "Escape with a dialog open is the dialog's");
+    await click(all(mounted, "dialog[open] button").find((button) => button.textContent === "Done")!);
+    assert.ok(q(mounted, "dialog[open]") === null, "Done closes the dialog");
+    // The Flow's own menu takes the next Escape too.
+    await act(async () => q(mounted, '.fy-swnode[data-kind="shot"]')!.dispatchEvent(contextMenu()));
+    assert.ok(menuOpen(mounted), "the menu opened");
+    await act(async () => menu(mounted)!.dispatchEvent(key("Escape")));
+    assert.equal(menuOpen(mounted), false, "Escape closes the menu");
+    assert.equal(workspace.getAttribute("data-full"), "true", "and that press was the menu's");
+    await escape();
+    assert.equal(workspace.getAttribute("data-full"), null, "the next Escape returns");
+    // Show boards moves the view to Storyboard, which never fills: the page comes back with it.
+    await click(q(mounted, ".fy-sw__full")!);
+    await act(async () => all(mounted, '.fy-swnode[data-kind="board"]')[0]!.dispatchEvent(contextMenu()));
+    await click(item(mounted, "Show boards"));
+    assert.equal(workspace.getAttribute("data-full"), null, "Storyboard is not a full-screen view");
+    assert.ok(q(mounted, ".fy-swrows") !== null, "and the rows are on screen");
   });
 });
 

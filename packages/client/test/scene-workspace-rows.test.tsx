@@ -338,3 +338,20 @@ it("shows the advisory 180-degree marker on the shot row and Flow staging node (
   await click(byText(mounted.container, "Flow"));
   assert.equal(q(mounted, '.fy-swnode[data-kind="block"] [title^="180° line:"]')?.textContent, "180° line");
 });
+
+describe("the band's chip says what the character brings to the shot (SPEC-044 R-22)", () => {
+  it("reads voice · look where the character speaks, look where only cited, nothing for the place, and opens the dialog", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.sheets.push({ id: "bray-half-hitch", type: "character", name: "Bray Half-Hitch", version: 2, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never);
+    sceneOf(state).shots[1]!.description += " @bray-half-hitch on the stair";
+    const mounted = await mountState(state);
+    const rows = all(mounted, ".fy-swrow");
+    const words = (row: HTMLElement) => [...row.querySelectorAll(".fy-swrow__ref")].map((chip) => chip.querySelector(".fy-swrow__refwords")?.textContent ?? null);
+    assert.match(rows[0]!.textContent ?? "", /Maren Kest.*The Vigil/);
+    assert.deepEqual(words(rows[0]!), ["voice · look", null], "she speaks in shot 12 and is cited; the place brings no words");
+    assert.deepEqual(words(rows[1]!), ["look"], "cited in shot 13, silent there");
+    assert.equal(rows[0]!.querySelector(".fy-swrow__ref--door")?.getAttribute("aria-haspopup"), "dialog");
+    await click(rows[0]!.querySelector(".fy-swrow__ref--door") as HTMLElement);
+    assert.equal(q(mounted, ".fy-chardialog")?.getAttribute("aria-label"), "Maren Kest in scene 4");
+  });
+});

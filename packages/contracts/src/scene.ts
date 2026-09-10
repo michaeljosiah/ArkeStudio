@@ -1,6 +1,7 @@
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { FullSha256Schema } from "./audio.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 
 /**
@@ -412,6 +413,29 @@ export type SceneStoryboard = z.infer<typeof SceneStoryboardSchema>;
  * because apart from the structural field there is nothing to drift — every other field keeps
  * its identity, owner, optionality, and meaning in both.
  */
+/**
+ * What a character in the scene brings as a voice (SPEC-044 R-7): the kit's designated sample,
+ * or one read made for this scene, by its immutable id and full hash. Absent means the sample.
+ */
+export const SceneVoiceChoiceSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("sample") }).strict(),
+  // `prefixedIdSchema("pf")` rather than PerformanceIdSchema: performance.ts reaches this file
+  // through scene-flow.ts, so importing it back here is a cycle that resolves as a TDZ crash.
+  z.object({ kind: z.literal("performance"), performanceId: prefixedIdSchema("pf"), hash: FullSha256Schema }).strict(),
+]);
+export type SceneVoiceChoice = z.infer<typeof SceneVoiceChoiceSchema>;
+
+/**
+ * A member of the scene's cast (SPEC-044 R-6..R-8). `added` marks someone put in the scene by
+ * hand rather than cited by a shot; a member held only for its choices has no `added`. The look
+ * is not here: it is the kit look attached to this scene (SPEC-017 R-20), which the planner
+ * already prefers, so a second record of it would only drift.
+ */
+export const SceneCastMemberSchema = z
+  .object({ added: IsoDateTimeSchema.optional(), voice: SceneVoiceChoiceSchema.optional() })
+  .strict();
+export type SceneCastMember = z.infer<typeof SceneCastMemberSchema>;
+
 export const SceneBaseShape = {
     id: SceneIdSchema,
     /**
@@ -442,6 +466,12 @@ export const SceneBaseShape = {
       })
       .strict()
       .optional(),
+    /**
+     * The scene's cast by character sheet id (SPEC-044 R-6..R-8): who is in it beyond the names
+     * its shots cite, and what each brings. Absent, the cast is the citations alone, every
+     * member on its defaults, and nothing is written for that.
+     */
+    cast: z.record(SlugSchema, SceneCastMemberSchema).optional(),
     /** Turn 97 (14d): camera defaults every shot inherits — a shot's `framing` field wins. */
     defaults: ShotFramingSchema.optional(),
     /** The action and set shared by the scene's cameras; a shot may carry a complete override. */

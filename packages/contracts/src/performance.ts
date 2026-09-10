@@ -17,6 +17,10 @@ export const PerformanceRecordBaseSchema = z.object({
   createdAt: IsoDateTimeSchema,
   captureAcknowledgement: z.object({ basis: z.enum(["self", "authorized", "licensed"]), statementVersion: z.literal(1), at: IsoDateTimeSchema }).strict().optional(),
   transcript: AudioTranscriptComparisonSchema.optional(), wordingConfirmedAt: IsoDateTimeSchema.optional(),
+  // Said once, at Keep (SPEC-044 R-14): what a dispatch needs attested about this audio, and the
+  // permission to send it, so no surface asks again per dispatch.
+  attestations: z.array(AudioAttestationSchema).optional(),
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 export const ScratchPerformanceSchema = PerformanceRecordBaseSchema.extend({ captureAcknowledgement: PerformanceRecordBaseSchema.shape.captureAcknowledgement.unwrap(), kind: z.literal("scratch"), recordedAt: IsoDateTimeSchema }).strict();
 export const SpeechToSpeechPerformanceSchema = PerformanceRecordBaseSchema.extend({
@@ -41,6 +45,8 @@ export const PerformanceConversionInputSchema = z.object({
   target: PerformanceTargetSchema, voiceAssignment: VoiceAssignmentSchema,
   acknowledgementId: z.string().min(1), warningCodes: z.array(z.string()), attestations: z.array(AudioAttestationSchema),
   wordingConfirmedAt: IsoDateTimeSchema, retention: z.enum(["provider-history", "zero-retention"]),
+  /** Said at the request (SPEC-044 R-14) and carried to the record; optional because queued jobs predate it. */
+  cloudBasis: z.enum(["self", "authorized", "licensed"]).optional(),
 }).strict();
 
 /** Stable script blocks win when coverage exists. Multiple lines require an explicit block choice. */

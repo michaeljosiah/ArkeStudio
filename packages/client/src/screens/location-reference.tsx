@@ -1,6 +1,6 @@
 import { resolveModel } from "../components/dispatch-bar.js";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   MAX_ACTIVE_LOCATION_VIEWS,
   designatedCompilation,
@@ -25,6 +25,7 @@ import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { shortDate } from "../lib/format.js";
 import {
   acceptLocationView,
+  attachCharacterLook,
   clearLocationViewUpload,
   generateLocationView,
   clearStagedReference,
@@ -182,6 +183,15 @@ export function LocationReferenceScreen() {
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [count, setCount] = useState(2);
   const addRef = useRef<HTMLButtonElement>(null);
+  // The scene dialog's `Add a plate` door lands here with the scene named (SPEC-044 R-18): each
+  // view then offers one press that makes it that scene's plate, the same attachment the dialog's
+  // own cards make.
+  const [searchParams] = useSearchParams();
+  const preset = (() => {
+    const [scope, productionId, sceneId] = (searchParams.get("attach") ?? "").split(":");
+    const scene = scope === "scene" ? world?.productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId) : undefined;
+    return scene !== undefined && productionId !== undefined && sceneId !== undefined ? { productionId, sceneId, number: scene.number } : null;
+  })();
   // A landed upload says itself — the candidate appears below. What it must not do is linger,
   // or the next press of Upload would find the slot already occupied and go quietly dead.
   useEffect(() => {
@@ -251,6 +261,15 @@ export function LocationReferenceScreen() {
                   accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
                   {view.artDirectionVersion}
                 </p>
+                {preset !== null && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                  >
+                    Use in scene {preset.number}
+                  </Button>
+                ) : null}
                 {index === 0 && (
                   // Panel 1 is the anchor every other angle was generated against, so replacing it
                   // is the one generation that is deliberately *not* anchored to anything.

@@ -1,4 +1,3 @@
-import { type MasterAudioRequest, type PerformanceAudioRequest } from "@arke-studio/contracts";
 import type { PromptReview, PromptSourceSnapshot } from "@arke-studio/contracts";
 import { devSession } from "./dev-session.js";
 import { useSyncExternalStore } from "react";
@@ -3543,12 +3542,11 @@ export function dispatchScenePlanned(
   policy: "review-gated" | "pre-authorized",
   resolution?: string,
   tier?: SizeTier,
-  audioReferencesDisabled?: boolean,
-  performanceAudio?: PerformanceAudioRequest[],
-  masterAudio?: MasterAudioRequest[],
-  acknowledgedRecommendationIds?: string[],
 ): string {
   const requestId = ulid();
+  // The scene page chooses nothing per dispatch (SPEC-044 R-26, R-29, R-34): the coordinator
+  // resolves the scene's cast when it plans, and dialogue guidance is not drawn, so no
+  // recommendation can have been acknowledged.
   send({
     kind: "dispatch-scene-planned",
     requestId,
@@ -3558,12 +3556,9 @@ export function dispatchScenePlanned(
     mode,
     modelId,
     policy,
-    ...(performanceAudio?.length ? { performanceAudio } : {}),
-    ...(masterAudio?.length ? { masterAudio } : {}),
-    ...(acknowledgedRecommendationIds?.length ? { acknowledgedRecommendationIds } : {}),
+    acknowledgedRecommendationIds: [],
     ...(resolution !== undefined ? { resolution } : {}),
     ...(tier !== undefined ? { tier } : {}),
-    ...(audioReferencesDisabled !== undefined ? { audioReferencesDisabled } : {}),
   });
   return requestId;
 }
@@ -3591,6 +3586,18 @@ export function planCancel(worldId: string, productionId: string, planId: string
 /** Ask for the folded states of a production's plans — also the restart reconciliation. */
 export function listPlans(worldId: string, productionId: string): void {
   send({ kind: "list-plans", worldId, productionId });
+}
+
+/** What the scene's lines can play (SPEC-044 R-33); the answer is a rehearsal result under this id. */
+export function planTableRead(worldId: string, productionId: string, sceneId: string): string | null {
+  const requestId = ulid();
+  return send({ kind: "plan-table-read", requestId, worldId, productionId, sceneId }) ? requestId : null;
+}
+
+/** Prepare the lines that have no read, at the cost the plan quoted (R-33); answered as the plan is. */
+export function prepareTableRead(worldId: string, productionId: string, sceneId: string, confirmationToken: string, confirmedMicroUsd: number): string | null {
+  const requestId = ulid();
+  return send({ kind: "prepare-table-read", requestId, worldId, productionId, sceneId, confirmationToken, confirmedMicroUsd }) ? requestId : null;
 }
 
 /** Save the routing record (epic 401): the strict parse server-side is the no-state gate. */
@@ -4915,7 +4922,8 @@ export function updateComfyUiRuntime(): void {
   send({ kind: "comfyui-update-runtime" });
 }
 
-export function convertPerformance(input: Omit<Extract<ClientMessage, { kind: "convert-performance" }>, "kind" | "requestId">): string | null {
-  const requestId = queueRequest("convert-performance");
-  return send({ kind: "convert-performance", requestId, ...input }) ? requestId : null;
+/** Generate a line (SPEC-044 R-14): a queue request, so the enqueue result reaches the sheet that asked. */
+export function generatePerformance(input: Omit<Extract<ClientMessage, { kind: "generate-performance" }>, "kind" | "requestId">): string | null {
+  const requestId = queueRequest("generate-performance");
+  return send({ kind: "generate-performance", requestId, ...input }) ? requestId : null;
 }

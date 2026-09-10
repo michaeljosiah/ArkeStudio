@@ -792,6 +792,16 @@ describe("kit mutations through the one commit primitive", () => {
     await store.close();
   });
 
+  it("attaches a location's view to a scene through the same door a character's look uses (SPEC-044 R-20)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "the-vigil", { id: "dusk", file: "looks/dusk.png", kind: "view", prompt: "The vigil at dusk",
+      takeId: "tk_01J8E0000000000000000000T9", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "the-vigil", "dusk", { kind: "scene", productionId: "saltlight", sceneId: "sc_04" });
+    assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.kind, look.attachedTo]),
+      [["view", { kind: "scene", productionId: "saltlight", sceneId: "sc_04" }]]);
+    await store.close();
+  });
+
   it("generates looks only after a main photo and carries it as identity", () => {
     const kit = kitOf([], {
       anchor: "main-photo.png",
@@ -1225,6 +1235,35 @@ describe("location views and the sheet they assemble (#243)", () => {
     await store.close();
   });
 
+  it("attaches a view to a scene as its plate, and the plate rides where the location's picture does (SPEC-044 R-18, §2.6)", async () => {
+    const { dir, store } = await openTicking();
+    await acceptView(store, dir, 1, "Establishing view");
+    await acceptView(store, dir, 2, "From the door");
+    const scope = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
+    await attachCharacterLook(store, VIGIL.id, "v2", scope);
+    const kit = (await readKit(store, VIGIL.id))!.kit;
+    const door = orderedLocationViews(kit).find((candidate) => candidate.name === "From the door")!;
+    assert.deepEqual(kit.looks?.map((look) => [look.id, look.kind, look.file, look.attachedTo]), [["v2", "view", door.file, scope]], "the first attachment makes the look, keyed by the view");
+    assert.equal(attachmentFor(kit, VIGIL, "primary", scope).file, `references/${VIGIL.id}/${door.file}`, "the plate that rides is the view");
+    assert.equal(attachmentFor(kit, VIGIL, "primary", { productionId: "saltlight", sceneId: "sc_05" }).mode, "designated", "another scene keeps the kit's sheet");
+    await attachCharacterLook(store, VIGIL.id, "v2", null);
+    const detached = (await readKit(store, VIGIL.id))!.kit;
+    assert.deepEqual(detached.looks?.map((look) => [look.id, look.attachedTo]), [["v2", undefined]], "detaching keeps the look and drops the scope");
+    await attachCharacterLook(store, VIGIL.id, "v2", scope);
+    assert.equal((await readKit(store, VIGIL.id))!.kit.looks?.length, 1, "a second attachment finds the look rather than making another");
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v9", scope), /no accepted look/);
+    // A scene set elsewhere takes no plate from this location (codex round 2), nor does one that is gone.
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v2", { ...scope, sceneId: "sc_99" }), /not set at the-vigil/);
+    // A replacement takes the plate with it: the look follows the view that took over the panel.
+    await acceptView(store, dir, 3, "From the door", { replaceExistingName: true });
+    const replaced = (await readKit(store, VIGIL.id))!.kit;
+    const newDoor = orderedLocationViews(replaced).find((candidate) => candidate.name === "From the door")!;
+    assert.equal(newDoor.id, "v3");
+    assert.deepEqual(replaced.looks?.map((look) => [look.id, look.file, look.attachedTo]), [["v3", newDoor.file, scope]]);
+    await assert.rejects(attachCharacterLook(store, VIGIL.id, "v2", scope), /no accepted look/, "a superseded view is no plate");
+    await store.close();
+  });
+
   it("keeps panel order establishing-first and rebuilds the sheet on every acceptance", async () => {
     const { dir, store } = await openTicking();
     await acceptView(store, dir, 1, "Establishing view");
@@ -1247,6 +1286,23 @@ describe("location views and the sheet they assemble (#243)", () => {
       "the compilation records exactly the panels it was built from, in order",
     );
     assert.deepEqual(orderedLocationViews(kit).map((v) => v.name), ["Establishing view", "Reverse angle", "Day"]);
+    await store.close();
+  });
+
+  it("a replacement that also takes the establishing seat consolidates the plates it takes over (codex round 1)", async () => {
+    const { dir, store } = await openTicking();
+    await acceptView(store, dir, 1, "Establishing view");
+    await acceptView(store, dir, 2, "From the door");
+    const first = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_04" };
+    const second = { kind: "scene" as const, productionId: "saltlight", sceneId: "sc_06" };
+    await attachCharacterLook(store, VIGIL.id, "v1", first);
+    await attachCharacterLook(store, VIGIL.id, "v2", second);
+    await acceptView(store, dir, 3, "From the door", { replaceExistingName: true, establishing: true });
+    const kit = (await readKit(store, VIGIL.id))!.kit;
+    assert.equal(kit.establishingViewId, "v3");
+    // One look id, one claim: the scene that named the door keeps its plate; the scene that held
+    // the old establishing view falls back to the sheet, which now opens on this picture.
+    assert.deepEqual(kit.looks?.map((look) => [look.id, look.attachedTo]), [["v3", second]]);
     await store.close();
   });
 

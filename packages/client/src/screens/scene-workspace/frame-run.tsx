@@ -3,6 +3,7 @@ import {
   aspectSupport,
   formatMicroUsd,
   isReplayableFinalization,
+  lookHoldingScope,
   orderedShots,
   PROVIDERS,
   resolveCast,
@@ -21,6 +22,7 @@ import {
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { lookTileLabel } from "../character-reference.js";
 import { Button } from "../../components/ui.js";
 import {
   clearFrameRunQuote,
@@ -308,7 +310,7 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
+  const references = matchingOptions ? quoteReferences(quote, scene, world, production.meta.id) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -464,7 +466,7 @@ function GenerateFramesDialogOpen({
                       ? "rides"
                       : reference.ridingSteps === 0
                         ? "citation only"
-                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}</span>
+                        : `rides in ${reference.ridingSteps} of ${reference.citedSteps}`}{reference.detail === null ? "" : ` · ${reference.detail}`}</span>
                   </span>
                 </article>
               ))}
@@ -586,14 +588,25 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): 
     .filter((value): value is string => value !== null);
 }
 
-function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
+  // What rides beside the sheet (SPEC-044 R-30): the look in use on a character's row when it is
+  // not the kit's — this scene's, else the production's, the order the resolver prefers — and
+  // the plate on the location's. Voice never applies to stills and is not said here.
+  const detailFor = (sheetId: string): string | null => {
+    const sheet = sheetById.get(sheetId);
+    if (sheet?.type === "location") return "plate";
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
+    const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
+    return look === undefined ? null : `look · ${lookTileLabel(look.prompt, look.kind)}`;
+  };
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
     path: string | null;
     citedSteps: number;
     ridingSteps: number;
+    detail: string | null;
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
@@ -614,6 +627,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
         path: previous?.path ?? riding?.path ?? null,
         citedSteps: (previous?.citedSteps ?? 0) + 1,
         ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
+        detail: previous?.detail ?? detailFor(sheetId),
       });
     }
   }

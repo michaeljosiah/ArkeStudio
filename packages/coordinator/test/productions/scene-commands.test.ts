@@ -9,6 +9,7 @@ import {
   SceneCommandRefused,
   SceneVersionMoved,
 } from "../../src/productions/scene-commands.js";
+import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -740,7 +741,7 @@ describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amen
         baseVersion: before.version,
         command: { kind: "edit-scene" },
       }),
-      (err: unknown) => err instanceof SceneCommandRefused && /neither a title nor a synopsis/.test(err.message),
+      (err: unknown) => err instanceof SceneCommandRefused && /names neither a title, a synopsis, the inherited context nor the cast/.test(err.message),
     );
     assert.equal(await worldPrint(dir), print);
   });
@@ -872,4 +873,107 @@ it("retimes a one-key camera's action and hold using the previous shot duration 
   assert.deepEqual(after.staging?.keys.map(key => key.t), [0, 8]);
   assert.deepEqual(after.staging?.performances?.[0]?.keys.map(key => key.t), [0, 4]);
   assert.equal(after.staging?.performances?.[0]?.keys[0]?.hold, 2);
+});
+
+describe("edit-scene writes the place and the cast, and refuses a place the world does not hold (SPEC-044 R-7, R-9, R-19)", () => {
+  it("writes a location the world holds, and refuses one it does not, leaving the world byte-identical", async () => {
+    const { dir, store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", inherits: { location: "the-weigh-house", tone: null } },
+    });
+    const moved = await sceneOnDisk(store);
+    assert.deepEqual(moved.inherits, { location: "the-weigh-house", timeOfDay: "night" });
+    assert.equal(moved.version, before.version + 1);
+    const print = await worldPrint(dir);
+    await assert.rejects(
+      applySceneCommand(store, {
+        productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: moved.version,
+        command: { kind: "edit-scene", inherits: { location: "maren-kest" } },
+      }),
+      /location maren-kest is not in this world/,
+    );
+    assert.equal(await worldPrint(dir), print);
+  });
+
+  it("adds a member, chooses its voice, and removes it — one version each, nothing else touched", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK() } } },
+    });
+    const added = await sceneOnDisk(store);
+    assert.deepEqual(added.cast, { "maren-kest": { added: CLOCK() } });
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: added.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK(), voice: { kind: "sample" } } } },
+    });
+    const voiced = await sceneOnDisk(store);
+    assert.deepEqual(voiced.cast?.["maren-kest"], { added: CLOCK(), voice: { kind: "sample" } });
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: voiced.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": null } },
+    });
+    const removed = await sceneOnDisk(store);
+    assert.equal(removed.cast, undefined);
+    assert.equal(removed.version, before.version + 3);
+    assert.deepEqual(shotIds(removed), shotIds(before));
+    await assert.rejects(
+      applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: removed.version, command: { kind: "edit-scene" } }),
+      /names neither/,
+    );
+  });
+
+  it("removing a member detaches the look this scene held and leaves the look on its kit (R-9)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "maren-kest", { id: "council-coat", file: "looks/council-coat.png", kind: "costume",
+      prompt: "Formal council coat", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "maren-kest", "council-coat", { kind: "scene", productionId: PRODUCTION, sceneId: SCENE_ID });
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK() } } },
+    });
+    const remove = { kind: "edit-scene" as const, cast: { "maren-kest": null } };
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version + 1, command: remove });
+    const looks = (await readKit(store, "maren-kest"))!.kit.looks ?? [];
+    assert.deepEqual(looks.map((look) => [look.id, look.attachedTo]), [["council-coat", undefined]], "the look stays; only its attachment to this scene goes");
+    // The release rode in the scene's own commit (codex round 1): one version cut, not two.
+    assert.equal((await sceneOnDisk(store)).version, before.version + 2);
+  });
+
+  it("changing the place releases the old location's plate in the same commit (SPEC-044 R-19; codex round 1)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "the-vigil", { id: "door", file: "looks/door.png", kind: "view", prompt: "From the door",
+      takeId: "tk_01J8E0000000000000000000T4", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "the-vigil", "door", { kind: "scene", productionId: PRODUCTION, sceneId: SCENE_ID });
+    const before = await sceneOnDisk(store);
+    assert.equal(before.inherits?.location, "the-vigil");
+    // A field the command does not name keeps its value, and keeps its plate with it.
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", inherits: { timeOfDay: "dusk" } } });
+    assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.id, look.attachedTo?.kind]), [["door", "scene"]]);
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version + 1,
+      command: { kind: "edit-scene", inherits: { location: "the-saltmarket" } } });
+    assert.equal((await sceneOnDisk(store)).inherits?.location, "the-saltmarket");
+    assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.id, look.attachedTo]), [["door", undefined]], "the old place holds no claim on this scene");
+  });
+
+  it("refuses a read the production does not hold, or a member who is no character, writing nothing (codex rounds 1 and 2)", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await assert.rejects(
+      applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+        command: { kind: "edit-scene", cast: { "the-vigil": { added: CLOCK() } } } }),
+      /not a character/,
+    );
+    await assert.rejects(
+      applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+        command: { kind: "edit-scene", cast: { "maren-kest": { added: CLOCK(), voice: { kind: "performance", performanceId: "pf_01J8E0000000000000000000P9", hash: `sha256:${"9".repeat(64)}` } } } } }),
+      /not in this production/,
+    );
+    assert.equal((await sceneOnDisk(store)).version, before.version);
+  });
 });

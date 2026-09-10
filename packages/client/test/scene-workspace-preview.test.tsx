@@ -5,7 +5,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { playlistSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import type { ClientMessage, ClientState } from "@arke-studio/contracts";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { ShotLightbox } from "../src/screens/scene-workspace/lightbox.js";
@@ -187,5 +190,91 @@ describe("Preview lightbox (SPEC-036 R-1, R-19)", () => {
 
     await act(async () => q(mounted, ".fy-swlightbox")!.dispatchEvent(new dom.window.Event("cancel")));
     assert.deepEqual(calls.splice(0), ["close"], "Escape closes it");
+  });
+});
+
+describe("Play lines (SPEC-044 R-33; T-14)", () => {
+  const capture = (sent: ClientMessage[]): ArkeBridge =>
+    ({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => { sent.push(JSON.parse(json) as ClientMessage); } }) as unknown as ArkeBridge;
+  const fakeAudio = () => ({ src: "", currentTime: 0, duration: 0, playbackRate: 1, play: () => Promise.resolve(), pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} });
+  const LINE_12 = "sc_04/sh_12/legacy", LINE_13 = "sc_04/sh_13/legacy";
+  const plan = (missing: "cloud" | "local" | "cached") => ({
+    productionId: "saltlight", sceneId: "sc_04", sceneVersion: 2, confirmationToken: `sha256:${"c".repeat(64)}`, totalEstimatedMicroUsd: missing === "cloud" ? 40_000 : 0,
+    items: [
+      { lineId: LINE_12, shotId: "sh_12", speakerSheetId: "maren-kest", route: "existing", file: `productions/saltlight/performances/pf_01J8E0000000000000000000P1/sha256-${"1".repeat(64)}.wav`, estimatedMicroUsd: 0 },
+      { lineId: LINE_13, shotId: "sh_13", speakerSheetId: "maren-kest", route: missing, estimatedMicroUsd: missing === "cloud" ? 40_000 : 0,
+        ...(missing === "cached" ? { file: `.cache/table-read/sha256-${"2".repeat(64)}.wav` } : {}) },
+    ],
+  });
+  afterEach(() => { setAudioFactoryForTest(null); });
+
+  it("plays the lines that have a read in shot order, says how many do, and offers to prepare the rest at the quoted price", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((production) => production.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    (scene as unknown as { shots: Array<{ audio?: unknown }> }).shots[1]!.audio = { kind: "dialogue", speaker: "maren-kest", line: "the bells answer" };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    setAudioFactoryForTest(() => fakeAudio() as never);
+    const mounted = await render(<MemoryRouter initialEntries={[SCENE_PATH]}><App /></MemoryRouter>);
+    await act(async () => { __setStateForTest(state); });
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const asked = sent.find((message) => message.kind === "plan-table-read");
+    assert.ok(asked && asked.kind === "plan-table-read", "the plan is asked for on arrival, so the count and the door are current");
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:00:00.000Z", type: "rehearsal.result", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan: plan("cloud") } as never); });
+    const lines = q(mounted, '[aria-label="Lines"]')!;
+    assert.match(lines.textContent ?? "", /1 of 2 lines have a read/);
+    const door = [...lines.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Prepare"))!;
+    assert.equal(door.textContent, "Prepare 1 line · $0.04");
+    assert.doesNotMatch(lines.textContent ?? "", /sha256|elevenlabs|kokoro|cloud|existing/, "no hash, route or provider on Preview");
+    // linkedom's <select> has no value setter, so the change goes to React's own handler.
+    const rate = lines.querySelectorAll("select")[1] as HTMLSelectElement;
+    const propsKey = Object.keys(rate).find((key) => key.startsWith("__reactProps$"))!;
+    await act(async () => { (rate as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[propsKey]!.onChange({ target: { value: "1.25" } }); });
+    await click([...lines.querySelectorAll("button")].find((button) => button.textContent?.includes("Play lines"))!);
+    await act(async () => {});
+    assert.deepEqual(playlistSnapshot()?.items.map((item) => [item.lineId, item.title]), [[LINE_12, "Maren Kest: the verse, under the water"]], "only the line with a read");
+    assert.equal(playlistSnapshot()?.rate, 1.25, "the rate chosen before the press applies to the read");
+    assert.ok(q(mounted, '[aria-label="Skip line"]') && q(mounted, '[aria-label="Previous line"]') && q(mounted, '[aria-label="Restart line"]'), "the player carries the lines' transport");
+    assert.equal(sent.some((message) => message.kind === "prepare-table-read"), false, "playing spends nothing");
+    await click(door);
+    const prepare = sent.find((message) => message.kind === "prepare-table-read");
+    assert.ok(prepare && prepare.kind === "prepare-table-read");
+    assert.equal(prepare.confirmationToken, `sha256:${"c".repeat(64)}`);
+    assert.equal(prepare.confirmedMicroUsd, 40_000);
+    // A refused preparation is said, and the plan is asked for again because its token is spent.
+    const asks = () => sent.filter((message) => message.kind === "plan-table-read").length;
+    const before = asks();
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:01:00.000Z", type: "rehearsal.result", requestId: prepare.requestId, worldId: FIXTURE_WORLD_ID, status: "refused", reason: "Preparation changed while local lines were being synthesized." } as never); });
+    assert.match(q(mounted, '[aria-label="Lines"] [role="status"]')?.textContent ?? "", /Preparation changed/);
+    assert.equal(asks(), before + 1);
+    // Lines the queue would not take are said too, though the plan went through (codex round 3).
+    const replan = sent.filter((message) => message.kind === "plan-table-read").at(-1)!;
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:02:00.000Z", type: "rehearsal.result", requestId: replan.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan: plan("cloud") } as never); });
+    await click([...lines.querySelectorAll("button")].find((button) => button.textContent?.startsWith("Prepare"))!);
+    const again = sent.filter((message) => message.kind === "prepare-table-read").at(-1)!;
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:03:00.000Z", type: "rehearsal.result", requestId: again.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "Some cloud lines were not queued: the provider is offline. Other prepared lines remain available.", plan: plan("cloud") } as never); });
+    assert.match(q(mounted, '[aria-label="Lines"] [role="status"]')?.textContent ?? "", /not queued/);
+  });
+
+  it("plays a cached line beside a selected read, in shot order, and hides the door when nothing is missing (T-18)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const scene = state.world!.productions.find((production) => production.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    (scene as unknown as { shots: Array<{ audio?: unknown }> }).shots[1]!.audio = { kind: "dialogue", speaker: "maren-kest", line: "the bells answer" };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    setAudioFactoryForTest(() => fakeAudio() as never);
+    const mounted = await render(<MemoryRouter initialEntries={[SCENE_PATH]}><App /></MemoryRouter>);
+    await act(async () => { __setStateForTest(state); });
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Preview")!);
+    const asked = sent.find((message) => message.kind === "plan-table-read")!;
+    await act(async () => { __applyEventForTest({ at: "2026-09-09T10:00:00.000Z", type: "rehearsal.result", requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, status: "planned", reason: "", plan: plan("cached") } as never); });
+    const lines = q(mounted, '[aria-label="Lines"]')!;
+    assert.match(lines.textContent ?? "", /2 of 2 lines have a read/);
+    assert.equal([...lines.querySelectorAll("button")].some((button) => button.textContent?.startsWith("Prepare")), false);
+    await click([...lines.querySelectorAll("button")].find((button) => button.textContent?.includes("Play lines"))!);
+    await act(async () => {});
+    assert.deepEqual(playlistSnapshot()?.items.map((item) => item.lineId), [LINE_12, LINE_13], "the selected read and the cached line, in shot order");
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Storyboard")!);
+    assert.equal(playlistSnapshot()?.items.length, 2, "leaving Preview does not stop the read");
   });
 });

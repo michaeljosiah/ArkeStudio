@@ -6,6 +6,7 @@ import {
   effectiveFraming,
   linearizeSceneFlow,
   resolveCast,
+  shotSpeakers,
   stagingMoveWord,
   effectiveStageBlocking,
   UNTITLED_SHOT,
@@ -19,6 +20,7 @@ import {
 import { Divider, Expand, Info, More, Move, PlaySolid, Plus } from "../../components/icons.js";
 import { Button } from "../../components/ui.js";
 import { sheetPortraitPath } from "../../components/portrait.js";
+import { sceneCast } from "./cast-picker.js";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId } from "../../lib/selectors.js";
 import { shotFramePath } from "./lightbox.js";
@@ -45,7 +47,7 @@ type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 /** Context box sizes follow the prototype; compact terminals complete SPEC-029's sequence. */
 const NODE = {
   entry: { w: 112, h: 52 },
-  ref: { w: 156, h: 178 },
+  ref: { w: 200, h: 72 },
   shot: { w: 232, h: 96 },
   board: { w: 196, h: 86 },
   clip: { w: 208, h: 152 },
@@ -69,6 +71,8 @@ interface FlowNode {
   duration?: string;
   thumb?: string;
   shotId?: string;
+  /** A character node's sheet, for the Open pill (SPEC-044 R-23). */
+  sheetId?: string;
   memberShotIds?: string[];
   /** Whether the clip a board renders to exists yet: the card's meta and its run label. */
   rendered?: boolean;
@@ -141,6 +145,7 @@ export function SceneFlow({
   onEditShot,
   onViewBoardSheet,
   onShowBoards,
+  onOpenCharacter,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -168,6 +173,8 @@ export function SceneFlow({
   onEditShot?: (shotId: string) => void;
   onViewBoardSheet?: (memberShotIds: string[], trigger: HTMLElement | null) => void;
   onShowBoards?: () => void;
+  /** A character node's Open pill leads to the character dialog (SPEC-044 R-23). */
+  onOpenCharacter?: (sheetId: string, trigger: HTMLElement) => void;
 }) {
   const sequence = useMemo(() => linearizeSceneFlow(scene), [scene]);
   const lineFindings = useMemo(() => sequence.kind === "linear" ? stageLineCrossings(scene, productionAspect(production.meta)) : [], [sequence, scene, production.meta]);
@@ -1203,6 +1210,34 @@ export function SceneFlow({
         </>
       );
     }
+    // The character card (SPEC-044 R-23): the portrait, the name, what she brings, and Open
+    // where a shot card carries its details — the same dialog a tile or a band chip opens.
+    if (node.kind === "ref" && node.sheetId !== undefined) {
+      const sheetId = node.sheetId;
+      return (
+        <>
+          {node.thumb === undefined
+            ? <span className="fy-swnode__thumb" aria-hidden="true" />
+            : <span className="fy-swnode__thumb" style={{ backgroundImage: `url(${node.thumb})` }} role="img" aria-label={node.name} />}
+          <span className="fy-swnode__text">
+            <span className="fy-swnode__name">{node.name}</span>
+            <span className="fy-swnode__meta">{node.meta}</span>
+          </span>
+          {onOpenCharacter === undefined ? null : (
+            <button
+              type="button"
+              className="fy-swnode__open"
+              aria-label={`Open ${node.name}`}
+              aria-haspopup="dialog"
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => { event.stopPropagation(); onOpenCharacter(sheetId, event.currentTarget); }}
+            >
+              Open
+            </button>
+          )}
+        </>
+      );
+    }
     return (
       <>
         {node.thumb === undefined ? null : (
@@ -1268,34 +1303,40 @@ function buildGraph(input: {
   const shotStartY = 104;
   const shotPitch = 118;
 
-  // References use the prototype's two-column lane wide and one compact context lane narrow.
-  const cited: string[] = [];
+  // The scene's cast (SPEC-044 R-6, R-23): the characters its shots cite, by first appearance,
+  // then the members added by hand. A location is context, not cast, and draws no node (R-17).
+  // The card says what each brings: voice where they speak anywhere in the scene, look where a
+  // shot cites them, and how many shots that is — or that no shot has them yet.
+  const cited = sceneCast(scene, sheets);
   const citedBy = new Map<string, string[]>();
   for (const shot of shots) {
     for (const entry of resolveCast(shot.description, [...sheets]).cast) {
-      if (!cited.includes(entry.sheet.id)) cited.push(entry.sheet.id);
-      citedBy.set(entry.sheet.id, [...(citedBy.get(entry.sheet.id) ?? []), shot.id]);
+      if (entry.sheet.type === "character") citedBy.set(entry.sheet.id, [...(citedBy.get(entry.sheet.id) ?? []), shot.id]);
     }
   }
+  const speakers = shotSpeakers(scene, shots).speakers;
   const refAt = new Map<string, { x: number; y: number }>();
   cited.forEach((sheetId, index) => {
-    const sheet = sheets.find((candidate) => candidate.id === sheetId)!;
-    const point = at(
-      `r:${sheetId}`,
-      compact ? 280 : 20 + (index % 2) * 172,
-      compact ? 24 + index * 196 : 24 + Math.floor(index / 2) * 196,
-    );
+    const sheet = sheets.find((candidate) => candidate.id === sheetId);
+    const point = at(`r:${sheetId}`, compact ? 280 : 20, 24 + index * 88);
     refAt.set(sheetId, point);
+    const shotCount = citedBy.get(sheetId)?.length ?? 0;
+    const meta = [
+      speakers.includes(sheetId) ? "voice" : null,
+      shotCount > 0 ? "look" : null,
+      shotCount > 0 ? `in ${shotCount} shot${shotCount === 1 ? "" : "s"}` : speakers.includes(sheetId) ? null : "in no shot yet",
+    ].filter((part): part is string => part !== null).join(" · ");
     nodes.push({
       id: `r:${sheetId}`,
       kind: "ref",
       x: point.x,
       y: point.y,
-      name: sheet.name,
-      meta: sheet.type,
+      name: sheet?.name ?? sheetId,
+      meta,
+      sheetId,
       staged: false,
       // The portrait every other screen shows for a sheet; a sheet without one keeps the well.
-      ...(slug === undefined ? {} : { thumb: mediaUrl(slug, sheetPortraitPath(sheet.id)) }),
+      ...(slug === undefined ? {} : { thumb: mediaUrl(slug, sheetPortraitPath(sheetId)) }),
     });
   });
 
@@ -1339,9 +1380,10 @@ function buildGraph(input: {
       ...(frame === undefined ? {} : { thumb: frame }),
     });
   });
-  // A staged shot's blocking, drawn where a reference would go next: it is an input to the shot
-  // the way a sheet is, and the reference grid already keeps things clear of one another.
-  let contextSlot = cited.length;
+  // A staged shot's blocking, drawn below the cast: it is an input to the shot the way a sheet
+  // is. The cast lane is one column of 72-tall cards, so the staging grid starts under its floor.
+  const castFloor = 24 + cited.length * 88;
+  let contextSlot = 0;
   sequence.shots.forEach(({ nodeId, shot }) => {
     if (shot.staging === undefined) return;
     const blocking = effectiveStageBlocking(scene, shot.staging);
@@ -1350,7 +1392,7 @@ function buildGraph(input: {
     const point = at(
       `k:${shot.id}`,
       compact ? 280 : 20 + (slot % 2) * 172,
-      compact ? 24 + slot * 196 : 24 + Math.floor(slot / 2) * 196,
+      compact ? castFloor + slot * 196 : castFloor + Math.floor(slot / 2) * 196,
     );
     nodes.push({
       id: `k:${shot.id}`,
@@ -1464,7 +1506,7 @@ function buildGraph(input: {
 
   // Boards, packed the way the rows pack them, and the clip each renders to.
   if (boardPack.ok) {
-    const contextFloor = compact ? 60 + cited.length * 196 : 0;
+    const contextFloor = compact ? 36 + cited.length * 88 + contextSlot * 196 : 0;
     for (const [boardIndex, board] of boardPack.boards.entries()) {
       const members = board.memberShotIds.flatMap((shotId: string) => {
         const point = shotAt.get(shotId);

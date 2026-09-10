@@ -59,15 +59,17 @@ async function writeKit(
   review?: ReviewDecision,
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
-  const files: import("../world/commit.js").CommitFileInput[] = [
-    {
-      path: kitPath(sheetId),
-      action: baseRaw === null ? "create" : "replace",
-      content: JSON.stringify(kit, null, 2) + "\n",
-      baseHash: baseRaw === null ? null : sha256(baseRaw),
-    },
-  ];
-  await commitReferenceRecord(store, files, review, options);
+  await commitReferenceRecord(store, [kitFile(sheetId, kit, baseRaw)], review, options);
+}
+
+/** The kit as one commit file, fenced on the bytes it was read from. */
+function kitFile(sheetId: string, kit: ReferenceKit, baseRaw: string | null): import("../world/commit.js").CommitFileInput {
+  return {
+    path: kitPath(sheetId),
+    action: baseRaw === null ? "create" : "replace",
+    content: JSON.stringify(kit, null, 2) + "\n",
+    baseHash: baseRaw === null ? null : sha256(baseRaw),
+  };
 }
 
 /**
@@ -368,6 +370,10 @@ export async function acceptLocationView(
     // Replacing the establishing view leaves the additional views' order untouched: they are
     // ordered by their own acceptance, and this one was not theirs.
     establishingViewId: establishing ? accepted.id : kit.establishingViewId,
+    // A view a scene took as its plate rides as a look keyed by the view (SPEC-044 R-18): a
+    // replacement takes over that look too, or the scene would keep dispatching a picture no
+    // panel shows any more.
+    ...(kit.looks === undefined ? {} : { looks: takenOverLooks(kit.looks, supersededByThis, collision?.id, accepted, now) }),
   };
 
   const sheetFile = await rebuildLocationSheet(store, sheet, nextKit);
@@ -429,7 +435,7 @@ export async function acceptCharacterLook(
   input: {
     id: string;
     file: string;
-    kind: "costume" | "pose-expression" | "condition-age";
+    kind: NonNullable<ReferenceKit["looks"]>[number]["kind"];
     prompt: string;
     jobId?: Job["id"];
     takeId: Take["id"];
@@ -492,38 +498,113 @@ export async function attachCharacterLook(
   scope: NonNullable<ReferenceKit["looks"]>[number]["attachedTo"] | null,
   options: ReferenceMutationOptions = {},
 ): Promise<void> {
-  const { kit, raw } = await loadOrEmpty(store, sheetId);
-  const looks = [...(kit.looks ?? [])];
-  const index = looks.findIndex((look) => look.id === lookId);
-  if (index === -1) throw new Error(`no accepted look "${lookId}"`);
-  const previous = looks[index]!.attachedTo;
-  const next = { ...looks[index]! };
-  if (scope) next.attachedTo = scope;
-  else delete next.attachedTo;
-  looks[index] = next;
-  /*
-   * One look per scope (design 67), enforced in both directions.
-   *
-   * Two looks claiming one production is a question the resolver has no answer to, and the
-   * production's cast row offers exactly one choice per character — so attaching displaces the
-   * incumbent rather than joining it, and detaching empties the scope the look was holding
-   * rather than leaving a second claimant behind it (codex round 2). Worlds written before this
-   * rule can hold such a pair, and clearing one of two left the row still showing a look after
-   * the reader had asked for the identity package.
-   */
-  const emptied = scope ?? previous;
-  if (emptied) {
-    for (let other = 0; other < looks.length; other += 1) {
-      if (other === index) continue;
-      const held = looks[other]!.attachedTo;
-      if (!held || held.productionId !== emptied.productionId || held.kind !== emptied.kind) continue;
-      if (held.kind === "scene" && emptied.kind === "scene" && held.sceneId !== emptied.sceneId) continue;
-      const cleared = { ...looks[other]! };
-      delete cleared.attachedTo;
-      looks[other] = cleared;
+  // Checked, read and written inside one gate (codex round 3): a place change committing
+  // between the check and the write would otherwise slip the claim onto the old kit after the
+  // scene's own commit had found nothing to release.
+  await store.gateOp(async () => {
+    // A plate is the scene's current place's, or nothing (codex round 2): the attach message
+    // carries no scene version, so a press still in flight when the place changes would land its
+    // claim on the old location's kit — released by nobody, and reading as occupied from then on.
+    if (scope?.kind === "scene" && store.getBundle().sheets.some((sheet) => sheet.id === sheetId && sheet.type === "location")) {
+      const scene = store.getBundle().productions.find((p) => p.meta.id === scope.productionId)?.scenes.find((s) => s.id === scope.sceneId);
+      if (scene?.inherits?.location !== sheetId) throw new Error(`scene ${scope.sceneId} is not set at ${sheetId}`);
     }
-  }
-  await writeKit(store, sheetId, { ...kit, looks }, raw, undefined, options);
+    const { kit, raw } = await loadOrEmpty(store, sheetId);
+    const looks = [...(kit.looks ?? [])];
+    let index = looks.findIndex((look) => look.id === lookId);
+    if (index === -1) {
+      // A location's views are not looks, but a view chosen as a scene's plate rides as one
+      // (SPEC-044 R-18, §2.6): the first attachment makes the look, keyed by the view, so the
+      // planner's one scoping rule covers places without a second record of the choice.
+      const view = (kit.locationViews ?? []).find((candidate) => candidate.id === lookId && candidate.status === "active");
+      if (view === undefined) throw new Error(`no accepted look "${lookId}"`);
+      looks.push({ id: view.id, file: view.file, kind: "view", prompt: view.name, sourceTakeId: view.sourceTakeId, artDirectionVersion: view.artDirectionVersion, acceptedAt: view.acceptedAt });
+      index = looks.length - 1;
+    }
+    const previous = looks[index]!.attachedTo;
+    const next = { ...looks[index]! };
+    if (scope) next.attachedTo = scope;
+    else delete next.attachedTo;
+    looks[index] = next;
+    /*
+     * One look per scope (design 67), enforced in both directions.
+     *
+     * Two looks claiming one production is a question the resolver has no answer to, and the
+     * production's cast row offers exactly one choice per character — so attaching displaces the
+     * incumbent rather than joining it, and detaching empties the scope the look was holding
+     * rather than leaving a second claimant behind it (codex round 2). Worlds written before this
+     * rule can hold such a pair, and clearing one of two left the row still showing a look after
+     * the reader had asked for the identity package.
+     */
+    const emptied = scope ?? previous;
+    if (emptied) {
+      for (let other = 0; other < looks.length; other += 1) {
+        if (other === index) continue;
+        const held = looks[other]!.attachedTo;
+        if (!held || held.productionId !== emptied.productionId || held.kind !== emptied.kind) continue;
+        if (held.kind === "scene" && emptied.kind === "scene" && held.sceneId !== emptied.sceneId) continue;
+        const cleared = { ...looks[other]! };
+        delete cleared.attachedTo;
+        looks[other] = cleared;
+      }
+    }
+    await store.commitUnserialised({
+      kind: "kit-edit",
+      source: options.source ?? "form",
+      files: [kitFile(sheetId, { ...kit, looks }, raw)],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    });
+  }, options.precondition);
+}
+
+/**
+ * The looks a replacement view takes over, as one record. Replacing a view by name while making
+ * the new one establishing supersedes two views at once, and one look id cannot hold two scenes'
+ * claims (one look per scope, design 67; codex round 1): the claim on the view named for
+ * replacement survives — that scene chose that side of the room — the old establishing view's
+ * claim is released, and its scene falls back to the sheet, which now opens on this picture.
+ */
+function takenOverLooks(
+  looks: NonNullable<ReferenceKit["looks"]>,
+  superseded: ReadonlySet<string>,
+  namedId: string | undefined,
+  accepted: LocationView,
+  now: string,
+): NonNullable<ReferenceKit["looks"]> {
+  const taken = looks.filter((look) => superseded.has(look.id));
+  if (taken.length === 0) return looks;
+  const kept = taken.find((look) => look.id === namedId && look.attachedTo !== undefined)
+    ?? taken.find((look) => look.attachedTo !== undefined)
+    ?? taken[0]!;
+  return looks.flatMap((look) => look === kept
+    ? [{ ...look, id: accepted.id, file: accepted.file, prompt: accepted.name, sourceTakeId: accepted.sourceTakeId, artDirectionVersion: accepted.artDirectionVersion, acceptedAt: now }]
+    : superseded.has(look.id) ? [] : [look]);
+}
+
+/**
+ * The kit write that releases this scene's claims on a sheet's looks, as a file for the commit
+ * that carries the scene's own write (SPEC-044 §2.6; codex round 1). A member removed, or a place
+ * changed, with the look still attached is a claim nobody can see — the plate reads occupied,
+ * the old place's plate comes back with it — and two commits would leave exactly that behind a
+ * crash between them. Empty when the kit holds no such claim, so nothing is written for it.
+ */
+export async function sceneLookReleases(
+  store: WorldStore,
+  sheetId: string,
+  scope: { productionId: string; sceneId: string },
+): Promise<import("../world/commit.js").CommitFileInput[]> {
+  const existing = await readKit(store, sheetId);
+  const looks = existing?.kit.looks;
+  const held = (look: NonNullable<ReferenceKit["looks"]>[number]) =>
+    look.attachedTo?.kind === "scene" && look.attachedTo.productionId === scope.productionId && look.attachedTo.sceneId === scope.sceneId;
+  if (existing === null || looks === undefined || !looks.some(held)) return [];
+  const released = looks.map((look) => {
+    if (!held(look)) return look;
+    const free = { ...look };
+    delete free.attachedTo;
+    return free;
+  });
+  return [{ path: kitPath(sheetId), action: "replace", content: JSON.stringify({ ...existing.kit, looks: released }, null, 2) + "\n", baseHash: sha256(existing.raw) }];
 }
 
 export async function setStyleOverride(

@@ -20,10 +20,10 @@ import { saveRehearsalNote } from "./audio/rehearsal-notes.js";
 import { writePerformanceBible } from "./audio/performance-bible.js";
 import { preparePerformanceGeneration, readPerformanceGenerationQuote, validatePerformanceGeneration, performanceGenerationJob,
   finalizeGeneratedPerformance, finalizePerformanceGenerationJob } from "./audio/performance-generation.js";
-import { reviewPerformance, clearPerformanceSelection } from "./audio/performance-review.js";
+import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, choosePerformance } from "./audio/performance-review.js";
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
-import { readCharacterAudioInputs, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
+import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, resolvePerformanceAudioReferences, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { randomBytes } from "node:crypto";
@@ -132,6 +132,7 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   applyBibleEdits,
+  characterAudioRoute,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import {
@@ -7784,10 +7785,21 @@ export class Coordinator {
           fail("The scene or selected model is no longer available.");
           return;
         }
+        // The scene chooses nothing per dispatch (SPEC-044 R-26): its cast's voices are resolved
+        // here, each on its own, so a read that cannot ride becomes a clause and the sample
+        // rides (R-28) rather than the whole plan refusing. A model with no audio route takes
+        // none of it (T-9): nothing is resolved — no rights written for an upload that never
+        // happens — and each chosen read is said once as not sent.
+        const takesNoAudio = characterAudioRoute(model) === null;
+        const audioReferencesDisabled = msg.audioReferencesDisabled || takesNoAudio;
+        const castVoices = audioReferencesDisabled
+          ? { references: [], notSent: takesNoAudio ? Object.entries(scene.cast ?? {}).filter(([, member]) => member.voice?.kind === "performance")
+              .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find((s) => s.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
+          : await resolveCastVoices(store, production, scene, msg.requestId, undefined, characterAudioRoute(model)?.local === true);
         let performanceReferences, masterReferences;
         try {
-          if (msg.audioReferencesDisabled && (msg.performanceAudio?.length || msg.masterAudio?.length)) throw new Error("Disabled references cannot carry selected performances.");
-          performanceReferences = await resolvePerformanceAudioReferences(store, production.meta.id, scene.id, msg.performanceAudio ?? [], msg.requestId);
+          if (msg.audioReferencesDisabled && msg.masterAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
+          performanceReferences = castVoices.references;
           masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
         } catch (error) {
           fail(describeCoordinatorError(error));
@@ -7799,7 +7811,7 @@ export class Coordinator {
         const scenePlan = planScene(
           {
             timingProduction: production,
-            audioReferencesDisabled: msg.audioReferencesDisabled,
+            audioReferencesDisabled,
             performanceReferences, masterReferences,
             world: bundle.meta,
             artDirection: bundle.artDirection,
@@ -7838,6 +7850,7 @@ export class Coordinator {
         try {
           const aggregate = await createDispatchPlan(store, {
             manifest: this.opts.manifest, acknowledgedRecommendationIds: msg.acknowledgedRecommendationIds,
+            castNotSent: [...castVoices.notSent, ...castVoices.refused],
             worldId: msg.worldId,
             productionId: production.meta.id,
             scene,
@@ -9926,9 +9939,24 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "That take is no longer in this session.");
           return;
         }
+        // The subject's scene cast rides here as it does on the plan card (SPEC-044 R-29) — for
+        // a video dispatch that wants audio; a still, a rerun or a disabled box resolves nothing,
+        // because resolving acknowledges an upload. The record-level clauses are the Bench's own
+        // to show; what only the bytes or the ledger refused is refused here, in the same words,
+        // with the Bench's checkbox as the way past it.
+        const benchParams = bench.session.composer.params;
+        const benchModel = this.opts.manifest?.models.find((candidate) => candidate.id === bench.session.composer.model);
+        const castVoices = bench.session.subject && benchParams.kind === "video" && !benchParams.audioReferencesDisabled && fromTake === undefined
+          ? await resolveSubjectCastVoices(store, bench.session.subject, msg.requestId, benchModel !== undefined && characterAudioRoute(benchModel)?.local === true)
+          : { references: [], notSent: [], refused: [] };
+        if (castVoices.refused.length > 0) {
+          this.rejectEnqueue(msg.requestId, msg.kind, castVoices.refused.map((entry) => `${entry.name}: voice not sent · ${entry.reason}`).join(" · "));
+          return;
+        }
         const plan = planBenchDispatch(bench.session, store.getBundle(), this.opts.manifest ?? null, {
           worldId: msg.worldId,
           requestId: msg.requestId,
+          performanceReferences: castVoices.references,
           at: this.nowIso(),
           fromTake,
           // A bench take of a local recipe records which version made it (R-13), and the
@@ -13277,10 +13305,22 @@ export class Coordinator {
             const failures = this.voiceService ? await prepareLocalTableRead(store, this.voiceService, prepared.local) : prepared.local.map(() => "Local synthesis is unavailable.");
             const scene = store.getBundle().productions.find(p => p.meta.id === msg.productionId)?.scenes.find(s => s.id === msg.sceneId);
             if (scene?.version !== prepared.plan.sceneVersion || prepared.cloud.some(input => JSON.stringify(store.getBundle().sheets.find(s => s.id === input.params.tableReadSpeakerSheetId)?.voice) !== JSON.stringify(input.params.tableReadVoiceAssignment))) throw new Error("Preparation changed while local lines were being synthesized.");
-            if (prepared.cloud.length) await this.enqueueBatch(msg.requestId, msg.kind, prepared.cloud);
+            // What the queue would not take is said here (codex round 3): the enqueue result goes
+            // out under this request too, but the page reads the rehearsal result, and one that
+            // said "planned" over a refused batch cleared the words and offered the same press.
+            const queued = prepared.cloud.length ? await this.enqueueBatch(msg.requestId, msg.kind, prepared.cloud) : undefined;
+            if (queued !== undefined && !queued.accepted) {
+              this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused",
+                reason: `The cloud lines were not queued: ${queued.reason ?? "the queue refused them."}` });
+              return;
+            }
             const refreshed = await planTableRead(store, msg.productionId, msg.sceneId, this.opts.manifest, this.jobQueue?.listJobs() ?? [], this.readModel.getState().app.providers);
+            const notices = [
+              failures.length ? `${failures.length} local lines could not be prepared.` : null,
+              queued?.reason !== undefined ? `Some cloud lines were not queued: ${queued.reason}` : null,
+            ].filter((notice): notice is string => notice !== null);
             this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: refreshed.plan,
-              reason: failures.length ? `${failures.length} local lines could not be prepared. Other prepared lines remain available.` : "Preparation processed. Ready cache audio remains separate from performance review." });
+              reason: notices.length ? `${notices.join(" ")} Other prepared lines remain available.` : "Preparation processed. Ready cache audio remains separate from performance review." });
           } else this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "planned", plan: prepared.plan, reason: "Review missing lines and the aggregate estimate." });
         } catch {
           this.emit({ type: "rehearsal.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId, status: "refused", reason: "Table read preparation could not complete. Refresh the authored lines, voices and provider readiness. Existing work is retained." });
@@ -13410,9 +13450,16 @@ export class Coordinator {
           if (!store || store.worldId !== msg.worldId) throw new Error("Open the performance world first.");
           if (msg.kind === "clear-performance-selection") await clearPerformanceSelection(store, msg);
           else await reviewPerformance(store, msg);
+          // The dialog's accept also chooses the read for the scene (SPEC-044 R-15). A choice that
+          // fails after the accept landed names itself; the accept stays.
+          let chosen: string | undefined;
+          if (msg.kind === "review-performance" && msg.select && msg.decision === "accept" && msg.expectedSceneVersion !== undefined) {
+            try { await choosePerformance(store, { ...msg, expectedSceneVersion: msg.expectedSceneVersion }); }
+            catch (error) { chosen = `Accepted, but not chosen: ${describeCoordinatorError(error)}`; }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "reviewed", reason: msg.kind === "clear-performance-selection" ? "Performance selection cleared. Existing timeline audio is unchanged." : msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged." });
+            productionId: msg.productionId, status: "reviewed", reason: chosen ?? (msg.kind === "clear-performance-selection" ? "Performance selection cleared. Existing timeline audio is unchanged." : msg.decision === "accept" ? "Performance selected for this line." : "Performance rejected. The current selection is unchanged.") });
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: msg.kind === "clear-performance-selection" ? "Clearing refused. Refresh the current performance selection." : "Review refused. Refresh the line, voice assignment and selection; verify the performance audio." });
@@ -13448,9 +13495,16 @@ export class Coordinator {
           if (!this.opts.audioMediaTools || !this.opts.performanceSpool) throw new Error("Keeping a performance requires desktop audio preparation.");
           const performance = await keepPerformanceRecording(store, this.opts.audioMediaTools, this.opts.performanceSpool, msg,
             this.voiceService ? bytes => this.voiceService!.transcribe(bytes, "audio/wav") : undefined);
+          // Keep selects (SPEC-044 R-15). A step that fails after the record landed names itself;
+          // the record stays and nothing is retried against a scene that moved.
+          let reason: string | undefined;
+          if (msg.select) {
+            try { await selectKeptPerformance(store, performance, msg); }
+            catch (error) { reason = `Kept, but not chosen: ${describeCoordinatorError(error)}`; }
+          }
           await this.refreshWorldSnapshot(msg.worldId);
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
-            productionId: msg.productionId, status: "kept", performance });
+            productionId: msg.productionId, status: "kept", performance, ...(reason ? { reason } : {}) });
         } catch {
           this.emit({ type: "performance.result", at: this.nowIso(), requestId: msg.requestId, worldId: msg.worldId,
             productionId: msg.productionId, status: "refused", reason: "The recording could not be kept. Check the current authored line, desktop audio tools and capture, then retry. Existing performances are retained." });
@@ -14905,6 +14959,9 @@ export class Coordinator {
       },
     };
     const revision = (await bench.store.read()).length;
+    // A quote prices; it acknowledges nothing. The cast's reads cost nothing to carry
+    // (`incrementalInputMicroUsd: 0`), so the number is the same without them, and resolving
+    // them here wrote a rights entry per quote for an upload that never happened.
     const plan = planBenchDispatch(session, store.getBundle(), this.opts.manifest ?? null, {
       worldId: store.worldId,
       requestId: `quote-${createdAt}`,

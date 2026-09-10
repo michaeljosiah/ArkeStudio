@@ -10,6 +10,7 @@ import {
   productionShape,
   promptFor,
   resolveCast,
+  shotSpeakers,
   shotCardState,
   shotCoverage,
   UNTITLED_SHOT,
@@ -120,6 +121,7 @@ export function StoryboardRows({
   onTalkToArke,
   onPlanVideo,
   onRenderBoard,
+  onOpenCharacter,
 }: {
   scene: SceneRecord;
   acceptedScene: SceneRecord;
@@ -152,6 +154,8 @@ export function StoryboardRows({
   onTalkToArke: () => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
+  /** A band's character chip leads to the character dialog (SPEC-044 R-22). */
+  onOpenCharacter: (sheetId: string, trigger: HTMLElement) => void;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
@@ -377,6 +381,7 @@ export function StoryboardRows({
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
                 onStage={() => onStageShot(shot.id)}
                 onPreview={() => onPreviewShot(shot.id)}
+                onOpenCharacter={onOpenCharacter}
               />
             </li>
           );
@@ -758,6 +763,7 @@ function Row({
   onOpenInGenerator,
   onStage,
   onPreview,
+  onOpenCharacter,
   prevShotId,
   nextShotId,
 }: {
@@ -795,6 +801,7 @@ function Row({
   onOpenInGenerator: () => void;
   onStage: () => void;
   onPreview: () => void;
+  onOpenCharacter: (sheetId: string, trigger: HTMLElement) => void;
   /** The rows either side, for moving without a pointer. */
   prevShotId: string | null;
   nextShotId: string | null;
@@ -851,6 +858,9 @@ function Row({
     (take) => (take.kind === "frame" || take.kind === "still") && take.media !== undefined,
   );
   const refs = resolveCast(shot.description, [...sheets]).cast;
+  // What a cited character brings to this shot (SPEC-044 R-22): voice where they speak in it,
+  // by the same resolution the planner and the dialog use; look where the shot cites them.
+  const speakers = shotSpeakers(scene, [shot]).speakers;
   const structuredOverrides = [
     shot.framing?.size,
     shot.framing?.angle,
@@ -1396,19 +1406,39 @@ function Row({
         {refs.length === 0 && overrides.length === 0 ? null : (
           <div className="fy-swrow__meta">
             <div className="fy-swrow__refs">
-              {refs.map((entry) => (
-                <span key={entry.sheet.id} className="fy-swrow__ref" title={`${entry.sheet.type} · v${entry.sheet.version}`}>
-                  <span className="fy-swrow__refthumb">
-                    <Portrait
-                      worldSlug={slug}
-                      path={entry.sheet.type === "location" ? locationPortraitPath(world, entry.sheet.id) : characterPortraitPath(world, entry.sheet.id)}
-                      label=""
-                      radius={99}
-                    />
-                  </span>
-                  {entry.sheet.name}
-                </span>
-              ))}
+              {refs.map((entry) => {
+                const title = `${entry.sheet.type} · v${entry.sheet.version}`;
+                const inner = (
+                  <>
+                    <span className="fy-swrow__refthumb">
+                      <Portrait
+                        worldSlug={slug}
+                        path={entry.sheet.type === "location" ? locationPortraitPath(world, entry.sheet.id) : characterPortraitPath(world, entry.sheet.id)}
+                        label=""
+                        radius={99}
+                      />
+                    </span>
+                    {entry.sheet.name}
+                    {entry.sheet.type === "character" ? (
+                      <span className="fy-swrow__refwords">{speakers.includes(entry.sheet.id) ? "voice · look" : "look"}</span>
+                    ) : null}
+                  </>
+                );
+                return entry.sheet.type === "character" ? (
+                  <button
+                    key={entry.sheet.id}
+                    type="button"
+                    className="fy-swrow__ref fy-swrow__ref--door"
+                    title={title}
+                    aria-haspopup="dialog"
+                    onClick={(event) => { event.stopPropagation(); onOpenCharacter(entry.sheet.id, event.currentTarget); }}
+                  >
+                    {inner}
+                  </button>
+                ) : (
+                  <span key={entry.sheet.id} className="fy-swrow__ref" title={title}>{inner}</span>
+                );
+              })}
             </div>
             <div className="fy-swrow__overrides">
               {overrides.map((label) => <span key={label} className="fy-swrow__override" title="overrides the scene">{label}</span>)}

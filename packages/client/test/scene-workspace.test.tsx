@@ -5,7 +5,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { insertShot, orderedShots, stageSourceFingerprintInput, seedStoryPictureTimeline, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
+import { insertShot, orderedShots, stageSourceFingerprintInput, type ClientMessage, type ClientState, type Episode, type SceneRecord } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import {
   __applyEventForTest,
@@ -142,41 +142,6 @@ describe("scene detail owns the workspace", () => {
     assert.deepEqual(stagePathPoint(points, 0, 0), [0, 0, 0]);
     assert.deepEqual(stagePathPoint(points, 1, 1), [1, 0, 1]);
     assert.notEqual(stagePathPoint(points, 0, 0.5)[2], 0);
-  });
-
-  /*
-   * The word cut kept the limits (issue 1008, codex round three). The rows above the board are
-   * labels now rather than paragraphs — but a clause that says what a route does NOT promise is
-   * the one explanation turn 69 keeps, and this one stands before a paid dispatch: the plan
-   * under it reads `motion guidance` and labels the reference `performance-sync`, either of
-   * which a person could take for an exact-sync promise the route does not make.
-   */
-  it("keeps the no-sync limit on master playback, and drops the paragraph around it", async () => {
-    // The control only opens on a saved timeline; without one it is its own refusal.
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((p) => p.meta.id === "saltlight")!;
-    production.timeline = { status: "ready", timeline: seedStoryPictureTimeline(production) };
-    const mounted = await mountState(state);
-    const text = mounted.container.textContent ?? "";
-    assert.match(text, /Master playback/, "the control is named");
-    assert.match(text, /Timing is not guaranteed/, "and says what it does not promise");
-    assert.doesNotMatch(text, /Its exact shot slice guides visible motion/, "without explaining how it works");
-    assert.doesNotMatch(text, /Master playback for performance shots/, "and with a label, not a sentence");
-  });
-
-  it("shows a repeated generation timing finding only once (#1064)", async () => {
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find(p => p.meta.id === "saltlight")!;
-    const timeline = seedStoryPictureTimeline(production);
-    const track = timeline.tracks.find(track => track.kind === "picture")!;
-    const clip = track.clips.find(clip => clip.source.kind === "shot" && clip.source.shotId === "sh_12")!;
-    const end = Math.max(...track.clips.map(clip => clip.startFrame + clip.durationFrames));
-    track.clips.push({ ...clip, id: "cl_repeat-1", startFrame: end }, { ...clip, id: "cl_repeat-2", startFrame: end + clip.durationFrames });
-    production.timeline = { status: "ready", timeline };
-    const mounted = await mountState(state);
-    const message = "sh_12: multiple picture placements make generation timing ambiguous.";
-    const findings = all(mounted, '[aria-label="Generation timing"] [role="alert"]');
-    assert.equal(findings.filter(finding => finding.textContent === message).length, 1);
   });
 
   it("mounts the workspace and compact production rail by default", async () => {
@@ -995,6 +960,12 @@ describe("scene detail owns the workspace", () => {
     assert.equal(create.sceneFile, "04-the-verse-rises");
     assert.equal(create.mode, "whole-scene");
     assert.equal(create.policy, "review-gated");
+    // Nothing chosen per dispatch (SPEC-044 R-34): no read, no master slice, no audio switch, and
+    // no acknowledgement, since no guidance was drawn to acknowledge.
+    assert.deepEqual(create.acknowledgedRecommendationIds, []);
+    assert.equal("performanceAudio" in create, false);
+    assert.equal("masterAudio" in create, false);
+    assert.equal("audioReferencesDisabled" in create, false);
     await apply({
       at: "2026-08-31T12:00:00Z",
       type: "production.plan-state",
@@ -1009,7 +980,20 @@ describe("scene detail owns the workspace", () => {
           policy: "review-gated",
           capMicroUsd: 120_000,
           status: "authorized",
-          passes: [{ passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000 }],
+          passes: [{
+            passIndex: 0, state: "materialised", estimatedMicroUsd: 80_000, askedSec: 7,
+            carries: {
+              shots: [{ shotId: "sh_12", number: 12 }, { shotId: "sh_13", number: 13 }],
+              frame: { shotId: "sh_12", number: 12 },
+              place: { sheetId: "the-vigil", name: "The Vigil", rides: true },
+              cast: [
+                { sheetId: "maren-kest", name: "Maren Kest", voice: "rides", look: "rides" },
+                { sheetId: "bray-half-hitch", name: "Bray Half-Hitch", voice: "not-sent", look: "none", voiceReason: "takes no audio" },
+                { sheetId: "the-chorister", name: "The Chorister", voice: "rides", look: "kit", voiceReason: "read missing" },
+              ],
+              timing: [{ shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 }],
+            },
+          }],
           spentEstimateMicroUsd: 80_000,
           next: { kind: "await-continue", passIndex: 0 },
         },
@@ -1028,6 +1012,19 @@ describe("scene detail owns the workspace", () => {
       ],
     });
 
+    // The card's line comes from the recorded summary alone (SPEC-044 R-24, R-25): what rides,
+    // what will not and why, and timing as one clause on the pass — while the header, which
+    // computes nothing for a dispatch any more (R-3, T-13), carries no shot id at all.
+    const card = q(mounted, ".fy-boardcard__mono")?.textContent ?? "";
+    assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: voice not sent · takes no audio · The Chorister: voice, sheet · The Chorister: read not sent · read missing · the sample rides · materialised/);
+    assert.match(card, /shot 14 · not on the Cut · left out/);
+    assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /sh_\d+|unanchored|Generation timing/);
+    // A refusal is the same plain clause in the callout, and nowhere else (R-25).
+    await apply({ at: "2026-08-31T12:01:00Z", type: "production.plan-result", requestId: create.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight",
+      disposition: "failed", reason: "shots 12 and 13 · overlap on the Cut · fix the timing first" });
+    const refused = all(mounted, ".ui-callout, [role=alert]").find((node) => node.textContent?.includes("Plan refused"));
+    assert.match(refused?.textContent ?? "", /shots 12 and 13 · overlap on the Cut · fix the timing first/);
+    assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /overlap on the Cut/);
     const optionButtons = all(mounted, "button").filter((button) => button.textContent?.trim() === "Generation options");
     assert.equal(optionButtons.length, 1, "another scene's plan is not actionable here");
     const options = optionButtons[0];
@@ -3305,4 +3302,97 @@ it("reports the empty Cut's runtime in the production rail (#930)", async () => 
   const link = all(mounted, '.fy-prodrail__item').find((item) => item.querySelector('.fy-prodrail__label')?.textContent === "Cut");
   assert.ok(link);
   assert.match(link.textContent ?? "", /Cut0s/);
+});
+
+describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2, T-13)", () => {
+  const sheetLike = (id: string, name: string, extra: Record<string, unknown> = {}) =>
+    ({ id, type: "character", name, version: 2, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [], ...extra });
+  const withSheets = (extra: Array<Record<string, unknown>>, edit?: (scene: SceneRecord) => void): ClientState => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.sheets.push(...(extra as never[]));
+    const scene = state.world!.productions.find((production) => production.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    edit?.(scene);
+    return state;
+  };
+  const BRAY = sheetLike("bray-half-hitch", "Bray Half-Hitch");
+  const ODILE = sheetLike("odile", "Odile");
+
+  it("draws the cited characters as tiles by first appearance, then the members added by hand, and writes nothing by looking (T-1, T-2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([BRAY, ODILE], (scene) => {
+      orderedShots(scene)[1]!.description += " @bray-half-hitch on the stair";
+      scene.cast = { odile: { added: "2026-09-09T10:00:00.000Z" } };
+    }));
+    const row = q(mounted, '[aria-label="Cast"]')!;
+    assert.deepEqual(
+      [...row.querySelectorAll("button")].map((tile) => tile.getAttribute("aria-label")),
+      ["Maren Kest", "Bray Half-Hitch", "Odile", "Add a character"],
+    );
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false);
+  });
+
+  it("keeps the header to the breadcrumb, the title, two actions, the synopsis, the chips, the count and the cast (T-13)", async () => {
+    const mounted = await mountState(FIXTURE_STATE);
+    const header = q(mounted, "header.fy-sw__head")!;
+    assert.ok(header.querySelector(".fy-sw__breadcrumb") && header.querySelector("h1") && header.querySelector(".fy-sbsynopsis, textarea"));
+    assert.equal(header.querySelectorAll(".fy-sw__actions button").length, 2);
+    assert.ok(header.querySelector(".fy-sw__context") && header.querySelector(".fy-sw__metrics") && header.querySelector('[aria-label="Cast"]'));
+    assert.equal(header.querySelector("input[type=checkbox]"), null, "no checkbox computed for a dispatch");
+    assert.doesNotMatch(header.textContent ?? "", /sh_\d+|Generation|Dialogue guidance|Master playback|Table read/);
+    assert.doesNotMatch(q(mounted, ".fy-sw__centre")?.textContent ?? "", /Table read · |Recorded performance/, "the panels under the header are gone (R-3)");
+    const place = header.querySelector(".fy-sw__place")!;
+    assert.equal(place.getAttribute("title"), "The Vigil");
+    assert.match(place.textContent ?? "", /The Vigil$/);
+    assert.ok(place.querySelector(".fy-sw__plate img"), "the place chip carries its plate (R-2)");
+    assert.equal(place.getAttribute("aria-haspopup"), "dialog");
+  });
+
+  it("opens the place from its chip, and Change location hands over to the picker (R-18, R-19)", async () => {
+    const mounted = await mountState(FIXTURE_STATE);
+    await click(q(mounted, ".fy-sw__place")!);
+    assert.equal(q(mounted, ".fy-chardialog")?.getAttribute("aria-label"), "The Vigil in scene 4");
+    await click([...q(mounted, ".fy-chardialog")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Change location") as HTMLElement);
+    assert.equal(q(mounted, ".fy-chardialog"), null, "the dialog steps aside for the picker");
+    assert.equal(q(mounted, ".fy-castpicker")?.getAttribute("aria-label"), "Change location");
+    assert.deepEqual([...q(mounted, ".fy-castpicker")!.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil · in the scene"]);
+  });
+
+  it("offers a dashed door when the scene has no location, and that door's picker lists locations only (R-2, R-20)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([BRAY], (scene) => { scene.inherits = { timeOfDay: "night" }; }));
+    assert.equal(q(mounted, ".fy-sw__place"), null);
+    const door = q(mounted, ".fy-sw__door")!;
+    assert.equal(door.textContent?.trim(), "Add a location");
+    await click(door);
+    const picker = q(mounted, ".fy-castpicker")!;
+    assert.equal(picker.getAttribute("aria-label"), "Add a location");
+    assert.deepEqual([...picker.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil"]);
+    await click(picker.querySelector(".fy-castpicker__card") as HTMLElement);
+    const command = sent.find((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command");
+    assert.deepEqual(command.command, { kind: "edit-scene", inherits: { location: "the-vigil" } });
+    assert.equal(q(mounted, ".fy-castpicker"), null, "a press adds and closes");
+  });
+
+  it("adds a character from the dashed box through one edit-scene, and a member already here is inert (R-4)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(withSheets([ODILE]));
+    await click(q(mounted, '[aria-label="Add a character"]')!);
+    const picker = q(mounted, ".fy-castpicker")!;
+    assert.equal(picker.getAttribute("aria-label"), "Add a character · scene 4");
+    assert.deepEqual([...picker.querySelectorAll(".fy-castpicker__label")].map((label) => label.textContent), ["In Saltlight", "From the world"]);
+    const maren = picker.querySelector('[aria-label="Maren Kest · in the scene"]') as HTMLButtonElement;
+    assert.equal(maren.disabled, true);
+    await click(maren);
+    assert.equal(sent.some((message) => message.kind === "scene-command"), false, "in the scene, and inert");
+    await click(picker.querySelector('[aria-label="Odile"]') as HTMLElement);
+    const command = sent.find((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command" && command.command.kind === "edit-scene");
+    const added = (command.command as { cast?: Record<string, { added?: string }> }).cast?.["odile"]?.added ?? "";
+    assert.match(added, /^\d{4}-\d{2}-\d{2}T/, "the member carries the time it was added (R-6)");
+    assert.equal(q(mounted, ".fy-castpicker"), null);
+  });
 });

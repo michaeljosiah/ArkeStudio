@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { EpisodeSchema, type Routing } from "@arke-studio/contracts";
 import { deleteScene, SceneDeleteRefused } from "../../src/productions/ops.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
+import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { saveRouting } from "../../src/productions/interactive.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -59,6 +60,31 @@ describe("deleting a scene (round 3's other gap)", () => {
     assert.deepEqual(after.problems, [], "the world still scans clean");
     // History is the undo: the last version is still on the shelf.
     await access(join(dir, ".history", "productions", "saltlight", "scenes", STEM));
+  });
+
+  it("releases the looks the scene held, a member's and the place's plate, in the deletion commit (codex round 3)", async () => {
+    const { dir, store } = await open();
+    const before = store.getBundle().productions.find((p) => p.meta.id === "saltlight")!;
+    const scene = legacySceneView(before.scenes.find((s) => s.id === "sc_04")!);
+    const scope = { kind: "scene" as const, productionId: "saltlight", sceneId: scene.id };
+    await acceptCharacterLook(store, "maren-kest", { id: "council-coat", file: "looks/council-coat.png", kind: "costume",
+      prompt: "Formal council coat", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "maren-kest", "council-coat", scope);
+    await acceptCharacterLook(store, "the-vigil", { id: "door", file: "looks/door.png", kind: "view", prompt: "From the door",
+      takeId: "tk_01J8E0000000000000000000T4", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "the-vigil", "door", scope);
+    await applySceneCommand(store, {
+      productionId: "saltlight", sceneFile: STEM, sceneId: scene.id, baseVersion: scene.version,
+      command: { kind: "edit-scene", synopsis: scene.synopsis ?? null },
+    });
+    assert.ok(await clearSelections(store, dir));
+    await deleteScene(store, { productionId: "saltlight", sceneFile: STEM });
+    for (const sheetId of ["maren-kest", "the-vigil"]) {
+      const looks = (await readKit(store, sheetId))!.kit.looks ?? [];
+      assert.deepEqual(looks.map((look) => look.attachedTo), [undefined], `${sheetId}: the look stays on its kit, claimed by no scene`);
+    }
+    const after = await scanWorld(dir);
+    assert.deepEqual(after.problems, [], "the world still scans clean");
   });
 
   it("refuses while a shot has an accepted take, and names the shot", async () => {

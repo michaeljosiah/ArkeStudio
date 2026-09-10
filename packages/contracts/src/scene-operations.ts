@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { ShotIdSchema } from "./ids.js";
-import { SceneBlockingSchema, ShotSchema, ShotStageEditSchema, type SceneBlocking, type Shot } from "./scene.js";
+import { ShotIdSchema, SlugSchema } from "./ids.js";
+import { SceneBlockingSchema, SceneCastMemberSchema, ShotSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -81,6 +81,17 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
       kind: z.literal("edit-scene"),
       title: z.string().trim().min(1).max(200).optional(),
       synopsis: z.string().min(1).nullable().optional(),
+      /** The inherited context, per field: null clears (SPEC-044 R-19). */
+      inherits: z
+        .object({
+          location: SlugSchema.nullable().optional(),
+          timeOfDay: z.string().min(1).nullable().optional(),
+          tone: z.string().min(1).nullable().optional(),
+        })
+        .strict()
+        .optional(),
+      /** The cast, per member: a member replaces its entry whole, null removes it (SPEC-044 R-7, R-9). */
+      cast: z.record(SlugSchema, SceneCastMemberSchema.nullable()).optional(),
     })
     .strict(),
   z
@@ -393,7 +404,13 @@ export function editShot(record: SceneRecord, input: { shotId: string; change: P
  */
 export function editScene(
   record: SceneRecord,
-  input: { title?: string; synopsis?: string | undefined; blocking?: SceneBlocking | undefined },
+  input: {
+    title?: string;
+    synopsis?: string | undefined;
+    blocking?: SceneBlocking | undefined;
+    inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
+    cast?: Record<string, SceneCastMember | null>;
+  },
 ): GraphScene {
   const completed = complete(record, shotsOf(record));
   let next = input.title === undefined ? completed : { ...completed, title: input.title };
@@ -403,6 +420,27 @@ export function editScene(
       const { synopsis: _synopsis, ...withoutSynopsis } = next;
       next = withoutSynopsis;
     }
+  }
+  if (input.inherits !== undefined) {
+    // Per field: a value sets, null clears, absent leaves; an emptied context is dropped whole,
+    // so a scene that never had one and one that lost it read the same.
+    const merged: Record<string, string> = { ...next.inherits };
+    for (const [field, value] of Object.entries(input.inherits)) {
+      if (value === undefined) continue;
+      if (value === null) delete merged[field];
+      else merged[field] = value;
+    }
+    const { inherits: _inherits, ...withoutInherits } = next;
+    next = Object.keys(merged).length === 0 ? withoutInherits : { ...withoutInherits, inherits: merged };
+  }
+  if (input.cast !== undefined) {
+    const merged: Record<string, SceneCastMember> = { ...next.cast };
+    for (const [sheetId, member] of Object.entries(input.cast)) {
+      if (member === null) delete merged[sheetId];
+      else merged[sheetId] = member;
+    }
+    const { cast: _cast, ...withoutCast } = next;
+    next = Object.keys(merged).length === 0 ? withoutCast : { ...withoutCast, cast: merged };
   }
   if (!("blocking" in input)) return next;
   if (input.blocking !== undefined) return { ...next, blocking: input.blocking };
