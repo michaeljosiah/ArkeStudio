@@ -14,6 +14,7 @@ import {
   type ThemePreference,
   type NarratorSettings,
   type VoxaSettings,
+  laterVersion,
 } from "@arke-studio/contracts";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 
@@ -201,10 +202,23 @@ export class AppSettingsFile {
     });
   }
 
-  /** What Activity's panel remembers (SPEC-014 R-25): either fact alone, the other untouched. */
+  /**
+   * What Activity's panel remembers (SPEC-014 R-25): either fact alone, the other untouched, and
+   * neither ever moving back. Two windows mark independently, and a mark carrying the bundled
+   * version can land after one carrying a waiting update's newer one; the later instant and the
+   * later version win, so a release once read never becomes unread again (codex, PR 1087).
+   */
   async setActivitySeen(change: Partial<ActivitySeen>): Promise<AppSettings> {
     return this.mutate((current) => {
-      const settings: AppSettings = { ...current, activity: { ...current.activity, ...change } };
+      const inboxSeenAt =
+        change.inboxSeenAt !== undefined && (current.activity.inboxSeenAt === null || change.inboxSeenAt === null || change.inboxSeenAt > current.activity.inboxSeenAt)
+          ? change.inboxSeenAt
+          : current.activity.inboxSeenAt;
+      const whatsNewSeenVersion =
+        change.whatsNewSeenVersion !== undefined
+          ? laterVersion(current.activity.whatsNewSeenVersion, change.whatsNewSeenVersion)
+          : current.activity.whatsNewSeenVersion;
+      const settings: AppSettings = { ...current, activity: { inboxSeenAt, whatsNewSeenVersion } };
       return { settings, value: settings };
     });
   }

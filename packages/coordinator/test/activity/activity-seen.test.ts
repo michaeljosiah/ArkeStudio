@@ -26,6 +26,18 @@ describe("what Activity's panel remembers", () => {
     assert.deepEqual(reloaded.activity, read.activity);
   });
 
+  it("never moves a mark back — the later instant and the later version win (codex, PR 1087)", async () => {
+    const { root } = await makeTempRoot();
+    const file = new AppSettingsFile(join(root, "settings.json"));
+    await file.setActivitySeen({ whatsNewSeenVersion: "0.5.50" });
+    assert.equal((await file.setActivitySeen({ whatsNewSeenVersion: "0.5.49" })).activity.whatsNewSeenVersion, "0.5.50", "an older bundled version cannot unread the update");
+    assert.equal((await file.setActivitySeen({ whatsNewSeenVersion: "0.5.51-beta.2" })).activity.whatsNewSeenVersion, "0.5.51-beta.2");
+    assert.equal((await file.setActivitySeen({ whatsNewSeenVersion: "0.5.51-beta.10" })).activity.whatsNewSeenVersion, "0.5.51-beta.10");
+    await file.setActivitySeen({ inboxSeenAt: "2026-09-10T12:00:00.000Z" });
+    assert.equal((await file.setActivitySeen({ inboxSeenAt: "2026-09-10T11:00:00.000Z" })).activity.inboxSeenAt, "2026-09-10T12:00:00.000Z", "a stale stamp from a slower window loses");
+    assert.equal((await file.setActivitySeen({ inboxSeenAt: "2026-09-10T13:00:00.000Z" })).activity.inboxSeenAt, "2026-09-10T13:00:00.000Z");
+  });
+
   it("reads a malformed pair as nothing seen rather than failing the settings file", async () => {
     const { root } = await makeTempRoot();
     const path = join(root, "settings.json");

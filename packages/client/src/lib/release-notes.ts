@@ -1,3 +1,5 @@
+import { compareVersions } from "@arke-studio/contracts";
+
 /**
  * Release cards (SPEC-016 R-18, design turn 136): `docs/releases/<tag>/notes.md`, front matter
  * naming a title, a date and the picture beside it, then the notes as plain paragraphs. The
@@ -53,45 +55,7 @@ export function parseReleaseCard(
   return { version: tag.replace(/^v/, ""), tag, title, date, paragraphs, picture };
 }
 
-/**
- * Dotted numbers compare numerically; a pre-release sorts below the release it precedes, and
- * its identifiers compare the way SemVer says — numeric ones by number, numeric below
- * alphanumeric, and a shorter set below a longer one that matches it — so `beta.10` outranks
- * `beta.2` (codex, PR 1087).
- */
-export function compareVersions(a: string, b: string): number {
-  const split = (version: string) => {
-    const [core = "", ...rest] = version.replace(/^v/, "").split("-");
-    const pre = rest.length > 0 ? rest.join("-") : null;
-    return { parts: core.split(".").map((part) => Number.parseInt(part, 10) || 0), pre };
-  };
-  const left = split(a);
-  const right = split(b);
-  for (let i = 0; i < Math.max(left.parts.length, right.parts.length); i += 1) {
-    const difference = (left.parts[i] ?? 0) - (right.parts[i] ?? 0);
-    if (difference !== 0) return difference;
-  }
-  if (left.pre === right.pre) return 0;
-  if (left.pre === null) return 1;
-  if (right.pre === null) return -1;
-  const ours = left.pre.split(".");
-  const theirs = right.pre.split(".");
-  for (let i = 0; i < Math.min(ours.length, theirs.length); i += 1) {
-    const x = ours[i]!;
-    const y = theirs[i]!;
-    const xNumeric = /^\d+$/.test(x);
-    const yNumeric = /^\d+$/.test(y);
-    if (xNumeric && yNumeric) {
-      const difference = Number(x) - Number(y);
-      if (difference !== 0) return difference;
-    } else if (xNumeric !== yNumeric) {
-      return xNumeric ? -1 : 1;
-    } else if (x !== y) {
-      return x < y ? -1 : 1;
-    }
-  }
-  return ours.length - theirs.length;
-}
+export { compareVersions };
 
 /** Newest first. */
 export function orderReleases(cards: readonly ReleaseCard[]): ReleaseCard[] {
