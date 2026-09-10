@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { UpdateState } from "@arke-studio/contracts";
-import { UpdateController, type PendingUpdate, type UpdateMarker, type UpdaterLike } from "../src/updates.js";
+import { plainReleaseNotes, UpdateController, type PendingUpdate, type UpdateMarker, type UpdaterLike } from "../src/updates.js";
 
 class FakeUpdater implements UpdaterLike {
   autoDownload = true;
@@ -88,7 +88,37 @@ describe("desktop update controller", () => {
       progressPercent: 100,
       flow: null,
       detail: null,
+      releaseName: null,
+      releaseNotes: null,
     });
+  });
+
+  it("carries the waiting update's release name and notes as plain text, and drops them with the update (SPEC-016 R-19)", async () => {
+    const { controller, updater, states } = setup();
+    updater.checkResult = {
+      isUpdateAvailable: true,
+      updateInfo: {
+        version: "1.1.0",
+        releaseName: " v1.1.0 — the cut hears itself ",
+        releaseNotes: "<p>The Cut plays its own audio back, <b>lane by lane</b>.</p><ul><li>One &amp; two</li></ul><p>Tom&#39;s &quot;plate&quot;</p>",
+      },
+    };
+    await controller.check();
+    const available = states.at(-1)!;
+    assert.equal(available.status, "available");
+    assert.equal(available.releaseName, "v1.1.0 — the cut hears itself");
+    assert.equal(available.releaseNotes, "The Cut plays its own audio back, lane by lane.\n\nOne & two\n\nTom's \"plate\"");
+    // The download's info says nothing about the release; what the check found stays on the state.
+    updater.emit("update-downloaded", { version: "1.1.0" });
+    assert.equal(states.at(-1)?.releaseNotes, available.releaseNotes);
+    // Per-version rows, as the provider sometimes hands them over, join as paragraphs.
+    assert.equal(plainReleaseNotes([{ version: "1.1.0", note: "<p>New</p>" }, { version: "1.0.1", note: null }]), "New");
+    assert.equal(plainReleaseNotes("   "), null);
+    assert.equal(plainReleaseNotes("x".repeat(5000))?.length, 4000, "bounded, with an ellipsis at the cut");
+    // A check that finds nothing leaves no stale notes behind.
+    updater.checkResult = { isUpdateAvailable: false, updateInfo: { version: "1.1.0" } };
+    await controller.check();
+    assert.equal(states.at(-1)?.releaseNotes, null);
   });
 
   it("hands off exactly once and only after clean shutdown", async () => {

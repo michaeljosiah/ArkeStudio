@@ -1,9 +1,12 @@
 import { useLocation, useNavigate } from "react-router";
-import { ActivityIcon, ChevronLeft, Cog, Inbox } from "./icons.js";
+import { Bell, ChevronLeft, Cog, Inbox } from "./icons.js";
 import { cx } from "./ui.js";
 import { useStore } from "../lib/store.js";
 import { rememberSettingsReturn, settingsReturnPath } from "../lib/settings-return.js";
-import { computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
+import { closeActivityPanel, openActivityPanel, useActivityPanel, waitingUpdate } from "../lib/activity-panel.js";
+import { bundledReleases } from "../lib/releases.js";
+import { unreadCount } from "../lib/release-notes.js";
+import { arrivedSince, computeNeedsYou, unattendedProposalsOf } from "@arke-studio/contracts";
 
 /**
  * The app's chrome: one bar, drawn the same way on every screen.
@@ -52,6 +55,15 @@ export function AppChrome({
   // Same derivation as Activity: rare unattended proposals must light this from every screen,
   // alongside reconciliation, paused providers, external edits and paid work awaiting review.
   const attention = state ? computeNeedsYou(state).length > 0 : false;
+  // The second dot (design turn 136, R-24): something to read rather than decide — work that came
+  // back since the Inbox was last opened, a release not yet read, or one the updater has found
+  // and the person does not have yet. Warning wins when both apply.
+  const seen = state?.app.activitySeen ?? { inboxSeenAt: null, whatsNewSeenVersion: null };
+  const fresh = state
+    ? arrivedSince(state.app.jobs, seen.inboxSeenAt) ||
+      unreadCount(bundledReleases(), seen.whatsNewSeenVersion, waitingUpdate(state.app.update)?.targetVersion ?? null) > 0
+    : false;
+  const panel = useActivityPanel();
   // Proposals are world-scoped, so the icon only exists while a world is open — the same rule the
   // world navigation follows. Its dot means the same thing as activity's: something wants you.
   const openWorldId = state?.world?.meta.worldId;
@@ -108,16 +120,24 @@ export function AppChrome({
                 {waiting > 0 && <span className="fy-iconbtn__dot" />}
               </button>
             )}
+            {/* The bell opens Activity over this screen rather than leaving it (design turn 136,
+                R-20): Inbox while anything needs you, What's new otherwise (R-21). Pressed again,
+                it closes; the panel's own outside-press rule leaves the bell alone for that. */}
             <button
               type="button"
-              className={cx("fy-iconbtn", current === "activity" && "fy-iconbtn--current")}
-              title={attention ? "Activity — something needs you" : "Activity"}
+              className={cx("fy-iconbtn", (current === "activity" || panel.open) && "fy-iconbtn--current")}
+              title={attention ? "Activity — something needs you" : fresh ? "Activity — something new" : "Activity"}
               aria-label="Activity"
-              aria-current={current === "activity" ? "page" : undefined}
-              onClick={() => navigate("/activity")}
+              aria-expanded={panel.open}
+              data-activity-bell=""
+              onClick={() => (panel.open ? closeActivityPanel() : openActivityPanel(attention ? "inbox" : "new"))}
             >
-              <ActivityIcon size={13} />
-              {attention && <span className="fy-iconbtn__dot" />}
+              <Bell size={13} />
+              {attention ? (
+                <span className="fy-iconbtn__dot" />
+              ) : fresh ? (
+                <span className="fy-iconbtn__dot fy-iconbtn__dot--new" />
+              ) : null}
             </button>
             <button
               type="button"

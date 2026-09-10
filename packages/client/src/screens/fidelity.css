@@ -143,6 +143,8 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
   border-radius: 99px;
   background: var(--warning);
 }
+/* Something to read, not to decide (design turn 136): the bell's second dot. */
+.fy-iconbtn__dot--new { background: var(--foreground); }
 
 /*
  * Loading — the sweep, chosen from the ten in design-system/loading.html.
@@ -3364,19 +3366,6 @@ select.fy-set__pill { padding-right: 26px; }
 @keyframes fy-update-pulse { 70% { box-shadow: 0 0 0 16px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 /* activity (26a) */
-.fy-activity { display: flex; flex: 1; min-height: 0; }
-.fy-activity__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; padding: 28px 40px 24px; overflow-y: auto; }
-.fy-activity__side {
-  width: 391px;
-  flex: none;
-  border-left: 1px solid var(--border);
-  padding: 30px;
-  background: var(--muted);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-
 .fy-provider-calls { margin-top: 24px; padding: 18px; border: 1px solid var(--border); background: var(--background); }
 .fy-provider-calls__head, .fy-provider-call > summary, .fy-provider-call__payloads { display: flex; gap: 12px; }
 .fy-provider-calls__head { align-items: flex-start; justify-content: space-between; margin-bottom: 12px; }
@@ -3386,16 +3375,6 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-provider-call__payloads > div { min-width: 0; flex: 1; }
 .fy-provider-call pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--muted); border: 1px solid var(--border); font: 11px/1.5 var(--type-mono, monospace); }
 @media (max-width: 800px) { .fy-provider-call__payloads { flex-direction: column; } }
-.fy-activityrow { display: flex; align-items: center; gap: 14px; padding: 11px 4px; border-bottom: 1px solid var(--border); }
-.fy-activityrow__title { font: 600 13px var(--font-sans); }
-.fy-activityrow__sub { font: 400 10.5px/1.5 var(--font-mono); color: var(--neutral-400); margin-top: 2px; }
-.fy-activityrow__main { flex: 1; min-width: 0; }
-.fy-activityrow__summary { display: flex; align-items: center; gap: 12px; }
-.fy-activityrow__summary > .dom-jobrow { flex: 1; min-width: 0; border-bottom: 0; }
-.fy-activityrow__summary .dom-jobrow__target,
-.fy-activityrow__summary .dom-jobrow__model { min-width: 0; overflow-wrap: anywhere; }
-.fy-activityrow__actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
-.fy-activityrow__meta { font: 400 10.5px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
 .fy-spendtotal { font: 650 30px/1 var(--font-sans); letter-spacing: -0.02em; margin-top: 10px; }
 .fy-spendbar { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .fy-spendbar__label { font: 400 10.5px var(--font-mono); color: var(--muted-foreground); width: 84px; flex: none; overflow: hidden; text-overflow: ellipsis; }

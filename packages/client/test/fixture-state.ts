@@ -123,6 +123,7 @@ const state: ClientState = {
       ledgerUnavailable: false,
     },
     backgroundNotifications: "issues-only",
+    activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
     research: { web: false },
 
     narrator: null,
@@ -137,7 +138,7 @@ const state: ClientState = {
     harnessInfo: null,
     queues: [{ provider: "fal", paused: false, held: 0 }],
     setup: null,
-    update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },
+    update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null },
     env: null,
     // Available, so the navigation test renders the pane that offers the install rather than
     // the shorter one that explains why it cannot.

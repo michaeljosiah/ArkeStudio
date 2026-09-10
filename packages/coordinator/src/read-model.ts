@@ -40,6 +40,7 @@ export class ReadModel {
         presets: [],
         spend: null,
         backgroundNotifications: "issues-only",
+        activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
         research: { web: false },
         narrator: null,
         appearance: { theme: "system" },
@@ -82,6 +83,7 @@ export class ReadModel {
         | "presets"
         | "spend"
         | "backgroundNotifications"
+        | "activitySeen"
         | "research"
         | "appearance"
         | "narrator"
@@ -320,6 +322,10 @@ export class ReadModel {
       }
       case "background-notifications.changed": {
         this.state = { ...this.state, app: { ...this.state.app, backgroundNotifications: event.preference } };
+        return;
+      }
+      case "activity.seen": {
+        this.state = { ...this.state, app: { ...this.state.app, activitySeen: event.seen } };
         return;
       }
       case "narrator.changed": {

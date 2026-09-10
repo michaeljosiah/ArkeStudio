@@ -147,11 +147,32 @@ function modelName(job: Job, manifest: ModelManifest | null): string {
  * a button reading $5.46 must not come back saying $1.37.
  */
 function modelAndCost(jobs: readonly Job[], manifest: ModelManifest | null, spent: boolean): string {
-  const total = jobs.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
+  const estimate = jobs.reduce((sum, job) => sum + job.estimatedMicroUsd, 0);
   const name = modelName(jobs[0]!, manifest);
   // Local recipes already prefix their picker label; the receipt says it once, in the cost slot.
-  if (total === 0) return `${name.replace(/^Local · /i, "")} · local`;
-  return `${name} · ${spent ? usd(total) : `~${usd(total)}`}`;
+  if (estimate === 0) return `${name.replace(/^Local · /i, "")} · local`;
+  if (!spent) return `${name} · ~${usd(estimate)}`;
+  // Spent, but measured only where the provider reported a figure (SPEC-014 R-10, codex on
+  // PR 1087): a manifest-derived actual is the estimate wearing a different name, and it keeps
+  // the tilde. The bare figure is the provider's own.
+  const measured = jobs.every((job) => job.providerCostMicroUsd !== undefined);
+  const total = jobs.reduce((sum, job) => sum + (job.providerCostMicroUsd ?? job.estimatedMicroUsd), 0);
+  return `${name} · ${measured ? usd(total) : `~${usd(total)}`}`;
+}
+
+/**
+ * What a failure cost, in the queue's own terms (SPEC-009). A provider that reported a charge
+ * on the failure is believed — the ledger holds the same figure. One that took the request and
+ * reported nothing is unknown, not zero. A request refused before it was taken, or a local run,
+ * cost nothing. `not charged` for every failure was the receipt's word for the usual case, the
+ * refusal, and a false zero over a charged failure (codex P1, PR 1087).
+ */
+function failureCost(job: Job): string {
+  if (job.estimatedMicroUsd === 0) return "not charged";
+  const cost = job.providerCostMicroUsd;
+  if (cost !== undefined) return cost > 0 ? usd(cost) : "not charged";
+  const taken = job.providerJobId !== null || (job.attempt > 0 && job.submissionRejected !== true);
+  return taken ? "charge unknown" : "not charged";
 }
 
 /**
@@ -378,8 +399,32 @@ export function failedNote(
     id: noteId ?? `job:${job.id}`,
     tone: "refused",
     title: title(subjectOf(job), noun(job.target.kind, 1), "failed"),
-    meta: [modelName(job, manifest), job.status === "failed" ? "not charged" : "held"].join(" · "),
+    meta: [modelName(job, manifest), job.status === "failed" ? failureCost(job) : "held"].join(" · "),
     ...(job.error ? { reason: job.error } : {}),
     action: { label: "Activity", to: "/activity" },
   };
+}
+
+/**
+ * The row a finished job gets in Activity's Earlier (design turn 136): the receipt's own words,
+ * so the panel and the notification never spell one job two ways (79's first binding). Cancelled
+ * work had no receipt — nothing came back — so it gets its verb here, unmetered.
+ */
+export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote {
+  if (job.status === "succeeded") return readyNote(job, manifest, undefined);
+  if (job.status === "cancelled") {
+    // The queue's own distinction (SPEC-009 §cancel): cancelled before anything reached the
+    // provider is not charged; once a request was submitted the provider may still complete or
+    // charge, the queue records that warning as the job's error, and the row says `charge
+    // unknown` and carries the warning rather than promising a zero nobody measured.
+    const remote = job.providerJobId !== null || (job.error !== null && job.error.length > 0);
+    return {
+      id: `job:${job.id}`,
+      tone: remote ? "warning" : "queued",
+      title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
+      meta: `${modelName(job, manifest)} · ${remote ? "charge unknown" : "not charged"}`,
+      ...(job.error ? { reason: job.error } : {}),
+    };
+  }
+  return failedNote(job, manifest, undefined);
 }

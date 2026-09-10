@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useNavigate, useSearchParams } from "react-router";
-import { Badge, Button, Callout, IconButton, Input, Select, Textarea, cx } from "../components/ui.js";
+import { Button, Callout, Input, Select, Textarea, cx } from "../components/ui.js";
 import { VoicePickerDialog } from "../components/voice-picker.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { EmptyState } from "../components/layout.js";
 import { renderInlineMarkdown } from "../components/inline-markdown.js";
-import { JobRow } from "../domain/domain.js";
-import { Archive, ChevronDown, ChevronRight, FileText, Plus, Sparkle, Trash } from "../components/icons.js";
+import { Archive, ChevronDown, ChevronRight, Plus, Sparkle } from "../components/icons.js";
 import { AgentsPanel } from "./agents.js";
 import {
   CAPABILITY_LABEL,
@@ -28,8 +26,6 @@ import { relativeDate, shortDateTime } from "../lib/format.js";
 import { setThemePreference, useResolvedTheme, useThemePreference, type ThemePreference } from "../lib/theme.js";
 import { genesisMediaUrl } from "../lib/media.js";
 import {
-  cancelExport as cancelExportMsg,
-  cancelJob,
   checkUpdates,
   attachHostFiles,
   attachHostText,
@@ -37,12 +33,10 @@ import {
   beginFoundingBuild,
   generateLookPreview,
   planFoundingBuild,
-  runBuildItem,
   useBuildPlans,
   setResearchWeb,
   createSheetFromSentence,
   createWorld,
-  deleteJob,
   genesisAttachFiles,
   genesisChat,
   genesisDiscard,
@@ -54,13 +48,8 @@ import {
   installUpdateAndRestart,
   installUpdateOnClose,
   generateDiagnostics,
-  listProviderCalls,
   openDataFolder,
   openThread,
-  openWorld,
-  resolveHeldJob,
-  retryJobFinalization,
-  resumeQueue,
   refreshVendorAuth,
   beginVendorSignIn,
   submitVendorSignInCode,
@@ -71,49 +60,36 @@ import {
   setBackgroundNotifications,
   setRoutingDefault,
   setHarnessEngine,
-  setSpendThreshold,
   installSampleWorld,
   useSampleWorld,
   useArchiveNote,
   useDiagnosticsBundle,
-  useProviderCalls,
   useEnvCheck,
-  useExports as useExportsState,
   useGenesis,
   useSetup,
-  useReconcileReport,
   useStore,
   useUpdateStatus,
-  useVoiceSidecar as useVoiceSidecarState,
   setNarrator,
   type ReadingVoice,
 } from "../lib/store.js";
 import { ArtStyleGrid, ArtStyleWords } from "../components/art-style-picker.js";
 import { seedFrom } from "../lib/art-styles.js";
 import {
-  computeNeedsYou,
-  computeRunning,
   formatMicroUsd,
-  jobActions,
-  jobOrigin,
   modelCapabilityCopy,
   PROVIDERS as PROVIDER_TABLE,
-  spendSummary,
   type Capability,
   type ComponentHealth,
   type HarnessAvailability,
   type HarnessEngine,
   OPENCODE_AVAILABILITY,
-  type LedgerEntry,
   type ManifestModel,
   type ProviderId,
-  type ProviderCallRecord,
   type VendorAuthMethod,
   type VendorIntegration,
   type VendorSignIn,
   DEFAULT_NARRATOR,
   blueprintCoverage,
-  buildWorkingLine,
   estimateImageMicroUsd,
   legacyVoiceModel,
   modelForCapability,
@@ -2522,491 +2498,6 @@ export function SettingsAboutScreen() {
         </div>
       )}
       <div className="fy-set__copyright">© 2026 Michael Josiah</div>
-    </div>
-  );
-}
-
-// ---- Activity --------------------------------------------------------------
-
-const TERMINAL_JOB = new Set(["succeeded", "failed", "cancelled"]);
-
-function ProviderCallInspector({ jobId, onClose }: { jobId: string | null; onClose: () => void }) {
-  const calls = useProviderCalls(jobId);
-  useEffect(() => listProviderCalls(jobId), [jobId]);
-  const copy = (call: ProviderCallRecord) => void navigator.clipboard.writeText(JSON.stringify(call, null, 2));
-  return (
-    <section className="fy-provider-calls" aria-label="Provider calls">
-      <div className="fy-provider-calls__head">
-        <div><div className="fy-eyebrow-sm">PROVIDER CALLS</div><div className="fy-mono">{jobId ?? "100 most recent calls"}</div></div>
-        <Button variant="ghost" onClick={onClose}>Close</Button>
-      </div>
-      <Callout tone="warning" title="Sensitive local history">
-        Requests and responses may contain prompts and world content. Credentials and binary media are redacted or summarized.
-      </Callout>
-      {calls === null && <div className="fy-mono">loading call history…</div>}
-      {calls?.length === 0 && <div className="fy-mono">No recorded calls. Calls made before this feature are not recoverable.</div>}
-      {calls?.map((call) => (
-        <details key={call.id} className="fy-provider-call" open={calls.length === 1}>
-          <summary>
-            <span>{call.operation}</span><span className="fy-mono">{call.method} {call.endpoint}</span>
-            <Badge tone={call.status === "succeeded" || call.status === "accepted" ? "success" : call.status === "pending" ? "warning" : "danger"}>
-              {call.status === "pending" ? "outcome unknown" : call.status}
-            </Badge>
-          </summary>
-          <div className="fy-provider-call__meta">{shortDateTime(call.startedAt)} · attempt {call.attempt ?? "—"} · HTTP {call.httpStatus ?? "no response"} · {call.elapsedMs === null ? "still pending" : `${call.elapsedMs} ms`}</div>
-          {call.error && <Callout tone="warning" title={`${call.error.name}${call.error.code ? ` · ${call.error.code}` : ""}`}>{call.error.message}</Callout>}
-          <div className="fy-provider-call__payloads">
-            <div><div className="fy-provider-call__label">REQUEST</div><pre>{JSON.stringify(call.request, null, 2)}</pre></div>
-            <div><div className="fy-provider-call__label">RESPONSE</div><pre>{call.response === null ? "No response was witnessed." : JSON.stringify(call.response, null, 2)}</pre></div>
-          </div>
-          <Button variant="ghost" onClick={() => copy(call)}>Copy sensitive call JSON</Button>
-        </details>
-      ))}
-    </section>
-  );
-}
-
-export function ActivityScreen() {
-  const { state } = useStore();
-  const reconcileReport = useReconcileReport();
-  const sidecar = useVoiceSidecarState();
-  const exportsState = useExportsState();
-  const navigate = useNavigate();
-  const [scope, setScope] = useState<"active" | "all">("active");
-  const [inspectedJobId, setInspectedJobId] = useState<string | null>(null);
-  const [inspectAllCalls, setInspectAllCalls] = useState(false);
-  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
-  const activeWorldId = state?.world?.meta.worldId ?? null;
-  // The alert threshold, set where it is reported (26a). Closed until asked for: the note says
-  // what the alert is, and most visits to this screen are not about changing it.
-  const [editingThreshold, setEditingThreshold] = useState(false);
-  const [threshold, setThreshold] = useState<string | null>(null);
-  const [period, setPeriod] = useState<string | null>(null);
-  const thresholdValue =
-    threshold ?? String((state?.app.spend?.settings.thresholdMicroUsd ?? 0) / 1_000_000);
-  const periodValue = period ?? String(state?.app.spend?.settings.periodDays ?? 7);
-
-  const jobs = [...(state?.app.jobs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  const scoped = <T extends { worldId?: string }>(items: T[]): T[] =>
-    scope === "all" || activeWorldId === null ? items : items.filter((i) => i.worldId === undefined || i.worldId === activeWorldId);
-
-  const running = state ? computeRunning(state, { sidecar, exports: exportsState }) : [];
-  const needsYou = state ? computeNeedsYou(state) : [];
-  // Founding-build items that did not land (SPEC-031 R-48): rows derived from the build
-  // record's own keys, so an item never dispatched — no route, no credential — is as visible
-  // and as runnable as a failed one. Held items are deliberately absent: their queue rows
-  // are already here, and resuming the lane is that row's action (row 32 — no duplicates).
-  const NOT_LANDED = new Set(["failed", "skipped", "unauthorized"]);
-  const builds = scoped([...(state?.app.builds ?? [])]).filter((build) => build.status !== "running");
-  const buildMissing = builds
-    .map((build) => ({ build, missing: build.items.filter((item) => NOT_LANDED.has(item.state)) }))
-    .filter(({ missing }) => missing.length > 0);
-  /** The build item a failed job belongs to, for the retry that lands as the build would (R-49). */
-  const buildItemForJob = (jobId: string) => {
-    for (const build of state?.app.builds ?? []) {
-      const item = build.items.find((candidate) => candidate.jobId === jobId);
-      if (item) return { build, item };
-    }
-    return null;
-  };
-  // Spend obeys the screen's scope like every other collection here (issue 305 §8). Bench jobs
-  // omit productionId but keep worldId, so their ledger entries are world-owned already; what was
-  // missing was reading that. The threshold alert below stays app-wide deliberately — it is one
-  // durable app setting about one app-wide rolling total, not a per-world figure.
-  //
-  // The ledger cannot use `scoped` as it stands, because it is the one collection here whose
-  // scope is not always a world id. A founding look preview is paid for before any world exists,
-  // and while the job is re-associated to the world at Begin, the ledger entry keeps the genesis
-  // it was actually spent under (SPEC-031 R-55) — that is the record of where the money went.
-  // The build holds the join, so read it: dropping those entries would underreport every world
-  // that was founded from a paid preview.
-  // The build is pruned from the snapshot once every item has landed, which is exactly when
-  // the founding went well — so the coordinator also keeps the pair it harvested before pruning
-  // (issue 531). Both are read: the build for a founding in this session, the map after any
-  // restart. Neither ever names another world's genesis as this one's.
-  const genesisForActiveWorld = new Set([
-    ...(state?.app.builds ?? []).filter((b) => b.worldId === activeWorldId).map((b) => b.genesisId),
-    ...Object.entries(state?.app.worldGenesis ?? {})
-      .filter(([worldId]) => worldId === activeWorldId)
-      .map(([, genesisId]) => genesisId),
-  ]);
-  const inScope = (entry: LedgerEntry): boolean =>
-    scope === "all" ||
-    activeWorldId === null ||
-    entry.worldId === activeWorldId ||
-    genesisForActiveWorld.has(entry.worldId);
-  const spend = state
-    ? spendSummary(state.app.ledger.filter(inScope), state.app.spend?.settings.periodDays ?? 7, new Date())
-    : null;
-  const spendStatus = state?.app.spend ?? null;
-  const spendThreshold = spendStatus?.settings.thresholdMicroUsd ?? 0;
-  // The source-quality slot, and a failed read is the loudest source fact there is: the figure
-  // beside it sums only what survived the read, a lower bound wearing the shape of a total.
-  // Keyed on the published list's own read — latched to the seed — where the alert note below
-  // states the fate of the evaluation's own, fresher read. The two can honestly differ.
-  const sourceNote = state?.app.ledgerUnavailable
-    ? "ledger could not be read"
-    : spend?.mixed
-      ? `mixed · ${spend.reportedEntries} measured, ${spend.derivedEntries} derived`
-      : (spend?.derivedEntries ?? 0) > 0
-        ? "derived from the manifest"
-        : "provider-reported";
-  /*
-   * The threshold row. A fired alert outranks everything: `alerted` is only ever computed from
-   * entries that were read, so the crossing is real even when a later read failed, and hiding
-   * it would be the reverse of this screen's fault. Then the un-evaluated case — a status whose
-   * read failed has an un-fired alert, which is not an all-clear (SPEC-008 R-19). A zero
-   * threshold stays `off` throughout: an alert that is off asks nothing of the ledger.
-   */
-  const alertWindow = `Alert at ${formatMicroUsd(spendThreshold)} / ${spend?.periodDays ?? 7}d`;
-  const alertNote = spendStatus?.alerted
-    ? `Over the threshold: ${formatMicroUsd(spendStatus.rollingMicroUsd)} against ${formatMicroUsd(spendThreshold)}. Nothing is blocked.`
-    : spendThreshold === 0
-      ? `${alertWindow} · off`
-      : spendStatus?.ledgerUnavailable
-        ? `${alertWindow} · not evaluated`
-        : alertWindow;
-  const drift = state?.app.drift ?? [];
-  const today = new Date().toISOString().slice(0, 10);
-  const recent = scoped(jobs.filter((j) => TERMINAL_JOB.has(j.status) && j.updatedAt.startsWith(today)));
-  const settled = running.length === 0 && needsYou.length === 0;
-
-  return (
-    <div className="fy-app" data-screen="activity">
-      <AppChrome back={{ label: "Home", to: "/worlds" }} context={{ label: "activity" }} current="activity" />
-      <div className="fy-activity">
-        <div className="fy-activity__main">
-          <div className="fy-h1row">
-            <h1 className="fy-h1">Activity</h1>
-            <span className="fy-h1row__meta">
-              {scoped(running).length} running · {scoped(needsYou).length} need{scoped(needsYou).length === 1 ? "s" : ""} you
-            </span>
-            <span className="fy-h1row__push" />
-            <span className="fy-seg">
-              <button
-                type="button"
-                className={cx("fy-seg__item", scope === "active" && "fy-seg__item--active")}
-                onClick={() => setScope("active")}
-              >
-                This world
-              </button>
-              <button
-                type="button"
-                className={cx("fy-seg__item", scope === "all" && "fy-seg__item--active")}
-                onClick={() => setScope("all")}
-              >
-                All worlds
-              </button>
-            </span>
-          </div>
-          {reconcileReport && reconcileReport.length > 0 && (
-            <Callout title="What recovery did">
-              {reconcileReport.map((r) => `${r.jobId.slice(0, 8)}… ${r.action}`).join(" · ")}
-            </Callout>
-          )}
-          {settled ? (
-            <div style={{ padding: "40px 0" }}>
-              <EmptyState
-                title="Nothing running, nothing waiting on you"
-                hint="A settled state, not a blank — you can stop."
-              />
-            </div>
-          ) : (
-            <>
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                RUNNING
-              </div>
-              {scoped(running).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing in flight</div>}
-              {scoped(running).map((r) => (
-                <div key={r.ref} className="fy-activityrow">
-                  <span className="fy-dot fy-dot--live" />
-                  <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title" title={r.diagnostic}>{r.title}</div>
-                    <div className="fy-activityrow__sub">
-                      {r.kind} · {r.detail}
-                    </div>
-                  </div>
-                  <span className="fy-activityrow__meta">{r.percent !== null ? `${Math.round(r.percent)}%` : "running"}</span>
-                  {r.cancellable && r.kind === "job" && (
-                    <Button variant="ghost" onClick={() => cancelJob(r.ref)}>
-                      Cancel
-                    </Button>
-                  )}
-                  {r.kind === "job" && (
-                    <IconButton label="Provider calls" onClick={() => setInspectedJobId(r.ref)}>
-                      <FileText />
-                    </IconButton>
-                  )}
-                  {r.cancellable && r.kind === "export" && activeWorldId && (
-                    <Button variant="ghost" onClick={() => cancelExportMsg(activeWorldId, r.ref)}>
-                      Cancel
-                    </Button>
-                  )}
-                </div>
-              ))}
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                NEEDS YOU · {scoped(needsYou).length}
-              </div>
-              {scoped(needsYou).length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing waiting on you</div>}
-              {scoped(needsYou).map((entry, i) => (
-                <div key={`${entry.kind}-${entry.ref ?? entry.worldId ?? i}`} className="fy-activityrow" style={{ alignItems: "flex-start" }}>
-                  <span className="fy-dot fy-dot--warn" style={{ marginTop: 5 }} />
-                  <div className="fy-activityrow__main">
-                    <div className="fy-activityrow__title" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                      {entry.title}
-                      <Badge tone={entry.urgency <= 2 ? "warning" : "outline"}>class {entry.urgency}</Badge>
-                      {entry.asOf && <Badge tone="outline">as of {shortDateTime(entry.asOf)} — not current</Badge>}
-                    </div>
-                    <div className="fy-activityrow__sub">{entry.detail}</div>
-                    <div style={{ display: "flex", gap: "var(--space-2)", marginTop: 8, flexWrap: "wrap" }}>
-                      {entry.ref && jobs.some((job) => job.id === entry.ref) && (
-                        <IconButton label="Provider calls" onClick={() => setInspectedJobId(entry.ref!)}>
-                          <FileText />
-                        </IconButton>
-                      )}
-                      {entry.actions.includes("resolve") && entry.ref && (
-                        <>
-                          <Button onClick={() => resolveHeldJob(entry.ref!, "resubmit")}>Resubmit · may charge again</Button>
-                          <Button variant="ghost" onClick={() => resolveHeldJob(entry.ref!, "discard")}>
-                            Abandon · prior cost unknown
-                          </Button>
-                        </>
-                      )}
-                      {entry.actions.includes("retry-finalization") && entry.ref && (
-                        <Button onClick={() => retryJobFinalization(entry.ref!)}>
-                          Retry finalization · no regeneration or charge
-                        </Button>
-                      )}
-                      {entry.actions.includes("settings") && entry.ref && (
-                        <>
-                          <Button onClick={() => resumeQueue(entry.ref!)}>Resume {entry.ref}</Button>
-                          <Button variant="ghost" onClick={() => navigate("/settings/providers")}>
-                            Settings
-                          </Button>
-                        </>
-                      )}
-                      {entry.actions.includes("reconcile") && entry.worldId && (
-                        <Button onClick={() => navigate(`/w/${entry.worldId}`)}>Open world</Button>
-                      )}
-                      {entry.actions.includes("review") && entry.worldId && (
-                        <Button onClick={() => navigate(entry.reviewPath ?? `/w/${entry.worldId}/productions`)}>Review</Button>
-                      )}
-                      {entry.actions.includes("open-proposal") && entry.worldId && (
-                        <Button onClick={() => navigate(`/w/${entry.worldId}/proposals`)}>Review</Button>
-                      )}
-                      {entry.actions.includes("open-world") && entry.worldId && (
-                        <Button
-                          onClick={() => {
-                            // Opening makes the counts precise (R-7).
-                            openWorld(entry.worldId!);
-                            navigate(`/w/${entry.worldId}`);
-                          }}
-                        >
-                          Open — items become precise
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
-          {buildMissing.map(({ build, missing }) => (
-            <div key={build.buildId}>
-              <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-                THE FOUNDING BUILD · {missing.length} NOT LANDED
-              </div>
-              {missing.length > 1 && (
-                <div className="fy-activityrow">
-                  <span className="fy-dot" />
-                  <div className="fy-activityrow__main">
-                    <span>{build.worldName} · everything outstanding</span>
-                  </div>
-                  <Button onClick={() => runBuildItem(build.worldId)}>Run all {missing.length}</Button>
-                </div>
-              )}
-              {missing.map((item) => (
-                <div key={item.key} className="fy-activityrow">
-                  <span className="fy-dot fy-dot--warn" />
-                  <div className="fy-activityrow__main">
-                    <span>{buildWorkingLine(item)}</span>
-                    {item.detail && <span className="fy-mono">{item.detail}</span>}
-                  </div>
-                  {/* Lands exactly as the build would have — settled, anchored, designated (R-49). */}
-                  <Button onClick={() => runBuildItem(build.worldId, item.key)}>Run</Button>
-                </div>
-              ))}
-            </div>
-          ))}
-          <div className="fy-eyebrow-sm" style={{ margin: "18px 0 2px" }}>
-            EARLIER TODAY
-          </div>
-          {recent.length === 0 && <div className="fy-mono" style={{ padding: "10px 0" }}>nothing finished today · the ledger holds everything</div>}
-          {recent.slice(0, 20).map((job) => (
-            <div key={job.id} className="fy-activityrow" style={{ display: "block" }}>
-              <div className="fy-activityrow__summary">
-                <JobRow job={job} state={state} />
-                <span className="fy-activityrow__actions">
-                  <IconButton label="Provider calls" onClick={() => setInspectedJobId(job.id)}><FileText /></IconButton>
-                  {jobActions(job).includes("delete") && confirmingDelete !== job.id && (
-                    <IconButton label="Delete" onClick={() => setConfirmingDelete(job.id)}><Trash /></IconButton>
-                  )}
-                </span>
-              </div>
-              {/* Where this one is re-run from, which is not one place (issue 226). The row used
-                  to name the production's dispatch dialog under every failure, including the
-                  reference work that belongs to no production and has no such dialog. */}
-              {jobActions(job).includes("retry") &&
-                (() => {
-                  // A founding-build job retries through the build's own landing (SPEC-031
-                  // R-49): the photo becomes the anchor, never a staged proposal.
-                  const owned = buildItemForJob(job.id);
-                  if (owned) {
-                    return (
-                      <>
-                        <span className="scr-field__hint">failed — runs again and lands settled</span>
-                        <Button variant="ghost" onClick={() => runBuildItem(owned.build.worldId, owned.item.key)}>
-                          Run again
-                        </Button>
-                      </>
-                    );
-                  }
-                  const origin = jobOrigin(job);
-                  return origin ? (
-                    <>
-                      <span className="scr-field__hint">failed — run it again from {origin.where}</span>
-                      <Button variant="ghost" onClick={() => navigate(origin.path)}>
-                        {origin.label}
-                      </Button>
-                    </>
-                  ) : (
-                    <span className="scr-field__hint">failed — run it again from wherever you started it</span>
-                  );
-                })()}
-              {/* Two clicks and no dialog, like archiving a world: the second click is the consent,
-                  and the words say what survives it — so the consent stays a text button even
-                  though the offer is a glyph. Offered only where the state permits it (R-13) —
-                  work still finishing, or a finalization the user can still retry, is not history
-                  yet. */}
-              {jobActions(job).includes("delete") &&
-                (confirmingDelete === job.id ? (
-                  <>
-                    <span className="scr-field__hint">
-                      Remove from this history? The ledger entry and anything it produced stay — spend does not
-                      move.
-                    </span>
-                    <Button
-                      onClick={() => {
-                        deleteJob(job.id);
-                        setConfirmingDelete(null);
-                      }}
-                    >
-                      Delete
-                    </Button>
-                    <Button variant="ghost" onClick={() => setConfirmingDelete(null)}>
-                      Keep
-                    </Button>
-                  </>
-                ) : null)}
-            </div>
-          ))}
-          {(inspectedJobId || inspectAllCalls) && (
-            <ProviderCallInspector jobId={inspectAllCalls ? null : inspectedJobId} onClose={() => { setInspectedJobId(null); setInspectAllCalls(false); }} />
-          )}
-        </div>
-        <div className="fy-activity__side">
-          <div style={{ font: "600 13px var(--font-sans)" }}>
-            {spend ? `Last ${spend.periodDays} days` : "Spend"}
-          </div>
-          {spend && (
-            <>
-              <div className="fy-spendtotal">
-                {formatMicroUsd(spend.totalMicroUsd)} <span className="fy-mono">{sourceNote}</span>
-              </div>
-              {spend.byProvider
-                .filter((p) => !p.unmetered)
-                .map((p) => (
-                  <div key={p.provider} className="fy-spendbar">
-                    <span className="fy-spendbar__label">{p.provider}</span>
-                    <div className="fy-spendbar__track">
-                      <div
-                        className="fy-spendbar__fill"
-                        style={{
-                          width: `${spend.totalMicroUsd > 0 ? Math.max(Math.round((p.microUsd / spend.totalMicroUsd) * 100), 2) : 0}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="fy-spendbar__value">{formatMicroUsd(p.microUsd)}</span>
-                  </div>
-                ))}
-              {spend.unmeteredRuns > 0 && (
-                <div className="fy-mono" style={{ marginTop: 12 }}>
-                  {spend.unmeteredRuns} unmetered run{spend.unmeteredRuns === 1 ? "" : "s"} — no provider charge
-                </div>
-              )}
-              <div className="fy-notecard" style={{ background: "var(--background)" }}>
-                <span className={`fy-dot fy-dot--${spendStatus?.alerted ? "warn" : "sketch"}`} />
-                {alertNote}
-                {/* Opens the control in place. It used to send you to Settings, which is where the
-                    threshold lived; 26a puts the threshold on this screen, so it is here now. */}
-                <button
-                  type="button"
-                  className="fy-spendalert__toggle"
-                  aria-expanded={editingThreshold}
-                  onClick={() => setEditingThreshold((open) => !open)}
-                >
-                  {editingThreshold ? "Close" : "Set"}
-                </button>
-              </div>
-              {editingThreshold && (
-                <div className="fy-spendalert">
-                  <span className="fy-spendalert__label">alert at $</span>
-                  <Input
-                    aria-label="Alert threshold in dollars"
-                    style={{ maxWidth: 92 }}
-                    value={thresholdValue}
-                    onChange={(e) => setThreshold(e.target.value)}
-                  />
-                  <span className="fy-spendalert__label">over</span>
-                  <Input
-                    aria-label="Alert window in days"
-                    style={{ maxWidth: 62 }}
-                    value={periodValue}
-                    onChange={(e) => setPeriod(e.target.value)}
-                  />
-                  <span className="fy-spendalert__label">days</span>
-                  <Button
-                    onClick={() => {
-                      const usdValue = Number.parseFloat(thresholdValue);
-                      const days = Number.parseInt(periodValue, 10);
-                      if (Number.isFinite(usdValue) && usdValue >= 0 && Number.isFinite(days) && days >= 1) {
-                        setSpendThreshold(Math.round(usdValue * 1_000_000), Math.min(days, 365));
-                        setThreshold(null);
-                        setPeriod(null);
-                        setEditingThreshold(false);
-                      }
-                    }}
-                  >
-                    Save
-                  </Button>
-                </div>
-              )}
-              {drift.map((d) => (
-                <Callout key={d.modelId} tone="warning" title={`${d.modelId} estimates are drifting`}>
-                  ~{(d.medianDivergencePerMille / 10).toFixed(0)}% off across {d.samples} provider-reported charges —
-                  the shipped manifest needs an update.
-                </Callout>
-              ))}
-            </>
-          )}
-          <div className="fy-mono" style={{ marginTop: 12 }}>
-            unmetered runtimes report no provider charge
-          </div>
-          <div style={{ flex: 1 }} />
-          <Button onClick={() => navigate("/settings/providers")}>Providers &amp; keys</Button>
-          <Button variant="ghost" onClick={() => { setInspectedJobId(null); setInspectAllCalls(true); }}>All provider calls</Button>
-        </div>
-      </div>
     </div>
   );
 }

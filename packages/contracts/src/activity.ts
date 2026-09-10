@@ -3,13 +3,17 @@ import type { Job } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
 import { PROVIDERS } from "./provider.js";
+import { formatMicroUsd } from "./money.js";
 import { unattendedProposalsOf } from "./proposal.js";
 import type { Take } from "./take.js";
 import { orderedShots } from "./scene-flow.js";
 import { PerformanceTargetSchema } from "./performance.js";
 
 /** The same names for running and completed work, resolved only inside its owning world (#1005). */
-export function activityJobLabels(state: ClientState | null | undefined, job: Job): { target: string; model: string } {
+export function activityJobLabels(
+  state: ClientState | null | undefined,
+  job: Job,
+): { target: string; model: string; place: string } {
   const world = state?.world?.meta.worldId === job.worldId ? state.world : null;
   const worldName = world?.meta.name ?? state?.worlds.find((candidate) => candidate.worldId === job.worldId)?.name;
   const targetParts = job.target.id?.split("/") ?? [];
@@ -40,7 +44,10 @@ export function activityJobLabels(state: ClientState | null | undefined, job: Jo
     ?? sheet?.name ?? bench?.title ?? (sceneWide ? scene?.title : shot ? `Shot ${shot.number} · ${shot.title}` : scene?.title)].filter(Boolean).join(" · ");
   const target = [subject ? `${subject} · ${kind}` : kind[0]!.toUpperCase() + kind.slice(1), production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
   const model = state?.app.manifest?.models.find((candidate) => candidate.id === job.model && candidate.provider === job.provider)?.displayName ?? job.model;
-  return { target, model };
+  // The path alone — production, world, scene — for a row whose title already names the subject
+  // the receipt's way (design turn 79) and still owes R-19 the place.
+  const place = [production?.meta.title, worldName, scene && (shot || sceneId) ? `Scene ${scene.number}` : null].filter(Boolean).join(" · ");
+  return { target, model, place };
 }
 
 /**
@@ -65,7 +72,8 @@ export type NeedsYouAction =
   | "review"
   | "open-proposal"
   | "open-world"
-  | "review-extraction";
+  | "review-extraction"
+  | "spend";
 
 export interface NeedsYouEntry {
   urgency: NeedsYouClass;
@@ -73,6 +81,7 @@ export interface NeedsYouEntry {
     | "job-needs-reconciliation"
     | "job-finalization-failed"
     | "provider-paused"
+    | "spend-over-threshold"
     | "external-edits"
     | "unreviewed-take"
     | "open-proposal"
@@ -159,6 +168,23 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class
       actions: ["settings"],
       ref: queue.provider,
+    });
+  }
+
+  // Class 2 — the user's own line, crossed (design turn 136, R-23). It blocks nothing, so it sits
+  // beside blocked work rather than above it. Derived from the last evaluation like everything
+  // here: it leaves when the rolling total falls back under the line or the line moves. A zero
+  // threshold is off and never alerts (SPEC-008 R-19), so the flag alone is the test.
+  const spend = state.app.spend;
+  if (spend?.alerted && spend.settings.thresholdMicroUsd > 0) {
+    entries.push({
+      urgency: 2,
+      kind: "spend-over-threshold",
+      title: "Over the spend alert",
+      detail: `${formatMicroUsd(spend.rollingMicroUsd)} against ${formatMicroUsd(spend.settings.thresholdMicroUsd)} / ${spend.settings.periodDays}d · nothing is blocked`,
+      at: "9999-12-31T00:00:00Z", // the status carries no instant; newest within class, like a pause
+      actions: ["spend"],
+      ref: "spend-threshold",
     });
   }
 
@@ -353,6 +379,19 @@ export type JobAction = "watch" | "cancel" | "retry" | "resolve" | "delete";
  * a pending one is still working and a failed one is a class-1 needs-you item with a retry on it.
  * Deleting either would remove an entry the user still has a decision to make about (D1, D10).
  */
+const ARRIVED = new Set<Job["status"]>(["succeeded", "failed", "cancelled"]);
+
+/**
+ * Whether work came back after the Inbox was last opened — the bell's foreground dot (design
+ * turn 136, R-24). Never opened counts as never seen, so a first look lights for any history at
+ * all; the coordinator stamps the instant with the clock that stamps `updatedAt`.
+ */
+export function arrivedSince(jobs: readonly Job[], seenAt: string | null): boolean {
+  return jobs.some(
+    (job) => ARRIVED.has(job.status) && job.deletedAt === undefined && (seenAt === null || job.updatedAt > seenAt),
+  );
+}
+
 export function canDeleteJob(job: Job): boolean {
   if (job.status !== "succeeded" && job.status !== "failed" && job.status !== "cancelled") return false;
   if (typeof job.params["frameRun"] === "string") return false;

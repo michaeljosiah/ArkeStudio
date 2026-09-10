@@ -42,10 +42,55 @@ export function fileUpdateMarker(path: string): UpdateMarker {
   };
 }
 
+/** What electron-updater says about a release: the notes are HTML from GitHub's feed, or per-version rows. */
+export interface UpdateReleaseInfo {
+  version?: string;
+  releaseName?: string | null;
+  releaseNotes?: string | Array<{ version: string; note: string | null }> | null;
+}
+
 type UpdateCheckResult = {
   isUpdateAvailable?: boolean;
-  updateInfo: { version: string };
+  updateInfo: UpdateReleaseInfo & { version: string };
 } | null;
+
+const NOTES_LIMIT = 4000;
+
+const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+/**
+ * The renderer never sees markup from the network (SPEC-016 R-19). The GitHub provider hands the
+ * release body back as the HTML of its feed, so block ends become paragraph breaks, every other
+ * tag goes, entities are decoded and whitespace settles — what is left is the text the release
+ * author typed, close enough to read on a card.
+ */
+export function plainReleaseNotes(notes: UpdateReleaseInfo["releaseNotes"]): string | null {
+  const raw = Array.isArray(notes)
+    ? notes.map((row) => row.note ?? "").filter((note) => note.trim().length > 0).join("\n\n")
+    : notes ?? "";
+  const text = raw
+    // A block end is a paragraph break; a line break inside one stays a line.
+    .replace(/<\s*(\/p|\/li|\/h[1-6]|\/div|\/tr)\b[^>]*>/gi, "\n\n")
+    .replace(/<\s*br\b[^>]*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, code: string) => {
+      if (code[0] === "#") {
+        const point = code[1]?.toLowerCase() === "x" ? parseInt(code.slice(2), 16) : parseInt(code.slice(1), 10);
+        return Number.isFinite(point) && point > 0 && point < 0x110000 ? String.fromCodePoint(point) : whole;
+      }
+      return ENTITIES[code.toLowerCase()] ?? whole;
+    })
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (text.length === 0) return null;
+  return text.length > NOTES_LIMIT ? `${text.slice(0, NOTES_LIMIT - 1).trimEnd()}…` : text;
+}
+
+function releaseOf(info: UpdateReleaseInfo | undefined): Pick<UpdateState, "releaseName" | "releaseNotes"> {
+  const name = info?.releaseName?.trim();
+  return { releaseName: name || null, releaseNotes: plainReleaseNotes(info?.releaseNotes) };
+}
 
 export interface UpdaterLike {
   autoDownload: boolean;
@@ -74,6 +119,8 @@ export class UpdateController {
     progressPercent: null,
     flow: null,
     detail: null,
+    releaseName: null,
+    releaseNotes: null,
   };
   private checkPromise: Promise<void> | null = null;
   private downloadPromise: Promise<void> | null = null;
@@ -88,22 +135,28 @@ export class UpdateController {
     if (!options.packaged) return;
 
     options.updater.on("checking-for-update", () => this.set({ status: "checking" }));
-    options.updater.on("update-available", (info: { version?: string }) => {
-      this.set({ status: "available", targetVersion: info.version ?? this.state.targetVersion });
+    options.updater.on("update-available", (info: UpdateReleaseInfo) => {
+      this.set({ status: "available", targetVersion: info.version ?? this.state.targetVersion, ...releaseOf(info) });
     });
-    options.updater.on("update-not-available", () => this.set({ status: "none", targetVersion: null }));
+    options.updater.on("update-not-available", () =>
+      this.set({ status: "none", targetVersion: null, releaseName: null, releaseNotes: null }),
+    );
     options.updater.on("download-progress", (progress: { percent?: number }) => {
       this.set({
         status: "downloading",
         progressPercent: Math.max(0, Math.min(100, progress.percent ?? 0)),
       });
     });
-    options.updater.on("update-downloaded", (info: { version?: string }) => {
+    options.updater.on("update-downloaded", (info: UpdateReleaseInfo) => {
+      // The download's info may carry the notes again or not at all; what the check found stays.
+      const found = releaseOf(info);
       this.set({
         status: "ready",
         targetVersion: info.version ?? this.state.targetVersion,
         progressPercent: 100,
         detail: null,
+        releaseName: found.releaseName ?? this.state.releaseName,
+        releaseNotes: found.releaseNotes ?? this.state.releaseNotes,
       });
     });
     options.updater.on("error", () => {
@@ -175,14 +228,22 @@ export class UpdateController {
     }
     if (this.checkPromise) return this.checkPromise;
     if (this.installOnCloseArmed) return Promise.resolve();
-    this.set({ status: "checking", targetVersion: null, progressPercent: null, flow: null, detail: null });
+    this.set({
+      status: "checking",
+      targetVersion: null,
+      progressPercent: null,
+      flow: null,
+      detail: null,
+      releaseName: null,
+      releaseNotes: null,
+    });
     this.checkPromise = this.options.updater
       .checkForUpdates()
       .then((result) => {
         if (result?.isUpdateAvailable === true) {
-          this.set({ status: "available", targetVersion: result.updateInfo.version });
+          this.set({ status: "available", targetVersion: result.updateInfo.version, ...releaseOf(result.updateInfo) });
         } else {
-          this.set({ status: "none", targetVersion: null });
+          this.set({ status: "none", targetVersion: null, releaseName: null, releaseNotes: null });
         }
       })
       .catch(() => {

@@ -71,6 +71,7 @@ export * from "./provider-call.js";
 export * from "./provider-transport.js";
 export * from "./diagnostics.js";
 export * from "./update.js";
+export * from "./version.js";
 export * from "./storyboard.js";
 export * from "./locked-modes.js";
 export * from "./single-act.js";

@@ -32,7 +32,6 @@ export const SCREENS: ScreenEntry[] = [
   { id: "settings-sample-world", samplePath: "/settings/sample-world" },
   { id: "settings-diagnostics", samplePath: "/settings/diagnostics" },
   { id: "settings-about", samplePath: "/settings/about" },
-  { id: "activity", samplePath: "/activity" },
 
   // World
   { id: "world-overview", samplePath: W },
