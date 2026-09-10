@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
+import type { Sheet } from "../src/world.js";
 import { AudioUseRequestSchema, castVoiceRequests, characterAudioRoute, planCharacterAudio, type FrozenPerformanceAudio } from "../src/audio-reference.js";
 import type { ManifestModel, ProductionBundle, SceneRecord } from "../src/index.js";
 
@@ -70,6 +71,11 @@ it("the cast authority says why a read will not be asked for, in the card's word
   const localOnly = castVoiceRequests(SHEETS, production({ performances: [{ ...RECORD, cloudBasis: undefined }] }), castScene(chosen), undefined, true);
   assert.deepEqual([localOnly.notSent, localOnly.requests.map(r => [r.performanceId, r.cloudBasis])], [[], [[RECORD.id, undefined]]]);
   assert.deepEqual(reason(production(), castScene({ kind: "sample" })), [], "the sample asks for nothing");
+  // A read made with an earlier voice assignment is another voice's (codex round 4); one made with the current one rides.
+  const made = { provider: "elevenlabs", voiceId: "v_1", assignedAtVersion: 1 };
+  assert.deepEqual(reason(production({ performances: [{ ...RECORD, kind: "generated-tts", voiceAssignment: made }] }), castScene(chosen)), ["Maren Kest: voice changed"]);
+  const voiced = [{ ...(SHEETS as unknown as Sheet[])[0]!, voice: made }] as never;
+  assert.deepEqual(castVoiceRequests(voiced, production({ performances: [{ ...RECORD, kind: "generated-tts", voiceAssignment: made }] }), castScene(chosen)).notSent, []);
   // Narrowed to a subject's shots (codex round 2): asked for where the member speaks, silent elsewhere.
   assert.equal(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_1"]).requests.length, 1);
   assert.deepEqual(castVoiceRequests(SHEETS, production(), castScene(chosen), ["sh_2"]), { requests: [], notSent: [] });

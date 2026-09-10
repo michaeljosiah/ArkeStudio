@@ -30,8 +30,8 @@ Object.assign(globalThis, {
 
 const LINE = "the verse, under the water";
 const hashOf = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
-const P1 = "pf_01J8E0000000000000000000P1", P2 = "pf_01J8E0000000000000000000P2";
-const HASH1 = `sha256:${"1".repeat(64)}`, HASH2 = `sha256:${"2".repeat(64)}`;
+const P1 = "pf_01J8E0000000000000000000P1", P2 = "pf_01J8E0000000000000000000P2", P3 = "pf_01J8E0000000000000000000P3";
+const HASH1 = `sha256:${"1".repeat(64)}`, HASH2 = `sha256:${"2".repeat(64)}`, HASH3 = `sha256:${"3".repeat(64)}`;
 const AT = "2026-09-09T10:00:00.000Z";
 const target = (authoredTextHash: string) => ({ productionId: "saltlight", sceneId: "sc_04", sceneVersion: 2, shotId: "sh_12", speakerSheetId: "maren-kest", authoredTextHash });
 const read = (id: string, hash: string, durationSec: number, authored = hashOf(LINE)) => ({
@@ -52,9 +52,12 @@ function stateFor(options: { voice?: unknown; sceneLook?: boolean; authored?: st
   kit.designatedVoiceSample = { schemaVersion: 1, operationId: "00000000-0000-4000-8000-000000000009", file: `voice/sha256-${"9".repeat(64)}.wav`, designatedAt: AT, warningCodes: [], attestations: [],
     provenance: { schemaVersion: 1, outputHash: `sha256:${"9".repeat(64)}`, outputTechnical: { durationSec: 8 }, qualityReport: { checks: {} } } } as never;
   const production = world.productions.find((candidate) => candidate.meta.id === "saltlight")!;
-  production.performances = [read(P1, HASH1, 3.1, options.authored), read(P2, HASH2, 2.4)] as never;
+  // P3 was generated with an earlier voice assignment: accepted, current for its line, and another voice's (codex round 4).
+  production.performances = [read(P1, HASH1, 3.1, options.authored), read(P2, HASH2, 2.4),
+    { ...read(P3, HASH3, 2.0), kind: "generated-tts", voiceAssignment: { provider: "elevenlabs", voiceId: "v_old", assignedAtVersion: 1 } }] as never;
   production.performanceReview = {
-    reviews: [{ requestId: "01J8E0000000000000000000R1", ts: AT, performanceId: P1, target: target(hashOf(LINE)), decision: "accept", by: "user" }],
+    reviews: [{ requestId: "01J8E0000000000000000000R1", ts: AT, performanceId: P1, target: target(hashOf(LINE)), decision: "accept", by: "user" },
+      { requestId: "01J8E0000000000000000000R3", ts: AT, performanceId: P3, target: target(hashOf(LINE)), decision: "accept", by: "user" }],
     selections: { "sc_04/sh_12/legacy": { performanceId: P1, target: target(hashOf(LINE)), selectedAt: AT, selectedBy: "user" } },
     reviewHash: "sha256:review", selectionHash: "sha256:selection",
   } as never;

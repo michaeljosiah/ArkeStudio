@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
 import { prepareAudio, acceptPreparedAudio, type PreparedAudioCandidate } from "./storage.js";
 import type { AudioMediaTools } from "./media-tools.js";
-import { castVoiceRequests, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
+import { castVoiceRequests, sameVoiceAssignment, type CastVoiceNotSent, type FrozenPerformanceAudio, type PerformanceAudioRequest, type ProductionBundle, type SceneRecord } from "@arke-studio/contracts";
 import { readPerformance, currentPerformanceTarget } from "./performances.js";
 import { CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset, type Job } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
@@ -76,9 +76,7 @@ export async function resolvePerformanceAudioReferences(store: WorldStore, produ
       throw new Error("The reviewed performance changed. Choose a currently accepted performance for this scene.");
     }
     if (requests.slice(0, index).some(r => r.performanceId === request.performanceId)) throw new Error("A performance reference was selected twice.");
-    if (performance.kind !== "scratch" && (!sheet.voice || sheet.voice.provider !== performance.voiceAssignment.provider ||
-      sheet.voice.voiceId !== performance.voiceAssignment.voiceId || sheet.voice.model !== performance.voiceAssignment.model ||
-      sheet.voice.assignedAtVersion !== performance.voiceAssignment.assignedAtVersion)) throw new Error("The performance uses an earlier character voice assignment.");
+    if (performance.kind !== "scratch" && !sameVoiceAssignment(sheet.voice, performance.voiceAssignment)) throw new Error("The performance uses an earlier character voice assignment.");
     const prepared = request.prepared ? await acceptPerformanceAudioRange(store, performance, request.prepared, requestId) : undefined;
     const asset = prepared ?? performance;
     const dispatchHash = asset.provenance.outputHash;
