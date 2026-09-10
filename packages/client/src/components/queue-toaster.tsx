@@ -18,6 +18,7 @@ import {
 } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
+import { openActivityPanel } from "../lib/activity-panel.js";
 import { Button, cx } from "./ui.js";
 
 /**
@@ -165,6 +166,8 @@ export function QueueToaster() {
     if (update?.status !== "updated" || !update.targetVersion) return;
     toast.success(`Arke Studio updated to v${update.targetVersion}`, {
       id: `update:${update.targetVersion}`,
+      // The release's own card is one press away (design turn 136, R-21).
+      action: { label: "What's new", onClick: () => openActivityPanel("new") },
       classNames: {
         toast: "fy-toast",
         title: "fy-toast__title",
@@ -246,7 +249,9 @@ export function QueueToaster() {
 
   useEffect(() => {
     const act = (note: QueueNote, id: string | number) => {
-      if (note.action) navigate(note.action.to);
+      // Activity is a panel over this screen, not a place to go (design turn 136, R-20).
+      if (note.action?.to === "/activity") openActivityPanel("inbox");
+      else if (note.action) navigate(note.action.to);
       toast.dismiss(id);
     };
     return subscribeQueueResults((result) => {

@@ -8,7 +8,6 @@ import { SettingsDiagnosticsScreen } from "./screens/settings-diagnostics.js";
 import { SettingsModelsScreen } from "./screens/settings-models.js";
 import { SettingsProvidersScreen } from "./screens/settings-providers.js";
 import {
-  ActivityScreen,
   FirstRunScreen,
   StartupScreen,
   NewWorldScreen,
@@ -77,6 +76,8 @@ import { ShotSheetScreen } from "./screens/storyboard.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
+import { ActivityPanel } from "./components/activity-panel.js";
+import { openActivityPanel, openActivityPanelOnArrival } from "./lib/activity-panel.js";
 import { ImageContextMenu } from "./components/image-context-menu.js";
 import { PlayerDock } from "./components/player.js";
 import { useThemePreference } from "./lib/theme.js";
@@ -118,6 +119,21 @@ export function PermissionBackstops() {
   );
 }
 
+/**
+ * `/activity` no longer renders a page (design turn 136, SPEC-014 R-20). Old links, the desktop's
+ * notification click of earlier builds and any bookmark still land: on Home, with the panel open
+ * on the Inbox. The panel opens once the redirect has landed, so it opens over the screen it will
+ * stay on rather than over the redirect it would otherwise close on.
+ */
+export function ActivityRoute() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    openActivityPanelOnArrival("inbox");
+    navigate("/worlds", { replace: true });
+  }, [navigate]);
+  return null;
+}
+
 export function UpdateTransition() {
   const update = useUpdateStatus();
   if (update?.status !== "shutting-down" && update?.status !== "installing") return null;
@@ -155,10 +171,10 @@ function RetiredSceneChatRoute() {
 }
 
 export function App() {
-  const navigate = useNavigate();
   const location = useLocation();
   useThemePreference();
-  useEffect(() => window.arke?.onActivateActivity?.(() => navigate("/activity")), [navigate]);
+  // A background notification's click opens the panel over whatever is showing (SPEC-014 R-20).
+  useEffect(() => window.arke?.onActivateActivity?.(() => openActivityPanel("inbox")), []);
   // The dock survives navigation (design 25c). It clears on an explicit dismiss or on leaving
   // this world for another — a clip from the world you just closed has nothing to say here.
   const openWorld = /^\/w\/([^/]+)/.exec(location.pathname)?.[1] ?? null;
@@ -175,6 +191,7 @@ export function App() {
           no clicks, contributes nothing but geometry. */}
       <div className="fy-dragstrip" aria-hidden="true" />
       <QueueToaster />
+      <ActivityPanel />
       {/* Right-click any picture, anywhere, and copy it. One listener rather than a control on
           each of the twenty-odd frames that draw one. */}
       <ImageContextMenu />
@@ -225,7 +242,8 @@ export function App() {
             <Route path="diagnostics" element={<SettingsDiagnosticsScreen />} />
             <Route path="about" element={<SettingsAboutScreen />} />
           </Route>
-          <Route path="/activity" element={<ActivityScreen />} />
+          {/* The page is retired (design turn 136); its route lands on Home with the panel open. */}
+          <Route path="/activity" element={<ActivityRoute />} />
         </Route>
 
         <Route path="/w/:worldId" element={<WorldLayout />}>

@@ -383,3 +383,21 @@ export function failedNote(
     action: { label: "Activity", to: "/activity" },
   };
 }
+
+/**
+ * The row a finished job gets in Activity's Earlier (design turn 136): the receipt's own words,
+ * so the panel and the notification never spell one job two ways (79's first binding). Cancelled
+ * work had no receipt — nothing came back — so it gets its verb here, unmetered.
+ */
+export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote {
+  if (job.status === "succeeded") return readyNote(job, manifest, undefined);
+  if (job.status === "cancelled") {
+    return {
+      id: `job:${job.id}`,
+      tone: "queued",
+      title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
+      meta: `${modelName(job, manifest)} · not charged`,
+    };
+  }
+  return failedNote(job, manifest, undefined);
+}

@@ -23,6 +23,7 @@ import "./screens/production-setup.css";
 import "./components/ui.css";
 import "./components/layout.css";
 import "./components/toast.css";
+import "./components/activity-panel.css";
 import "./components/player.css";
 import "./components/image-actions.css";
 import "./components/editor/editor.css";

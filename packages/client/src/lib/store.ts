@@ -875,6 +875,8 @@ function fold(state: ClientState, event: DomainEvent): ClientState {
     }
     case "update.status":
       return { ...state, app: { ...state.app, update: event.update } };
+    case "activity.seen":
+      return { ...state, app: { ...state.app, activitySeen: event.seen } };
     case "entity.changed":
       if (!state.world || state.world.meta.worldId !== event.worldId) return state;
       return { ...state, world: { ...state.world, changes: [...state.world.changes, event.change] } };
@@ -2681,6 +2683,16 @@ export function testLocalVoice(): string {
 
 export function setBackgroundNotifications(preference: ClientState["app"]["backgroundNotifications"]): void {
   send({ kind: "set-background-notifications", preference });
+}
+
+/** The Inbox was looked at: the coordinator stamps the instant the bell's dot measures against (SPEC-014 R-25). */
+export function markInboxSeen(): void {
+  send({ kind: "mark-inbox-seen" });
+}
+
+/** What's new was read up to this bundled release (SPEC-014 R-25). */
+export function markWhatsNewSeen(version: string): void {
+  send({ kind: "mark-whats-new-seen", version });
 }
 
 // ---- SPEC-009: the job queue -----------------------------------------------

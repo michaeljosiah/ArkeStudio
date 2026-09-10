@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import {
   AppSettingsSchema,
   newId,
+  type ActivitySeen,
   type AppSettings,
   type BackgroundNotificationPreference,
   type BenchPreset,
@@ -196,6 +197,14 @@ export class AppSettingsFile {
   async setBackgroundNotifications(preference: BackgroundNotificationPreference): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, backgroundNotifications: preference };
+      return { settings, value: settings };
+    });
+  }
+
+  /** What Activity's panel remembers (SPEC-014 R-25): either fact alone, the other untouched. */
+  async setActivitySeen(change: Partial<ActivitySeen>): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const settings: AppSettings = { ...current, activity: { ...current.activity, ...change } };
       return { settings, value: settings };
     });
   }

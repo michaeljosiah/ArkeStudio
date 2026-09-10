@@ -105,6 +105,25 @@ That changes the order of work rather than the standard:
   packaging, say how you know it is safe: those four are where a mistake is expensive and quiet.
 - Never commit credentials, world content, or anything from `.dev/`.
 
+## Cutting a release
+
+A release is a tag: push `v<major>.<minor>.<patch>` matching `apps/desktop/package.json` and the
+release workflow builds, verifies and publishes it. Before tagging, write the release's card at
+`docs/releases/v<version>/notes.md` with a `picture.jpg` beside it (960×540 reads well):
+
+```markdown
+---
+title: A world remembers why it was made
+date: 2026-08-23
+picture: picture.jpg
+---
+The notes, as plain paragraphs separated by blank lines.
+```
+
+The workflow refuses a tag without one and publishes the GitHub release's title and body from
+it; the application bundles the newest eight cards for the Activity panel's What's new. Check a
+card before tagging with `node scripts/release-notes.mjs check v<version>`.
+
 ## Reporting a security issue
 
 Do not open a public issue. Email the address on

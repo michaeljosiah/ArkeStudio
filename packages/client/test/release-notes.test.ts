@@ -1,0 +1,110 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { compareVersions, orderReleases, parseReleaseCard, unreadReleases, type ReleaseCard } from "../src/lib/release-notes.js";
+import { dayLabel } from "../src/lib/format.js";
+
+/**
+ * Release cards (SPEC-016 R-18; design turn 136). The file is front matter and paragraphs; the
+ * bundler gathers them, and this is the reading of one.
+ */
+
+const RAW = `---
+title: A world remembers why it was made
+date: 2026-08-23
+picture: picture.jpg
+---
+The world door produced a cast, some places and a few open questions
+and threw away the reasoning that produced all three.
+
+Worlds can be renamed. The name is a label and the folder underneath never moves.
+`;
+
+const card = (version: string, date = "2026-08-01"): ReleaseCard => ({
+  version,
+  tag: `v${version}`,
+  title: version,
+  date,
+  paragraphs: ["…"],
+  picture: null,
+});
+
+describe("a release card is read from its file", () => {
+  it("takes the title and date from the front matter and folds each paragraph onto one line", () => {
+    const read = parseReleaseCard("v0.5.47", RAW, "./picture.jpg");
+    assert.ok(read);
+    assert.equal(read.version, "0.5.47");
+    assert.equal(read.tag, "v0.5.47");
+    assert.equal(read.title, "A world remembers why it was made");
+    assert.equal(read.date, "2026-08-23");
+    assert.equal(read.picture, "./picture.jpg");
+    assert.equal(read.paragraphs.length, 2);
+    assert.match(read.paragraphs[0]!, /^The world door produced .* all three\.$/);
+    assert.equal(read.paragraphs[0]!.includes("\n"), false, "a wrapped source line is one paragraph on screen");
+  });
+
+  it("reads Windows line endings the same way", () => {
+    const read = parseReleaseCard("v0.5.47", RAW.replace(/\n/g, "\r\n"), null);
+    assert.equal(read?.paragraphs.length, 2);
+  });
+
+  it("refuses a card with no title, no date, a malformed date, or no paragraph", () => {
+    assert.equal(parseReleaseCard("v1", "---\ndate: 2026-08-23\n---\nwords", null), null);
+    assert.equal(parseReleaseCard("v1", "---\ntitle: T\n---\nwords", null), null);
+    assert.equal(parseReleaseCard("v1", "---\ntitle: T\ndate: 23 Aug\n---\nwords", null), null);
+    assert.equal(parseReleaseCard("v1", "---\ntitle: T\ndate: 2026-08-23\n---\n\n", null), null);
+    assert.equal(parseReleaseCard("v1", "no front matter", null), null);
+  });
+});
+
+describe("versions order numerically, newest first", () => {
+  it("compares dotted numbers by number, not by string", () => {
+    assert.ok(compareVersions("0.5.10", "0.5.9") > 0);
+    assert.ok(compareVersions("0.5.9", "0.5.10") < 0);
+    assert.equal(compareVersions("v0.5.9", "0.5.9"), 0);
+    assert.ok(compareVersions("1.0.0", "1.0.0-beta.1") > 0, "a pre-release sorts below its release");
+  });
+
+  it("orders cards newest first", () => {
+    const ordered = orderReleases([card("0.5.9"), card("0.5.47"), card("0.5.10")]);
+    assert.deepEqual(ordered.map((c) => c.version), ["0.5.47", "0.5.10", "0.5.9"]);
+  });
+});
+
+describe("what has not been read (SPEC-014 R-24, R-25)", () => {
+  const cards = [card("0.5.41"), card("0.5.47"), card("0.5.20")];
+
+  it("a version never recorded counts only the newest card — a fresh install announces one release", () => {
+    assert.deepEqual(unreadReleases(cards, null).map((c) => c.version), ["0.5.47"]);
+  });
+
+  it("counts every card newer than the one last read, and nothing once the newest is read", () => {
+    assert.deepEqual(unreadReleases(cards, "0.5.20").map((c) => c.version), ["0.5.47", "0.5.41"]);
+    assert.deepEqual(unreadReleases(cards, "0.5.47"), []);
+    assert.deepEqual(unreadReleases(cards, "0.6.0"), [], "a version newer than any card is not unread");
+  });
+
+  it("has nothing to say with no cards", () => {
+    assert.deepEqual(unreadReleases([], null), []);
+  });
+});
+
+describe("the day a stamp falls on, as a feed labels it", () => {
+  const now = new Date(2026, 8, 10, 15, 30); // 10 Sep 2026, local
+
+  it("says today, yesterday, then counts", () => {
+    assert.equal(dayLabel(new Date(2026, 8, 10, 1, 0).toISOString(), now), "today");
+    assert.equal(dayLabel(new Date(2026, 8, 9, 23, 59).toISOString(), now), "yesterday");
+    assert.equal(dayLabel(new Date(2026, 8, 8, 12, 0).toISOString(), now), "2 days ago");
+    assert.equal(dayLabel(new Date(2026, 8, 1, 12, 0).toISOString(), now), "last week");
+    assert.equal(dayLabel(new Date(2026, 7, 20, 12, 0).toISOString(), now), "3 weeks ago");
+  });
+
+  it("reads a date alone as a local day, so an evening release keeps its date west of Greenwich", () => {
+    assert.equal(dayLabel("2026-09-10", now), "today");
+    assert.equal(dayLabel("2026-09-08", now), "2 days ago");
+  });
+
+  it("names a stamp it cannot read rather than inventing a day", () => {
+    assert.equal(dayLabel("not a date", now), "earlier");
+  });
+});

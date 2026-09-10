@@ -64,6 +64,20 @@ export const HarnessSettingsSchema = z
   .strict();
 export type HarnessSettings = z.infer<typeof HarnessSettingsSchema>;
 
+/**
+ * What Activity's panel remembers (SPEC-014 R-25): when the Inbox was last opened, and the last
+ * bundled release read. Two facts and never a row — the queue stays derived (SPEC-014 D1), and
+ * these only decide whether the bell's foreground dot is lit.
+ */
+export const ActivitySeenSchema = z
+  .object({
+    inboxSeenAt: z.string().nullable().default(null),
+    whatsNewSeenVersion: z.string().nullable().default(null),
+  })
+  .strict();
+export type ActivitySeen = z.infer<typeof ActivitySeenSchema>;
+export const NOTHING_SEEN: ActivitySeen = { inboxSeenAt: null, whatsNewSeenVersion: null };
+
 export const AppearanceSettingsSchema = z
   .object({
     theme: ThemePreferenceSchema.default("system"),
@@ -204,6 +218,13 @@ const AppSettingsObjectSchema = z
     models: ModelAvailabilitySchema.default({ disabled: [] }),
     spend: SpendSettingsSchema.default({ thresholdMicroUsd: 0, periodDays: 7 }),
     backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+    /** Guarded like appearance: a malformed pair costs two dots, never the settings file. */
+    activity: z
+      .preprocess(
+        (value) => (ActivitySeenSchema.safeParse(value).success ? value : NOTHING_SEEN),
+        ActivitySeenSchema,
+      )
+      .default(NOTHING_SEEN),
     appearance: z
       .preprocess(
         (value) => (AppearanceSettingsSchema.safeParse(value).success ? value : {}),

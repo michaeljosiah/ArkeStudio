@@ -41,6 +41,7 @@ import { ProviderCallRecordSchema } from "./provider-call.js";
 import { RippleItemSchema } from "./proposal.js";
 import { ShotSelectionSchema } from "./scene.js";
 import {
+  ActivitySeenSchema,
   LocalRuntimeStatusSchema,
   ThemePreferenceSchema,
   BackgroundNotificationPreferenceSchema,
@@ -1330,6 +1331,8 @@ export const DomainEventSchema = z.discriminatedUnion("type", [
       preference: BackgroundNotificationPreferenceSchema,
     })
     .strict(),
+  /** What Activity's panel remembers, after either mark (SPEC-014 R-25). */
+  z.object({ ...base, type: z.literal("activity.seen"), seen: ActivitySeenSchema }).strict(),
   z
     .object({
       ...base,

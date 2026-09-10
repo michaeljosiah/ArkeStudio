@@ -317,6 +317,8 @@ const CLIENT_COMMAND_METADATA = {
   "open-engine-log": globalOnly(GLOBAL_OPERATION),
   "test-local-voice": readOnly("Produces a transient local test read and does not change a creative target."),
   "set-background-notifications": globalOnly(GLOBAL_OPERATION),
+  "mark-inbox-seen": globalOnly(GLOBAL_OPERATION),
+  "mark-whats-new-seen": globalOnly(GLOBAL_OPERATION),
   "set-appearance-theme": globalOnly(GLOBAL_OPERATION),
   "set-narrator": globalOnly(GLOBAL_OPERATION),
   "create-prop": humanOnly("Prop authoring has no registered Arke action adapter."),

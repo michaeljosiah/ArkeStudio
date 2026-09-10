@@ -41,7 +41,10 @@ jobs:
 
       # A tag that disagrees with the version in package.json ships a build that lies about
       # itself, and electron-updater compares versions — so stop here rather than release it.
-      - name: The tag and the version must agree
+      # The same step refuses a tag with no release card: the card is the release's title and
+      # body here and the application's What's new (SPEC-016 R-18), so a release without one
+      # would announce nothing in either place.
+      - name: The tag, the version and the release card must agree
         shell: bash
         run: |
           tag="${{ inputs.tag || github.ref_name }}"
@@ -50,6 +53,7 @@ jobs:
             echo "::error::tag $tag does not match apps/desktop/package.json version $version"
             exit 1
           fi
+          node scripts/release-notes.mjs check "$tag"
           echo "releasing $tag"
 
       - run: npm ci
@@ -80,7 +84,8 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "$tag already exists — replacing verified assets"
           else
-            gh release create "$tag" --title "$tag" --notes "$(git tag -l --format='%(contents)' "$tag")"
+            node scripts/release-notes.mjs body "$tag" > release-body.md
+            gh release create "$tag" --title "$(node scripts/release-notes.mjs title "$tag")" --notes-file release-body.md
           fi
           gh release upload "$tag" apps/desktop/release/*.exe apps/desktop/release/*.blockmap apps/desktop/release/latest*.yml --clobber
 

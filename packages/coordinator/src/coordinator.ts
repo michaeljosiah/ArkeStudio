@@ -3425,6 +3425,7 @@ export class Coordinator {
       ...(settings ? { presets: settings.presets } : {}),
       ...(seededSpend ? { spend: seededSpend } : {}),
       ...(settings ? { backgroundNotifications: settings.backgroundNotifications } : {}),
+      ...(settings ? { activitySeen: settings.activity } : {}),
       ...(settings ? { research: settings.research } : {}),
       ...(settings ? { appearance: settings.appearance } : {}),
       // Without this the narrator was correct on disk and absent from every snapshot, so a
@@ -6869,6 +6870,19 @@ export class Coordinator {
           type: "background-notifications.changed",
           preference: settings.backgroundNotifications,
         });
+        return;
+      }
+      case "mark-inbox-seen":
+      case "mark-whats-new-seen": {
+        // The instant is this clock's, the same one that stamps every job's updatedAt — so the
+        // bell's "newer than the last look" is one clock against itself, never the renderer's.
+        if (!this.appSettings) return;
+        const settings = await this.appSettings.setActivitySeen(
+          msg.kind === "mark-inbox-seen"
+            ? { inboxSeenAt: new Date().toISOString() }
+            : { whatsNewSeenVersion: msg.version },
+        );
+        this.emit({ at: new Date().toISOString(), type: "activity.seen", seen: settings.activity });
         return;
       }
       case "set-narrator": {
@@ -10436,6 +10450,8 @@ export class Coordinator {
               targetVersion: null,
               progressPercent: null,
               flow: null,
+              releaseName: null,
+              releaseNotes: null,
               detail: "Updates are managed outside this build.",
             },
           });

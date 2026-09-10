@@ -102,3 +102,24 @@ export function initials(name: string): string {
 export function generatedOriginLabel(artifact: { origin: { by: string; producedBy?: string } }): string {
   return artifact.origin.producedBy === "character-reference" ? "character reference" : "made here";
 }
+
+/**
+ * Which day a stamp falls on, said the way a feed groups its rows: today, yesterday, then a
+ * count. A date alone (`2026-08-23`) is read as a local day rather than as UTC midnight, or a
+ * release cut in the evening would sit under the wrong label west of Greenwich.
+ */
+export function dayLabel(iso: string, now: Date = new Date()): string {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  const d = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(iso);
+  if (Number.isNaN(d.getTime())) return "earlier";
+  const start = (at: Date) => new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
+  const days = Math.round((start(now) - start(d)) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  if (days < 30) return days < 14 ? "last week" : `${Math.floor(days / 7)} weeks ago`;
+  if (days < 365) return days < 60 ? "last month" : `${Math.floor(days / 30)} months ago`;
+  return shortDate(iso);
+}

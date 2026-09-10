@@ -37,7 +37,9 @@ import { ProviderStatusSchema, ProviderToolStatusSchema } from "./provider.js";
 import {
   LocalRuntimeStatusSchema,
   AppearanceSettingsSchema,
+  ActivitySeenSchema,
   BackgroundNotificationPreferenceSchema,
+  NOTHING_SEEN,
   ManifestDriftSchema,
   RoutingDefaultsSchema,
   ModelAvailabilitySchema,
@@ -480,6 +482,8 @@ export const ClientStateSchema = z
           .default(null),
         spend: SpendStatusSchema.nullable().default(null),
         backgroundNotifications: BackgroundNotificationPreferenceSchema.default("issues-only"),
+        /** What Activity's panel remembers (SPEC-014 R-25); the bell's foreground dot reads it. */
+        activitySeen: ActivitySeenSchema.default(NOTHING_SEEN),
         /** Whether the Studio may read a page online when a conversation asks it to (SPEC-005 R-10). */
         research: z.object({ web: z.boolean() }).strict().default({ web: false }),
         appearance: AppearanceSettingsSchema.default({ theme: "system" }),

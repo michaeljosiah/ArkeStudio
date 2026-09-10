@@ -4,7 +4,8 @@ import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, FoundingBuildState } from "@arke-studio/contracts";
 import { BuildingScreen } from "../src/screens/building.js";
-import { ActivityScreen } from "../src/screens/shell.js";
+import { ActivityPanel } from "../src/components/activity-panel.js";
+import { openActivityPanel } from "../src/lib/activity-panel.js";
 import { foundingNote } from "../src/components/queue-note.js";
 import { shortDate } from "../src/lib/format.js";
 import { App } from "../src/App.js";
@@ -227,14 +228,16 @@ describe("Activity derives rows from the build record (SPEC-031 R-48)", () => {
       },
     };
     __setStateForTest(state);
+    // Activity is a panel since design turn 136; the rows are the same, in the Inbox.
+    openActivityPanel("inbox");
     const html = renderToString(
       <MemoryRouter initialEntries={["/activity"]}>
         <Routes>
-          <Route path="/activity" element={<ActivityScreen />} />
+          <Route path="/activity" element={<ActivityPanel />} />
         </Routes>
       </MemoryRouter>,
     );
-    assert.ok(html.includes("THE FOUNDING BUILD"), "the group is named");
+    assert.ok(html.includes("The founding build"), "the group is named");
     assert.ok(html.includes("Maren Kest · main photo"), "the unrun item has a row (row 25)");
     assert.ok(html.includes("The Undersong · key art"), "the failed item has a row");
     assert.match(html, /Run all/, "one press runs everything outstanding (R-11)");

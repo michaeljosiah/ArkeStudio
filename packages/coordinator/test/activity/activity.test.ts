@@ -65,6 +65,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
         presets: [],
       spend: null,
       backgroundNotifications: "issues-only",
+      activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
       research: { web: false },
         narrator: null,
       appearance: { theme: "system" },
@@ -78,7 +79,7 @@ function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientSta
       harnessInfo: null,
       queues: [],
       setup: null,
-      update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null },
+      update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null },
       env: null,
       sampleWorld: { available: false, installing: false, note: null },
       ...overrides,
@@ -346,6 +347,36 @@ describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {
   });
 });
 
+describe("a fired spend threshold is a queue entry (R-23, design turn 136)", () => {
+  const spend = (alerted: boolean, thresholdMicroUsd = 50_000_000) => ({
+    settings: { thresholdMicroUsd, periodDays: 7 },
+    rollingMicroUsd: 62_100_000,
+    alerted,
+    ledgerUnavailable: false,
+  });
+
+  it("ranks with blocked work, names the figures, and offers Spend alone", () => {
+    const [entry] = computeNeedsYou(baseState({ spend: spend(true) }));
+    assert.equal(entry?.kind, "spend-over-threshold");
+    assert.equal(entry?.urgency, 2);
+    assert.equal(entry?.title, "Over the spend alert");
+    assert.match(entry?.detail ?? "", /against .* \/ 7d · nothing is blocked$/);
+    assert.deepEqual(entry?.actions, ["spend"]);
+  });
+
+  it("sits below a reconciliation and above a paused provider's peers by recency", () => {
+    const held = job({ status: "needs-reconciliation", updatedAt: "2026-08-01T12:00:00Z" });
+    const entries = computeNeedsYou(baseState({ jobs: [held], spend: spend(true) }));
+    assert.deepEqual(entries.map((e) => e.kind), ["job-needs-reconciliation", "spend-over-threshold"]);
+  });
+
+  it("leaves with the status — a cleared alert, or a threshold turned off, is no entry at all", () => {
+    assert.equal(computeNeedsYou(baseState({ spend: spend(false) })).length, 0);
+    assert.equal(computeNeedsYou(baseState({ spend: spend(true, 0) })).length, 0, "off never alerts (SPEC-008 R-19)");
+    assert.equal(computeNeedsYou(baseState({ spend: null })).length, 0);
+  });
+});
+
 describe("actions offered only where the state permits (R-13, D10, §3.2)", () => {
   it("covers every job state", () => {
     assert.deepEqual(jobActions(job({ status: "queued" })), ["cancel"]);
@@ -596,14 +627,13 @@ describe("registry attention counts (R-7, T-5, T-6)", () => {
   });
 });
 
-describe("liveness (R-14, §3.2): the screen has no polling timer", () => {
-  it("ActivityScreen contains no setInterval", () => {
-    const source = readFileSync(
-      resolve(join(import.meta.dirname, "../../../client/src/screens/shell.tsx")),
+describe("liveness (R-14, §3.2): the panel has no polling timer", () => {
+  it("the Activity panel contains no setInterval", () => {
+    // The page became a panel (design turn 136); the rule is the same, read off the panel's file.
+    const body = readFileSync(
+      resolve(join(import.meta.dirname, "../../../client/src/components/activity-panel.tsx")),
       "utf8",
     );
-    const activity = source.slice(source.indexOf("export function ActivityScreen"));
-    const body = activity.slice(0, activity.indexOf("\nexport function", 10));
     assert.ok(!body.includes("setInterval"), "pushed events, never polling");
     assert.ok(!body.includes("setTimeout"), "no disguised polling either");
   });
