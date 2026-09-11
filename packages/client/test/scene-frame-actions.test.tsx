@@ -3,6 +3,11 @@ import { afterEach, it } from "node:test";
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
+import type { ClientMessage, DomainEvent } from "@arke-studio/contracts";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { playbackSnapshot, setAudioFactoryForTest } from "../src/lib/audio.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
 import { FrameActions } from "../src/screens/scene-workspace/frame-actions.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -14,6 +19,9 @@ afterEach(async () => {
   await act(async () => root?.unmount());
   dom.document.body.replaceChildren();
   delete (dom.window as unknown as { arke?: unknown }).arke;
+  __setBridgeForTest(null);
+  __setStateForTest(FIXTURE_STATE);
+  setAudioFactoryForTest(null);
 });
 
 async function mount(overrides: Partial<ComponentProps<typeof FrameActions>> = {}) {
@@ -54,7 +62,7 @@ it("offers four image icons and saves the same world-relative frame that it prev
   assert.equal(menu.parentElement, dom.document.body, "image actions clear the clipping frame");
   await click([...menu.querySelectorAll("button")].find((button) => button.textContent === "Replace frame")!);
   assert.deepEqual(calls, ["preview", "variants", "upload"]);
-  assert.equal(dom.document.querySelector(".fy-swimage-menu"), null);
+  assert.equal(dom.document.querySelector(".fy-swimage-menu:not([hidden])"), null);
 });
 
 it("keeps empty-frame actions honest and closes the image popover with Escape", async () => {
@@ -68,6 +76,36 @@ it("keeps empty-frame actions honest and closes the image popover with Escape", 
   const event = new dom.window.Event("keydown", { bubbles: true });
   Object.defineProperty(event, "key", { value: "Escape" });
   await act(async () => dom.document.dispatchEvent(event));
-  assert.equal(dom.document.querySelector(".fy-swimage-menu"), null);
+  assert.equal(dom.document.querySelector(".fy-swimage-menu:not([hidden])"), null);
   assert.deepEqual(calls, []);
+});
+
+it("plays prepared read-aloud audio after the image menu is dismissed", async () => {
+  const sent: ClientMessage[] = [];
+  __setStateForTest(FIXTURE_STATE);
+  __setBridgeForTest({
+    appVersion: "test", platform: "test", connect() {}, subscribe() {},
+    send: (json: string) => { sent.push(JSON.parse(json) as ClientMessage); },
+  } as unknown as ArkeBridge);
+  setAudioFactoryForTest(() => ({
+    src: "", currentTime: 0, duration: NaN, playbackRate: 1,
+    play: async () => {}, pause() {}, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {},
+  }) as never);
+  const { container } = await mount();
+  await click(container.querySelector('[aria-label="More image actions for shot 3"]'));
+  await click(dom.document.querySelector('.fy-swimage-menu [title="Read aloud"]'));
+  const request = sent.find((message) => message.kind === "read-prose")!;
+  assert.equal(request.kind, "read-prose");
+  if (request.kind !== "read-prose") return;
+  await act(async () => dom.document.body.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })));
+  assert.equal(dom.document.querySelector('.fy-swimage-menu[role="dialog"]'), null);
+  await act(async () => __applyEventForTest({
+    type: "voice.audio", at: "2026-09-11T00:00:00Z", requestId: request.requestId,
+    worldId: FIXTURE_STATE.world!.meta.worldId, purpose: "prose", sheetVersion: 1,
+    provider: "kokoro", model: "kokoro-82m", voiceId: "bm_george", format: "wav",
+    status: "ready", file: ".cache/voice-previews/shot-3.wav", cached: false,
+    characterCount: 18, estimatedMicroUsd: 0,
+  } satisfies DomainEvent));
+  assert.equal(playbackSnapshot().clip?.id, request.requestId);
+  assert.match(playbackSnapshot().clip?.url ?? "", /voice-previews\/shot-3\.wav/);
 });

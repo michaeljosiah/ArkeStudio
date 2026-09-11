@@ -1661,7 +1661,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
-    assert.ok(row.querySelector(".fy-swchip > span"), "shot status uses a dot rather than a filled pill");
+    assert.equal(row.querySelector(".fy-swchip"), null, "a rendered shot has no missing-frame exception");
     const script = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement | null;
     assert.equal(script?.getAttribute("role"), "combobox", "the shared @ picker remains live in-place");
     assert.ok(script);

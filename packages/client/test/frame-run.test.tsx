@@ -897,6 +897,21 @@ describe("durable run projections", () => {
 });
 
 describe("durable frame-run reports in Arke", () => {
+  for (const partial of [false, true]) it(`keeps a ${partial ? "partially generated" : "zero-output"} cancelled run terminal`, async () => {
+    const run = frameState({
+      cancelled: true,
+      first: { status: partial ? "succeeded" : "cancelled", finalization: "complete", etaSec: null },
+      second: { status: "cancelled", etaSec: null },
+      ...(partial ? { firstLanding: "filed" as const } : {}),
+    });
+    const item = await mountReport([run]);
+    const report = one(item, ".fy-chat__runsummary")!;
+    assert.equal(report.getAttribute("data-state"), "cancelled");
+    assert.equal(report.hasAttribute("open"), false);
+    assert.equal(report.querySelector("summary")?.textContent, partial ? "Cancelled · 1 frame generated" : "Cancelled");
+    assert.equal(report.querySelector(".fy-chat__runreport-retry"), null);
+  });
+
   it("keeps entirely overtaken runs complete and names the newer frames preserved", async () => {
     const run = frameState({
       first: { status: "succeeded", finalization: "complete", etaSec: null },

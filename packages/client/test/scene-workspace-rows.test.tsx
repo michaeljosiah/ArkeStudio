@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -68,6 +68,7 @@ afterEach(async () => {
   dom.document.body.replaceChildren();
   __setStateForTest(FIXTURE_STATE);
   __setBridgeForTest(null);
+  __connectionStatusForTest("closed");
 });
 
 function capture(sent: ClientMessage[]): ArkeBridge {
@@ -229,6 +230,37 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.equal(chip.firstElementChild?.tagName, "SPAN");
     assert.equal(chip.firstElementChild?.getAttribute("aria-hidden"), "true", "the exception has a decorative dot");
     assert.match(chip.textContent ?? "", /Needs frame|Needs attention/);
+  });
+
+  it("does not ask for a frame when an accepted clip makes the shot rendered", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clip = production.takes.find((take) => take.kind === "clip")!;
+    const shot = sceneOf(state).shots[0]!;
+    production.selections[shot.id] = { acceptedTakeId: clip.id, trimInSec: 0 };
+    const mounted = await mountState(state);
+    const row = q(mounted, `[data-shot-id="${shot.id}"]`)!;
+    assert.equal(row.getAttribute("data-state"), "rendered");
+    assert.equal(row.querySelector(".fy-swchip"), null);
+    assert.doesNotMatch(row.textContent ?? "", /Needs frame/);
+  });
+
+  it("reports the confirmed connection and version without claiming local edits are saved", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
+    const mounted = await mountState();
+    const editor = q(mounted, ".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "An unsaved local script";
+      const key = Object.keys(editor).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (editor as unknown as Record<string, { onChange: (event: { target: HTMLTextAreaElement }) => void }>)[key]!;
+      props.onChange({ target: editor });
+    });
+    assert.equal(editor.value, "An unsaved local script");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(FIXTURE_STATE).version}`);
+    assert.doesNotMatch(q(mounted, ".fy-sw__save")?.textContent ?? "", /saved/i);
   });
 
   it("leads each reference chip with a round thumbnail and caps override labels at two", async () => {

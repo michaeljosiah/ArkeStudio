@@ -68,8 +68,9 @@ export function FrameActions({ shotNumber, title, slug, framePath, variants, dis
         <ImageDownload worldSlug={slug} path={framePath ?? ""} name={`Shot ${shotNumber} - ${title}`} ready={framePath !== null} />
         <button ref={trigger} type="button" title="More image actions" aria-label={`More image actions for shot ${shotNumber}`} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)}><More size={15} /></button>
       </div>
-      {open ? createPortal(
-        <div ref={panel} className="fy-swimage-menu" role="dialog" aria-label={`Image actions for shot ${shotNumber}`} style={position} onClick={(event) => event.stopPropagation()}>
+      {/* Keep read-aloud's request alive while its synthesis finishes, even after menu dismissal. */}
+      {typeof document !== "undefined" ? createPortal(
+        <div ref={panel} hidden={!open} className="fy-swimage-menu" role={open ? "dialog" : undefined} aria-label={`Image actions for shot ${shotNumber}`} style={position} onClick={(event) => event.stopPropagation()}>
           <button type="button" disabled={disabled || !canUpload} title={canUpload ? "Use an image from this computer" : "Upload is available in the desktop app"} onClick={() => { close(); onUpload(); }}>{framePath === null ? "Upload frame" : "Replace frame"}</button>
           <button type="button" disabled={disabled || !canClear} onClick={() => { close(); onClear(); }}>Clear frame</button>
           <ReadAloudButton {...readAloud} />

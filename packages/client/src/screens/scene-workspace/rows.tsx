@@ -1281,7 +1281,7 @@ function Row({
             />
           ) : <button ref={durationTrigger} type="button" aria-label={`Edit duration for shot ${shot.number}`} title="Edit duration in seconds" disabled={disabled} onClick={() => setEditingDuration(true)}>{shot.durationSec ?? DEFAULT_SHOT_SEC}s</button>}
           <span aria-hidden="true">·</span><span>{aspect}</span>
-          {state === "needs attention" || !hasFrame ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : "Needs frame"}</span> : null}
+          {state === "needs attention" || state === "story" ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : "Needs frame"}</span> : null}
         </div>
         <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
         {coverage === "changed" || runScriptChanged ? (
