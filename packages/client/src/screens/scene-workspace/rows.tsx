@@ -1003,9 +1003,11 @@ function Row({
     band.current.scrollIntoView?.({ block: "nearest" });
     band.current.focus({ preventScroll: true });
   }, [selected]);
+  // The draft follows the durable note and nothing else: a refused write leaves the person's
+  // words in the box to blur again, rather than putting the old note back over them.
   useEffect(() => {
     setNotesDraft(shot.notes ?? "");
-  }, [shot.notes, refusalVersion]);
+  }, [shot.notes]);
   useEffect(() => {
     setScriptDraft(shot.description);
   }, [shot.description]);
@@ -1191,12 +1193,14 @@ function Row({
   const commitNotes = (value: string) => {
     const next = value.trim();
     if (disabled || next === (shot.notes ?? "")) return;
-    const accepted = next === ""
-      ? onCommand({ kind: "edit-shot", shotId: shot.id, change: {}, clear: ["notes"] })
-      : onCommand({ kind: "edit-shot", shotId: shot.id, change: { notes: next } });
-    if (!accepted) setNotesDraft(shot.notes ?? "");
+    // A write that is not taken (one is already in flight) keeps the draft, as a refusal does.
+    if (next === "") onCommand({ kind: "edit-shot", shotId: shot.id, change: {}, clear: ["notes"] });
+    else onCommand({ kind: "edit-shot", shotId: shot.id, change: { notes: next } });
   };
   const togglePanel = (panel: "description" | "prompt" | "notes") => {
+    // The fold control sits inside the prompt's blur boundary, so folding that panel would
+    // unmount the editor without the blur that writes it; the fold writes a dirty draft first.
+    if (panel === "prompt" && !foldedPanels.has("prompt") && promptDirty.current) commitPrompt(promptValue);
     setFoldedPanels((current) => {
       const next = new Set(current);
       if (next.has(panel)) next.delete(panel);
@@ -1258,7 +1262,7 @@ function Row({
       className="fy-swrow__script fy-swrow__scripteditor"
       title="Write what happens · type @ to name anything in the world"
       onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
+      onKeyDown={(event) => { if (event.key !== "Escape") event.stopPropagation(); }}
       onBlur={(event) => {
         if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
         commitScript(event.currentTarget.querySelector("textarea")?.value ?? scriptDraft);
@@ -1438,6 +1442,14 @@ function Row({
       onDrop={(event) => { event.preventDefault(); onDrop(); }}
       onClick={() => !staged && openRow()}
       onKeyDown={(event) => {
+        // Escape closes the open row from anywhere in it — a menu that took the key (the @
+        // picker) has prevented it — and the band takes the focus the editor is about to lose.
+        if (event.key === "Escape" && open && !event.defaultPrevented && event.target !== event.currentTarget) {
+          event.preventDefault();
+          closeRow();
+          event.currentTarget.focus({ preventScroll: true });
+          return;
+        }
         if (event.target !== event.currentTarget) return;
         if (staged) return;
         if (event.key === "Delete") {
@@ -1679,7 +1691,7 @@ function Row({
                   disabled={disabled}
                   rows={1}
                   onChange={(event) => setNotesDraft(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => { if (event.key !== "Escape") event.stopPropagation(); }}
                   onBlur={(event) => commitNotes(event.currentTarget.value)}
                 />
               )}

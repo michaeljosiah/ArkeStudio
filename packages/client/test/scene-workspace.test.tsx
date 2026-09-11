@@ -2056,6 +2056,77 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "an unchanged prompt lets the row close at once");
   });
 
+  it("keeps a note draft through a refused write, and writes it again on the next blur (codex round 2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
+    const notes = () => row.querySelector('[aria-label="Notes for shot 12"]') as HTMLTextAreaElement;
+    await editTextarea(notes(), "Hold on the hands.");
+    await act(async () => notes().dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    const noteWrites = () => sent.filter((message) => message.kind === "scene-command" && message.command.kind === "edit-shot");
+    assert.equal(noteWrites().length, 1);
+    await apply({
+      at: "2026-09-01T10:05:00.000Z",
+      type: "scene.write-refused",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      sceneFile: "04-the-verse-rises",
+      reason: "The scene version moved.",
+    });
+    assert.equal(notes().value, "Hold on the hands.", "the refusal leaves the person's words in the box");
+    await act(async () => notes().dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    assert.equal(noteWrites().length, 2, "and the next blur sends them again");
+  });
+
+  it("folding the Frame prompt panel writes a dirty prompt first, since its fold control sits inside the blur boundary (codex round 2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
+    const editor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
+    await editTextarea(editor.querySelector("textarea") as HTMLTextAreaElement, "Folded away mid-edit");
+    await click(row.querySelector('[aria-label="Fold the frame prompt for shot 12"]') as HTMLElement);
+    assert.equal(editor.querySelector("textarea"), null, "the panel is folded to its head");
+    const command = sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.deepEqual(command.command, { kind: "set-prompt-override", shotId: "sh_12", text: "Folded away mid-edit", capability: "video" });
+  });
+
+  it("Escape closes the open row from inside its editors, and the band takes the focus (codex round 2)", async () => {
+    const mounted = await mount();
+    const row = q(mounted, ".fy-swrow")!;
+    const band = row.querySelector(".fy-swrow__band") as HTMLElement;
+    await click(band);
+    const reactProps = <T,>(element: Element): T => {
+      const key = Object.keys(element).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      return (element as unknown as Record<string, T>)[key]!;
+    };
+    type KeyHandler = { onKeyDown: (event: { key: string; stopPropagation: () => void }) => void };
+    // The editors keep their keys to themselves — a space in the script is not a row press —
+    // and let Escape through to the band. (A keydown dispatched on a text input itself would
+    // route through React's change-event polyfill, which linkedom cannot host; the handlers are
+    // exercised directly and the bubbling from the panel they sit in.)
+    for (const editor of [row.querySelector(".fy-swrow__panel .fy-swrow__scripteditor")!, row.querySelector('[aria-label="Notes for shot 12"]')!]) {
+      let stopped = 0;
+      reactProps<KeyHandler>(editor).onKeyDown({ key: " ", stopPropagation: () => { stopped += 1; } });
+      reactProps<KeyHandler>(editor).onKeyDown({ key: "Escape", stopPropagation: () => { stopped += 1; } });
+      assert.equal(stopped, 1, "every key but Escape stays in the editor");
+    }
+    const escapeFrom = async (element: HTMLElement, taken = false) => {
+      const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+      Object.defineProperty(escape, "key", { value: "Escape" });
+      if (taken) escape.preventDefault();
+      await act(async () => element.dispatchEvent(escape));
+    };
+    await escapeFrom(row.querySelector(".fy-swrow__panel--notes") as HTMLElement);
+    assert.equal(band.getAttribute("data-open"), null, "Escape from inside a panel closes the row");
+    await click(band);
+    await escapeFrom(row.querySelector(".fy-swrow__panel--notes") as HTMLElement, true);
+    assert.equal(band.getAttribute("data-open"), "true", "an Escape a menu already took leaves the row open");
+  });
+
   it("clears a dirty consolidated prompt without a blur write and restores stored copy on refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;

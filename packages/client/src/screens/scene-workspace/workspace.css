@@ -268,7 +268,8 @@
   :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 26px 44px minmax(0, 1fr); }
   :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { grid-column: 2; width: 44px; }
   :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__label { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__hatch > * { display: none; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__hatch > *,
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame > .fy-swrow__img { display: none; }
   :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { grid-column: 3; padding: 0 88px 0 12px; }
   :where([data-screen="scene-detail"]) .fy-sw__headline { flex-wrap: wrap; }
   :where([data-screen="scene-detail"]) .fy-sw__headline > .fy-sw__title { flex-basis: 100%; font-size: 24px; }
