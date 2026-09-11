@@ -1253,7 +1253,9 @@ export function ProductionConversation({
               })}
             </div>
           )}
-          {sceneDock ? languageControl : null}
+          {/* The scene dock has no model select above its composer (design turn 143): the
+              production's language model is chosen in Settings and remembered from the other
+              docks, which keep their control. */}
           <Composer
             value={message}
             onChange={setMessage}

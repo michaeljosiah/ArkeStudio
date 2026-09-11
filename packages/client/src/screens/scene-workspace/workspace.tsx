@@ -681,6 +681,8 @@ export function SceneWorkspace({
               onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
               onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
+              locationName={locationName}
+              onOpenLocation={(trigger) => { doorFocus.current = trigger; setOpenPlace(scene.inherits?.location ?? null); }}
               onStageShot={openStage}
               onPreviewShot={setLightboxShotId}
               onTalkToArke={talkToArke}

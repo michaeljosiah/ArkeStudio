@@ -281,6 +281,11 @@ export const ShotSchema = z
     title: z.string().min(1),
     /** `@slug` tokens are live sheet references, resolved at prompt assembly (§2.3.4). */
     description: z.string(),
+    /**
+     * Working notes on the shot (design turn 143). For the person, never for a model: nothing
+     * reads them into a prompt, which is what keeps them safe to write freely.
+     */
+    notes: z.string().optional(),
     camera: z.string().optional(),
     audio: ShotAudioSchema.optional(),
     durationSec: z.number().positive().optional(),

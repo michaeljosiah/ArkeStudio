@@ -108,7 +108,14 @@ const click = async (element: HTMLElement): Promise<void> => {
 const editTextarea = async (textarea: HTMLTextAreaElement, value: string): Promise<void> => {
   await act(async () => {
     textarea.value = value;
-    textarea.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    // linkedom answers no to React's `oninput` support probe, so React listens for the polyfill
+    // events and an `input` dispatch never reaches onChange; the prop is called as a keystroke
+    // would have it called, with the value already on the node.
+    const key = Object.keys(textarea).find((candidate) => candidate.startsWith("__reactProps$"));
+    const props = key === undefined
+      ? undefined
+      : (textarea as unknown as Record<string, { onChange?: (event: { target: HTMLTextAreaElement }) => void }>)[key];
+    props?.onChange?.({ target: textarea });
   });
 };
 const editInput = async (input: HTMLInputElement, value: string): Promise<void> => {
@@ -1662,9 +1669,14 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
     assert.equal(row.querySelector(".fy-swchip"), null, "a rendered shot has no missing-frame exception");
-    const script = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement | null;
+    // The toggle opened the row (turn 143), and the editor now lives in its Description panel.
+    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), "true", "Frame prompt opens the row");
+    const script = row.querySelector(".fy-swrow__panel .fy-swrow__script textarea") as HTMLTextAreaElement | null;
     assert.equal(script?.getAttribute("role"), "combobox", "the shared @ picker remains live in-place");
     assert.ok(script);
+    // linkedom's textarea has no defaultValue, so an editor mounted after the first render reads
+    // empty until React next updates it; the value is seeded the way typing would leave it.
+    await editTextarea(script, "@maren-kest grips the rail of @the-vigil.");
     Object.defineProperties(script, {
       selectionStart: { configurable: true, value: "@maren-kest".length },
       selectionEnd: { configurable: true, value: "@maren-kest".length },
@@ -1830,9 +1842,11 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     await editTextarea(row.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement, "Stored shot prompt");
     const cleanShotCommands = sent.filter((message) => message.kind === "scene-command").length;
-    await click([...row.querySelectorAll(".fy-swrow__prompt button")].find((button) => button.textContent === "Hide") as HTMLElement);
+    // The open row closes from its chevron (turn 143); an unchanged prompt lets it close at once.
+    await click(row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, cleanShotCommands);
     assert.equal(row.querySelector(".fy-swrow__prompt") === null, true, "an unchanged shot prompt closes immediately");
+    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "and the row is closed");
   });
 
   it("closes an unchanged board prompt immediately without writing", async () => {
@@ -1858,7 +1872,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, cleanBoardCommands);
   });
 
-  it("waits for durable shot and board prompt props before Hide closes", async () => {
+  it("waits for durable shot and board prompt props before Close and Hide close", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -1877,15 +1891,16 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
     const shotPrompt = shotEditor.querySelector("textarea") as HTMLTextAreaElement;
     await editTextarea(shotPrompt, "Committed shot draft");
-    await click([...shotEditor.querySelectorAll("button")].find((button) => button.textContent === "Hide") as HTMLElement);
+    const close = row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement;
+    await click(close);
     assert.deepEqual((sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>).command, {
       kind: "set-prompt-override",
       shotId: shots[0]!.id,
       text: "Committed shot draft",
       capability: "video",
     });
-    assert.ok(row.querySelector(".fy-swrow__prompt"), "command admission alone does not close the shot editor");
-    assert.equal((row.querySelector(".fy-swrow__prompt button:last-child") as HTMLButtonElement).disabled, true);
+    assert.ok(row.querySelector(".fy-swrow__prompt"), "command admission alone does not close the row");
+    assert.equal(close.disabled, true, "Close waits for the durable override");
 
     const advanced = structuredClone(state) as ClientState;
     const advancedScene = advanced.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
@@ -1893,7 +1908,8 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     advancedScene.version += 1;
     orderedShots(advancedScene)[0]!.promptOverride = { text: "Committed shot draft", sheetVersions: {} };
     await act(async () => __setStateForTest(advanced));
-    assert.equal(row.querySelector(".fy-swrow__prompt"), null, "the matching durable shot override acknowledges Hide");
+    assert.equal(row.querySelector(".fy-swrow__prompt"), null, "the matching durable shot override acknowledges Close");
+    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "and the row closes on it");
 
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const board = q(mounted, "[data-testid=workspace-board-A]")!;
@@ -1918,7 +1934,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(board.querySelector(".fy-swboard__prompt"), null, "the matching durable board override acknowledges Hide");
   });
 
-  it("keeps admitted shot and board Hide drafts open for retry after asynchronous refusal", async () => {
+  it("keeps admitted shot Close and board Hide drafts open for retry after asynchronous refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -1937,7 +1953,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
     await editTextarea(shotEditor.querySelector("textarea") as HTMLTextAreaElement, "Retry this exact shot draft  ");
-    await click([...shotEditor.querySelectorAll("button")].find((button) => button.textContent === "Hide") as HTMLElement);
+    await click(row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
     assert.ok(row.querySelector(".fy-swrow__prompt"));
     await apply({
       at: "2026-09-01T10:02:00.000Z",
@@ -1948,9 +1964,9 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       reason: "The shot prompt version moved.",
     });
     const refusedShot = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    assert.ok(refusedShot, "the asynchronously refused shot Hide remains open");
+    assert.ok(refusedShot, "the asynchronously refused shot Close leaves the row open");
     assert.equal((refusedShot.querySelector("textarea") as HTMLTextAreaElement).value, "Retry this exact shot draft  ");
-    assert.equal((refusedShot.querySelector("button:last-child") as HTMLButtonElement).disabled, false, "the draft can be retried");
+    assert.equal((row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement).disabled, false, "the draft can be retried");
 
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const board = q(mounted, "[data-testid=workspace-board-A]")!;

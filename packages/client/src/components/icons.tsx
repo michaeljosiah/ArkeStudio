@@ -528,6 +528,9 @@ export const Wrench = icon(<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 
 
 // ---- Row verbs and one-register toolbars (issue 1010) ----------------------------------------
 export const ChevronUp = icon(<path d="m18 15-6-6-6 6" />);
+/* The open storyboard row's panels and its location chip (design turn 143). */
+export const StickyNote = icon(<><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2z" /><path d="M15 21v-5a2 2 0 0 1 2-2h5" /></>);
+export const MapPin = icon(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>);
 export const Help = icon(<><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></>);
 /* A track of sound, and the plus that adds one — the verb drawn as its own noun. */
 export const AudioPlus = icon(<><path d="M3 10v4M7 6v12M11 9v6" /><path d="M16 13h6M19 10v6" /></>);
