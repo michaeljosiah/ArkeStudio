@@ -6,7 +6,7 @@
    ============================================================ */
 :root {
   /* ---- Families ------------------------------------------- */
-  --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Geist Sans", "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
   /* Back-compat aliases: all interface text uses sans. */
   --font-mono: var(--font-sans);
@@ -20,6 +20,7 @@
   --weight-bold:     700;
 
   /* ---- Type scale (px) — shadcn uses a tight, small scale -- */
+  --text-2xs:  11px;   /* metadata floor: mono lines, chips, Stage labels (design turn 139) */
   --text-xs:   12px;
   --text-sm:   13px;   /* default UI text (text-sm) */
   --text-base: 14px;   /* body */
@@ -55,5 +56,6 @@
   --type-body:    var(--weight-regular)  var(--text-base)/var(--leading-body) var(--font-sans);
   --type-ui:      var(--weight-medium)   var(--text-sm)/1.4                   var(--font-sans);
   --type-label:   var(--weight-medium)   var(--text-xs)/1.2                   var(--font-sans);
+  --type-meta:    var(--weight-regular)  var(--text-2xs)/1.4                  var(--font-sans);
   --type-mono:    var(--weight-regular)  var(--text-sm)/1.5                   var(--font-mono);
 }
