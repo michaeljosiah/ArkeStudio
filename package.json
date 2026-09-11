@@ -20,12 +20,13 @@
     "dev:coordinator": "npm run dev --workspace @arke-studio/coordinator",
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "lint": "node scripts/check-source-text.mjs && node scripts/check-spec-ids.mjs && oxlint packages apps",
+    "lint": "node scripts/check-source-text.mjs && node scripts/check-spec-ids.mjs && node design-system/check-master.mjs && node design-system/build-review.mjs --check && oxlint packages apps",
     "format": "prettier --write \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "test": "npm run test --workspaces --if-present",
     "clean:temp": "node scripts/clean-temp.mjs",
     "design:check": "node design-system/check-master.mjs",
+    "design:review": "node design-system/build-review.mjs",
     "start": "npm run start --workspace @arke-studio/desktop"
   },
   "devDependencies": {

@@ -174,11 +174,15 @@ async function renderCheck(chrome, file, { needsRuntime }) {
       }
       return false;
     })()`);
-    // Platform fonts are read off the paint, so the probe scrolls into view and the page gets a frame.
-    await new Promise((r) => setTimeout(r, 500));
-    const { root } = await send("DOM.getDocument", { depth: 0 });
-    const { nodeId } = await send("DOM.querySelector", { nodeId: root.nodeId, selector: "[data-dc-check-probe]" });
-    const { fonts } = nodeId ? await send("CSS.getPlatformFontsForNode", { nodeId }) : { fonts: [] };
+    // Platform fonts are read off the paint, so the probe scrolls into view and the page gets a
+    // frame — sometimes several, on the master, before the runtime has painted that card.
+    let fonts = [];
+    for (let attempt = 0; attempt < 8 && fonts.length === 0; attempt++) {
+      await evaluate("new Promise(r => requestAnimationFrame(() => setTimeout(r, 400)))");
+      const { root } = await send("DOM.getDocument", { depth: 0 });
+      const { nodeId } = await send("DOM.querySelector", { nodeId: root.nodeId, selector: "[data-dc-check-probe]" });
+      if (nodeId) fonts = (await send("CSS.getPlatformFontsForNode", { nodeId })).fonts;
+    }
     ws.close();
     return { cards, faces, loaded, platform: fonts.map((f) => `${f.familyName}${f.isCustomFont ? "" : " (system)"}`) };
   } finally {

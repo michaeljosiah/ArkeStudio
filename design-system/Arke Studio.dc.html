@@ -54,6 +54,9 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 #t138 .dv-hover-key th{font-weight:600}
 #t138 .dv-hover-key svg{display:inline-block;vertical-align:middle;margin-right:9px}
 .dv-rule code{font:11.5px var(--font-mono),monospace;background:var(--dv-code-bg);padding:1px 5px;border-radius:3px}
+/* A surface the build has and this document deliberately has not drawn. The review page reads these and lists the screen as built, not drawn, rather than omitting it. */
+.dv-undrawn{margin:22px 0 0;padding:11px 14px;border-left:2px dashed var(--dv-ink-faint);font:12px/1.6 var(--font-sans),sans-serif;color:var(--dv-ink-body);max-width:1360px;box-sizing:border-box}
+.dv-undrawn b{font-weight:600}
 /* Appearance control · fixed to the canvas, never inside a screen. */
 .dv-theme{position:fixed;top:14px;right:14px;z-index:99;display:flex;flex-direction:column;align-items:flex-end;gap:5px;padding:7px 8px;border-radius:10px;background:var(--background);border:1px solid var(--dv-card-line);box-shadow:var(--dv-card-shadow)}
 .dv-theme__row{display:flex;gap:2px}
@@ -164,6 +167,7 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 <p class="dv-rule"><b>Binding &middot; the transport and the keys.</b> One row: play, <code>Loop</code>, <code>t / duration</code>; the camera track with its rail, the played portion filled, a diamond per mid key and a circle for the first and last, the active key named beneath it (<code>key 2 &middot; 2.2s</code>), a hold drawn as a bar with <code>Hold</code> under it and a handle to retime; then <code>+</code> <code>&minus;</code> and <code>n keys</code>. A lane per moving figure or set below, in its colour, with its marks and <code>n marks</code>. Keys drag to retime; the first and last stay put.</p>
 <p class="dv-rule"><b>Binding &middot; Build with Arke.</b> One line above the viewport: the instruction field, <code>Keep blocking</code> / <code>Keep camera</code> / <code>Revise both</code> where a blockout exists, <code>Build with Arke</code>, and <code>Stop</code> while it runs. The model and its turn limit are a hint on the button, not a caption beside it; <code>AI inspection and assumptions</code> is a disclosure that opens when a build has something to say.</p>
 <p class="dv-rule"><b>Binding &middot; full screen.</b> The Stage takes the glyph at the right end of the view row exactly as the Flow does on <a class="dv-oid" href="#135h">135h</a>: the rail, the header, the row and the dock leave; the pill names the scene and <code>Stage</code>; the same glyph reversed with <code>Esc</code> leaves. The whole section &#8212; strip, blockout line, viewport, panel, timeline &#8212; fills the frame, and the panel fits without scrolling.</p>
+<p class="dv-undrawn" data-screen="Preview"><b>Built, not drawn &middot; Preview.</b> The fourth view plays the scene&#8217;s frames and clips in order with the Cut&#8217;s transport (<code>preview.tsx</code>). It is left to the build until a turn draws it; the review page lists it as built, not drawn.</p>
 <p class="dv-next">Try next: &#8217;Camera mode with the safe area and a figure tracked&#8217; &#183; &#8217;the Stage before anything is staged &#8212; the empty viewport and Quick layout&#8217; &#183; &#8217;a dark ground, if the ink can follow it&#8217;</p>
 </section>
 <section class="dv-turn" id="t139">
