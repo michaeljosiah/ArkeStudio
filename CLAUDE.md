@@ -87,6 +87,11 @@ nothing):
 New-Item -ItemType Junction -Path "$wt\node_modules\@arke-studio\<pkg>" -Target "$wt\packages\<pkg>"
 ```
 
+That junction is also why `git worktree remove` fails on a worktree that has one: git deletes the
+target first, cannot read the dangling link, and stops with the tree deregistered but ~330 MB of
+`node_modules` still on disk — a folder that now resolves to `main`. `prune-merged.mjs` finishes
+those off; do not reach for `Remove-Item` yourself.
+
 **Eviction is silent.** If another session removes your worktree mid-task, nothing errors: the
 `.git` file vanishes, git walks up, finds the main checkout, and every later command operates on
 `main`. A commit from that directory lands on main. Detect it with `git rev-parse --show-toplevel`
