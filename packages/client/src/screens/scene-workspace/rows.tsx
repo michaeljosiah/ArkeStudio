@@ -989,6 +989,14 @@ function Row({
     }
     if (restored.current || band.current === null) return;
     restored.current = true;
+    // A press on the title or the script opened the row with the editor already focused; the
+    // band takes focus only when nothing inside it holds it.
+    const focusBand = () => {
+      if (band.current === null) return;
+      const active = typeof document === "undefined" ? null : document.activeElement;
+      if (active !== null && active !== band.current && band.current.contains(active)) return;
+      band.current.focus({ preventScroll: true });
+    };
     if (pressTop.current !== null) {
       // The row a person pressed keeps its top edge where it was (turn 143): the rows above it
       // have just folded, so it moved up by their loss, and the list scrolls back by the same.
@@ -997,11 +1005,11 @@ function Row({
       pressTop.current = null;
       const scroller = band.current.closest<HTMLElement>(".fy-swrows");
       if (delta !== 0 && scroller !== null) scroller.scrollTop += delta;
-      band.current.focus({ preventScroll: true });
+      focusBand();
       return;
     }
     band.current.scrollIntoView?.({ block: "nearest" });
-    band.current.focus({ preventScroll: true });
+    focusBand();
   }, [selected]);
   // The draft follows the durable note and nothing else: a refused write leaves the person's
   // words in the box to blur again, rather than putting the old note back over them.
@@ -1020,12 +1028,13 @@ function Row({
         promptDirty.current = false;
         setPromptDraft(null);
         setPendingHide(null);
-        if (pendingHide.closes === "row") onClose();
+        // A row opened in the meantime is the selection now; this one's close is already done.
+        if (pendingHide.closes === "row") { if (open) onClose(); }
         else setPromptOpen(false);
       }
     }
     if (durablePromptOverride === null) pendingRebuildVersion.current = null;
-  }, [durablePromptOverride, onClose, pendingHide]);
+  }, [durablePromptOverride, onClose, open, pendingHide]);
   useEffect(() => {
     // A refusal answers the write in flight: the draft is the person's again, to send once more.
     if (promptWrite.current !== null && promptWrite.current.refusalVersion !== refusalVersion) {
@@ -1261,7 +1270,6 @@ function Row({
     <div
       className="fy-swrow__script fy-swrow__scripteditor"
       title="Write what happens · type @ to name anything in the world"
-      onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => { if (event.key !== "Escape") event.stopPropagation(); }}
       onBlur={(event) => {
         if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
@@ -1576,7 +1584,7 @@ function Row({
       </div>
       {folded ? (
         <div className="fy-swrow__body">
-          <div className="fy-swrow__titleline" onClick={(event) => event.stopPropagation()}>
+          <div className="fy-swrow__titleline">
             {titleControl}
             {stateChip}
             <span className="fy-swrow__timing">{durationControl}<span aria-hidden="true">·</span><span>{aspect}</span>{shot.promptOverride === undefined ? null : <span className="fy-swrow__authored">Authored</span>}</span>
@@ -1589,7 +1597,9 @@ function Row({
            row opening (turn 143). The open row places these children on the band's grid. */
         <div className="fy-swrow__body">
           <div className="fy-swrow__head">
-            <div className="fy-swrow__titleline" onClick={(event) => event.stopPropagation()}>
+            {/* The title and the script open the row (turn 143), so their presses reach the band;
+                the editor the press landed in keeps its focus. */}
+            <div className="fy-swrow__titleline">
               {titleControl}
               {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
               {shot.staging?.playblast === undefined ? null : <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>}
@@ -1637,7 +1647,6 @@ function Row({
           <section
             className={open ? "fy-swrow__panel fy-swrow__panel--description" : "fy-swrow__descwrap"}
             data-folded={open && foldedPanels.has("description") ? "true" : undefined}
-            onClick={(event) => event.stopPropagation()}
           >
             {open ? (
               <div className="fy-swrow__panelhead">

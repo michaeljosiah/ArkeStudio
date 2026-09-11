@@ -159,7 +159,10 @@
    editor keep the relationship the card's prompt has. */
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt { margin: 0; gap: 10px; }
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt > .fy-bench__briefstack { height: 69px; min-height: 69px; max-height: 69px; resize: none; overflow: hidden; }
+/* Whole: the stack's children are absolute, so the underlay joins the flow and the box takes
+   the prompt's own height; the textarea over it still fills the stack. */
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt[data-whole="true"] > .fy-bench__briefstack { height: auto; max-height: none; }
+:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt[data-whole="true"] > .fy-bench__briefstack > .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__briefunder,
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__briefmirror,
 :where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__brieftext { padding: 8px 10px; font: 400 13px/1.55 var(--font-sans); }

@@ -2127,6 +2127,48 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(band.getAttribute("data-open"), "true", "an Escape a menu already took leaves the row open");
   });
 
+  it("the title and the script open the row, and the editor the press landed in survives the opening (codex round 3)", async () => {
+    const mounted = await mount();
+    const row = q(mounted, ".fy-swrow")!;
+    const band = row.querySelector(".fy-swrow__band") as HTMLElement;
+    const editor = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await click(editor);
+    assert.equal(band.getAttribute("data-open"), "true", "a press on the script opens the row");
+    assert.equal(row.querySelector(".fy-swrow__panel--description .fy-swrow__script textarea"), editor, "in the same editor, now in its panel");
+    await click(row.querySelector('[aria-label="Close shot 12"]') as HTMLElement);
+    assert.equal(band.getAttribute("data-open"), null);
+    await click(row.querySelector('[aria-label="Edit title for shot 12"]') as HTMLElement);
+    assert.equal(band.getAttribute("data-open"), "true", "a press on the title opens the row");
+    assert.ok(row.querySelector('input[aria-label="Title for shot 12"]'), "with the title open for typing");
+  });
+
+  it("a close waiting on its write does not close a row opened in the meantime (codex round 3)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shots = orderedShots(scene);
+    shots[0]!.promptOverride = { text: "Stored shot prompt", sheetVersions: {} };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const [first, second] = all(mounted, ".fy-swrow__band");
+    await click(first!);
+    await editTextarea(first!.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement, "Written on the way out");
+    await click(first!.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
+    assert.equal(first!.getAttribute("data-open"), "true", "the row waits for its write");
+    await click(second!);
+    assert.equal(second!.getAttribute("data-open"), "true");
+    assert.equal(first!.getAttribute("data-folded"), "true");
+    const landed = structuredClone(state) as ClientState;
+    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    landedScene.version += 1;
+    orderedShots(landedScene)[0]!.promptOverride = { text: "Written on the way out", sheetVersions: {} };
+    await act(async () => __setStateForTest(landed));
+    assert.equal(second!.getAttribute("data-open"), "true", "the write landing does not take the newer row's place");
+    assert.equal(first!.getAttribute("data-folded"), "true");
+  });
+
   it("clears a dirty consolidated prompt without a blur write and restores stored copy on refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
@@ -3394,6 +3436,10 @@ describe("shot authoring and the season length (#931)", () => {
     const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
     assert.equal(row.querySelector('input'), null, "fields are revealed only while editing");
     const edit = async (field: "title" | "duration", value: string) => {
+      // A press on the title opens the row (turn 143), where the duration is set from Shot
+      // settings; the timing line's number box belongs to the wide row, so it is closed first.
+      const band = row.querySelector(".fy-swrow__band") as HTMLElement;
+      if (field === "duration" && band.getAttribute("data-open") === "true") await click(row.querySelector('[aria-label="Close shot 13"]') as HTMLElement);
       await click(row.querySelector(`[aria-label="Edit ${field} for shot 13"]`) as HTMLElement);
       const input = row.querySelector(field === "title" ? 'input[aria-label^="Title"]' : 'input[type="number"]') as HTMLInputElement;
       input.value = value;
