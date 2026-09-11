@@ -36,11 +36,12 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
+import { Eyebrow, Link, Row, Stepper, Triad, Value } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
 import { Button } from "../../components/ui.js";
-import { ChevronLeft, ChevronRight, Lamp, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
+import { ChevronLeft, ChevronRight, Lamp, Minimize2, Minus, PauseSolid, PlaySolid, Plus, X } from "../../components/icons.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type MotionLane = { kind: "performance" | "object"; id: string };
@@ -116,6 +117,7 @@ export function SceneStage({
   onRenderShot,
   playblastRequest,
   constructionRequest,
+  fullscreen = null,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -130,6 +132,8 @@ export function SceneStage({
   onRenderShot: (shotId: string) => void;
   constructionRequest?: { actionId: string; conversationId: string; shotId: string; instruction: string; preserve: "blocking" | "camera" | "none" };
   playblastRequest?: { actionId: string; conversationId: string; shotId: string };
+  /** In full screen the way out sits on this head row (turn 144); null means the page is not in it. */
+  fullscreen?: { leave: () => void } | null;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -181,6 +185,8 @@ export function SceneStage({
   const [mode, setMode] = useState<"look" | "camera">("look");
   const [selection, setSelection] = useState<StageSelection>(null);
   const [motionMark, setMotionMark] = useState<MotionMark | null>(null);
+  // Where the shot's form puts the reference rows; null while another form is up (turn 144).
+  const [referenceSlot, setReferenceSlot] = useState<HTMLElement | null>(null);
   const stageRoot = useRef<HTMLElement | null>(null);
   const keyDrag = useRef<{ pointerId: number; which: number; lane?: MotionLane; left: number; width: number; low: number; high: number } | null>(null);
   const [ghost, setGhost] = useState(false);
@@ -295,17 +301,22 @@ export function SceneStage({
   }, [frozen, durationSec, resolvedPersisted]);
   useEffect(() => {
     setMotionMark(null);
-    setSelection(null);
+    // A landing keeps the selection while the thing is still on the stage (turn 144): a person who
+    // kept the camera is still on the camera's form, and a removed figure's selection goes with it.
+    setSelection((current) => {
+      if (current === null || resolvedPersisted === null) return null;
+      if (current.kind === "rig" || current.kind === "aim") return current;
+      if (current.kind === "set") return resolvedPersisted.sets[current.index] === undefined ? null : current;
+      return resolvedPersisted.cast.some((figure) => figure.sheetId === current.sheetId) ? current : null;
+    });
   }, [resolvedPersisted]);
   useEffect(() => {
     if (motionMark === null) return;
     const marks = motionMark.kind === "performance"
       ? working?.performances?.find(track => track.sheetId === motionMark.id)?.keys
       : working?.objectMotions?.find(track => track.group === motionMark.id)?.keys;
-    if (marks?.length !== motionMark.keyCount) {
-      setMotionMark(null);
-      setSelection(null);
-    }
+    // The mark is gone or has a new neighbour; the figure or set it belonged to stays selected.
+    if (marks?.length !== motionMark.keyCount) setMotionMark(null);
   }, [working, motionMark]);
   useEffect(() => {
     if (motionMark === null) return;
@@ -674,6 +685,11 @@ export function SceneStage({
     setKeyIndex(which);
     setMotionMark(null);
     setAt(keys[which]?.t ?? 0);
+    // The key a person pressed is the camera's; the camera's form follows it (turn 144).
+    if (selection?.kind !== "rig" && selection?.kind !== "aim") {
+      setSelection({ kind: "rig" });
+      viewport.current?.select({ kind: "rig" });
+    }
   };
   const seekTime = (time: number) => {
     if (latest.current.frozen) return;
@@ -729,7 +745,8 @@ export function SceneStage({
     if (!key) return;
     seekTime(key.t);
     setMotionMark({ ...lane, index: which, keyCount: motionKeys(working, lane).length });
-    const selected: StageSelection = lane.kind === "performance" ? { kind: "cast", sheetId: lane.id } : null;
+    const setIndex = lane.kind === "object" ? working.sets.findIndex((set) => set.group === lane.id) : -1;
+    const selected: StageSelection = lane.kind === "performance" ? { kind: "cast", sheetId: lane.id } : setIndex < 0 ? null : { kind: "set", index: setIndex };
     setSelection(selected);
     viewport.current?.select(selected);
   };
@@ -768,12 +785,6 @@ export function SceneStage({
     keyDrag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const nudge = (axis: 1 | 2, delta: number) => {
-    if (activeKey === null) return;
-    const p: [number, number, number] = [...activeKey.p];
-    p[axis] = round(p[axis] + delta);
-    patchKey(active, { p });
-  };
   const anchorTo = (sheetId: string | null) => {
     if (activeKey === null || working === null) return;
     const world = sampleStageCamera({...working, keys:[activeKey]},activeKey.t,durationSec);
@@ -795,20 +806,6 @@ export function SceneStage({
         }
         const { pose: _pose, ...standing } = figure;
         return { ...standing, to: [round(figure.x + 0.4), round(figure.z - 3.4)] };
-      }),
-    }));
-  const cyclePose = (sheetId: string) =>
-    patchBlocking((current) => ({
-      ...current,
-      cast: current.cast.map((figure) => {
-        if (figure.sheetId !== sheetId) return figure;
-        if (figure.pose === "sit") return { ...figure, pose: "lie" };
-        if (figure.pose === "lie") {
-          const { pose: _pose, ...standing } = figure;
-          return standing;
-        }
-        const { to: _to, ...holding } = figure;
-        return { ...holding, pose: "sit" };
       }),
     }));
   const patchPerformanceAt = (sheetId: string, change: Partial<StagePerformanceKey>, time = latest.current.at) => {
@@ -836,46 +833,73 @@ export function SceneStage({
       ...current,
       sets: current.sets.map((set, position) => position === which ? { ...set, ...change } : set),
     }));
-  const patchSetNumber = (which: number, field: "x" | "y" | "z" | "w" | "h" | "d", raw: string) => {
-    const parsed = Number.parseFloat(raw);
-    if (!Number.isFinite(parsed)) return;
-    const value = field === "x" || field === "z" || field === "y" ? parsed : Math.max(0.1, parsed);
-    patchSet(which, { [field]: round(value) });
+  const addSet = () => {
+    if (working === null) return;
+    const index = working.sets.length;
+    patchBlocking((current) => {
+      const figure = current.cast[0];
+      return {
+        ...current,
+        sets: [...current.sets, {
+          name: `set ${current.sets.length + 1}`,
+          x: figure?.x ?? 0,
+          z: round((figure?.z ?? 0) + 1),
+          w: 1,
+          h: 0.75,
+          d: 1,
+        }],
+      };
+    });
+    // A new set is the thing to name next, so it is the selection (turn 144).
+    const selected: StageSelection = { kind: "set", index };
+    setSelection(selected);
+    setMotionMark(null);
+    viewport.current?.select(selected);
   };
-  const addSet = () => patchBlocking((current) => {
-    const figure = current.cast[0];
-    return {
-      ...current,
-      sets: [...current.sets, {
-        name: `set ${current.sets.length + 1}`,
-        x: figure?.x ?? 0,
-        z: round((figure?.z ?? 0) + 1),
-        w: 1,
-        h: 0.75,
-        d: 1,
-      }],
-    };
-  });
   const removeSet = (which: number) =>
     patchBlocking((current) => ({ ...current, sets: current.sets.filter((_, position) => position !== which) }));
-  const cycleRig = () => patchCamera((current) => {
-    const index = STAGE_RIGS.indexOf(current.rig ?? "sticks");
-    return { ...current, rig: STAGE_RIGS[(index + 1) % STAGE_RIGS.length]! };
-  });
-  const nudgeRig = (delta: number) => patchCamera((current) => ({
-    ...current,
-    rigIntensity: Math.max(0, Math.min(2, round((current.rigIntensity ?? 1) + delta))),
-  }));
-  const selLabel =
-    motionMark !== null
-      ? `${motionMark.kind === "object" ? motionMark.id : nameOf(motionMark.id)} · mark ${motionMark.index + 1}`
-      : selection === null
-      ? "nothing selected"
-      : selection.kind === "rig"
-        ? "camera"
-        : selection.kind === "aim"
-          ? "aim target"
-          : `${nameOf(selection.sheetId)} · ${selection.kind === "cast" ? "start" : "end"}`;
+  // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
+  const pick = (next: Exclude<StageSelection, null>) => {
+    const same = selection !== null && selection.kind === next.kind && (
+      next.kind === "rig" || next.kind === "aim"
+        ? true
+        : next.kind === "set" ? (selection as { index: number }).index === next.index : (selection as { sheetId: string }).sheetId === next.sheetId);
+    const selected: StageSelection = same ? null : next;
+    setSelection(selected);
+    setMotionMark(null);
+    viewport.current?.select(selected);
+  };
+  const setKeyAxis = (axis: 1 | 2, value: number) => {
+    if (activeKey === null) return;
+    const p: [number, number, number] = [...activeKey.p];
+    p[axis] = round(value);
+    patchKey(active, { p });
+  };
+  const setPose = (sheetId: string, pose: "stand" | "sit" | "lie") =>
+    patchBlocking((current) => ({
+      ...current,
+      cast: current.cast.map((figure) => {
+        if (figure.sheetId !== sheetId) return figure;
+        if (pose === "stand") { const { pose: _pose, ...standing } = figure; return standing; }
+        // A seated or lying figure holds where it is; the walk goes with the standing pose.
+        const { to: _to, ...holding } = figure;
+        return { ...holding, pose };
+      }),
+    }));
+  const figureLegs = (sheetId: string) => motionSpeeds.filter((leg) => leg.kind === "performance" && leg.id === sheetId);
+  const movementWord = (figure: ResolvedShotStaging["cast"][number]): string => {
+    const legs = figureLegs(figure.sheetId);
+    const tooFast = legs.some((leg) => leg.ceiling !== undefined && leg.speed > leg.ceiling);
+    if (working?.performances?.some((p) => p.sheetId === figure.sheetId)) {
+      const gaits = [...new Set(legs.map((leg) => leg.gait))].join(" / ");
+      return `${gaits || "holds"}${tooFast ? " · too fast" : ""}`;
+    }
+    if (figure.to === undefined) return "holds";
+    const length = Math.hypot(figure.to[0] - figure.x, figure.to[1] - figure.z);
+    return `walks ${length.toFixed(1)} m${tooFast ? " · too fast" : ""}`;
+  };
+  const poseWord = (pose: "stand" | "sit" | "lie" | undefined): string => (pose === "sit" ? "sits" : pose === "lie" ? "lies" : "stands");
+  const shotLensMm = framing.lens === undefined ? undefined : String(Number.parseFloat(framing.lens) || "");
   const filed = persisted?.playblast;
   const stale = persisted !== null && stagePlayblastIsStale(scene, persisted, { durationSec, aspect, lens: framing.lens });
   const ghostable = previous?.staging !== undefined;
@@ -908,6 +932,11 @@ export function SceneStage({
             v{persisted?.version ?? 1} · {keys.length} keys · {stagingMotionWord(working,durationSec)}
           </span>
         )}
+        {fullscreen === null ? null : (
+          <button type="button" className="fy-swstage__exit" title="Leave full screen · Esc" aria-label="Leave full screen" onClick={fullscreen.leave}>
+            <Minimize2 size={14} />
+          </button>
+        )}
       </div>
 
       <div className="fy-swstage__construction">
@@ -915,10 +944,9 @@ export function SceneStage({
         {persisted ? <select aria-label="Preserve Stage work" value={preserve} onChange={e => setPreserve(e.target.value as typeof preserve)} disabled={constructing}>
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
         </select> : null}
-        <Button size="sm" disabled={frozen || moved} onClick={() => construct()}>Build with Arke</Button>
+        <Button size="sm" className="fy-tip--end" disabled={frozen || moved} hint="Uses the configured language model · up to 3 turns / 5 minutes" onClick={() => construct()}>Build with Arke</Button>
         {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
         {note ? <span role="status">{note}</span> : null}
-        <span>Uses the configured language model · up to 3 turns / 5 minutes</span>
         {draft?.authorship ? <details><summary>AI inspection and assumptions</summary><p>{draft.authorship.assessment}</p><ul>{draft.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{draft.authorship.model} · {draft.authorship.inspectedFrames} views inspected</small></details> : null}
       </div>
       <div className="fy-swstage__work">
@@ -974,278 +1002,420 @@ export function SceneStage({
           )}
         </div>
 
-        <aside className="fy-swstage__panel">
+        <aside className="fy-swstage__panel" aria-label="Stage inspector">
           {working === null ? (
             <p className="fy-swstage__note">Stage the shot to place the cast, put down the set and start a camera move.</p>
           ) : (
             <>
-              <div className="fy-swstage__sel" data-selected={selection === null && motionMark === null ? undefined : "true"} title="Click to select · drag the axis arrows to move it · in Camera view drag to pan and tilt · middle or right drag orbits the view">
-                <span aria-hidden="true" />
-                <span>{selLabel}</span>
-              </div>
-
+              {/* The stage list (turn 144): what is on the stage, one line each with its state. A press
+                  is the viewport's selection too, and pressing the selected line again clears it. */}
               <div className="fy-swstage__block">
-                <div className="fy-swstage__eyebrow">
-                  <span>Camera</span>
-                  <span>{keyName(active, keys.length)}</span>
-                </div>
-                <label className="fy-swstage__row">Move
-                  <select aria-label="Camera move" value="" disabled={frozen || !working.cast.length} onChange={event => {
-                    const move = event.target.value as StageCameraMove;
-                    if (!STAGE_CAMERA_MOVES.some(candidate => candidate.id === move)) return;
-                    const subjectId = selection?.kind === "cast" || selection?.kind === "walkend" ? selection.sheetId : undefined;
-                    stop();
-                    patchCamera(current => ({ ...current, keys: stageCameraMove(move, current, { durationSec, at, subjectId, lens: framing.lens, aspect }) }));
-                    setAt(0); setKeyIndex(0); setMotionMark(null);
-                  }}>
-                    <option value="">Choose a move…</option>
-                    {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
-                  </select>
-                </label>
-                <div className="fy-swstage__row fy-swstage__row--chips">
-                  <span title="Scene blocking is shared by every camera; This shot keeps a private variant">blocking</span>
-                  <span className="fy-swstage__chips">
-                    {(["scene", "shot"] as const).map((candidate) => (
-                      <button
-                        key={candidate}
-                        type="button"
-                        data-on={scope === candidate ? "true" : undefined}
-                        disabled={locked || frozen}
-                        onClick={() => chooseScope(candidate)}
-                      >
-                        {candidate === "scene" ? "Scene" : "This shot"}
-                      </button>
-                    ))}
-                  </span>
-                </div>
-                <div className="fy-swstage__row">
-                  <span title="Drag the green arrow on the camera to raise or lower it">height</span>
-                  <span>{activeKey === null ? "—" : `${activeKey.p[1].toFixed(2)}m`}</span>
-                  <span className="fy-swstage__nudge">
-                    <button type="button" aria-label="Lower" disabled={frozen} onClick={() => nudge(1, -0.1)}><Minus size={10} /></button>
-                    <button type="button" aria-label="Raise" disabled={frozen} onClick={() => nudge(1, 0.1)}><Plus size={10} /></button>
-                  </span>
-                </div>
-                <div className="fy-swstage__row">
-                  <span title="Drag the red or blue arrow to move the camera across the floor">back</span>
-                  <span>{activeKey === null ? "—" : `${activeKey.p[2].toFixed(2)}m`}</span>
-                  <span className="fy-swstage__nudge">
-                    <button type="button" aria-label="Closer" disabled={frozen} onClick={() => nudge(2, -0.25)}><Minus size={10} /></button>
-                    <button type="button" aria-label="Further" disabled={frozen} onClick={() => nudge(2, 0.25)}><Plus size={10} /></button>
-                  </span>
-                </div>
-                <div className="fy-swstage__row">
-                  <span title="Drag the ring, or double-click a figure to track them">aim</span>
-                  <select aria-label="Camera aim target" disabled={frozen} value={activeKey?.track ?? ""} onChange={e=>patchKey(active,{track:e.target.value || undefined,l:[0,1.25,0]})}>
-                    <option value="">Free aim</option>
-                    {[...working.cast.map(f=>f.sheetId),...new Set(working.sets.flatMap(s=>s.group?[s.group]:[]))].map(id=><option key={id} value={id}>{nameOf(id)}</option>)}
-                  </select>
-                </div>
-                <div className="fy-swstage__row fy-swstage__row--chips">
-                  <span title="World keys stay put; anchored keys ride with the subject, so you set the offset once">anchor</span>
-                  <span className="fy-swstage__chips">
-                    {[null, ...working.cast.map((figure) => figure.sheetId), ...new Set(working.sets.flatMap(s=>s.group?[s.group]:[]))].map((candidate) => (
-                      <button
-                        key={candidate ?? "world"}
-                        type="button"
-                        data-on={(activeKey?.anchor ?? null) === candidate ? "true" : undefined}
-                        disabled={frozen}
-                        onClick={() => anchorTo(candidate)}
-                      >
-                        {candidate === null ? "world" : nameOf(candidate)}
-                      </button>
-                    ))}
-                  </span>
-                </div>
-                {activeKey?.anchor ? <label><input type="checkbox" checked={activeKey.anchorSpace === "local"} disabled={frozen} onChange={e=>{
-                  const world=sampleStageCamera({...working,keys:[activeKey]},activeKey.t,durationSec);
-                  const key={...activeKey,anchorSpace:e.target.checked?"local" as const:"world" as const};
-                  patchKey(active,{...key,p:stageKeyOffset(working,key,world.p,key.t,durationSec),l:key.track?key.l:stageKeyOffset(working,key,world.l,key.t,durationSec)});
-                }}/>Turn with target</label>:null}
-                {(["roll","focalMm"] as const).map(field=><label className="fy-swstage__row" key={field}>{field==="roll"?"Roll °":"Lens mm"}<input type="number" aria-label={field==="roll"?"Camera roll":"Camera focal length"} value={activeKey?.[field]??""} min={field==="roll"?-180:1} max={field==="roll"?180:1000} disabled={frozen} onChange={e=>{const value=Number(e.target.value);if(e.target.value==="")patchKey(active,{[field]:undefined});else if(Number.isFinite(value)&&value>=(field==="roll"?-180:1)&&value<=(field==="roll"?180:1000))patchKey(active,{[field]:value});}}/></label>)}
-                {(["easeIn", "easeOut"] as const).map(field => (
-                  <label className="fy-swstage__row" key={field}>{field === "easeIn" ? "Ease in" : "Ease out"}
-                    <input type="number" aria-label={field === "easeIn" ? "Ease in" : "Ease out"} min={0} max={0.5} step={0.05}
-                      value={activeKey?.[field] ?? 0} disabled={frozen}
-                      onChange={event => {
-                        const value = Number(event.target.value);
-                        if (event.target.value === "") patchKey(active, { [field]: undefined });
-                        else if (Number.isFinite(value) && value >= 0 && value <= 0.5) patchKey(active, { [field]: value });
-                      }} />
-                  </label>
+                <Eyebrow title="Stage" />
+                <button
+                  type="button"
+                  className="fy-swstage__item"
+                  data-selected={selection?.kind === "rig" || selection?.kind === "aim" ? "true" : undefined}
+                  onClick={() => pick({ kind: "rig" })}
+                >
+                  <span className="fy-swstage__mark" data-kind="camera" aria-hidden="true" />
+                  <span>camera</span>
+                  <span>{stagingMotionWord(working, durationSec)} · {keys.length} {keys.length === 1 ? "key" : "keys"}</span>
+                </button>
+                {working.cast.map((figure, position) => (
+                  <button
+                    key={figure.sheetId}
+                    type="button"
+                    className="fy-swstage__item"
+                    data-selected={(selection?.kind === "cast" || selection?.kind === "walkend") && selection.sheetId === figure.sheetId ? "true" : undefined}
+                    title={figureLegs(figure.sheetId).map((leg) => stageSpeedWarning(leg, nameOf)).filter(Boolean).join("\n") || undefined}
+                    onClick={() => pick({ kind: "cast", sheetId: figure.sheetId })}
+                  >
+                    <span className="fy-swstage__mark" style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
+                    <span>{nameOf(figure.sheetId)}</span>
+                    <span>{movementWord(figure)} · {poseWord(figure.pose)}</span>
+                  </button>
                 ))}
-                <span className="fy-swstage__quiet">{activeKey?.anchor === undefined ? "fixed in the set" : `rides with ${nameOf(activeKey.anchor)}`}</span>
+                {working.sets.map((set, position) => (
+                  <button
+                    key={position}
+                    type="button"
+                    className="fy-swstage__item"
+                    data-selected={selection?.kind === "set" && selection.index === position ? "true" : undefined}
+                    onClick={() => pick({ kind: "set", index: position })}
+                  >
+                    <span className="fy-swstage__mark" data-kind="set" aria-hidden="true" />
+                    <span>{set.name}</span>
+                    <span>{set.shape ?? "box"}{set.solid ? " · solid" : ""}</span>
+                  </button>
+                ))}
+                <button type="button" className="fy-swstage__add" disabled={frozen} onClick={addSet}><Plus size={12} />Add set</button>
               </div>
 
-              <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
-                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
-                disabled={frozen} onChoose={() => setMode("camera")} />
-
-              {working.cast.length === 0 ? null : (
+              {(selection?.kind === "rig" || selection?.kind === "aim") && activeKey !== null ? (
                 <div className="fy-swstage__block">
-                  <div className="fy-swstage__eyebrow"><span title="A walking figure draws a path on the floor · drag its ghost to set where it ends">Movement</span></div>
-                  {working.cast.map((figure, position) => {
-                    const legs = motionSpeeds.filter(leg => leg.kind === "performance" && leg.id === figure.sheetId);
-                    const tooFast = legs.some(leg => leg.ceiling !== undefined && leg.speed > leg.ceiling);
-                    const timed = working.performances?.some(p => p.sheetId === figure.sheetId);
-                    const gaits = [...new Set(legs.map(leg => leg.gait))].join(" / ");
-                    return (
-                      <button key={figure.sheetId} type="button" className="fy-swstage__mover" title={legs.map(leg => stageSpeedWarning(leg, nameOf)).filter(Boolean).join("\n")} disabled={frozen || timed} onClick={() => toggleWalk(figure.sheetId)}>
-                        <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
-                        <span>{nameOf(figure.sheetId)}</span>
-                        <span data-walks={figure.to === undefined ? undefined : "true"}>{timed ? `${gaits || "holds"}${tooFast ? " · too fast" : ""}` : figure.to === undefined ? "holds" : tooFast ? "walks · too fast" : "walks"}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {working.cast.length === 0 ? null : (
-                <div className="fy-swstage__block">
-                  <div className="fy-swstage__eyebrow"><span>Pose</span></div>
-                  {working.cast.map((figure, position) => (
-                    <button key={figure.sheetId} type="button" className="fy-swstage__mover" disabled={frozen || working.performances?.some(p => p.sheetId === figure.sheetId)} onClick={() => cyclePose(figure.sheetId)}>
-                      <span style={{ background: `#${figureColour(position).toString(16).padStart(6, "0")}` }} aria-hidden="true" />
-                      <span>{nameOf(figure.sheetId)}</span>
-                      <span>{figure.pose === "sit" ? "sits" : figure.pose === "lie" ? "lies" : "stands"}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <div className="fy-swstage__block">
-                <div className="fy-swstage__eyebrow">Timed action</div>
-                {working.cast.map(figure => <details key={figure.sheetId}>
-                  <summary>{nameOf(figure.sheetId)}</summary>
-                  <Button size="sm" disabled={frozen} onClick={() => patchPerformanceAt(figure.sheetId,{})}>Mark action here</Button>
-                  {working.performances?.find(p=>p.sheetId===figure.sheetId)?.keys.map((key,index) => <div className="fy-swstage__motion-mark" key={index} data-motion-mark={motionMark?.kind === "performance" && motionMark.id === figure.sheetId && motionMark.index === index ? "selected" : undefined}>
-                    <span>{key.t.toFixed(2)}s</span>
-                    {(["x","z","y","facing"] as const).map(field => <label key={field}>{field === "facing" ? "Facing °" : field}<input type="number" aria-label={`${nameOf(figure.sheetId)} ${key.t}s ${field}`} value={key[field] ?? 0} step={field === "facing" ? 5 : .1} disabled={frozen} onChange={e=>{ const value=Number(e.target.value); if(Number.isFinite(value))patchPerformanceAt(figure.sheetId,{[field]:value},key.t); }} /></label>)}
-                    <select aria-label={`${nameOf(figure.sheetId)} ${key.t}s posture`} value={key.pose ?? "stand"} disabled={frozen} onChange={e=>patchPerformanceAt(figure.sheetId,{pose:e.target.value as StagePerformanceKey["pose"]},key.t)}><option value="stand">Standing</option><option value="sit">Seated</option><option value="lie">Lying</option></select>
-                    <select aria-label={`${nameOf(figure.sheetId)} ${key.t}s gait`} value={key.gait ?? "walk"} disabled={frozen} onChange={e=>patchPerformanceAt(figure.sheetId,{gait:e.target.value as StagePerformanceKey["gait"]},key.t)}><option value="walk">Walk</option><option value="jog">Jog</option><option value="run">Run</option></select>
-                    {(["easeIn", "easeOut", "hold"] as const).map(field => <label key={field}>{field === "hold" ? "Hold (s)" : field === "easeIn" ? "Ease in" : "Ease out"}<input type="number" min="0" max={field === "hold" ? undefined : .5} step={field === "hold" ? .1 : .05} aria-label={`${nameOf(figure.sheetId)} ${key.t}s ${field}`} value={key[field] ?? ""} placeholder="0" disabled={frozen} onChange={e=>{const raw=e.target.value;const value=Number(raw);if(raw==="")patchPerformanceAt(figure.sheetId,{[field]:undefined},key.t);else if(Number.isFinite(value)&&value>=0&&(field==="hold"||value<=.5))patchPerformanceAt(figure.sheetId,{[field]:value},key.t);}} /></label>)}
-                    {index>0 ? <button disabled={frozen} onClick={()=>patchCamera(current=>({...current,performances:current.performances?.map(p=>p.sheetId===figure.sheetId?{...p,keys:p.keys.filter((_,i)=>i!==index)}:p)}))}>Remove mark</button> : null}
-                  </div>)}
-                </details>)}
-              </div>
-              <div className="fy-swstage__block">
-                <div className="fy-swstage__eyebrow">Object motion</div>
-                {[...new Set(working.sets.flatMap(s=>s.group?[s.group]:[]))].map(group=><details key={group}><summary>{group}</summary>
-                  <Button size="sm" disabled={frozen} onClick={()=>patchObjectAt(group,{})}>Mark motion here</Button>
-                  <label>Speed ceiling (m/s)<input type="number" min="0.01" step="1" placeholder="None" aria-label={`${group} speed ceiling`} disabled={frozen || !working.objectMotions?.some(m=>m.group===group)} value={working.objectMotions?.find(m=>m.group===group)?.maxSpeed ?? ""} onChange={e=>{const raw=e.target.value;const value=Number(raw);if(raw!==""&&(!Number.isFinite(value)||value<=0))return;patchCamera(current=>({...current,objectMotions:current.objectMotions?.map(m=>m.group===group?{...m,maxSpeed:raw===""?undefined:value}:m)}));}}/></label>
-                  {motionSpeeds.filter(leg => leg.kind === "object" && leg.id === group).flatMap(leg => { const warning = stageSpeedWarning(leg, nameOf); return warning ? [warning] : []; }).map(warning=><span key={warning} className="fy-swstage__quiet">{warning}</span>)}
-                  {working.objectMotions?.find(m=>m.group===group)?.keys.map((key,index)=><div key={index} className="fy-swstage__motion-mark" data-motion-mark={motionMark?.kind === "object" && motionMark.id === group && motionMark.index === index ? "selected" : undefined}><span>{key.t.toFixed(2)}s</span>
-                    {(["p","rotation"] as const).flatMap(field=>([0,1,2] as const).map(axis=><label key={`${field}${axis}`}>{field==="p"?["x","y","z"][axis]:["Pitch °","Turn °","Roll °"][axis]}<input type="number" aria-label={`${group} ${key.t}s ${field} ${axis}`} value={key[field]?.[axis]??0} disabled={frozen} step={field==="p"?.1:5} onChange={e=>{const value=Number(e.target.value);if(!Number.isFinite(value))return;const tuple:[number,number,number]=[...(key[field]??[0,0,0])];tuple[axis]=value;patchObjectAt(group,{[field]:tuple},key.t);}}/></label>))}
-                    {index>0?<button disabled={frozen} onClick={()=>patchCamera(current=>({...current,objectMotions:current.objectMotions?.map(m=>m.group===group?{...m,keys:m.keys.filter((_,i)=>i!==index)}:m)}))}>Remove mark</button>:null}
-                  </div>)}
-                </details>)}
-              </div>
-              <div className="fy-swstage__block">
-                <div className="fy-swstage__eyebrow"><span>Set massing</span></div>
-                <div className="fy-swstage__sets">
-                  {working.sets.map((set, position) => (
-                    <div className="fy-swstage__set" key={position}>
-                      <select aria-label={`${set.name} shape`} value={set.shape ?? "box"} disabled={frozen} onChange={e=>patchSet(position,{shape:e.target.value as StagingSet["shape"]})}><option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option>{set.shape === "mesh" ? <option value="mesh">Custom mesh</option>:null}</select>
-                      <label>Solid<input type="checkbox" checked={set.solid ?? false} disabled={frozen} onChange={e=>patchSet(position,{solid:e.target.checked})}/></label>
-                      {([0,1,2] as const).map(axis=><label key={axis}>{["Pitch","Turn","Roll"][axis]} °<input type="number" value={set.rotation?.[axis] ?? 0} disabled={frozen} onChange={e=>{const value=Number(e.target.value);if(!Number.isFinite(value))return;const rotation:[number,number,number]=[...(set.rotation ?? [0,0,0])];rotation[axis]=value;patchSet(position,{rotation});}}/></label>)}
-                      <div className="fy-swstage__set-head">
-                        <input
-                          key={set.name}
-                          type="text"
-                          aria-label={`Set ${position + 1} name`}
-                          defaultValue={set.name}
+                  <Eyebrow title="Camera" meta={keyName(active, keys.length)} />
+                  <Row label="move">
+                    <select className="fy-swstage__select" aria-label="Camera move" value="" disabled={frozen || !working.cast.length} onChange={event => {
+                      const move = event.target.value as StageCameraMove;
+                      if (!STAGE_CAMERA_MOVES.some(candidate => candidate.id === move)) return;
+                      // The move is about the figure the camera aims at, now that choosing a move means the camera is selected.
+                      const subjectId = activeKey.track && working.cast.some((figure) => figure.sheetId === activeKey.track) ? activeKey.track : undefined;
+                      stop();
+                      patchCamera(current => ({ ...current, keys: stageCameraMove(move, current, { durationSec, at, subjectId, lens: framing.lens, aspect }) }));
+                      setAt(0); setKeyIndex(0); setMotionMark(null);
+                    }}>
+                      <option value="">Choose a move…</option>
+                      {STAGE_CAMERA_MOVES.map(move => <option key={move.id} value={move.id} title={move.description}>{move.label}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="height">
+                    <Stepper label="Camera height" value={activeKey.p[1]} unit="m" step={0.1} decimals={2} disabled={frozen} less="Lower" more="Raise" onCommit={(value) => setKeyAxis(1, value ?? activeKey.p[1])} />
+                  </Row>
+                  <Row label="back">
+                    <Stepper label="Camera back" value={activeKey.p[2]} unit="m" step={0.25} decimals={2} disabled={frozen} less="Closer" more="Further" onCommit={(value) => setKeyAxis(2, value ?? activeKey.p[2])} />
+                  </Row>
+                  <Row label="aim">
+                    <select className="fy-swstage__select" aria-label="Camera aim target" disabled={frozen} value={activeKey.track ?? ""} onChange={event => {
+                      const track = event.target.value || undefined;
+                      if (track === undefined) { const { track: _track, ...free } = activeKey; patchKey(active, { ...free, track: undefined }); }
+                      else patchKey(active, { track, l: [0, 1.25, 0] });
+                    }}>
+                      <option value="">Free aim</option>
+                      {[...working.cast.map(f => f.sheetId), ...new Set(working.sets.flatMap(s => s.group ? [s.group] : []))].map(id => <option key={id} value={id}>{nameOf(id)}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="anchor" top>
+                    <span className="fy-swstage__chips">
+                      {[null, ...working.cast.map((figure) => figure.sheetId), ...new Set(working.sets.flatMap(s => s.group ? [s.group] : []))].map((candidate) => (
+                        <button
+                          key={candidate ?? "world"}
+                          type="button"
+                          data-on={(activeKey.anchor ?? null) === candidate ? "true" : undefined}
                           disabled={frozen}
-                          onBlur={(event) => {
-                            const name = event.currentTarget.value.trim();
-                            if (name.length > 0) patchSet(position, { name });
-                            else event.currentTarget.value = set.name;
-                          }}
-                        />
-                        <button type="button" aria-label={`Remove set ${position + 1}`} disabled={frozen} onClick={() => removeSet(position)}><X size={10} /></button>
-                      </div>
-                      <div className="fy-swstage__set-fields">
-                        {([
-                          ["x", "x", set.x],
-                          ["y", "elevation", set.y ?? 0],
-                          ["z", "z", set.z],
-                          ["w", "width", set.w],
-                          ["h", "height", set.h],
-                          ["d", "depth", set.d],
-                        ] as const).map(([field, label, value]) => (
-                          <label key={field}>
-                            <span>{field}</span>
-                            <input
-                              key={`${field}:${value}`}
-                              type="number"
-                              step="0.1"
-                              min={field === "x" || field === "z" || field === "y" ? undefined : 0.1}
-                              aria-label={`Set ${position + 1} ${label}`}
-                              defaultValue={value}
-                              disabled={frozen}
-                              onBlur={(event) => patchSetNumber(position, field, event.currentTarget.value)}
-                            />
-                          </label>
+                          onClick={() => anchorTo(candidate)}
+                        >
+                          {candidate === null ? "world" : nameOf(candidate)}
+                        </button>
+                      ))}
+                    </span>
+                  </Row>
+                  {activeKey.anchor ? (
+                    <Row label="">
+                      <label className="fy-swstage__check"><input type="checkbox" checked={activeKey.anchorSpace === "local"} disabled={frozen} onChange={e => {
+                        const world = sampleStageCamera({ ...working, keys: [activeKey] }, activeKey.t, durationSec);
+                        const key = { ...activeKey, anchorSpace: e.target.checked ? "local" as const : "world" as const };
+                        patchKey(active, { ...key, p: stageKeyOffset(working, key, world.p, key.t, durationSec), l: key.track ? key.l : stageKeyOffset(working, key, world.l, key.t, durationSec) });
+                      }} />Turn with target</label>
+                    </Row>
+                  ) : null}
+                  <Row label="roll">
+                    <Stepper label="Camera roll" value={activeKey.roll} unit="°" step={5} min={-180} max={180} decimals={0} placeholder="0" disabled={frozen} clearable onCommit={(value) => patchKey(active, { roll: value })} />
+                  </Row>
+                  <Row label="lens">
+                    <Stepper label="Camera lens" value={activeKey.focalMm} unit="mm" step={5} min={8} max={400} decimals={0} placeholder={shotLensMm} disabled={frozen} clearable onCommit={(value) => patchKey(active, { focalMm: value })} />
+                  </Row>
+                  <Row label="ease in">
+                    <Stepper label="Ease in" value={activeKey.easeIn ?? 0} step={0.05} min={0} max={0.5} disabled={frozen} onCommit={(value) => patchKey(active, { easeIn: value })} />
+                  </Row>
+                  <Row label="ease out">
+                    <Stepper label="Ease out" value={activeKey.easeOut ?? 0} step={0.05} min={0} max={0.5} disabled={frozen} onCommit={(value) => patchKey(active, { easeOut: value })} />
+                  </Row>
+                </div>
+              ) : null}
+
+              {selection?.kind === "cast" || selection?.kind === "walkend" ? (() => {
+                const sheetId = selection.sheetId;
+                const figure = working.cast.find((candidate) => candidate.sheetId === sheetId);
+                if (figure === undefined) return null;
+                const name = nameOf(sheetId);
+                const marks = working.performances?.find(p => p.sheetId === sheetId)?.keys ?? [];
+                const timed = marks.length > 0;
+                const chosen = motionMark?.kind === "performance" && motionMark.id === sheetId ? marks[motionMark.index] : undefined;
+                const chosenIndex = chosen === undefined ? -1 : motionMark!.index;
+                const patchChosen = (change: Partial<StagePerformanceKey>) => { if (chosen !== undefined) patchPerformanceAt(sheetId, change, chosen.t); };
+                return (
+                  <div className="fy-swstage__block">
+                    <Eyebrow title="Figure" meta={name} />
+                    <Row label="pose">
+                      <select className="fy-swstage__select" aria-label={`${name} pose`} value={figure.pose ?? "stand"} disabled={frozen || timed} onChange={(event) => setPose(sheetId, event.target.value as "stand" | "sit" | "lie")}>
+                        <option value="stand">Stands</option><option value="sit">Sits</option><option value="lie">Lies</option>
+                      </select>
+                    </Row>
+                    <Row label="moves">
+                      <Value>{movementWord(figure)}</Value>
+                      {timed ? null : <Link disabled={frozen} onClick={() => toggleWalk(sheetId)}>{figure.to === undefined ? "Set a walk" : "Hold"}</Link>}
+                    </Row>
+                    <Row label="marks">
+                      <Value>{marks.length}</Value>
+                      <Link disabled={frozen} onClick={() => patchPerformanceAt(sheetId, {})}>Mark here</Link>
+                    </Row>
+                    {marks.map((key, index) => (
+                      <button
+                        key={index}
+                        type="button"
+                        className="fy-swstage__markrow"
+                        data-motion-mark={index === chosenIndex ? "selected" : undefined}
+                        disabled={frozen}
+                        onClick={() => selectMotion({ kind: "performance", id: sheetId }, index)}
+                      >
+                        <span>{key.t.toFixed(2)} s</span>
+                        <span>{poseWord(key.pose)} · {key.gait ?? "walk"}</span>
+                      </button>
+                    ))}
+                    {chosen === undefined ? null : (
+                      <>
+                        <Row label="place">
+                          <Triad disabled={frozen} cells={[
+                            { prefix: "x", label: `${name} ${chosen.t}s x`, value: chosen.x, onCommit: (x) => patchChosen({ x }) },
+                            { prefix: "z", label: `${name} ${chosen.t}s z`, value: chosen.z, onCommit: (z) => patchChosen({ z }) },
+                            { prefix: "y", label: `${name} ${chosen.t}s y`, value: chosen.y ?? 0, onCommit: (y) => patchChosen({ y }) },
+                          ]} />
+                        </Row>
+                        <Row label="facing">
+                          <Stepper label={`${name} ${chosen.t}s facing`} value={chosen.facing ?? 0} unit="°" step={5} decimals={0} disabled={frozen} onCommit={(facing) => patchChosen({ facing })} />
+                        </Row>
+                        <Row label="pose">
+                          <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s posture`} value={chosen.pose ?? "stand"} disabled={frozen} onChange={e => patchChosen({ pose: e.target.value as StagePerformanceKey["pose"] })}>
+                            <option value="stand">Standing</option><option value="sit">Seated</option><option value="lie">Lying</option>
+                          </select>
+                        </Row>
+                        <Row label="gait">
+                          <select className="fy-swstage__select" aria-label={`${name} ${chosen.t}s gait`} value={chosen.gait ?? "walk"} disabled={frozen} onChange={e => patchChosen({ gait: e.target.value as StagePerformanceKey["gait"] })}>
+                            <option value="walk">Walk</option><option value="jog">Jog</option><option value="run">Run</option>
+                          </select>
+                        </Row>
+                        <Row label="ease in">
+                          <Stepper label={`${name} ${chosen.t}s easeIn`} value={chosen.easeIn} placeholder="0" step={0.05} min={0} max={0.5} disabled={frozen} clearable onCommit={(easeIn) => patchChosen({ easeIn })} />
+                        </Row>
+                        <Row label="ease out">
+                          <Stepper label={`${name} ${chosen.t}s easeOut`} value={chosen.easeOut} placeholder="0" step={0.05} min={0} max={0.5} disabled={frozen} clearable onCommit={(easeOut) => patchChosen({ easeOut })} />
+                        </Row>
+                        <Row label="hold">
+                          <Stepper label={`${name} ${chosen.t}s hold`} value={chosen.hold} unit="s" placeholder="0" step={0.1} min={0} decimals={2} disabled={frozen} clearable onCommit={(hold) => patchChosen({ hold })} />
+                        </Row>
+                        {chosenIndex > 0 ? (
+                          <Row label="">
+                            <Link disabled={frozen} onClick={() => patchCamera(current => ({ ...current, performances: current.performances?.map(p => p.sheetId === sheetId ? { ...p, keys: p.keys.filter((_, i) => i !== chosenIndex) } : p) }))}>Remove mark</Link>
+                          </Row>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
+                );
+              })() : null}
+
+              {selection?.kind === "set" ? (() => {
+                const position = selection.index;
+                const set = working.sets[position];
+                if (set === undefined) return null;
+                const group = set.group;
+                const motion = group === undefined ? undefined : working.objectMotions?.find(m => m.group === group);
+                const marks = motion?.keys ?? [];
+                const chosen = group !== undefined && motionMark?.kind === "object" && motionMark.id === group ? marks[motionMark.index] : undefined;
+                const chosenIndex = chosen === undefined ? -1 : motionMark!.index;
+                const patchChosenTuple = (field: "p" | "rotation", axis: 0 | 1 | 2, value: number) => {
+                  if (chosen === undefined || group === undefined) return;
+                  const tuple: [number, number, number] = [...(chosen[field] ?? [0, 0, 0])];
+                  tuple[axis] = value;
+                  patchObjectAt(group, { [field]: tuple }, chosen.t);
+                };
+                const warnings = group === undefined ? [] : motionSpeeds.filter(leg => leg.kind === "object" && leg.id === group).flatMap(leg => { const warning = stageSpeedWarning(leg, nameOf); return warning ? [warning] : []; });
+                return (
+                  <div className="fy-swstage__block">
+                    <Eyebrow title="Set" meta={set.name} />
+                    <Row label="name">
+                      <input
+                        key={set.name}
+                        type="text"
+                        className="fy-swstage__field"
+                        aria-label={`Set ${position + 1} name`}
+                        defaultValue={set.name}
+                        disabled={frozen}
+                        onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); }}
+                        onBlur={(event) => {
+                          const name = event.currentTarget.value.trim();
+                          if (name.length > 0) patchSet(position, { name });
+                          else event.currentTarget.value = set.name;
+                        }}
+                      />
+                    </Row>
+                    <Row label="shape">
+                      <select className="fy-swstage__select" aria-label={`${set.name} shape`} value={set.shape ?? "box"} disabled={frozen} onChange={e => patchSet(position, { shape: e.target.value as StagingSet["shape"] })}>
+                        <option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option><option value="mesh">Mesh</option>
+                      </select>
+                    </Row>
+                    <Row label="solid">
+                      <label className="fy-swstage__check"><input type="checkbox" aria-label={`${set.name} solid`} checked={set.solid ?? false} disabled={frozen} onChange={e => patchSet(position, { solid: e.target.checked })} /></label>
+                    </Row>
+                    <Row label="place">
+                      <Triad disabled={frozen} cells={[
+                        { prefix: "x", label: `Set ${position + 1} x`, value: set.x, onCommit: (x) => patchSet(position, { x }) },
+                        { prefix: "y", label: `Set ${position + 1} elevation`, value: set.y ?? 0, onCommit: (y) => patchSet(position, { y }) },
+                        { prefix: "z", label: `Set ${position + 1} z`, value: set.z, onCommit: (z) => patchSet(position, { z }) },
+                      ]} />
+                    </Row>
+                    <Row label="size">
+                      <Triad disabled={frozen} cells={[
+                        { prefix: "w", label: `Set ${position + 1} width`, value: set.w, min: 0.1, onCommit: (w) => patchSet(position, { w }) },
+                        { prefix: "h", label: `Set ${position + 1} height`, value: set.h, min: 0.1, onCommit: (h) => patchSet(position, { h }) },
+                        { prefix: "d", label: `Set ${position + 1} depth`, value: set.d, min: 0.1, onCommit: (d) => patchSet(position, { d }) },
+                      ]} />
+                    </Row>
+                    <Row label="rotation">
+                      <Triad disabled={frozen} step={5} cells={(["pitch", "turn", "roll"] as const).map((word, axis) => ({
+                        prefix: word,
+                        label: `${set.name} ${word}`,
+                        value: set.rotation?.[axis] ?? 0,
+                        onCommit: (value: number) => {
+                          const rotation: [number, number, number] = [...(set.rotation ?? [0, 0, 0])];
+                          rotation[axis] = value;
+                          patchSet(position, { rotation });
+                        },
+                      }))} />
+                    </Row>
+                    <Row label="group">
+                      <input
+                        key={group ?? ""}
+                        type="text"
+                        className="fy-swstage__field"
+                        aria-label={`Set ${position + 1} group`}
+                        placeholder="—"
+                        defaultValue={group ?? ""}
+                        disabled={frozen}
+                        onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); }}
+                        onBlur={(event) => {
+                          const next = event.currentTarget.value.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+                          if (next === (group ?? "")) { event.currentTarget.value = group ?? ""; return; }
+                          patchSet(position, { group: next === "" ? undefined : next });
+                        }}
+                      />
+                    </Row>
+                    {group === undefined ? null : (
+                      <>
+                        <Row label="marks">
+                          <Value>{marks.length}</Value>
+                          <Link disabled={frozen} onClick={() => patchObjectAt(group, {})}>Mark here</Link>
+                        </Row>
+                        {marks.length === 0 ? null : (
+                          <Row label="ceiling">
+                            <Stepper label={`${group} speed ceiling`} value={motion?.maxSpeed} unit="m/s" placeholder="—" step={1} min={0.01} decimals={2} disabled={frozen} clearable
+                              onCommit={(value) => patchCamera(current => ({ ...current, objectMotions: current.objectMotions?.map(m => m.group === group ? { ...m, maxSpeed: value } : m) }))} />
+                          </Row>
+                        )}
+                        {warnings.map(warning => <span key={warning} className="fy-swstage__quiet">{warning}</span>)}
+                        {marks.map((key, index) => (
+                          <button
+                            key={index}
+                            type="button"
+                            className="fy-swstage__markrow"
+                            data-motion-mark={index === chosenIndex ? "selected" : undefined}
+                            disabled={frozen}
+                            onClick={() => selectMotion({ kind: "object", id: group }, index)}
+                          >
+                            <span>{key.t.toFixed(2)} s</span>
+                            <span>{(key.p ?? [0, 0, 0]).map(v => v.toFixed(1)).join(" · ")}</span>
+                          </button>
                         ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <Button className="fy-swstage__set-add" variant="outline" size="sm" disabled={frozen} onClick={addSet}>Add set</Button>
-              </div>
+                        {chosen === undefined ? null : (
+                          <>
+                            <Row label="place">
+                              <Triad disabled={frozen} cells={(["x", "y", "z"] as const).map((prefix, axis) => ({ prefix, label: `${group} ${chosen.t}s p ${axis}`, value: chosen.p?.[axis] ?? 0, onCommit: (value: number) => patchChosenTuple("p", axis as 0 | 1 | 2, value) }))} />
+                            </Row>
+                            <Row label="rotation">
+                              <Triad disabled={frozen} step={5} cells={(["pitch", "turn", "roll"] as const).map((prefix, axis) => ({ prefix, label: `${group} ${chosen.t}s rotation ${axis}`, value: chosen.rotation?.[axis] ?? 0, onCommit: (value: number) => patchChosenTuple("rotation", axis as 0 | 1 | 2, value) }))} />
+                            </Row>
+                            {chosenIndex > 0 ? (
+                              <Row label="">
+                                <Link disabled={frozen} onClick={() => patchCamera(current => ({ ...current, objectMotions: current.objectMotions?.map(m => m.group === group ? { ...m, keys: m.keys.filter((_, i) => i !== chosenIndex) } : m) }))}>Remove mark</Link>
+                              </Row>
+                            ) : null}
+                          </>
+                        )}
+                      </>
+                    )}
+                    <Row label="">
+                      <Link disabled={frozen} onClick={() => removeSet(position)}>Remove set</Link>
+                    </Row>
+                  </div>
+                );
+              })() : null}
 
-              <div className="fy-swstage__block">
-                <div className="fy-swstage__eyebrow"><span title="Resolved from the shot · reads out on the prompt">Framing</span></div>
-                <div className="fy-swstage__row"><span>size</span><span>{framing.size?.toLowerCase() ?? "—"}</span></div>
-                <div className="fy-swstage__row"><span>lens</span><span>{framing.lens ?? "—"}</span></div>
-                <div className="fy-swstage__row"><span>movement</span><span>{framing.movement?.toLowerCase() ?? "—"}</span></div>
-                <div className="fy-swstage__row">
-                  <span>rig</span>
-                  <button type="button" disabled={frozen} onClick={cycleRig}>{(working.rig ?? "sticks").replace("-", " ")}</button>
+              {selection === null ? (
+                <div className="fy-swstage__block">
+                  <Eyebrow title="Shot" meta={shot.title} hint="Framing is resolved from the shot · reads out on the prompt" />
+                  <Row label="blocking" top>
+                    <span className="fy-swstage__chips" title="Scene blocking is shared by every camera; This shot keeps a private variant">
+                      {(["scene", "shot"] as const).map((candidate) => (
+                        <button
+                          key={candidate}
+                          type="button"
+                          data-on={scope === candidate ? "true" : undefined}
+                          disabled={locked || frozen}
+                          onClick={() => chooseScope(candidate)}
+                        >
+                          {candidate === "scene" ? "Scene" : "This shot"}
+                        </button>
+                      ))}
+                    </span>
+                  </Row>
+                  <Row label="size"><Value>{framing.size?.toLowerCase() ?? "—"}</Value></Row>
+                  <Row label="lens"><Value>{framing.lens ?? "—"}</Value></Row>
+                  <Row label="movement"><Value>{framing.movement?.toLowerCase() ?? "—"}</Value></Row>
+                  {/* A shot written before the structured camera keeps its one line, and it still staged from it. */}
+                  {shot.camera === undefined || framing.size !== undefined || framing.movement !== undefined ? null : (
+                    <Row label="camera"><Value>{shot.camera}</Value></Row>
+                  )}
+                  <Row label="rig">
+                    <select className="fy-swstage__select" aria-label="Camera rig" value={working.rig ?? "sticks"} disabled={frozen} onChange={(event) => patchCamera((current) => ({ ...current, rig: event.target.value as ResolvedShotStaging["rig"] }))}>
+                      {STAGE_RIGS.map((rig) => <option key={rig} value={rig}>{rig.replace("-", " ")}</option>)}
+                    </select>
+                  </Row>
+                  <Row label="intensity">
+                    <Stepper label="Rig intensity" value={working.rigIntensity ?? 1} step={0.25} min={0} max={2} decimals={2} disabled={frozen} less="Less rig motion" more="More rig motion"
+                      onCommit={(value) => patchCamera((current) => ({ ...current, rigIntensity: value ?? 1 }))} />
+                  </Row>
+                  <div className="fy-swstage__slot" ref={setReferenceSlot} />
                 </div>
-                <div className="fy-swstage__row">
-                  <span>rig intensity</span>
-                  <span>{(working.rigIntensity ?? 1).toFixed(2)}</span>
-                  <span className="fy-swstage__nudge">
-                    <button type="button" aria-label="Less rig motion" disabled={frozen} onClick={() => nudgeRig(-0.25)}><Minus size={10} /></button>
-                    <button type="button" aria-label="More rig motion" disabled={frozen} onClick={() => nudgeRig(0.25)}><Plus size={10} /></button>
-                  </span>
-                </div>
-                {/* A shot written before the structured camera keeps its one line, and it still staged from it. */}
-                {shot.camera === undefined || framing.size !== undefined || framing.movement !== undefined ? null : (
-                  <div className="fy-swstage__row"><span>camera</span><span>{shot.camera}</span></div>
-                )}
-              </div>
+              ) : null}
 
+              {/* The ways on are the shot's whatever is selected (140a's foot, kept by 144): the
+                  playblast's state, then Export and Render, pinned under the forms. */}
               <span className="fy-swstage__spacer" />
-
-              <div className="fy-swstage__block fy-swstage__block--playblast">
-                <div className="fy-swstage__row">
-                  <span>playblast</span>
-                  <span data-filed={filed === undefined || stale ? undefined : "true"}>
+              <div className="fy-swstage__block fy-swstage__block--ways">
+                <Row label="playblast">
+                  <span className="fy-swstage__value" data-filed={filed === undefined || stale ? undefined : "true"}>
                     {filed === undefined ? "not filed" : stale ? "filed · stale" : "filed"}
                   </span>
-                </div>
+                </Row>
                 {note === null ? null : <span className="fy-swstage__quiet" role="status">{note}</span>}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={locked || moved || persisted === null || exporting !== null || sceneFile === undefined}
-                  title={moved ? "Keep the move first" : undefined}
-                  onClick={() => void exportPlayblast()}
-                >
-                  {exporting === null ? "Export playblast" : `exporting… ${Math.round(exporting * 100)}%`}
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  // The session is prepared from the KEPT staging; a move still in hand would render the old one.
-                  disabled={generatorPending || frozen || moved || stale || filed === undefined}
-                  title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout first" : undefined}
-                  onClick={() => onRenderShot(shot.id)}
-                >
-                  {generatorPending ? "Opening…" : "Render with this"}
-                </Button>
+                <div className="fy-swstage__ways">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={locked || moved || persisted === null || exporting !== null || sceneFile === undefined}
+                    title={moved ? "Keep the move first" : undefined}
+                    onClick={() => void exportPlayblast()}
+                  >
+                    {exporting === null ? "Export playblast" : `exporting… ${Math.round(exporting * 100)}%`}
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    // The session is prepared from the KEPT staging; a move still in hand would render the old one.
+                    disabled={generatorPending || frozen || moved || stale || filed === undefined}
+                    title={moved ? "Keep the move first" : stale || filed === undefined ? "Export the current blockout first" : undefined}
+                    onClick={() => onRenderShot(shot.id)}
+                  >
+                    {generatorPending ? "Opening…" : "Render with this"}
+                  </Button>
+                </div>
               </div>
+
+              {/* Mounted whatever is selected: the reference plate lives in the viewport and its choice
+                  must survive a change of form; only its rows belong to the shot's form. */}
+              <StageUnderlay key={`underlay:${world.meta.worldId}:${shot.id}`} world={world} production={production} shotId={shot.id}
+                viewport={viewportElement} aspect={aspect} at={at} playing={playing} visible={mode === "camera" && exporting === null && !constructing}
+                disabled={frozen} onChoose={() => setMode("camera")} slot={referenceSlot} />
             </>
           )}
         </aside>

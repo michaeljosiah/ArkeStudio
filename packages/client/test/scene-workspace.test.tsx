@@ -102,6 +102,16 @@ const all = (m: Mounted, selector: string): HTMLElement[] =>
   [...m.container.querySelectorAll(selector)] as unknown as HTMLElement[];
 const menuButtons = (): HTMLButtonElement[] =>
   [...dom.document.querySelectorAll(".fy-swrow__menu button")] as unknown as HTMLButtonElement[];
+/** The Stage inspector's list (turn 144): one line per thing on the stage, pressed to select it. */
+const stageItem = (m: Mounted, name: string): HTMLElement =>
+  all(m, ".fy-swstage__item").find((item) => item.querySelector("span:nth-child(2)")?.textContent === name)!;
+const stageLink = (m: Mounted, text: string): HTMLElement =>
+  all(m, ".fy-swstage__link").find((link) => link.textContent === text)!;
+const chooseOption = async (element: HTMLElement, value: string): Promise<void> => {
+  const key = Object.keys(element).find((candidate) => candidate.startsWith("__reactProps$"))!;
+  const props = (element as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
+  await act(async () => props.onChange({ target: { value } }));
+};
 const click = async (element: HTMLElement): Promise<void> => {
   await act(async () => element.click());
 };
@@ -349,7 +359,8 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(shared));
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    await click(all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    await click(stageItem(mounted, "Maren Kest"));
+    await click(stageLink(mounted, "Set a walk"));
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const sharedCommand = (shared.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(sharedCommand.kind, "edit-stage");
@@ -394,7 +405,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
-    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /Maren Kest/, "the promoted cast remains visible");
+    assert.ok(stageItem(mounted, "Maren Kest"), "the promoted cast remains visible");
 
     const updated = structuredClone(state);
     const updatedScene = updated.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
@@ -431,7 +442,10 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    await click(all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    await click(stageItem(mounted, "Maren Kest"));
+    await click(stageLink(mounted, "Set a walk"));
+    // Pressing the selected line again clears the selection: the shot's form, with the scope, is back.
+    await click(stageItem(mounted, "Maren Kest"));
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
 
     const updated = structuredClone(state);
@@ -491,9 +505,10 @@ describe("scene detail owns the workspace", () => {
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
-    const mover = q(mounted, ".fy-swstage__mover") as HTMLButtonElement;
-    assert.equal(mover.disabled, true);
-    await click(mover);
+    await click(stageItem(mounted, "Maren Kest"));
+    const walk = stageLink(mounted, "Set a walk") as HTMLButtonElement;
+    assert.equal(walk.disabled, true);
+    await click(walk);
 
     const landed = structuredClone(state);
     const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
@@ -506,7 +521,7 @@ describe("scene detail owns the workspace", () => {
 
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 1);
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
-    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /holds/);
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /holds/);
   });
 
   it("rebases the untouched half of a Stage draft when a newer scene snapshot arrives", async () => {
@@ -521,6 +536,7 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
 
+    await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
     const blockingMoved = structuredClone(state);
     const newerScene = blockingMoved.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
@@ -543,7 +559,8 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(secondSent));
     const second = await mountState(secondState);
     await click(all(second, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    await click(all(second, ".fy-swstage__mover").find((button) => button.textContent?.includes("holds"))!);
+    await click(all(second, ".fy-swstage__item").find((item) => item.querySelector("span:nth-child(2)")?.textContent === "Maren Kest")!);
+    await click(all(second, ".fy-swstage__link").find((link) => link.textContent === "Set a walk")!);
     const cameraMoved = structuredClone(secondState);
     const cameraScene = cameraMoved.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
       .scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -598,6 +615,7 @@ describe("scene detail owns the workspace", () => {
     orderedShots(scene)[0]!.staging = { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
 
     const cleared = structuredClone(state);
@@ -632,10 +650,14 @@ describe("scene detail owns the workspace", () => {
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
     assert.match(stage.textContent ?? "", /v2 · 3 keys · orbit/);
-    assert.match(stage.textContent ?? "", /1\.55m/, "the camera readout is in metres");
-    assert.match(stage.textContent ?? "", /rides with Maren/);
-    assert.match(stage.textContent ?? "", /walks/);
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
     assert.match(stage.textContent ?? "", /not filed/);
+    // The camera's numbers are on the camera's form (turn 144): the value in its box, the unit beside it.
+    await click(stageItem(mounted, "camera"));
+    const height = () => (q(mounted, '[aria-label="Camera height"]') as HTMLInputElement).value;
+    assert.equal(height(), "1.55", "the camera readout is in metres");
+    assert.equal(q(mounted, '[aria-label="Camera height"]')!.nextElementSibling?.textContent, "m");
+    assert.equal(all(mounted, ".fy-swstage__chips button").find((chip) => chip.textContent === "Maren Kest")?.getAttribute("data-on"), "true", "the key rides with Maren");
     assert.equal(all(mounted, ".fy-swstage__key").length, 3);
     assert.equal(all(mounted, ".fy-swstage__key[data-mid=\"true\"]").length, 1, "only interior keys retime");
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null);
@@ -657,7 +679,7 @@ describe("scene detail owns the workspace", () => {
 
     // A nudge is a draft: nothing is written until Keep, and Keep writes the next version.
     await click(q(mounted, '[aria-label="Raise"]')!);
-    assert.match(stage.textContent ?? "", /1\.65m/);
+    assert.equal(height(), "1.65");
     const moved = q(mounted, '[data-testid="stage-moved"]')!;
     assert.match(moved.textContent ?? "", /start moved/);
     const before = sent.length;
@@ -675,7 +697,7 @@ describe("scene detail owns the workspace", () => {
     const pendingLower = q(mounted, '[aria-label="Lower"]') as HTMLButtonElement;
     assert.equal(pendingLower.disabled, true);
     await click(pendingLower);
-    assert.match(stage.textContent ?? "", /1\.65m/, "a disabled control cannot move the pending draft");
+    assert.equal(height(), "1.65", "a disabled control cannot move the pending draft");
 
     const landed = structuredClone(state);
     const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
@@ -685,11 +707,11 @@ describe("scene detail owns the workspace", () => {
     landedShot.staging = { ...landedShot.staging!, ...kept, version: landedShot.staging!.version + 1 };
     await act(async () => __setStateForTest(landed));
     assert.ok(q(mounted, '[data-testid="stage-moved"]') === null, "the landed draft retires");
-    assert.match(stage.textContent ?? "", /1\.65m/);
+    assert.equal(height(), "1.65");
 
     // Returning to the newly kept height is not a move at all.
     await click(q(mounted, '[aria-label="Lower"]')!);
-    assert.match(stage.textContent ?? "", /1\.55m/);
+    assert.equal(height(), "1.55");
     assert.ok(q(mounted, '[data-testid="stage-moved"]'));
     await click(q(mounted, '[aria-label="Raise"]')!);
     assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
@@ -697,10 +719,10 @@ describe("scene detail owns the workspace", () => {
     // Discard returns a later draft to the camera that actually landed.
     await click(q(mounted, '[aria-label="Lower"]')!);
     await click(q(mounted, '[aria-label="Lower"]')!);
-    assert.match(stage.textContent ?? "", /1\.45m/);
+    assert.equal(height(), "1.45");
     await click(q(mounted, '[data-testid="stage-moved"] [aria-label="Discard"]')!);
     assert.ok(q(mounted, '[data-testid="stage-moved"]') === null);
-    assert.match(stage.textContent ?? "", /1\.65m/);
+    assert.equal(height(), "1.65");
   });
 
   it("marks a blocked walk whose implied speed is too fast", async () => {
@@ -717,7 +739,7 @@ describe("scene detail owns the workspace", () => {
     };
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    assert.match(q(mounted, ".fy-swstage__mover")?.textContent ?? "", /Maren Kestwalks · too fast/);
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /Maren Kest.*walks.*too fast/);
   });
 
   it("shows and edits a figure's greybox pose", async () => {
@@ -735,9 +757,10 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    const pose = all(mounted, ".fy-swstage__mover").find((button) => button.textContent?.includes("sits"))!;
-    await click(pose);
-    assert.match(pose.textContent ?? "", /lies/);
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /sits/);
+    await click(stageItem(mounted, "Maren Kest"));
+    await chooseOption(q(mounted, '[aria-label="Maren Kest pose"]')!, "lie");
+    assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /lies/);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
     assert.equal(command.kind, "edit-stage");
@@ -790,7 +813,7 @@ describe("scene detail owns the workspace", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    await click(all(mounted, ".fy-swstage__row button").find((button) => button.textContent === "handheld")!);
+    await chooseOption(q(mounted, '[aria-label="Camera rig"]')!, "crane");
     await click(q(mounted, '[aria-label="More rig motion"]')!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = (sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
@@ -827,6 +850,7 @@ describe("scene detail owns the workspace", () => {
     assert.match(keys[1]!, /2.0s/, "an interior key that still fits is left where it was");
     assert.equal(q(mounted, '[data-testid="stage-moved"]'), null, "reading is not a move");
 
+    await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;

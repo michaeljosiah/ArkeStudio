@@ -411,7 +411,21 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
     assert.match(pill, /scene 4/);
     assert.match(pill, /Stage$/);
     assert.ok(one(item, ".fy-swstage") !== null, "the Stage is the view that fills");
-    await click(one(item, ".fy-sw__fullexit")!);
+    // The Stage's way out is on its own head row, where the way in stood (turn 144); the corner
+    // pill of 135h is the Flow's.
+    assert.equal(one(item, ".fy-sw__fullexit"), null, "no corner pill on the Stage");
+    const exit = one(item, ".fy-swstage__head .fy-swstage__exit")!;
+    assert.equal(exit.getAttribute("aria-label"), "Leave full screen");
+    assert.equal(exit.getAttribute("title"), "Leave full screen · Esc");
+    assert.equal(one(item, ".fy-swstage__head")!.lastElementChild, exit, "the row's last control");
+    await click(exit);
     assert.equal(workspace.getAttribute("data-full"), null, "the reversed glyph returns");
+    assert.equal(one(item, ".fy-swstage__exit"), null, "and leaves with the mode");
+
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Flow")!);
+    await click(one(item, ".fy-sw__full")!);
+    assert.ok(one(item, ".fy-sw__fullexit"), "the Flow keeps the corner pill");
+    await click(one(item, ".fy-sw__fullexit")!);
+    assert.equal(workspace.getAttribute("data-full"), null);
   });
 });

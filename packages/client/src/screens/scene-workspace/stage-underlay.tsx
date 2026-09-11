@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { STAGE_FRAME_RATE, type ProductionBundle, type WorldBundle } from "@arke-studio/contracts";
 import { ReferencePickerDialog, characterPickerSources, worldPickerSources, type PickerSource } from "../../components/reference-picker.js";
-import { Button } from "../../components/ui.js";
+import { Link, Row, Stepper, Value } from "./stage-inspector.js";
 import { artifactsForProduction } from "../../lib/artifact-view.js";
 import { mediaUrl } from "../../lib/media.js";
 import { onMediaReady, syncMediaElement } from "../../lib/playback-engine.js";
@@ -31,10 +31,16 @@ export function stagePlateSources(world: WorldBundle, production: ProductionBund
   };
 }
 
-/** Editor chrome only: a sibling of the WebGL canvas, never part of the rendered scene (issue 1049). */
-export function StageUnderlay({ world, production, shotId, viewport, aspect, at, playing, visible, disabled, onChoose }: {
+/**
+ * Editor chrome only: a sibling of the WebGL canvas, never part of the rendered scene (issue 1049).
+ *
+ * The plate and the choice behind it outlive the panel's forms (turn 144): this stays mounted
+ * whatever is selected, and its rows go where the shot's form puts its `slot` — nowhere while
+ * another form is up. Without a slot named at all, the rows render in place, as a bare mount does.
+ */
+export function StageUnderlay({ world, production, shotId, viewport, aspect, at, playing, visible, disabled, onChoose, slot }: {
   world: WorldBundle; production: ProductionBundle; shotId: string; viewport: HTMLElement | null; aspect: string;
-  at: number; playing: boolean; visible: boolean; disabled: boolean; onChoose: () => void;
+  at: number; playing: boolean; visible: boolean; disabled: boolean; onChoose: () => void; slot?: HTMLElement | null;
 }) {
   const sources = useMemo(() => stagePlateSources(world, production, shotId), [world, production, shotId]);
   const [sourceKey, setSourceKey] = useState<string | null>(null);
@@ -82,17 +88,30 @@ export function StageUnderlay({ world, production, shotId, viewport, aspect, at,
   }, [src, visible, viewport]);
   useEffect(sync, [sync]);
 
-  return <div className="fy-swstage__block">
-    <div className="fy-swstage__eyebrow"><span>Reference</span></div>
-    <Button size="sm" disabled={disabled} onClick={() => setPicker(true)}>{source ? "Change reference" : "Choose reference"}</Button>
+  const rows = <>
+    <Row label="reference">
+      <Link disabled={disabled} onClick={() => setPicker(true)}>{source ? "Change reference" : "Choose reference"}</Link>
+    </Row>
     {source ? <>
-      <span className="fy-swstage__quiet">{source.name}</span>
-      <label className="fy-swstage__row">View<select aria-label="Reference display" value={layout} disabled={disabled} onChange={event => setLayout(event.target.value as typeof layout)}><option value="ghost">Ghost</option><option value="corner">Corner</option></select></label>
-      <label className="fy-swstage__row">Opacity<input aria-label="Reference opacity" type="range" min="0" max="1" step=".05" value={opacity} disabled={disabled} onChange={event => setOpacity(Number(event.target.value))} /></label>
-      {source.kind === "video" ? <label className="fy-swstage__row">Offset (s)<input aria-label="Reference time offset" type="number" step=".1" value={offset} disabled={disabled} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value)) setOffset(value); }} /></label> : null}
-      <Button size="sm" disabled={disabled} onClick={() => { setSourceKey(null); setNote(null); }}>Remove reference</Button>
+      <Row label=""><Value muted>{source.name}</Value><Link disabled={disabled} onClick={() => { setSourceKey(null); setNote(null); }}>Remove reference</Link></Row>
+      <Row label="view">
+        <select className="fy-swstage__select" aria-label="Reference display" value={layout} disabled={disabled} onChange={event => setLayout(event.target.value as typeof layout)}>
+          <option value="ghost">Ghost</option><option value="corner">Corner</option>
+        </select>
+      </Row>
+      <Row label="opacity">
+        <input className="fy-swstage__range" aria-label="Reference opacity" type="range" min="0" max="1" step=".05" value={opacity} disabled={disabled} onChange={event => setOpacity(Number(event.target.value))} />
+      </Row>
+      {source.kind === "video" ? (
+        <Row label="offset">
+          <Stepper label="Reference time offset" value={offset} unit="s" step={0.1} disabled={disabled} onCommit={(value) => setOffset(value ?? 0)} />
+        </Row>
+      ) : null}
     </> : null}
     {note ? <span className="fy-swstage__quiet" role="status">{note}</span> : null}
+  </>;
+  return <>
+    {slot === undefined ? rows : slot === null ? null : createPortal(rows, slot)}
     <ReferencePickerDialog open={picker} mode="slot" title="Stage reference" note="Choose a picture or clip to match in Camera view. Imported files appear here when filed."
       budget="none" worldSlug={world.meta.slug} model={null} carried={[]} world={sources.world} session={sources.takes} sessionLabel="Shot takes" characters={sources.characters}
       onChoose={pick => {
@@ -108,5 +127,5 @@ export function StageUnderlay({ world, production, shotId, viewport, aspect, at,
           ? <video ref={video} key={src} src={src} muted playsInline preload="auto" style={{ opacity }} onError={() => setNote("This reference could not be played.")} />
           : <img src={src} alt="" style={{ opacity }} onError={() => setNote("This reference could not be opened.")} />}
       </div>, viewport) : null}
-  </div>;
+  </>;
 }

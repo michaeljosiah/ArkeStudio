@@ -201,6 +201,84 @@
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__actionline { justify-content: space-between; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swaddshot { align-self: start; }
 
+/* Design turn 144: the Stage panel is an inspector — the stage list, then one form for the selection —
+   in one field grammar. A row is 24px: a label in a 64px mono column, then the control, which starts at
+   the column's edge on every row of every form. */
+/* The list's lines bleed 6px past the column for their fill (margin: 0 -6px below); a scroll
+   container counts that as sideways overflow and grows a scrollbar for it, so only up and down. */
+:where([data-screen="scene-detail"]) .fy-swstage__panel { width: 264px; gap: 10px; overflow: hidden auto; }
+:where([data-screen="scene-detail"]) .fy-swstage__block { gap: 4px; }
+:where([data-screen="scene-detail"]) .fy-swstage__block + .fy-swstage__block { padding-top: 9px; }
+:where([data-screen="scene-detail"]) .fy-swstage__eyebrow > span:first-child { font: 500 var(--text-2xs)/1.2 var(--font-sans); letter-spacing: var(--tracking-label); }
+:where([data-screen="scene-detail"]) .fy-swstage__eyebrow > span:last-child:not(:first-child) { font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"]) .fy-swstage__row { min-height: 24px; gap: 8px; }
+:where([data-screen="scene-detail"]) .fy-swstage__row[data-top="true"] { align-items: flex-start; }
+:where([data-screen="scene-detail"]) .fy-swstage__row > .fy-swstage__rowlabel { width: 64px; flex: none; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"]) .fy-swstage__row[data-top="true"] > .fy-swstage__rowlabel { padding-top: 5px; }
+:where([data-screen="scene-detail"]) .fy-swstage__row > .fy-swstage__value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swstage__value[data-muted="true"] { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__value[data-filed="true"] { color: var(--success); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"]) .fy-swstage__select,
+:where([data-screen="scene-detail"]) .fy-swstage__field { flex: 1; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swstage__select:focus-visible,
+:where([data-screen="scene-detail"]) .fy-swstage__field:focus-visible,
+:where([data-screen="scene-detail"]) .fy-swstage__triad input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:where([data-screen="scene-detail"]) .fy-swstage__field::placeholder { color: var(--muted-foreground); }
+/* A number: the value, its unit, and the stepper at the right end. The box is the value's own
+   text; the browser's spinner would be a second stepper. */
+:where([data-screen="scene-detail"]) .fy-swstage__stepper { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > input { flex: none; max-width: 100%; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); appearance: textfield; -moz-appearance: textfield; }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > input::-webkit-outer-spin-button,
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > input::placeholder { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > input:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper[data-inherited="true"] > .fy-swstage__unit { color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__unit { flex: none; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swstage__stepper > .fy-swstage__nudge { margin-left: auto; }
+/* Three of a kind on one row, each cell prefixed with its axis. */
+:where([data-screen="scene-detail"]) .fy-swstage__triad { flex: 1; min-width: 0; display: flex; gap: 6px; }
+:where([data-screen="scene-detail"]) .fy-swstage__triad > label { flex: 1; min-width: 0; display: flex; align-items: center; gap: 5px; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="scene-detail"]) .fy-swstage__triad input { flex: 1; min-width: 0; width: 0; height: 24px; box-sizing: border-box; padding: 0 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); appearance: textfield; -moz-appearance: textfield; }
+:where([data-screen="scene-detail"]) .fy-swstage__triad input::-webkit-outer-spin-button,
+:where([data-screen="scene-detail"]) .fy-swstage__triad input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+:where([data-screen="scene-detail"]) .fy-swstage__check { flex: 1; display: inline-flex; align-items: center; gap: 8px; min-height: 24px; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__check > input { width: 12px; height: 12px; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__check:has(> input:checked) { color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__range { flex: 1; min-width: 0; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__link { flex: none; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__link:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__link:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"]) .fy-swstage__chips { padding-top: 2px; }
+:where([data-screen="scene-detail"]) .fy-swstage__chips button { font: 400 var(--text-2xs)/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swstage__quiet { font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+/* The stage list: what is on the stage, one line each with its state; the selected line is filled. */
+:where([data-screen="scene-detail"]) .fy-swstage__item { display: flex; align-items: center; gap: 8px; height: 24px; box-sizing: border-box; padding: 0 6px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__item:hover { background: var(--accent); }
+:where([data-screen="scene-detail"]) .fy-swstage__item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+:where([data-screen="scene-detail"]) .fy-swstage__item[data-selected="true"] { background: var(--secondary); font-weight: 500; }
+:where([data-screen="scene-detail"]) .fy-swstage__item > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where([data-screen="scene-detail"]) .fy-swstage__item > span:last-child { flex: none; color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); white-space: nowrap; }
+:where([data-screen="scene-detail"]) .fy-swstage__item[data-selected="true"] > span:last-child { color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__mark { width: 8px; height: 8px; flex: none; border-radius: 2px; }
+:where([data-screen="scene-detail"]) .fy-swstage__mark[data-kind="camera"] { background: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__mark[data-kind="set"] { box-sizing: border-box; border: 1.5px solid var(--neutral-400); }
+:where([data-screen="scene-detail"]) .fy-swstage__add { display: inline-flex; align-items: center; gap: 6px; height: 22px; align-self: flex-start; border: 0; padding: 0; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__add:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__add:disabled { opacity: .45; cursor: default; }
+/* A figure's or a group's marks, one line each; the selected mark's fields follow. */
+:where([data-screen="scene-detail"]) .fy-swstage__markrow { display: flex; align-items: center; gap: 8px; height: 22px; box-sizing: border-box; padding: 0 6px 0 72px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__markrow:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swstage__markrow[data-motion-mark="selected"] { background: var(--secondary); color: var(--foreground); font-weight: 500; outline: 0; }
+:where([data-screen="scene-detail"]) .fy-swstage__markrow > span:last-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+:where([data-screen="scene-detail"]) .fy-swstage__slot { display: contents; }
+:where([data-screen="scene-detail"]) .fy-swstage__block--ways { border-top: 1px solid var(--border); padding-top: 9px; }
+:where([data-screen="scene-detail"]) .fy-swstage__ways { display: flex; gap: 6px; padding-top: 4px; }
+:where([data-screen="scene-detail"]) .fy-swstage__ways > .ui-btn { flex: 1; min-width: 0; }
+/* The way out of full screen: on the head row, where the way in stood. */
+:where([data-screen="scene-detail"]) .fy-swstage__exit { width: 32px; height: 32px; flex: none; display: inline-grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--secondary); color: var(--foreground); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swstage__exit:hover { background: var(--accent); }
+:where([data-screen="scene-detail"]) .fy-swstage__exit:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
 /* Completed generation reports collapse by run; failures and their retry controls remain visible. */
 .fy-chat__runsummary { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--card); }
 .fy-chat__runsummary > summary { display: flex; align-items: center; gap: 9px; padding: 12px; font: 400 12px var(--font-sans); cursor: pointer; list-style: none; }

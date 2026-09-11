@@ -101,6 +101,8 @@ export type StageSelection =
   | { kind: "aim" }
   | { kind: "cast"; sheetId: string }
   | { kind: "walkend"; sheetId: string }
+  /** A set, by its position in the staging's list (turn 144: the inspector's list and the viewport hold one selection). */
+  | { kind: "set"; index: number }
   | null;
 
 export interface StageFrameSink {
@@ -259,9 +261,16 @@ function aimMarker(): Group {
   return group;
 }
 
+function selectionOf(tag: PickTag): StageSelection {
+  if (tag.pick === "rig" || tag.pick === "aim") return { kind: tag.pick };
+  if (tag.pick === "set") return { kind: "set", index: tag.index! };
+  return { kind: tag.pick, sheetId: tag.sheetId! };
+}
+
 interface PickTag {
-  pick: "rig" | "aim" | "cast" | "walkend";
+  pick: "rig" | "aim" | "cast" | "walkend" | "set";
   sheetId?: string;
+  index?: number;
 }
 
 interface CamRefs {
@@ -533,7 +542,8 @@ export class StageViewport {
     this.aim = null;
     this.path = null;
 
-    for (const set of data.sets) {
+    for (const [index, set] of data.sets.entries()) {
+      const picked = this.selection?.kind === "set" && this.selection.index === index;
       let parent = this.setGroup;
       if (set.group) {
         let group = this.objectGroups.get(set.group);
@@ -557,13 +567,15 @@ export class StageViewport {
       if (set.rotation) box.rotation.set(...set.rotation.map(v => v * Math.PI / 180) as [number, number, number]);
       box.receiveShadow = true;
       box.castShadow = set.solid ?? false;
-      box.userData = { label: set.name, up: set.h / 2 + 0.28 };
+      box.userData = { label: set.name, up: set.h / 2 + 0.28, pick: "set", index } satisfies PickTag & Record<string, unknown>;
       parent.add(box);
       this.setMeshes.push(box);
+      // The selected set is drawn in ink, as a selected figure's ring is: the list and the floor agree.
       const edges = new LineSegments(
         new EdgesGeometry(box.geometry),
-        new LineBasicMaterial({ color: 0x9a9187, transparent: true, opacity: 0.6 }),
+        new LineBasicMaterial({ color: picked ? INK : 0x9a9187, transparent: true, opacity: picked ? 1 : 0.6 }),
       );
+      edges.raycast = noPick;
       edges.position.copy(box.position);
       edges.rotation.copy(box.rotation);
       edges.scale.copy(box.scale);
@@ -796,11 +808,11 @@ export class StageViewport {
   private probe(event: PointerEvent): StageSelection {
     this.syncPick();
     this.canvasPoint(event);
-    const hits = this.ray.intersectObjects([...this.rigGroup.children, ...this.castGroup.children], true);
+    const hits = this.ray.intersectObjects([...this.rigGroup.children, ...this.castGroup.children, ...this.setGroup.children], true);
     for (const hit of hits) {
       const tag = this.tagOf(hit.object);
       if (tag === null) continue;
-      return tag.pick === "rig" || tag.pick === "aim" ? { kind: tag.pick } : { kind: tag.pick, sheetId: tag.sheetId! };
+      return selectionOf(tag);
     }
     return null;
   }
@@ -808,7 +820,9 @@ export class StageViewport {
   private isSelected(candidate: StageSelection): boolean {
     const current = this.selection;
     if (current === null || candidate === null || current.kind !== candidate.kind) return false;
-    return current.kind === "rig" || current.kind === "aim" || (current as { sheetId: string }).sheetId === (candidate as { sheetId: string }).sheetId;
+    if (current.kind === "rig" || current.kind === "aim") return true;
+    if (current.kind === "set") return current.index === (candidate as { index: number }).index;
+    return current.sheetId === (candidate as { sheetId: string }).sheetId;
   }
 
   private down(event: PointerEvent): void {
@@ -832,12 +846,14 @@ export class StageViewport {
       }
       return null;
     };
-    const tag = first(rigHits, "aim") ?? first(rigHits) ?? first(this.ray.intersectObjects(this.castGroup.children, true));
+    // Figures win over the set they stand in; a set is picked where nothing else is.
+    const tag = first(rigHits, "aim") ?? first(rigHits) ?? first(this.ray.intersectObjects(this.castGroup.children, true))
+      ?? first(this.ray.intersectObjects(this.setGroup.children, true));
     if (tag === null) {
       this.orbitDrag(event);
       return;
     }
-    this.selection = tag.pick === "rig" || tag.pick === "aim" ? { kind: tag.pick } : { kind: tag.pick, sheetId: tag.sheetId! };
+    this.selection = selectionOf(tag);
     this.events.selchange(this.selection);
     this.build();
   }
@@ -939,6 +955,7 @@ export class StageViewport {
     let position: Vector3 | null = null;
     if (selection.kind === "rig") position = this.sampleCam(at, at);
     else if (selection.kind === "aim") position = this.sampleAim(at, at);
+    else if (selection.kind === "set") position = null; // a set is placed from its fields; there is no gizmo on it
     else {
       const walker = this.walkers.find((candidate) => candidate.userData["sheetId"] === selection.sheetId);
       if (walker !== undefined) {
