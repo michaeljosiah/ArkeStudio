@@ -3,7 +3,7 @@ import { afterEach, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type Shot } from "@arke-studio/contracts";
+import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
 import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -414,7 +414,7 @@ it("every row starts its control at the label column's edge: one grammar, no bro
 });
 
 it("a set's form writes its place, size, rotation and group, and Add set selects the new set (turn 144)", async () => {
-  const { q, sent } = await mount(movingShot);
+  const { q, sent, shot, scene } = await mount(movingShot);
   await click(stageItem(q, "Cart"));
   const commit = async (label: string, value: string) => {
     const input = q(`[aria-label="${label}"]`) as HTMLInputElement;
@@ -434,7 +434,98 @@ it("a set's form writes its place, size, rotation and group, and Add set selects
   assert.equal(set?.y, 0.5);
   assert.deepEqual(set?.rotation, [0, 90, 0]);
   assert.equal(set?.group, "wagon-train", "a group is a slug");
+  assert.equal(command.staging?.objectMotions?.[0]?.group, "wagon-train", "the group's motion track follows its last set's new name");
+  assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...shot.staging!, ...command.staging! }), 4), [], "what was Kept passes the write boundary");
   await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
   assert.match(selectedItem(q), /set 2/, "the new set is the thing to name next");
   assert.ok(q('[aria-label="Set 2 name"]'));
+});
+
+/** A field's value, committed the way a person leaves the box: onBlur, since linkedom fires no focusout of its own. */
+async function leaveField(input: HTMLInputElement, value: string) {
+  input.value = value;
+  const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
+  const props = (input as unknown as Record<string, { onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[key]!;
+  await act(async () => props.onBlur({ currentTarget: input }));
+}
+
+it("a group's references follow it: cleared, its track and the camera's anchor go; removing the selected set clears the selection", async () => {
+  const { q, sent, shot, scene } = await mount((candidate) => {
+    movingShot(candidate);
+    candidate.staging!.keys[1]!.anchor = "cart";
+    candidate.staging!.cast![0]!.parent = "cart";
+  });
+  await click(stageItem(q, "Cart"));
+  await leaveField(q('[aria-label="Set 1 group"]') as HTMLInputElement, "");
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind !== "edit-stage") return;
+  assert.equal(command.staging?.sets?.[0]?.group, undefined);
+  assert.deepEqual(command.staging?.objectMotions, [], "a track cannot name a group nothing carries");
+  assert.equal(command.staging?.keys[1]?.anchor, undefined, "the camera's anchor on the group goes with it");
+  assert.equal(command.staging?.cast?.[0]?.parent, undefined, "so does the figure's parent");
+  assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...shot.staging!, ...command.staging! }), 4), []);
+
+  const links = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__link")];
+  await click(links().find((link) => link.textContent === "Remove set")!);
+  assert.equal(q('.fy-swstage__item[data-selected="true"]'), null, "the removed set is no longer the selection");
+  assert.ok(q('[aria-label="Camera rig"]'), "with nothing selected the shot's form is back, not a stale set's or none");
+  assert.equal(stageItem(q, "Cart"), undefined);
+});
+
+it("Escape in a field is the field's: it drops what was typed without committing, and stops there; other keys pass", async () => {
+  const { q, shot } = await mount(movingShot);
+  const reached: string[] = [];
+  const listen = (event: Event) => reached.push((event as KeyboardEvent).key);
+  dom.document.addEventListener("keydown", listen);
+  try {
+    const intensity = q('[aria-label="Rig intensity"]') as HTMLInputElement;
+    const propsKey = Object.keys(intensity).find((candidate) => candidate.startsWith("__reactProps$"))!;
+    const props = (intensity as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[propsKey]!;
+    await act(async () => props.onChange({ target: { value: "999" } }));
+    assert.equal(intensity.value, "999", "typing out of range shows but does not land");
+    assert.equal(q('[data-testid="stage-moved"]'), null);
+    await key(intensity, "ArrowUp");
+    await key(intensity, "Escape");
+    // The Escape's blur has no focusout in linkedom; the one a browser fires must not commit either.
+    await act(async () => props.onBlur({ currentTarget: intensity }));
+    assert.equal(intensity.value, "1.00", "Escape reverts to the value that stands");
+    assert.equal(q('[data-testid="stage-moved"]'), null, "and nothing was clamped into the draft on the way out");
+    assert.deepEqual(reached, ["ArrowUp"], "Escape stopped at the field; the arrow reached the page");
+
+    await click(stageItem(q, "Cart"));
+    const turn = q('[aria-label="Cart turn"]') as HTMLInputElement;
+    turn.value = "45";
+    await key(turn, "Escape");
+    assert.equal(turn.value, "0", "a triad cell reverts the same way");
+    assert.equal(shot.staging?.sets?.[0]?.rotation, undefined);
+    assert.deepEqual(reached, ["ArrowUp"]);
+  } finally {
+    dom.document.removeEventListener("keydown", listen);
+  }
+});
+
+it("a scene with no shots keeps the way out of full screen", async () => {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const production = world.productions.find(p => p.meta.id === "saltlight")!;
+  const at = production.scenes.findIndex(s => s.id === "sc_04");
+  // A legacy scene shape with no flow and no shots: the Stage has nothing to stage.
+  const scene = { ...production.scenes[at], shots: [] } as unknown as SceneRecord;
+  delete (scene as { flow?: unknown }).flow;
+  production.scenes[at] = scene;
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  let left = 0;
+  await act(async () => root!.render(
+    <SelectionProvider value={{ subject: { kind: "scene" }, select: () => {} }}>
+      <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined} fullscreen={{ leave: () => { left += 1; } }}
+        locked={false} generatorPending={false} refusalVersion={0} onCommand={() => true} onRenderShot={() => {}} />
+    </SelectionProvider>,
+  ));
+  const exit = container.querySelector<HTMLElement>(".fy-swstage--empty .fy-swstage__exit");
+  assert.ok(exit, "no head row to carry it, so the exit stands alone in the empty state");
+  await click(exit!);
+  assert.equal(left, 1);
 });

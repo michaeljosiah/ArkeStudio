@@ -36,7 +36,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
-import { Eyebrow, Link, Row, Stepper, Triad, Value } from "./stage-inspector.js";
+import { Eyebrow, Link, Row, Stepper, Triad, Value, fieldEscape } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -596,7 +596,17 @@ export function SceneStage({
     construct(constructionRequest);
   }, [constructionRequest, shot?.id, moved, frozen]);
   if (shot === null) {
-    return <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">Add a shot to begin.</div>;
+    // No shot, no head row: the way out of full screen stands alone in the corner the row would fill.
+    return (
+      <div className="fy-swstage fy-swstage--empty" data-testid="workspace-stage">
+        Add a shot to begin.
+        {fullscreen === null ? null : (
+          <button type="button" className="fy-swstage__exit" title="Leave full screen · Esc" aria-label="Leave full screen" onClick={fullscreen.leave}>
+            <Minimize2 size={14} />
+          </button>
+        )}
+      </div>
+    );
   }
 
   const stage = () => {
@@ -856,8 +866,53 @@ export function SceneStage({
     setMotionMark(null);
     viewport.current?.select(selected);
   };
-  const removeSet = (which: number) =>
+  const removeSet = (which: number) => {
     patchBlocking((current) => ({ ...current, sets: current.sets.filter((_, position) => position !== which) }));
+    // The selection is a position in the list: the removed set's clears, and a set after it moves up,
+    // or the next set would inherit the selection and take the edits meant for the one removed.
+    if (selection?.kind !== "set" || selection.index < which) return;
+    const next: StageSelection = selection.index === which ? null : { kind: "set", index: selection.index - 1 };
+    setSelection(next);
+    setMotionMark(null);
+    viewport.current?.select(next);
+  };
+  // A set's group is a name other things hold — its motion track, a camera anchor or track, a
+  // figure's parent. When the group's last set is renamed those follow, and when it is cleared they
+  // go; either way Keep would otherwise be refused for naming a group that no longer exists, or in
+  // scene scope the blocking would save with the shot's references dangling.
+  const patchGroup = (which: number, next: string | undefined) => {
+    const { working: current, frozen: editingFrozen } = latest.current;
+    if (current === null || editingFrozen) return;
+    const previous = current.sets[which]?.group;
+    const orphaned = previous !== undefined && !current.sets.some((set, position) => position !== which && set.group === previous);
+    const follow = <T extends { anchor?: string; track?: string; parent?: string }>(thing: T, field: "anchor" | "track" | "parent"): T => {
+      if (!orphaned || thing[field] !== previous) return thing;
+      const { [field]: _stale, ...rest } = thing;
+      return (next === undefined ? rest : { ...rest, [field]: next }) as T;
+    };
+    const keys = current.keys.map((key) => follow(follow(key, "anchor"), "track"));
+    const motions = (current.objectMotions ?? []).flatMap((motion) => {
+      if (!orphaned || motion.group !== previous) return [motion];
+      // A group has one track: a rename onto a group that already moves keeps that group's track.
+      if (next === undefined || current.objectMotions!.some((other) => other.group === next)) return [];
+      return [{ ...motion, group: next }];
+    });
+    const cameraTouched = keys.some((key, position) => key !== current.keys[position])
+      || motions.length !== (current.objectMotions?.length ?? 0) || motions.some((motion, position) => motion !== current.objectMotions![position]);
+    blockingDirty.current = true;
+    if (cameraTouched) cameraDirty.current = true;
+    const { authorship: _authorship, ...edited } = {
+      ...current,
+      sets: current.sets.map((set, position) => {
+        if (position !== which) return set;
+        const { group: _group, ...rest } = set;
+        return next === undefined ? rest : { ...rest, group: next };
+      }),
+      cast: current.cast.map((figure) => follow(figure, "parent")),
+      ...(cameraTouched ? { keys, ...(current.objectMotions === undefined ? {} : { objectMotions: motions }) } : {}),
+    };
+    setDraft(edited);
+  };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
   const pick = (next: Exclude<StageSelection, null>) => {
     const same = selection !== null && selection.kind === next.kind && (
@@ -1231,7 +1286,10 @@ export function SceneStage({
                         aria-label={`Set ${position + 1} name`}
                         defaultValue={set.name}
                         disabled={frozen}
-                        onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                          else if (event.key === "Escape") { fieldEscape(event); event.currentTarget.value = set.name; event.currentTarget.blur(); }
+                        }}
                         onBlur={(event) => {
                           const name = event.currentTarget.value.trim();
                           if (name.length > 0) patchSet(position, { name });
@@ -1241,7 +1299,9 @@ export function SceneStage({
                     </Row>
                     <Row label="shape">
                       <select className="fy-swstage__select" aria-label={`${set.name} shape`} value={set.shape ?? "box"} disabled={frozen} onChange={e => patchSet(position, { shape: e.target.value as StagingSet["shape"] })}>
-                        <option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option><option value="mesh">Mesh</option>
+                        <option value="box">Box</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option>
+                        {/* A mesh is its vertices and triangles, which no primitive has; the choice exists only for a set built as one. */}
+                        {set.shape === "mesh" ? <option value="mesh">Mesh</option> : null}
                       </select>
                     </Row>
                     <Row label="solid">
@@ -1282,11 +1342,14 @@ export function SceneStage({
                         placeholder="—"
                         defaultValue={group ?? ""}
                         disabled={frozen}
-                        onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+                          else if (event.key === "Escape") { fieldEscape(event); event.currentTarget.value = group ?? ""; event.currentTarget.blur(); }
+                        }}
                         onBlur={(event) => {
                           const next = event.currentTarget.value.trim().toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
                           if (next === (group ?? "")) { event.currentTarget.value = group ?? ""; return; }
-                          patchSet(position, { group: next === "" ? undefined : next });
+                          patchGroup(position, next === "" ? undefined : next);
                         }}
                       />
                     </Row>

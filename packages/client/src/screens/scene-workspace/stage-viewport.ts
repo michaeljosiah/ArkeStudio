@@ -856,6 +856,9 @@ export class StageViewport {
     this.selection = selectionOf(tag);
     this.events.selchange(this.selection);
     this.build();
+    // A set has no gizmo to drag, and a room's massing can cover most of the view: the press picks
+    // it, and the same press moved orbits, as it did before sets could be picked at all.
+    if (tag.pick === "set") this.orbitDrag(event);
   }
 
   /** A left drag on empty space orbits — by hand, since the left button is off OrbitControls. */

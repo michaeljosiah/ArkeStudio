@@ -7493,7 +7493,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 /* Stage — a derived three.js block and an authored-camera playblast, not another shot editor. */
 /* The Stage — a greybox previs of one shot: viewport, panel, timeline (the design's Stage tab). */
 .fy-swstage { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 11px; overflow: auto; }
-.fy-swstage--empty { align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
+.fy-swstage--empty { position: relative; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
+.fy-swstage--empty > .fy-swstage__exit { position: absolute; top: 0; right: 0; }
 .fy-swstage__head { flex: none; display: flex; align-items: center; gap: 8px; }
 .fy-swstage__head > strong { font: 600 12.5px var(--font-sans); letter-spacing: -0.01em; }
 .fy-swstage__step { width: 22px; height: 22px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
@@ -7713,6 +7714,11 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-swpreview__transport button, .fy-swpreview__filmstrip button,
   .fy-swstage__step, .fy-swstage__play, .fy-swstage__keytools button, .fy-swstage__nudge button,
   .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button { min-width: 44px; min-height: 44px; }
+  /* The inspector's rows and boxes (turn 144) grow to the touch target in height only: they are
+     as wide as their column already, and a number box is as wide as its own text. */
+  .fy-swstage__item, .fy-swstage__add, .fy-swstage__markrow, .fy-swstage__link, .fy-swstage__select,
+  .fy-swstage__field, .fy-swstage__stepper > input, .fy-swstage__triad input, .fy-swstage__exit { min-height: 44px; }
+  .fy-swstage__check > input { width: 24px; height: 24px; }
   .fy-swstage__track { height: 44px; }
   .fy-swstage__key, .fy-swstage__lane-head { top: 18px; }
   .fy-swstage__rail, .fy-swstage__head-fill { top: 24px; }

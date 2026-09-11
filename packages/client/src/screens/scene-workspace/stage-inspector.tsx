@@ -33,6 +33,16 @@ export function Link({ children, onClick, disabled, title }: { children: ReactNo
   return <button type="button" className="fy-swstage__link" disabled={disabled} title={title} onClick={onClick}>{children}</button>;
 }
 
+/**
+ * Escape in a field is the field's: it drops what was typed and leaves the box, and stops there, so
+ * the page's Escape (leaving full screen, on the document) waits for the next press. Every other
+ * key propagates — the Stage's shortcuts already ignore keys typed into an input.
+ */
+export function fieldEscape(event: ReactKeyboardEvent<HTMLElement>): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function decimalsOf(step: number): number {
   const text = String(step);
   const dot = text.indexOf(".");
@@ -66,6 +76,9 @@ export function Stepper({ label, value, unit, step, min, max, decimals, placehol
   const shown = value === undefined ? "" : value.toFixed(places);
   const [text, setText] = useState(shown);
   const focused = useRef(false);
+  // Escape reverts and leaves the box, and the blur that follows must not read the box first: the
+  // revert has not rendered when blur() runs synchronously, so the blur would commit what was typed.
+  const escaped = useRef(false);
   useEffect(() => {
     if (!focused.current) setText(shown);
   }, [shown]);
@@ -112,13 +125,16 @@ export function Stepper({ label, value, unit, step, min, max, decimals, placehol
         min={min}
         max={max}
         disabled={disabled}
-        onFocus={() => { focused.current = true; }}
+        onFocus={() => { focused.current = true; escaped.current = false; }}
         onChange={(event) => type(event.target.value)}
-        onBlur={(event) => { focused.current = false; leave(event.currentTarget.value); }}
+        onBlur={(event) => {
+          focused.current = false;
+          if (escaped.current) { escaped.current = false; setText(shown); return; }
+          leave(event.currentTarget.value);
+        }}
         onKeyDown={(event: ReactKeyboardEvent<HTMLInputElement>) => {
-          event.stopPropagation();
           if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
-          else if (event.key === "Escape") { event.preventDefault(); setText(shown); event.currentTarget.blur(); }
+          else if (event.key === "Escape") { fieldEscape(event); setText(shown); escaped.current = true; event.currentTarget.blur(); }
         }}
       />
       {unit === undefined ? null : <span className="fy-swstage__unit">{unit}</span>}
@@ -149,7 +165,10 @@ export function Triad({ cells, disabled, step = 0.1 }: {
             aria-label={cell.label}
             defaultValue={cell.value}
             disabled={disabled}
-            onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Enter") event.currentTarget.blur(); }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); }
+              else if (event.key === "Escape") { fieldEscape(event); event.currentTarget.value = String(cell.value); event.currentTarget.blur(); }
+            }}
             onBlur={(event) => {
               const parsed = Number.parseFloat(event.currentTarget.value);
               if (!Number.isFinite(parsed)) { event.currentTarget.value = String(cell.value); return; }
