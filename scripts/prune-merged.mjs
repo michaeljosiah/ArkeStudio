@@ -24,8 +24,10 @@
  * checked out in any worktree that survived the pass above.
  *
  * An orphan — a directory under .claude/worktrees that git no longer lists — is removed only when
- * it has no `.git` file, which means a `worktree remove` already passed the gates above and gave
- * up partway through the delete. One that still has a `.git` file is named and left alone.
+ * it has no `.git` file AND every file in it is either ignored or already in git's object store,
+ * which is what a `worktree remove` that passed the gates above and gave up partway through the
+ * delete leaves behind. Anything else — a `.git` file, a file nobody committed — is named and
+ * left alone.
  *
  * Dry run is the DEFAULT, which is a deliberate break from `clean-temp.mjs` next door: that one
  * sweeps scratch directories, this one deletes work. Nothing is removed without `--apply`.
@@ -224,13 +226,16 @@ if (keepWorktrees) {
 // worse than clutter: with no `.git` file, a shell inside one resolves upward to the MAIN
 // checkout, which is the eviction trap this whole script exists to avoid.
 //
-// A missing `.git` is the gate, and it is enough: git only takes a worktree's `.git` file
-// through `worktree remove`, which had already refused anything dirty (or a person passed
-// `--force`, and took that decision themselves). What survives is what git's delete could not
-// reach — ignored files and junctions — and nothing git ever vouched for. A `.git` that is still
+// A missing `.git` is necessary but not proof: a session can make a directory here and never
+// register it, and the first draft of this pass would have deleted a lone `draft.txt` on the
+// strength of the folder's address (Codex, PR #1100). So the contents are examined the way
+// `dirty()` examines a live worktree, for a tree git can no longer read: every file must be
+// either ignored by the repo's own rules or have contents git has already recorded somewhere.
+// Residue from a guarded `worktree remove` passes — ignored tails and untouched copies of
+// tracked files. A file nobody ever committed has a blob hash the repository has never seen,
+// and the folder is refused with a count, exactly as a dirty worktree is. A `.git` that is still
 // there while git does not list the tree is the opposite case: a checkout that lost its
-// registration with its contents intact, and nothing here can say whether those contents are
-// work. That one is refused, by name, so a person can look.
+// registration with its contents intact. That one is refused by name so a person can look.
 if (existsSync(managedRoot)) {
   const registered = new Set(worktrees().map((tree) => pathKey(tree.path)));
   for (const entry of readdirSync(managedRoot, { withFileTypes: true })) {
@@ -241,8 +246,85 @@ if (existsSync(managedRoot)) {
       kept.push([path, entry.name, "git no longer lists it but it still has a .git file; inspect it by hand"]);
       continue;
     }
+    const unvouched = unvouchedFiles(path);
+    if (unvouched) {
+      kept.push([path, entry.name, unvouched]);
+      continue;
+    }
     removals.push({ kind: "orphan", path });
   }
+}
+
+/**
+ * The reason an orphan must stay, or null when every file in it is either ignored or already in
+ * git's object store. Walks level by level so one `check-ignore` per depth prunes `node_modules`
+ * and `dist` before they are entered — hashing a full install would take minutes. Paths are
+ * given to git relative to the orphan and evaluated from the main checkout, so the repo's own
+ * `.gitignore` files apply as they would to a checkout (the orphan's own copy is usually gone by
+ * now, deleted as a tracked file). Junctions and symlinks are never entered: in a live tree they
+ * point at the main checkout's packages.
+ */
+function unvouchedFiles(root) {
+  const files = [];
+  let level = [""];
+  while (level.length > 0) {
+    const candidates = [];
+    for (const rel of level) {
+      for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
+        if (entry.isSymbolicLink()) continue;
+        const relPath = rel === "" ? entry.name : `${rel}/${entry.name}`;
+        if (entry.isDirectory()) candidates.push({ rel: relPath, dir: true });
+        else if (entry.isFile()) candidates.push({ rel: relPath, dir: false });
+      }
+    }
+    if (candidates.length === 0) break;
+    // `--non-matching` echoes every path; an ignored one carries its rule's source, an unignored
+    // one starts with `::`. Both are asked for in one call, directories with the trailing slash
+    // that makes a `node_modules/` pattern match them.
+    const ask = spawnSync("git", ["check-ignore", "--stdin", "--verbose", "--non-matching"], {
+      cwd: mainCheckout,
+      input: candidates.map((c) => (c.dir ? `${c.rel}/` : c.rel)).join("\n") + "\n",
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    if (ask.status !== 0 && ask.status !== 1) return "its contents could not be checked against .gitignore";
+    const ignored = new Set(
+      ask.stdout
+        .split("\n")
+        .filter((line) => line !== "" && !line.startsWith("::"))
+        .map((line) => line.slice(line.lastIndexOf("\t") + 1).replace(/\/$/, "")),
+    );
+    level = [];
+    for (const c of candidates) {
+      if (ignored.has(c.rel)) continue;
+      if (c.dir) level.push(c.rel);
+      else files.push(c.rel);
+    }
+  }
+  if (files.length === 0) return null;
+  // Absolute paths, and not by choice: `--stdin-paths` reads its paths AFTER git has changed
+  // directory to the repository root, ignoring the prefix it applies to command-line paths. With
+  // paths relative to the orphan, `README.md` quietly hashed the main checkout's README and
+  // `draft.txt` was "not found" — the check passed the wrong file and failed the right one.
+  const hashed = spawnSync("git", ["hash-object", "--stdin-paths"], {
+    cwd: root,
+    input: files.map((rel) => join(root, rel)).join("\n") + "\n",
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (hashed.status !== 0) return "its contents could not be hashed";
+  const known = spawnSync("git", ["cat-file", "--batch-check"], {
+    cwd: mainCheckout,
+    input: hashed.stdout,
+    encoding: "utf8",
+    windowsHide: true,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (known.status !== 0) return "its contents could not be looked up";
+  const missing = known.stdout.split("\n").filter((line) => line.endsWith(" missing")).length;
+  if (missing > 0) return `${missing} file${missing === 1 ? "" : "s"} whose contents git has never recorded`;
+  return null;
 }
 
 // Re-read after the worktree pass: a branch still checked out somewhere must not be deleted, and
@@ -365,7 +447,9 @@ for (const r of worktreeRemovals) {
   worktreesGone += 1;
 }
 for (const r of orphanRemovals) {
-  const why = removeDirectory(r.path);
+  // Checked again at the moment of deletion, not just at listing: a session could have written
+  // into the folder between the two, and the scan above is what the manifest was written from.
+  const why = unvouchedFiles(r.path) ?? removeDirectory(r.path);
   if (why !== null) {
     console.error(`failed  orphan   ${r.path} — left in place (${why})`);
     failed += 1;
