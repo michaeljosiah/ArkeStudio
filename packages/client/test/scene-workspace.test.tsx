@@ -152,7 +152,7 @@ describe("scene detail owns the workspace", () => {
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "Storyboard is the default (R-21)");
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
     assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
-    assert.equal(q(mounted, ".fy-cx__placeholder")?.textContent, "Ask about scene 4", "the plain-text dock does not promise mentions");
+    assert.equal(q(mounted, ".fy-cx__placeholder")?.textContent, "Ask Arke about this scene…", "the dock names its current subject");
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Stage"));
     assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
   });
@@ -1037,7 +1037,7 @@ describe("scene detail owns the workspace", () => {
 });
 
 describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
-  it("offers Done only when every shot has an accepted clip and reports the same state on the episode", async () => {
+  it("always offers Back to episode and keeps completion derived from accepted clips", async () => {
     const episodeId = "ep_the-verse-rises";
     const episodePath = `/w/${FIXTURE_WORLD_ID}/p/saltlight/episodes/${episodeId}`;
     const withEpisode = (complete: boolean): ClientState => {
@@ -1069,11 +1069,11 @@ describe("scene completion is shared with its episode (SPEC-036 R-31)", () => {
     assert.match(incompleteCard.textContent ?? "", /Scene 4 · in progress/);
     await click(incompleteCard.querySelector("button") as HTMLElement);
     assert.ok(q(incomplete, '[data-testid="scene-workspace"]'));
-    assert.equal(q(incomplete, ".fy-sw__done"), null, "the incomplete workspace has no Done control");
+    assert.ok(q(incomplete, ".fy-sw__back"), "an incomplete scene can return to its episode");
 
     const complete = await mountState(withEpisode(true));
-    const done = q(complete, ".fy-sw__done")!;
-    assert.equal(done.textContent?.trim(), "Done · back to the episode");
+    const done = q(complete, ".fy-sw__back")!;
+    assert.equal(done.textContent?.trim(), "Back to episode →");
     await click(done);
     assert.ok(q(complete, '[data-screen="episode-detail"]'), "Done navigates back to the owning episode");
     const completeCard = all(complete, ".fy-draftcard").find((card) => card.textContent?.includes("The verse rises"))!;
@@ -1651,13 +1651,17 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     const mounted = await mount();
     const row = q(mounted, ".fy-swrow")!;
     const labels = [...row.querySelectorAll("button")].map((button) => button.textContent?.trim());
-    assert.ok(labels.includes("Prompt"));
-    assert.ok(labels.includes("Variants"));
-    assert.ok(labels.includes("Upload"));
-    assert.ok(labels.includes("Edit"));
+    assert.ok(labels.includes("Frame prompt"));
+    assert.equal(row.querySelectorAll('.fy-swrow__frameactions > button').length, 4);
+    assert.ok(row.querySelector('[aria-label="Expand image for shot 12"] svg'));
+    assert.ok(row.querySelector('[aria-label="Frame variants for shot 12"] svg'));
+    assert.ok(row.querySelector('[aria-label="More image actions for shot 12"] svg'));
+    assert.ok(row.querySelector('[aria-label="Edit title for shot 12"]'));
+    assert.equal(row.querySelector(".fy-swrow__meta"), null, "secondary references are folded with the prompt at rest");
+    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
-    assert.ok(row.querySelector(".fy-swchip > span"), "shot status uses a dot rather than a filled pill");
+    assert.equal(row.querySelector(".fy-swchip"), null, "a rendered shot has no missing-frame exception");
     const script = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement | null;
     assert.equal(script?.getAttribute("role"), "combobox", "the shared @ picker remains live in-place");
     assert.ok(script);
@@ -1693,7 +1697,6 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       }
     }
 
-    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
     const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
     assert.equal(prompt?.getAttribute("role"), "combobox", "the image prompt uses the shared @ picker too");
   });
@@ -1792,7 +1795,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     const row = q(mounted, `[data-testid="workspace-row-${shot.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
+    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     const prompt = row.querySelector(".fy-swrow__prompt") as unknown as HTMLElement;
     const textarea = prompt.querySelector("textarea") as HTMLTextAreaElement;
     const rebuild = [...prompt.querySelectorAll("button")].find((button) => button.textContent === "Rebuild") as HTMLElement;
@@ -1824,7 +1827,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
+    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     await editTextarea(row.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement, "Stored shot prompt");
     const cleanShotCommands = sent.filter((message) => message.kind === "scene-command").length;
     await click([...row.querySelectorAll(".fy-swrow__prompt button")].find((button) => button.textContent === "Hide") as HTMLElement);
@@ -1870,7 +1873,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
     const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
+    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
     const shotPrompt = shotEditor.querySelector("textarea") as HTMLTextAreaElement;
     await editTextarea(shotPrompt, "Committed shot draft");
@@ -1931,7 +1934,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     const mounted = await mountState(state);
     const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
 
-    await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Prompt") as HTMLElement);
+    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
     const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
     await editTextarea(shotEditor.querySelector("textarea") as HTMLTextAreaElement, "Retry this exact shot draft  ");
     await click([...shotEditor.querySelectorAll("button")].find((button) => button.textContent === "Hide") as HTMLElement);
@@ -2211,7 +2214,7 @@ describe("the workspace writes only named, versioned scene commands (#606)", () 
     // The shot label is the reorder handle (R-6); dropping it on another row moves the shot before it.
     const second = q(mounted, `[data-testid="workspace-row-${shots[1]!.id}"]`)!;
     const firstBand = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"] .fy-swrow__band`)!;
-    await act(async () => second.querySelector(".fy-swrow__label")!.dispatchEvent(new dom.window.Event("dragstart", { bubbles: true })));
+    await act(async () => second.querySelector(".fy-swrow__grip")!.dispatchEvent(new dom.window.Event("dragstart", { bubbles: true })));
     await act(async () => firstBand.dispatchEvent(new dom.window.Event("drop", { bubbles: true, cancelable: true })));
     assert.deepEqual(sent.at(-1), {
       kind: "scene-command",
@@ -2520,7 +2523,7 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
     const stagedRow = q(mounted, '[data-testid="workspace-row-sh_999"] .fy-swrow__band')!;
     assert.equal(stagedRow.getAttribute("data-staged"), "true");
     assert.equal(stagedRow.getAttribute("aria-disabled"), "true");
-    assert.match(q(mounted, ".fy-sw__metrics")?.textContent ?? "", new RegExp(`^${orderedShots(accepted).length} shots`));
+    assert.match(q(mounted, ".fy-sw__metrics")?.textContent ?? "", new RegExp(`${orderedShots(accepted).length} shots`));
     assert.ok(all(mounted, "button").some((button) => button.textContent === "Accept"));
     assert.match(q(mounted, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren hears it land/);
 
@@ -3236,17 +3239,18 @@ describe("shot authoring and the season length (#931)", () => {
     __setBridgeForTest(capture(sent));
     const mounted = await mount();
     const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
-    const title = row.querySelector('input[aria-label^="Title"]') as HTMLInputElement;
-    const duration = row.querySelector('input[type="number"]') as HTMLInputElement;
-    const blur = async (input: HTMLInputElement, value: string) => {
+    assert.equal(row.querySelector('input'), null, "fields are revealed only while editing");
+    const edit = async (field: "title" | "duration", value: string) => {
+      await click(row.querySelector(`[aria-label="Edit ${field} for shot 13"]`) as HTMLElement);
+      const input = row.querySelector(field === "title" ? 'input[aria-label^="Title"]' : 'input[type="number"]') as HTMLInputElement;
       input.value = value;
       await act(async () => input.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
     };
-    await blur(title, " ");
-    await blur(duration, "0");
-    await blur(duration, "-1");
+    await edit("title", " ");
+    await edit("duration", "0");
+    await edit("duration", "-1");
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
-    await blur(title, "The end of the room");
+    await edit("title", "The end of the room");
     assert.deepEqual((sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command,
       { kind: "edit-shot", shotId: "sh_13", change: { title: "The end of the room" } });
     const next = structuredClone(FIXTURE_STATE) as ClientState;
@@ -3254,7 +3258,7 @@ describe("shot authoring and the season length (#931)", () => {
     scene.version++;
     orderedShots(scene).find((s) => s.id === "sh_13")!.title = "The end of the room";
     await act(async () => __setStateForTest(next));
-    await blur(duration, "9");
+    await edit("duration", "9");
     assert.deepEqual((sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command,
       { kind: "edit-shot", shotId: "sh_13", change: { durationSec: 9 } });
   });

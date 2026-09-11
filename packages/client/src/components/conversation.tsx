@@ -41,7 +41,7 @@ import { eligibilityInputs, productionModel } from "./dispatch-bar.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
-import { Pin } from "./icons.js";
+import { Film, Pin } from "./icons.js";
 import { PosterVideo } from "./player.js";
 import { ReadAloud } from "./read-aloud.js";
 import { renderInlineMarkdown } from "./inline-markdown.js";
@@ -605,11 +605,24 @@ function FrameRunReport({
       );
     }
   });
+  const generated = new Set(run.steps.flatMap((step) => step.shots.filter((shot) => REPORT_RETURNED_STATUSES.has(shot.status)).map((shot) => shot.shotId))).size;
+  const cancelled = run.status === "cancelled";
+  // A completed run can lose every landing race to a newer frame without being empty or pending.
+  const summary = [
+    cancelled ? "Cancelled" : null,
+    generated > 0 || (!cancelled && run.supersededShots === 0) ? `${generated} frame${generated === 1 ? "" : "s"} generated` : null,
+    run.supersededShots > 0 ? `${run.supersededShots} newer frame${run.supersededShots === 1 ? "" : "s"} kept` : null,
+  ].filter(Boolean).join(" · ");
+  // Reconciled failures stay in the history, but a successful retry needs no more attention.
+  const needsAttention = !cancelled && run.steps.some((step) => step.shots.some((shot) => REPORT_FAILURE_STATUSES.has(shot.status)));
   return (
-    <div className="fy-chat__runreport" aria-label="Frame run report">
-      {stepRows}
-      {failureRows}
-    </div>
+    <details className="fy-chat__runsummary" data-state={cancelled ? "cancelled" : needsAttention ? "attention" : generated > 0 || run.supersededShots > 0 ? "complete" : "pending"} open={needsAttention || (!cancelled && run.status !== "completed") ? true : undefined}>
+      <summary><span aria-hidden="true" />{summary}{needsAttention ? " · needs attention" : ""}</summary>
+      <div className="fy-chat__runreport" aria-label="Frame run report">
+        {stepRows}
+        {failureRows}
+      </div>
+    </details>
   );
 }
 
@@ -1055,8 +1068,9 @@ export function ProductionConversation({
       ? { onPromoteAttachment: (attachmentId: string) => promoteWorldChatAttachment(worldId, conversationId, attachmentId) }
       : {}),
   };
+  const sceneDock = dock?.conversationFirst === true && context.kind === "scene";
   const languageControl = productionId ? (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+    <div className="fy-arke__model" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <select
         className="fy-set__pill"
         aria-label="Language model"
@@ -1073,7 +1087,7 @@ export function ProductionConversation({
           </option>
         ))}
       </select>
-      <span className="fy-mono">
+      <span className="fy-mono fy-arke__modelscope">
         {languageModelId !== undefined
           ? "THIS TURN"
           : rememberedLanguageModel !== undefined
@@ -1140,7 +1154,7 @@ export function ProductionConversation({
           {/* The slot stays whether or not there is a frame to show in it, so the title does
               not shift left the moment the subject is the scene, a board, or a frameless shot. */}
           <span className="fy-arke__thumb">
-            {dock.thumbnail === undefined ? null : <img src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
+            {dock.thumbnail === undefined ? (sceneDock ? <Film size={24} /> : null) : <img src={dock.thumbnail.src} alt={dock.thumbnail.alt} />}
           </span>
           {dock.onToggleSubject === undefined ? (
             <span className="fy-arke__who">
@@ -1213,7 +1227,7 @@ export function ProductionConversation({
           </div>
         ) : null}
         <div className="fy-arke__foot">
-          {languageControl}
+          {sceneDock ? null : languageControl}
           {dock.subjectLine !== undefined && <div className="fy-mono fy-arke__subject">{dock.subjectLine}</div>}
           {dock.prompts === undefined || dock.prompts.length === 0 ? null : (
             <div className="fy-arke__prompts">
@@ -1239,6 +1253,7 @@ export function ProductionConversation({
               })}
             </div>
           )}
+          {sceneDock ? languageControl : null}
           <Composer
             value={message}
             onChange={setMessage}

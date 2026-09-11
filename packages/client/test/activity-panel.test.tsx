@@ -54,7 +54,6 @@ Object.assign(globalThis, {
 });
 
 const TODAY = `${new Date().toISOString().slice(0, 10)}T09:14:00Z`;
-const YESTERDAY = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
 
 function job(overrides: Partial<Job>): Job {
   return {
@@ -446,11 +445,15 @@ describe("the spend alert is a queue entry (R-23)", () => {
 });
 
 describe("the Inbox's order and its history (R-22)", () => {
-  it("groups finished work by day and keeps the settled line when nothing runs or waits", () => {
+  it("groups finished work by day and keeps the settled line when nothing runs or waits", (t) => {
+    // Calendar days, not a 26-hour offset: that offset reaches two days back just after midnight.
+    const today = new Date(2026, 8, 11, 0, 3);
+    const yesterday = new Date(2026, 8, 10, 0, 3);
+    t.mock.timers.enable({ apis: ["Date"], now: today });
     const state = quiet();
     state.app.jobs = [
-      job({ id: "jb_01J8E0000000000000000000L2", status: "succeeded", error: null, updatedAt: TODAY }),
-      job({ id: "jb_01J8E0000000000000000000L3", status: "succeeded", error: null, updatedAt: YESTERDAY, createdAt: YESTERDAY }),
+      job({ id: "jb_01J8E0000000000000000000L2", status: "succeeded", error: null, updatedAt: today.toISOString(), createdAt: today.toISOString() }),
+      job({ id: "jb_01J8E0000000000000000000L3", status: "succeeded", error: null, updatedAt: yesterday.toISOString(), createdAt: yesterday.toISOString() }),
     ];
     const html = render(state, "inbox");
     assert.ok(html.includes("Nothing running, nothing waiting on you"));

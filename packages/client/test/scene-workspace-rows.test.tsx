@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -68,6 +68,7 @@ afterEach(async () => {
   dom.document.body.replaceChildren();
   __setStateForTest(FIXTURE_STATE);
   __setBridgeForTest(null);
+  __connectionStatusForTest("closed");
 });
 
 function capture(sent: ClientMessage[]): ArkeBridge {
@@ -106,6 +107,47 @@ function sceneOf(state: ClientState): SceneShape {
 }
 
 describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", () => {
+  it("switches List and Grid without replacing the editor, draft, selection or shot order (turn 138)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    const list = q(mounted, '[data-testid="workspace-rows"]')!;
+    const band = q(mounted, ".fy-swrow__band")!;
+    await click(band);
+    const editor = band.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "An unfinished shot draft";
+      // Linkedom does not implement React's native textarea value tracking.
+      const key = Object.keys(editor).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (editor as unknown as Record<string, { onChange: (event: { target: HTMLTextAreaElement }) => void }>)[key]!;
+      props.onChange({ target: editor });
+    });
+    const order = all(mounted, ".fy-swrow__band").map((row) => row.dataset.shotId);
+    assert.equal(list.dataset.layout, "list");
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    assert.equal(list.dataset.layout, "grid");
+    assert.equal(q(mounted, ".fy-swrow__band"), band);
+    assert.equal(band.querySelector(".fy-swrow__script textarea"), editor);
+    assert.equal(editor.value, "An unfinished shot draft");
+    assert.equal(band.dataset.selected, "true");
+    assert.deepEqual(all(mounted, ".fy-swrow__band").map((row) => row.dataset.shotId), order);
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "List"));
+    assert.equal(list.dataset.layout, "list");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0, "layout alone authors no scene change");
+  });
+
+  it("shows board controls in List and restores an ungrouped Grid without changing boards", async () => {
+    const mounted = await mountState();
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    await click(q(mounted, ".fy-sw__boards-toggle")!);
+    assert.equal(q(mounted, ".fy-swrows")?.dataset.layout, "list");
+    assert.ok(q(mounted, ".fy-swboard"));
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    assert.equal(q(mounted, ".fy-swrows")?.dataset.layout, "grid");
+    assert.equal(q(mounted, ".fy-swboard"), null);
+    assert.equal(q(mounted, ".fy-sw__boards-toggle")?.getAttribute("aria-pressed"), "false");
+  });
+
   it("orders the ··· menu as the design does and keeps reordering on the label handle", async () => {
     const mounted = await mountState();
     const row = q(mounted, ".fy-swrow")!;
@@ -176,18 +218,49 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.ok(all(mounted, ".fy-swready").length === 1, "one line, beneath the list, not one per row");
   });
 
-  it("puts the state dot after its label and keeps the shot title when framing is set (#931)", async () => {
+  it("shows only exceptional state and keeps the authored title when framing is set (#931)", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = sceneOf(state);
     scene.shots[0]!.framing = { size: "wide" };
     const mounted = await mountState(state);
     const [first, second] = all(mounted, ".fy-swrow__title");
-    assert.equal(first?.textContent, `Shot 12 · ${scene.shots[0]!.title}`, "framing must not replace the authored title");
-    assert.equal(second?.textContent, "Shot 13 · The lamps answer", "every shot shows its title");
+    assert.equal(first?.textContent, scene.shots[0]!.title, "framing must not replace the authored title");
+    assert.equal(second?.textContent, "The lamps answer", "every shot shows its title");
     const chip = q(mounted, ".fy-swchip")!;
-    assert.equal(chip.lastElementChild?.tagName, "SPAN");
-    assert.equal(chip.lastElementChild?.getAttribute("aria-hidden"), "true", "the dot follows the label");
-    assert.equal(chip.firstChild?.nodeType, dom.window.Node.TEXT_NODE);
+    assert.equal(chip.firstElementChild?.tagName, "SPAN");
+    assert.equal(chip.firstElementChild?.getAttribute("aria-hidden"), "true", "the exception has a decorative dot");
+    assert.match(chip.textContent ?? "", /Needs frame|Needs attention/);
+  });
+
+  it("does not ask for a frame when an accepted clip makes the shot rendered", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clip = production.takes.find((take) => take.kind === "clip")!;
+    const shot = sceneOf(state).shots[0]!;
+    production.selections[shot.id] = { acceptedTakeId: clip.id, trimInSec: 0 };
+    const mounted = await mountState(state);
+    const row = q(mounted, `[data-shot-id="${shot.id}"]`)!;
+    assert.equal(row.getAttribute("data-state"), "rendered");
+    assert.equal(row.querySelector(".fy-swchip"), null);
+    assert.doesNotMatch(row.textContent ?? "", /Needs frame/);
+  });
+
+  it("reports the confirmed connection and version without claiming local edits are saved", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
+    const mounted = await mountState();
+    const editor = q(mounted, ".fy-swrow__script textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      editor.value = "An unsaved local script";
+      const key = Object.keys(editor).find((candidate) => candidate.startsWith("__reactProps$"))!;
+      const props = (editor as unknown as Record<string, { onChange: (event: { target: HTMLTextAreaElement }) => void }>)[key]!;
+      props.onChange({ target: editor });
+    });
+    assert.equal(editor.value, "An unsaved local script");
+    assert.equal(sent.filter((message) => message.kind === "scene-command").length, 0);
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(FIXTURE_STATE).version}`);
+    assert.doesNotMatch(q(mounted, ".fy-sw__save")?.textContent ?? "", /saved/i);
   });
 
   it("leads each reference chip with a round thumbnail and caps override labels at two", async () => {
@@ -195,6 +268,7 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     sceneOf(state).shots[0]!.framing = { size: "MCU", lens: "50mm", movement: "slow push-in" };
     const mounted = await mountState(state);
     const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     const refs = [...row.querySelectorAll(".fy-swrow__ref")] as unknown as HTMLElement[];
     assert.ok(refs.length >= 2);
     for (const ref of refs) {
@@ -206,11 +280,11 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.ok(overrides.every((label) => label.getAttribute("title") === "overrides the scene"));
   });
 
-  it("hides the prompt slot while its disclosure is open, and Edit opens it in place", async () => {
+  it("opens the collapsed Frame prompt disclosure in place", async () => {
     const mounted = await mountState();
     const row = q(mounted, ".fy-swrow")!;
-    assert.equal(row.querySelector(".fy-swrow__slot span")?.textContent, "prompt · auto");
-    await click(byText(row, "Edit"));
+    assert.equal(row.querySelector(".fy-swrow__prompt-toggle")?.textContent, "Frame prompt");
+    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
     assert.equal(prompt?.getAttribute("role"), "combobox", "Edit opens the row's mention-aware prompt");
     assert.equal(row.querySelector(".fy-swrow__slot"), null, "the slot gives way to the disclosure");
@@ -228,15 +302,15 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     };
     const mounted = await mountState(state);
     const [written, blank] = all(mounted, ".fy-swrow");
-    const blankPrompt = byText(blank!.querySelector(".fy-swrow__frameactions")!, "Prompt") as unknown as HTMLButtonElement;
-    assert.equal(blankPrompt.disabled, true, "a blank script has no prompt to show");
+    const blankPrompt = byText(blank!, "Frame promptAuthored") as unknown as HTMLButtonElement;
+    assert.equal(blankPrompt.disabled, false, "an authored prompt remains reachable even before a script is written");
 
-    await click(byText(written!.querySelector(".fy-swrow__frameactions")!, "Prompt"));
+    await click(byText(written!, "Frame prompt"));
     const rebuild = byText(written!.querySelector(".fy-swrow__prompt")!, "Rebuild") as unknown as HTMLButtonElement;
     assert.equal(rebuild.getAttribute("title"), "Rebuild from the script, references and camera");
     assert.equal(rebuild.disabled, true, "nothing to rebuild while the prompt is the assembled one");
 
-    await click(byText(blank!, "Edit"));
+    await click(blankPrompt);
     const stored = byText(blank!.querySelector(".fy-swrow__prompt")!, "Rebuild") as unknown as HTMLButtonElement;
     assert.equal(stored.disabled, false, "a stored override is something to rebuild from");
   });
@@ -347,6 +421,7 @@ describe("the band's chip says what the character brings to the shot (SPEC-044 R
     const mounted = await mountState(state);
     const rows = all(mounted, ".fy-swrow");
     const words = (row: HTMLElement) => [...row.querySelectorAll(".fy-swrow__ref")].map((chip) => chip.querySelector(".fy-swrow__refwords")?.textContent ?? null);
+    for (const row of rows) await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
     assert.match(rows[0]!.textContent ?? "", /Maren Kest.*The Vigil/);
     assert.deepEqual(words(rows[0]!), ["voice · look", null], "she speaks in shot 12 and is cited; the place brings no words");
     assert.deepEqual(words(rows[1]!), ["look"], "cited in shot 13, silent there");

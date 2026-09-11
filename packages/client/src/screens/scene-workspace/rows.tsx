@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
   assemblePrompt,
@@ -24,7 +24,6 @@ import {
   type SceneRecord,
   type Sheet,
   type Shot,
-  type ShotCardState,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../../lib/media.js";
@@ -34,22 +33,12 @@ import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./se
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
 import { finalizationRetryJobId, frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
-import { ReadAloudButton } from "../../components/read-aloud.js";
-import { Grid2x2, Grip, ImageMark, Lines, More, Plus } from "../../components/icons.js";
+import { FrameActions } from "./frame-actions.js";
+import { ChevronRight, Grid2x2, Grip, ImageMark, Lines, More, Pencil, Plus } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
-
-const CHIP: Record<ShotCardState, string> = {
-  "needs attention": "needs attention",
-  story: "story",
-  storyboard: "storyboard",
-  "production-ready": "production-ready",
-  rendered: "rendered",
-};
-
-const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
 
 export function waitingTakeSessions(
   sessions: readonly BenchSessionSummary[],
@@ -90,6 +79,7 @@ function canPickFiles(): boolean {
 }
 
 export function StoryboardRows({
+  layout = "list",
   scene,
   acceptedScene,
   world,
@@ -123,6 +113,7 @@ export function StoryboardRows({
   onRenderBoard,
   onOpenCharacter,
 }: {
+  layout?: "list" | "grid";
   scene: SceneRecord;
   acceptedScene: SceneRecord;
   world: WorldBundle;
@@ -260,6 +251,7 @@ export function StoryboardRows({
       <ol
         ref={(element) => { rowsRoot.current = element; }}
         className="fy-swrows"
+        data-layout={layout}
         data-testid="workspace-rows"
         aria-label={`Shots in scene ${scene.number}`}
         tabIndex={-1}
@@ -403,11 +395,11 @@ export function StoryboardRows({
           </button>
         </li>
       </ol>
-      <div className="fy-swready">
-        <span className="fy-swready__dot" data-ready={attention === 0 ? "true" : undefined} aria-hidden="true" />
-        <span>{attention === 0 ? "Ready to generate" : attention === 1 ? "1 item worth reviewing" : `${attention} items worth reviewing`}</span>
+      {attention > 0 ? <div className="fy-swready">
+        <span className="fy-swready__dot" aria-hidden="true" />
+        <span>{attention === 1 ? "1 item worth reviewing" : `${attention} items worth reviewing`}</span>
         <span className="fy-swready__meta">scene {scene.number} · v{scene.version}</span>
-      </div>
+      </div> : null}
     </>
   );
 }
@@ -821,6 +813,11 @@ function Row({
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [scriptDraft, setScriptDraft] = useState(shot.description);
   const [titleDraft, setTitleDraft] = useState(shot.title);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDuration, setEditingDuration] = useState(false);
+  const titleTrigger = useRef<HTMLButtonElement>(null);
+  const durationTrigger = useRef<HTMLButtonElement>(null);
+  const editReturnFocus = useRef<"title" | "duration" | null>(null);
   const [durationDraft, setDurationDraft] = useState(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptDraft, setPromptDraft] = useState<string | null>(null);
@@ -893,6 +890,11 @@ function Row({
     imagePath: sheet.type === "location" ? locationPortraitPath(world, sheet.id) : characterPortraitPath(world, sheet.id),
   }));
   const disabled = locked || staged;
+  useEffect(() => {
+    if (editingTitle || editingDuration || disabled || editReturnFocus.current === null) return;
+    (editReturnFocus.current === "title" ? titleTrigger : durationTrigger).current?.focus();
+    editReturnFocus.current = null;
+  }, [editingTitle, editingDuration, disabled]);
   const menuOpen = menu || confirmDelete;
 
   const closeMenu = useCallback((restoreFocus = false) => {
@@ -1103,6 +1105,7 @@ function Row({
         onBand(element);
       }}
       className="fy-swrow__band"
+      style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}
       data-shot-id={shot.id}
       data-state={state}
       data-selected={selected ? "true" : undefined}
@@ -1134,13 +1137,18 @@ function Row({
         }
       }}
     >
+      <span
+        className="fy-swrow__grip" aria-hidden="true" title="Drag to reorder shot" draggable={!disabled}
+        onDragStart={(event) => { if (!disabled) onDragStart(); event.dataTransfer?.setData("text/plain", shot.id); }}
+        onDragEnd={onDragEnd}
+      ><Grip size={14} /></span>
       {selected ? <span className="fy-swrow__ring" aria-hidden="true" /> : null}
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
-      <div className="fy-swrow__frame fy-imghost" style={{ aspectRatio: aspect.replace(":", " / ") }}>
+      <div className="fy-swrow__frame fy-imghost">
         {src === null ? (
           <div className="fy-swrow__hatch"><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
         ) : (
-          <div className="fy-swrow__img" role="img" aria-label={shot.title} style={{ backgroundImage: `url(${src})` }} />
+          <img className="fy-swrow__img" alt={shot.title} src={src} draggable={false} />
         )}
         <span
           className="fy-swrow__label"
@@ -1152,72 +1160,26 @@ function Row({
           }}
           onDragEnd={onDragEnd}
         >
-          shot {shot.number}
+          {shot.number}
         </span>
         <span className="fy-swrow__chipmeta">
-          {aspect} · {(shot.durationSec ?? DEFAULT_SHOT_SEC).toFixed(1)}s{shot.framing?.lens === undefined ? "" : ` · ${shot.framing.lens}`}
+          {shot.durationSec ?? DEFAULT_SHOT_SEC}s
         </span>
-        {framePath === null ? null : (
-          // The circle alone is the hit area, so the rest of the thumbnail stays draggable (§7.1).
-          <button
-            type="button"
-            className="fy-swrow__preview"
-            aria-label={`Preview frame for shot ${shot.number}`}
-            title="Open larger"
-            onMouseDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation();
-              onPreview();
-            }}
-          />
-        )}
-        <div
-          className="fy-swrow__frameactions"
-          onMouseDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button type="button" disabled={shot.description.trim() === ""} onClick={() => setPromptOpen((open) => !open)}>Prompt</button>
-          {/*
-            The script is written in place, so read-aloud sits with the row's other buttons rather
-            than hovering over the text (issue 857) — a speaker inside an editor fights the caret,
-            which is the same call the bible made about its own document.
-          */}
-          <ReadAloudButton
-            source={{ of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }}
-            title={`Shot ${shot.number} · script`}
-            text={shot.description}
-          />
-          <button
-            ref={variantsTrigger}
-            type="button"
-            disabled={frameVariants.length === 0}
-            onClick={() => variantsDialog.current?.showModal()}
-          >
-            Variants
-          </button>
-          <button
-            type="button"
-            disabled={disabled || !canPickFiles()}
-            title={canPickFiles() ? "Use an image from this computer" : UPLOAD_UNAVAILABLE}
-            onClick={() => importShotFrame(worldId, production.meta.id, shot.id)}
-          >
-            Upload
-          </button>
-          {/*
-            The reverse of the chain (issue 851). An accept files a still onto the next shot, and
-            nothing else takes one off — so without this a shot handed a boundary frame could only
-            be moved off it by drawing over it.
-          */}
-          <button
-            type="button"
-            disabled={disabled || !hasFramePointer}
-            title="Clear the start frame; dispatch from this shot's own references"
-            aria-label={`Clear the start frame for shot ${shot.number}`}
-            onClick={() => clearShotFrame(worldId, production.meta.id, shot.id)}
-          >
-            Clear
-          </button>
-        </div>
+        <FrameActions
+          shotNumber={shot.number}
+          title={shot.title}
+          slug={slug}
+          framePath={framePath}
+          variants={frameVariants.length}
+          disabled={disabled}
+          canUpload={canPickFiles()}
+          canClear={hasFramePointer}
+          onPreview={onPreview}
+          onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
+          onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
+          onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
+          readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
+        />
         <dialog
           ref={variantsDialog}
           className="fy-swvariants"
@@ -1274,51 +1236,52 @@ function Row({
         )}
       </div>
       <div className="fy-swrow__body">
-        <div className="fy-swrow__titleline">
-          <span className="fy-swrow__title">Shot {shot.number} · {shot.title}</span>
-          <span className="fy-swchip" data-state={state}>{CHIP[state]}<span aria-hidden="true" /></span>
-          {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
-          {shot.staging?.playblast === undefined ? null : (
-            <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>
-          )}
-        </div>
-        <div className="fy-swrow__fields" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          <label>
-            Title
+        <div className="fy-swrow__titleline" onClick={(event) => event.stopPropagation()}>
+          {editingTitle ? (
             <input
-              aria-label={`Title for shot ${shot.number}`}
-              value={titleDraft}
-              disabled={disabled}
+              className="fy-swrow__title-input" aria-label={`Title for shot ${shot.number}`} value={titleDraft} disabled={disabled} autoFocus
+              onFocus={(event) => event.currentTarget.select()}
               onChange={(event) => setTitleDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key !== "Enter" && event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                editReturnFocus.current = "title";
                 if (event.key === "Escape") { event.currentTarget.value = shot.title; setTitleDraft(shot.title); event.currentTarget.blur(); }
+                else event.currentTarget.blur();
               }}
               onBlur={(event) => {
                 const title = event.currentTarget.value.trim();
                 if (!title || title === shot.title || disabled || !onCommand({ kind: "edit-shot", shotId: shot.id, change: { title } })) setTitleDraft(shot.title);
+                setEditingTitle(false);
               }}
             />
-          </label>
-          <label>
-            Duration · seconds
+          ) : <button ref={titleTrigger} type="button" className="fy-swrow__title-edit" aria-label={`Edit title for shot ${shot.number}`} disabled={disabled} onClick={() => setEditingTitle(true)}><span className="fy-swrow__title">{shot.title}</span><Pencil size={14} /></button>}
+          {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
+          {shot.staging?.playblast === undefined ? null : <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>}
+        </div>
+        <div className="fy-swrow__timing" onClick={(event) => event.stopPropagation()}>
+          {editingDuration ? (
             <input
-              aria-label={`Duration for shot ${shot.number}`}
-              type="number" min="0.01" step="any"
-              value={durationDraft}
-              disabled={disabled}
+              aria-label={`Duration for shot ${shot.number}`} type="number" min="0.01" step="any" value={durationDraft} disabled={disabled} autoFocus
               onChange={(event) => setDurationDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key !== "Enter" && event.key !== "Escape") return;
+                event.preventDefault();
+                event.stopPropagation();
+                editReturnFocus.current = "duration";
                 if (event.key === "Escape") { event.currentTarget.value = String(shot.durationSec ?? DEFAULT_SHOT_SEC); setDurationDraft(event.currentTarget.value); event.currentTarget.blur(); }
+                else event.currentTarget.blur();
               }}
               onBlur={(event) => {
                 const durationSec = Number(event.currentTarget.value);
-                if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec === (shot.durationSec ?? DEFAULT_SHOT_SEC) || disabled ||
-                  !onCommand({ kind: "edit-shot", shotId: shot.id, change: { durationSec } })) setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+                if (!Number.isFinite(durationSec) || durationSec <= 0 || durationSec === (shot.durationSec ?? DEFAULT_SHOT_SEC) || disabled || !onCommand({ kind: "edit-shot", shotId: shot.id, change: { durationSec } })) setDurationDraft(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
+                setEditingDuration(false);
               }}
             />
-          </label>
+          ) : <button ref={durationTrigger} type="button" aria-label={`Edit duration for shot ${shot.number}`} title="Edit duration in seconds" disabled={disabled} onClick={() => setEditingDuration(true)}>{shot.durationSec ?? DEFAULT_SHOT_SEC}s</button>}
+          <span aria-hidden="true">·</span><span>{aspect}</span>
+          {state === "needs attention" || state === "story" ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : "Needs frame"}</span> : null}
         </div>
         <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
         {coverage === "changed" || runScriptChanged ? (
@@ -1357,6 +1320,7 @@ function Row({
             disabled={disabled}
           />
         </div>
+        {promptOpen ? null : <button type="button" className="fy-swrow__prompt-toggle" aria-expanded={false} onClick={(event) => { event.stopPropagation(); setPromptOpen(true); }}><ChevronRight size={14} />Frame prompt{shot.promptOverride === undefined ? null : <span>Authored</span>}</button>}
         {promptOpen ? (
           <div
             className="fy-swrow__prompt"
@@ -1402,7 +1366,7 @@ function Row({
             />
           </div>
         ) : null}
-        {refs.length === 0 && overrides.length === 0 ? null : (
+        {!promptOpen || (refs.length === 0 && overrides.length === 0) ? null : (
           <div className="fy-swrow__meta">
             <div className="fy-swrow__refs">
               {refs.map((entry) => {
@@ -1448,7 +1412,7 @@ function Row({
       <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
         <div className="fy-swrow__actionline">
           <Button
-            variant={hasFrame ? "outline" : "primary"}
+            variant="outline"
             size="sm"
             className="fy-swrow__generate"
             disabled={disabled || run?.status === "active" || run?.status === "paused"}
@@ -1476,12 +1440,6 @@ function Row({
             <More size={15} />
           </button>
         </div>
-        {promptOpen ? null : (
-          <div className="fy-swrow__slot">
-            <span>{shot.promptOverride === undefined ? "prompt · auto" : "prompt · authored"}</span>
-            <button type="button" disabled={disabled} onClick={() => setPromptOpen(true)}>Edit</button>
-          </div>
-        )}
       </div>
       {menuOpen && typeof document !== "undefined"
         ? createPortal(

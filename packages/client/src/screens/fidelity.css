@@ -7080,7 +7080,7 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swrow__staged { position: absolute; right: 13px; bottom: 9px; z-index: 7; display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font: 400 9px var(--font-mono, ui-monospace, monospace); }
 .fy-swrow__staged::before { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--neutral-400); }
 
-.fy-swrow__frame { width: 252px; height: 158px; aspect-ratio: auto !important; position: relative; overflow: hidden; background: var(--muted); }
+.fy-swrow__frame { position: relative; overflow: hidden; background: var(--muted); }
 .fy-swrow__img { width: 100%; height: 100%; background-size: cover; background-position: center; }
 .fy-swrow__hatch {
   box-sizing: border-box; width: 100%; height: 100%;
