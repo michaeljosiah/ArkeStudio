@@ -25,6 +25,7 @@
     "format:check": "prettier --check \"packages/**/*.{ts,tsx,css,json}\" \"apps/**/*.{ts,tsx,json}\"",
     "test": "npm run test --workspaces --if-present",
     "clean:temp": "node scripts/clean-temp.mjs",
+    "design:check": "node design-system/check-master.mjs",
     "start": "npm run start --workspace @arke-studio/desktop"
   },
   "devDependencies": {
