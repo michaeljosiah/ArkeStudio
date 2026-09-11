@@ -36,7 +36,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { StageUnderlay } from "./stage-underlay.js";
-import { Eyebrow, Link, Row, Stepper, Triad, Value, fieldEscape } from "./stage-inspector.js";
+import { Eyebrow, Link, Row, Stepper, Triad, Value, fieldEscape, sameLine } from "./stage-inspector.js";
 import { selectedShotId, useWorkspaceSelection } from "./selection.js";
 import { figureColour, StageViewport, type StageData, type StageSelection } from "./stage-viewport.js";
 import { send, subscribeStageConstruction, beginStageExport, cancelStageExport, failStagePlayblastAction, stagePlayblast, writeStageExportFrame } from "../../lib/store.js";
@@ -310,6 +310,19 @@ export function SceneStage({
       return resolvedPersisted.cast.some((figure) => figure.sheetId === current.sheetId) ? current : null;
     });
   }, [resolvedPersisted]);
+  // The selection is a line of the list. When the list loses that line — a set added and then
+  // discarded with its draft, a figure gone from the blocking — the selection goes with it and the
+  // viewport hears, or the panel would show no form at all: not the missing thing's, not the shot's.
+  useEffect(() => {
+    if (selection === null || working === null) return;
+    const gone = selection.kind === "set"
+      ? working.sets[selection.index] === undefined
+      : (selection.kind === "cast" || selection.kind === "walkend") && !working.cast.some((figure) => figure.sheetId === selection.sheetId);
+    if (!gone) return;
+    setSelection(null);
+    setMotionMark(null);
+    viewport.current?.select(null);
+  }, [working, selection]);
   useEffect(() => {
     if (motionMark === null) return;
     const marks = motionMark.kind === "performance"
@@ -915,11 +928,7 @@ export function SceneStage({
   };
   // The list's press is the viewport's selection, held once; pressing the selected line again clears it.
   const pick = (next: Exclude<StageSelection, null>) => {
-    const same = selection !== null && selection.kind === next.kind && (
-      next.kind === "rig" || next.kind === "aim"
-        ? true
-        : next.kind === "set" ? (selection as { index: number }).index === next.index : (selection as { sheetId: string }).sheetId === next.sheetId);
-    const selected: StageSelection = same ? null : next;
+    const selected: StageSelection = sameLine(selection, next) ? null : next;
     setSelection(selected);
     setMotionMark(null);
     viewport.current?.select(selected);

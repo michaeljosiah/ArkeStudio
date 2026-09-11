@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
+import { sameLine } from "../src/screens/scene-workspace/stage-inspector.js";
 import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -528,4 +529,21 @@ it("a scene with no shots keeps the way out of full screen", async () => {
   assert.ok(exit, "no head row to carry it, so the exit stands alone in the empty state");
   await click(exit!);
   assert.equal(left, 1);
+});
+
+it("a list line stands for every pick of its thing, and a line that leaves the list takes the selection with it", async () => {
+  // The viewport picks the camera's aim or the end of a walk; the list shows one line for each thing.
+  assert.equal(sameLine({ kind: "aim" }, { kind: "rig" }), true, "the camera line, whichever end of it the viewport holds");
+  assert.equal(sameLine({ kind: "walkend", sheetId: "maren-kest" }, { kind: "cast", sheetId: "maren-kest" }), true, "a figure's line, at either end of its walk");
+  assert.equal(sameLine({ kind: "cast", sheetId: "maren-kest" }, { kind: "cast", sheetId: "bray" }), false);
+  assert.equal(sameLine({ kind: "set", index: 0 }, { kind: "set", index: 1 }), false);
+  assert.equal(sameLine(null, { kind: "rig" }), false);
+
+  const { q } = await mount(movingShot);
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  assert.match(selectedItem(q), /set 2/);
+  await click(q('[aria-label="Discard"]'));
+  assert.equal(stageItem(q, "set 2"), undefined, "the discarded draft takes its set");
+  assert.equal(q('.fy-swstage__item[data-selected="true"]'), null, "and the selection that pointed at it");
+  assert.ok(q('[aria-label="Camera rig"]'), "the shot's form, not an empty panel");
 });

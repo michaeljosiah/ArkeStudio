@@ -7716,8 +7716,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button { min-width: 44px; min-height: 44px; }
   /* The inspector's rows and boxes (turn 144) grow to the touch target in height only: they are
      as wide as their column already, and a number box is as wide as its own text. */
-  .fy-swstage__item, .fy-swstage__add, .fy-swstage__markrow, .fy-swstage__link, .fy-swstage__select,
-  .fy-swstage__field, .fy-swstage__stepper > input, .fy-swstage__triad input, .fy-swstage__exit { min-height: 44px; }
+  .fy-swstage__item, .fy-swstage__add, .fy-swstage__markrow, .fy-swstage__link, .fy-swstage__select, .fy-swstage__field,
+  .fy-swstage__stepper > input, .fy-swstage__triad input, .fy-swstage__check, .fy-swstage__range, .fy-swstage__exit { min-height: 44px; }
   .fy-swstage__check > input { width: 24px; height: 24px; }
   .fy-swstage__track { height: 44px; }
   .fy-swstage__key, .fy-swstage__lane-head { top: 18px; }

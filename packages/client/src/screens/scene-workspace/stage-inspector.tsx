@@ -1,11 +1,24 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Minus, Plus } from "../../components/icons.js";
+import type { StageSelection } from "./stage-viewport.js";
 
 /**
  * The Stage panel's field grammar (design turn 144): a row is a label in a fixed column and one
  * control that starts at the column's edge, whichever row it is. Every form on the panel is built
  * from these, so a number, a choice, a yes/no and three-of-a-kind each look one way.
  */
+
+/**
+ * Whether a selection is the list line about to be pressed. A line stands for every pick the viewport
+ * can make of its thing — the camera's body or its aim, a figure or the end of its walk — so the
+ * press that clears a selected line compares lines, not picks.
+ */
+export function sameLine(current: StageSelection, next: Exclude<StageSelection, null>): boolean {
+  if (current === null) return false;
+  if (current.kind === "rig" || current.kind === "aim") return next.kind === "rig" || next.kind === "aim";
+  if (current.kind === "set") return next.kind === "set" && current.index === next.index;
+  return (next.kind === "cast" || next.kind === "walkend") && current.sheetId === next.sheetId;
+}
 
 export function Eyebrow({ title, meta, hint }: { title: string; meta?: string; hint?: string }) {
   return (
