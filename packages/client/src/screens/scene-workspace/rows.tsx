@@ -863,6 +863,12 @@ function Row({
   const [promptWhole, setPromptWhole] = useState(false);
   const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
   const pressTop = useRef<number | null>(null);
+  /**
+   * A prompt write the blur (or Rebuild) admitted and the durable override has not yet matched.
+   * Close waits on this rather than inferring a write from the draft: a draft that differs from
+   * the durable prompt with nothing in flight is a refused write, and Close must send it again.
+   */
+  const promptWrite = useRef<{ expected: string | null; refusalVersion: number } | null>(null);
   // In the Grid a card's prompt opens on its toggle; in the List the prompt is one of the open
   // row's panels, so it is shown exactly when the row is.
   const promptShown = layout === "grid" ? promptOpen : open;
@@ -1004,6 +1010,7 @@ function Row({
     setScriptDraft(shot.description);
   }, [shot.description]);
   useEffect(() => {
+    if (promptWrite.current !== null && durablePromptOverride === promptWrite.current.expected) promptWrite.current = null;
     if (pendingHide !== null) {
       if (durablePromptOverride === pendingHide.expected) {
         pendingRebuildVersion.current = null;
@@ -1018,6 +1025,11 @@ function Row({
     if (durablePromptOverride === null) pendingRebuildVersion.current = null;
   }, [durablePromptOverride, onClose, pendingHide]);
   useEffect(() => {
+    // A refusal answers the write in flight: the draft is the person's again, to send once more.
+    if (promptWrite.current !== null && promptWrite.current.refusalVersion !== refusalVersion) {
+      promptWrite.current = null;
+      promptDirty.current = true;
+    }
     if (pendingHide !== null) {
       if (pendingHide.refusalVersion === refusalVersion) return;
       preservedRefusal.current = refusalVersion;
@@ -1116,6 +1128,7 @@ function Row({
       setPromptDraft(null);
       return false;
     }
+    promptWrite.current = { expected: replacement, refusalVersion };
     setPromptDraft(replacement === null ? assembledPrompt : next);
     return true;
   };
@@ -1130,6 +1143,7 @@ function Row({
     }
     if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
       pendingRebuildVersion.current = refusalVersion;
+      promptWrite.current = { expected: null, refusalVersion };
       setPromptDraft(assembledPrompt);
     } else {
       setPromptDraft(null);
@@ -1162,14 +1176,14 @@ function Row({
     pressTop.current = band.current?.getBoundingClientRect().top ?? null;
     onSelect();
   };
-  // Close writes the prompt as the row holds it, as Hide does on a card. One case Hide never met:
-  // reached by keyboard, the chevron takes focus and the blur has already written the draft —
-  // then the row waits for that write rather than sending it twice.
+  // Close takes focus like any button, so whichever editor held it blurs and writes first —
+  // the script, the notes, or the prompt — and one write is in flight at most. A prompt write
+  // the blur admitted is waited on rather than sent again; a refused one is the draft's again
+  // and goes through hidePrompt, which resends it and waits.
   const closeRow = () => {
     if (pendingHide !== null) return;
-    if (!promptDirty.current && promptDraft !== null && promptDraft.trim() !== currentPrompt.text.trim()) {
-      const next = promptDraft.trim();
-      setPendingHide({ expected: next === "" || next === assembledPrompt.trim() ? null : next, draft: promptDraft, refusalVersion, closes: "row" });
+    if (promptWrite.current !== null) {
+      setPendingHide({ expected: promptWrite.current.expected, draft: promptDraft ?? promptValue, refusalVersion, closes: "row" });
       return;
     }
     hidePrompt(promptValue, "row");
@@ -1393,9 +1407,6 @@ function Row({
             aria-label={`${open ? "Close" : "Open"} shot ${shot.number}`}
             aria-expanded={open}
             disabled={staged || pendingHide !== null}
-            // Taking focus would blur the prompt and commit it before Close runs; Close writes
-            // the draft itself and waits for the durable override, as Hide does on a card.
-            onPointerDown={(event) => event.preventDefault()}
             onClick={() => (open ? closeRow() : openRow())}
           >
             {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}

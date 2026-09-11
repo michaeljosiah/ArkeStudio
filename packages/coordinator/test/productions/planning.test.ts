@@ -1177,6 +1177,20 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
+  it("never splices a shot's notes into the prompt (design turn 143)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const noted: Shot = {
+      ...shot(1, 6, "@maren-kest grips the rail"),
+      notes: "NOTE-SENTINEL make it moodier, ask about the lamp",
+    };
+    for (const capability of ["image", "video"] as const) {
+      const prompt = assemblePrompt(bundle.meta, bundle.sheets, scene([noted]), noted, undefined, undefined, capability);
+      assert.ok(!prompt.includes("NOTE-SENTINEL"), `a note is the person's; the ${capability} prompt reads the shot's named fields, not this one`);
+    }
+    await store.close();
+  });
+
   it("emits the complete location Look and an explicitly authored camera anchor for video", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

@@ -282,8 +282,11 @@ export const ShotSchema = z
     /** `@slug` tokens are live sheet references, resolved at prompt assembly (§2.3.4). */
     description: z.string(),
     /**
-     * Working notes on the shot (design turn 143). For the person, never for a model: nothing
-     * reads them into a prompt, which is what keeps them safe to write freely.
+     * Working notes on the shot (design turn 143). The person's, first: prompt assembly reads
+     * the shot's named fields and never this one, so a note is not spliced into an image or
+     * video prompt. A model that is handed the whole shot — World Chat's scene reads, Stage
+     * construction — sees the note with the rest of it, which is the point of a note Arke can
+     * act on; it is not a private field.
      */
     notes: z.string().optional(),
     camera: z.string().optional(),

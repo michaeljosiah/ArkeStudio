@@ -1990,6 +1990,72 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.match(dom.document.body.textContent ?? "", /The board prompt version moved/, "the workspace still shows the refusal");
   });
 
+  it("resends a blur-written prompt that was refused when the row is closed, and waits for it (codex round 1)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shots = orderedShots(scene);
+    shots[0]!.promptOverride = { text: "Stored shot prompt", sheetVersions: {} };
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
+    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
+    const editor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
+    await editTextarea(editor.querySelector("textarea") as HTMLTextAreaElement, "Blur-written draft");
+    // Tabbing into another panel blurs the prompt and writes it.
+    await act(async () => editor.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    const writes = () => sent.filter((message) => message.kind === "scene-command" && message.command.kind === "set-prompt-override");
+    assert.equal(writes().length, 1, "the blur admitted one write");
+    await apply({
+      at: "2026-09-01T10:04:00.000Z",
+      type: "scene.write-refused",
+      worldId: FIXTURE_WORLD_ID,
+      productionId: "saltlight",
+      sceneFile: "04-the-verse-rises",
+      reason: "The shot prompt version moved.",
+    });
+    assert.equal((editor.querySelector("textarea") as HTMLTextAreaElement).value, "Blur-written draft", "the refused draft is still the person's");
+    const close = row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement;
+    assert.equal(close.disabled, false, "nothing is in flight after the refusal");
+    await click(close);
+    assert.equal(writes().length, 2, "Close sends the refused draft again rather than waiting on a write that is not there");
+    assert.deepEqual((writes().at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command, {
+      kind: "set-prompt-override",
+      shotId: shots[0]!.id,
+      text: "Blur-written draft",
+      capability: "video",
+    });
+    assert.equal(close.disabled, true, "and now waits on that write");
+    const landed = structuredClone(state) as ClientState;
+    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
+      .scenes.find((candidate) => candidate.id === "sc_04")!;
+    landedScene.version += 1;
+    orderedShots(landedScene)[0]!.promptOverride = { text: "Blur-written draft", sheetVersions: {} };
+    await act(async () => __setStateForTest(landed));
+    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "the durable override closes the row");
+  });
+
+  it("Close takes focus like any button, so the editor that held it blurs and writes before the row closes", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mount();
+    const row = q(mounted, ".fy-swrow")!;
+    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
+    const close = row.querySelector('[aria-label="Close shot 12"]') as HTMLButtonElement;
+    const key = Object.keys(close).find((candidate) => candidate.startsWith("__reactProps$"))!;
+    const props = (close as unknown as Record<string, { onPointerDown?: unknown }>)[key]!;
+    assert.equal(props.onPointerDown, undefined, "no pointer-down guard keeps the notes or the script from blurring");
+    // What the browser does on the press: the notes editor blurs, its write goes, then Close runs.
+    const notes = row.querySelector('[aria-label="Notes for shot 12"]') as HTMLTextAreaElement;
+    await editTextarea(notes, "Hold on the hands.");
+    await act(async () => notes.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    await click(close);
+    const command = sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>;
+    assert.deepEqual(command.command, { kind: "edit-shot", shotId: "sh_12", change: { notes: "Hold on the hands." } });
+    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "an unchanged prompt lets the row close at once");
+  });
+
   it("clears a dirty consolidated prompt without a blur write and restores stored copy on refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;

@@ -235,12 +235,41 @@
   :where([data-screen="scene-detail"]) .fy-swrow__titleline { padding-right: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
   :where([data-screen="scene-detail"]) .fy-swrow__actionline { justify-content: space-between; }
+  /* The open row stacks: frame, head, actions, then the panels one under another. The rules
+     above place the actions in column 3, which on this grid is the 12px seam. */
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; row-gap: 12px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__frame { grid-column: 1; grid-row: 1; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__head { grid-column: 1; grid-row: 2; padding: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__titleline { padding-right: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actions { position: static; grid-column: 1; grid-row: 3; padding: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actionline { justify-content: flex-start; gap: 10px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--description { grid-column: 1; grid-row: 4; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--prompt { grid-column: 1; grid-row: 5; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--notes { grid-column: 1; grid-row: 6; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--settings { grid-column: 1; grid-row: 7; }
+  /* A folded row keeps its one line: a shorter strip, the overflow and the chevron over the right
+     edge, and the action left to the open row, one press away. */
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 54px 120px minmax(0, 1fr); }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { width: 120px; grid-row: auto; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { padding: 0 96px 0 16px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__actions { position: absolute; grid-column: auto; top: 50%; right: 12px; padding: 0; transform: translateY(-50%); }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__generate { display: none; }
 }
 @container (max-width: 560px) {
   :where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
   :where([data-screen="scene-detail"]) .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, 285px); }
   :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] { grid-template-columns: minmax(0, 1fr); padding: 12px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__frame { grid-column: 1; width: min(100%, 260px); }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actions { grid-column: 1; }
+  :where([data-screen="scene-detail"]) .fy-swrow__settingsgrid { grid-template-columns: minmax(0, 1fr); }
+  /* The strip drops its picture: number, title, timing, one line of script, and the actions. */
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 26px 44px minmax(0, 1fr); }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { grid-column: 2; width: 44px; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__label { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__hatch > * { display: none; }
+  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { grid-column: 3; padding: 0 88px 0 12px; }
   :where([data-screen="scene-detail"]) .fy-sw__headline { flex-wrap: wrap; }
   :where([data-screen="scene-detail"]) .fy-sw__headline > .fy-sw__title { flex-basis: 100%; font-size: 24px; }
   :where([data-screen="scene-detail"]) .fy-sw__context { gap: 12px; }
