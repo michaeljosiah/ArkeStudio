@@ -154,13 +154,16 @@ async function renderCheck(chrome, file, { needsRuntime }) {
     // The master renders through the dc runtime, which fetches React first; give it time and
     // then insist on cards, so an unrendered page reads as a failure rather than "no Geist".
     const deadline = Date.now() + 60_000;
+    const enough = needsRuntime ? 200 : 1;
     let cards = 0;
     while (Date.now() < deadline) {
       cards = await evaluate("document.querySelectorAll('[data-screen-label]').length").catch(() => 0);
-      if (cards > (needsRuntime ? 200 : 0)) break;
+      if (cards >= enough) break;
       await new Promise((r) => setTimeout(r, 1000));
     }
-    if (cards === 0) throw new Error(`${file}: nothing rendered (no [data-screen-label] in 60s)`);
+    // A stalled or truncated runtime leaves a handful of cards; one of them painting in Geist
+    // would prove nothing about the document, so a partial render fails here.
+    if (cards < enough) throw new Error(`${file}: ${cards} card(s) rendered in 60s, expected at least ${enough}`);
     await evaluate("document.fonts.ready.then(() => true)");
     const faces = await evaluate(`[...document.fonts].filter(f => /^Geist/.test(f.family)).map(f => f.family + ' ' + f.weight + ' ' + f.status)`);
     const loaded = faces.filter((f) => f.endsWith(" loaded"));

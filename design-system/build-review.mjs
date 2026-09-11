@@ -168,6 +168,11 @@ const decode = (s) => s
   .replace(/&middot;/g, "·").replace(/&#8217;/g, "’").replace(/&#8212;/g, "—").replace(/&times;/g, "×")
   .replace(/&nbsp;/g, " ").replace(/&hellip;|&#8230;/g, "…").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
 const textOf = (markup) => decode(markup.replace(/<svg[\s\S]*?<\/svg>/g, " ").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ");
+/** A whole label, not a substring: the header's `Generate frames` must not stand in for a row's `Generate frame`. */
+function hasLabel(text, label) {
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("(^|[^\\p{L}\\p{N}])" + escaped + "(?=$|[^\\p{L}\\p{N}])", "u").test(text);
+}
 
 const sections = [];
 for (const s of SCREENS) {
@@ -181,7 +186,7 @@ for (const s of SCREENS) {
   if (!f) { problems.push(`${s.screen}: frame ${s.frame} is not in the master`); continue; }
   if (f.bitmapOnly) { problems.push(`${s.screen}: frame ${s.frame} is a bitmap, not a drawing (turn 139)`); continue; }
   const text = textOf(f.root);
-  const missing = s.controls.filter((c) => !text.includes(c));
+  const missing = s.controls.filter((c) => !hasLabel(text, c));
   if (missing.length) { problems.push(`${s.screen}: frame ${s.frame} does not carry ${missing.map((c) => `"${c}"`).join(", ")} — update the frame in the PR that shipped the control`); continue; }
   const t = turn(turnOf(s.frame));
   sections.push({ ...s, root: f.root, caption: f.caption, turn: turnOf(s.frame), turnName: t?.name ?? "", rules: t?.rules ?? [] });
@@ -246,11 +251,12 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="${TOKENS}/spacing.css">
 <link rel="stylesheet" href="${TOKENS}/effects.css">
 <script src="image-slot.js"></script>
+<script src="theme-switch.js"></script>
 <style>
 /* The master's own chrome, copied so its rules and cards read here as they read there. */
 ${masterStyle}
-/* This page's chrome. Theme follows the system; the frames re-theme from the tokens alone. */
-@media (prefers-color-scheme: dark) { :root { color-scheme: dark; } }
+/* This page's chrome. theme-switch.js writes .dark / data-theme / color-scheme to the root exactly
+   as the master does — System, Light, Dark — and the frames re-theme from the tokens alone. */
 html { background: var(--dv-canvas); }
 body { margin: 0; font: 400 var(--text-sm)/1.55 var(--font-sans); color: var(--dv-ink); }
 .wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }

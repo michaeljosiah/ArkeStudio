@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/spacing.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/effects.css">
 <script src="image-slot.js"></script>
+<script src="theme-switch.js"></script>
 <style>
 /* The master's own chrome, copied so its rules and cards read here as they read there. */
 
@@ -62,8 +63,8 @@ a{color:var(--dv-link)}a:hover{color:var(--dv-link-hover)}
 @keyframes fadeUp{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:none}}
 @keyframes drift{from{transform:translateY(0)}to{transform:translateY(-7px)}}
 @keyframes barFill{from{width:4%}to{width:78%}}@keyframes kenburns{from{transform:scale(1)}to{transform:scale(1.08)}}@keyframes pulseDot{0%,100%{opacity:1}50%{opacity:.35}}
-/* This page's chrome. Theme follows the system; the frames re-theme from the tokens alone. */
-@media (prefers-color-scheme: dark) { :root { color-scheme: dark; } }
+/* This page's chrome. theme-switch.js writes .dark / data-theme / color-scheme to the root exactly
+   as the master does — System, Light, Dark — and the frames re-theme from the tokens alone. */
 html { background: var(--dv-canvas); }
 body { margin: 0; font: 400 var(--text-sm)/1.55 var(--font-sans); color: var(--dv-ink); }
 .wrap { display: grid; grid-template-columns: 250px minmax(0, 1fr); min-height: 100vh; }
