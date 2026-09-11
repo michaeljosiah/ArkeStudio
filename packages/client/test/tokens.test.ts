@@ -161,10 +161,27 @@ describe("design tokens", () => {
       ".fy-swstage__modes button",
       ".fy-swstage__ghost",
       ".fy-swstage__chips button",
-      ".fy-swstage__set input",
-      ".fy-swstage__set-head button",
     ]) {
       assert.ok(coarseTargets.includes(selector), `${selector} keeps a 44px coarse-pointer target`);
+    }
+    // The inspector's rows and boxes (turn 144) are as wide as their column already; they grow to
+    // the touch target in height alone.
+    const coarseHeights = [...coarse.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{ min-height: 44px; \}/g)]
+      .flatMap((match) => match[1]!.split(",").map((selector) => selector.trim()));
+    for (const selector of [
+      ".fy-swstage__item",
+      ".fy-swstage__add",
+      ".fy-swstage__markrow",
+      ".fy-swstage__link",
+      ".fy-swstage__select",
+      ".fy-swstage__field",
+      ".fy-swstage__stepper > input",
+      ".fy-swstage__triad input",
+      ".fy-swstage__check",
+      ".fy-swstage__range",
+      ".fy-swstage__exit",
+    ]) {
+      assert.ok(coarseHeights.includes(selector), `${selector} keeps a 44px coarse-pointer height`);
     }
     assert.match(imageActions, /@media \(pointer: coarse\)[\s\S]*?\.fy-imgdl\s*\{[^}]*width:\s*44px;[^}]*height:\s*44px/);
     assert.match(css, /\.fy-swalt:focus-within\s*\{[^}]*clip-path:\s*none/, "focused edge words escape the visually-hidden clipping box");
