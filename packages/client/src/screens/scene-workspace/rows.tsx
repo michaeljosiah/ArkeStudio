@@ -862,6 +862,9 @@ function Row({
   const [foldedPanels, setFoldedPanels] = useState<ReadonlySet<"description" | "prompt" | "notes">>(new Set());
   const [promptWhole, setPromptWhole] = useState(false);
   const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
+  /** The note last written and not yet durable, so leaving the row does not write it twice. */
+  const notesSent = useRef<string | null>(null);
+  const wasOpen = useRef(open);
   const pressTop = useRef<number | null>(null);
   /**
    * A prompt write the blur (or Rebuild) admitted and the durable override has not yet matched.
@@ -870,8 +873,9 @@ function Row({
    */
   const promptWrite = useRef<{ expected: string | null; refusalVersion: number } | null>(null);
   // In the Grid a card's prompt opens on its toggle; in the List the prompt is one of the open
-  // row's panels, so it is shown exactly when the row is.
-  const promptShown = layout === "grid" ? promptOpen : open;
+  // row's panels, so it is shown exactly when the row is. A card also shows it while a draft is
+  // dirty, in the very render that leaves the List, so the switch never unmounts the editor.
+  const promptShown = layout === "grid" ? promptOpen || promptDirty.current : open;
   const accepted = newShot ? null : acceptedTakeId(production, shot.id);
   const takes = takesForShot(production, shot.id);
   const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
@@ -1014,6 +1018,7 @@ function Row({
   // The draft follows the durable note and nothing else: a refused write leaves the person's
   // words in the box to blur again, rather than putting the old note back over them.
   useEffect(() => {
+    notesSent.current = null;
     setNotesDraft(shot.notes ?? "");
   }, [shot.notes]);
   useEffect(() => {
@@ -1037,6 +1042,7 @@ function Row({
   }, [durablePromptOverride, onClose, open, pendingHide]);
   useEffect(() => {
     // A refusal answers the write in flight: the draft is the person's again, to send once more.
+    notesSent.current = null;
     if (promptWrite.current !== null && promptWrite.current.refusalVersion !== refusalVersion) {
       promptWrite.current = null;
       promptDirty.current = true;
@@ -1201,11 +1207,29 @@ function Row({
   };
   const commitNotes = (value: string) => {
     const next = value.trim();
-    if (disabled || next === (shot.notes ?? "")) return;
+    if (disabled || next === (shot.notes ?? "") || next === notesSent.current) return;
     // A write that is not taken (one is already in flight) keeps the draft, as a refusal does.
-    if (next === "") onCommand({ kind: "edit-shot", shotId: shot.id, change: {}, clear: ["notes"] });
-    else onCommand({ kind: "edit-shot", shotId: shot.id, change: { notes: next } });
+    const accepted = next === ""
+      ? onCommand({ kind: "edit-shot", shotId: shot.id, change: {}, clear: ["notes"] })
+      : onCommand({ kind: "edit-shot", shotId: shot.id, change: { notes: next } });
+    if (accepted) notesSent.current = next;
   };
+  // The prompt panel and Notes exist only in the open row, so they leave with it. A press
+  // elsewhere blurred and wrote them first; the List/Grid switch holds focus instead (turn 138)
+  // and unmounts them without a blur. Then the card's prompt opens on the same editor, draft and
+  // focus intact, and a note — which the card has no box for — is written on the way out.
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      if (promptDirty.current) {
+        if (layout === "grid") setPromptOpen(true);
+        else commitPrompt(promptValue);
+      }
+      commitNotes(notesDraft);
+    }
+    wasOpen.current = open;
+    // Runs on the transition only; the drafts and commit paths it reads are the current ones.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   const togglePanel = (panel: "description" | "prompt" | "notes") => {
     // The fold control sits inside the prompt's blur boundary, so folding that panel would
     // unmount the editor without the blur that writes it; the fold writes a dirty draft first.

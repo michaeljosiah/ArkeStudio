@@ -462,6 +462,30 @@ describe("a row opens in place and the others fold around it (design turn 143)",
     assert.equal(band.getAttribute("data-open"), "true", "back in the List, the selected row is the open one");
   });
 
+  it("switching to Grid keeps a dirty prompt in the same editor and writes an unsaved note (codex round 4)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    const band = q(mounted, ".fy-swrow__band")!;
+    await click(band);
+    const prompt = band.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement;
+    await act(async () => {
+      prompt.value = "Kept across the switch";
+      reactProps<{ onChange: (event: { target: HTMLTextAreaElement }) => void }>(prompt).onChange({ target: prompt });
+    });
+    const notes = band.querySelector('[aria-label="Notes for shot 12"]') as HTMLTextAreaElement;
+    await act(async () => reactProps<{ onChange: (event: { target: { value: string } }) => void }>(notes).onChange({ target: { value: "Written on the switch" } }));
+    // The layout button holds focus (turn 138), so neither editor blurs; the row's own leaving
+    // has to keep one and write the other.
+    await click(byText(q(mounted, ".fy-sw__layouts")!, "Grid"));
+    assert.equal(band.getAttribute("data-open"), null);
+    assert.equal(band.querySelector(".fy-swrow__prompt textarea"), prompt, "the card's prompt opens on the same editor");
+    assert.equal(prompt.value, "Kept across the switch", "with the draft still in it");
+    const commands = sent.filter((message) => message.kind === "scene-command") as Array<Extract<ClientMessage, { kind: "scene-command" }>>;
+    assert.deepEqual(commands.map((message) => message.command), [{ kind: "edit-shot", shotId: "sh_12", change: { notes: "Written on the switch" } }], "the note, which the card has no box for, is written; the prompt is not");
+    assert.equal(band.querySelector('[aria-label="Notes for shot 12"]'), null);
+  });
+
   it("the scene dock has no language-model select above its composer", async () => {
     const mounted = await mountState();
     assert.ok(q(mounted, ".fy-arke .fy-cx"), "the composer is there");
