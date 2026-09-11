@@ -616,7 +616,15 @@ export function SceneWorkspace({
             {view === "storyboard" ? (
               <div className="fy-sw__layouts" role="group" aria-label="Storyboard layout">
                 {(["list", "grid"] as const).map((layout) => (
-                  <button key={layout} type="button" aria-pressed={(boardsVisible ? "list" : storyboardLayout) === layout} disabled={layout === "grid" && frameRun?.run.mode === "board"} onClick={() => { setStoryboardLayout(layout); if (layout === "grid") setShowBoards(false); }}>
+                  <button
+                    key={layout}
+                    type="button"
+                    aria-pressed={(boardsVisible ? "list" : storyboardLayout) === layout}
+                    disabled={layout === "grid" && frameRun?.run.mode === "board"}
+                    // Moving focus would blur and commit the current editor before the layout changes.
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={() => { setStoryboardLayout(layout); if (layout === "grid") setShowBoards(false); }}
+                  >
                     {layout === "list" ? <ListBullet size={14} /> : <Grid2x2 size={14} />}{layout === "list" ? "List" : "Grid"}
                   </button>
                 ))}
