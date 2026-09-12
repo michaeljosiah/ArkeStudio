@@ -98,6 +98,17 @@ for (const w of [400, 500, 600, 700]) {
   if (!existsSync(join(here, `_ds/fonts/geist-sans-latin-${w}-normal.woff2`))) fail(`_ds/fonts/geist-sans-latin-${w}-normal.woff2 is missing`);
 }
 
+// 5. The workspace footer's resting label. Turn 138 binds it to the confirmed connection and
+//    scene version (`Connected · v21`) and forbids a claim that uncommitted editor drafts have
+//    been saved; twelve frames from 139 on drew "All changes saved" regardless (issues 1103,
+//    1114). Any turn from 138 on that writes it fails.
+const FOOTER_RULE_FROM_TURN = 138;
+for (const { turn, body } of sections) {
+  if (turn < FOOTER_RULE_FROM_TURN) continue;
+  const claims = body.match(/All changes saved/g) ?? [];
+  if (claims.length) fail(`turn ${turn}: ${claims.length} footer(s) claim "All changes saved" — 138 binds the resting label to "Connected · v<version>", never a claim that local drafts are saved`);
+}
+
 // ---- render check ---------------------------------------------------------------------------
 
 function chromePath() {
