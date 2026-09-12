@@ -85,6 +85,7 @@ describe("prop-state references", () => {
     assert.equal(moved?.path, "references/moved-by-hand/prop.json", "the path a person can open, not the id the file claims");
     assert.match(moved?.message ?? "", /@maren-kest, the sheet Maren Kest's id/);
     assert.equal(reported.length, 2);
+    assert.match(twins[0]!.message, /\(references\/prop_[0-9A-Z]+\/prop\.json\)/, "the twin's holder is named by the path it was read from");
 
     assert.equal(await createProp(store, "Tea Cup"), null, "the slug is another prop's");
     assert.equal(await createProp(store, "The Vigil"), null, "the slug is a sheet's id");
@@ -101,6 +102,22 @@ describe("prop-state references", () => {
     for (const problem of store.getBundle().problems.filter((entry) => entry.path.endsWith("prop.json"))) {
       assert.equal(problem.kind, "conflict", "a loaded record in conflict is not a file that could not be read");
     }
+  });
+
+  it("two files claiming one prop id are both named, each by its own path (codex round 4)", async () => {
+    const dir = await makeTempWorld();
+    const id = newId("prop");
+    for (const [folder, name] of [["first-copy", "Lantern"], ["second-copy", "Lantern"]] as const) {
+      await mkdir(join(dir, "references", folder), { recursive: true });
+      await writeFile(join(dir, "references", folder, "prop.json"), `${JSON.stringify({ id, name, states: [] }, null, 2)}` + "\n");
+    }
+    const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
+    closeOnCleanup(() => store.close());
+    const reported = store.getBundle().problems.filter((problem) => problem.kind === "conflict");
+    const paths = reported.map((problem) => problem.path).sort();
+    assert.deepEqual([...new Set(paths)], ["references/second-copy/prop.json"], "the later file is the one reported, and never a path it does not have");
+    assert.ok(reported.some((problem) => /carries the id prop_[0-9A-Z]+, as does "Lantern" \(references\/first-copy\/prop\.json\)/.test(problem.message)), JSON.stringify(reported));
+    assert.ok(reported.some((problem) => /answers to @lantern, as does "Lantern" \(references\/first-copy\/prop\.json\)/.test(problem.message)), JSON.stringify(reported));
   });
 
   it("a sheet minted after a prop of the same name steps past the prop's slug (issue 1116)", async () => {

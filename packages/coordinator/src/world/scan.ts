@@ -29,7 +29,9 @@ import {
   ProductionSchema,
   ProposalSchema,
   PropSchema,
+  type Prop,
   checkPropName,
+  propSlug,
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
@@ -430,9 +432,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   const referenceKits = [];
   const props = [];
-  // Where each prop record was read from — a hand-edited file may claim another id than its
-  // directory's, and a report has to name the file a person can open.
-  const propPaths = new Map<string, string>();
+  // Each prop record beside the path it was read from, in scan order — a hand-edited file may
+  // claim another id than its directory's, two files may even claim one id, and a report has to
+  // name the file a person can open, so the path rides the record rather than a map by id.
+  const propEntries: Array<{ prop: Prop; path: string }> = [];
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
   for (const sheetId of await listDir(join(dir, "references"))) {
@@ -448,7 +451,7 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
       const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
       if (prop) {
         props.push(prop);
-        propPaths.set(prop.id, toPortable(`references/${sheetId}/prop.json`));
+        propEntries.push({ prop, path: toPortable(`references/${sheetId}/prop.json`) });
       }
     }
     const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
@@ -1105,18 +1108,25 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   // Both records stay loaded, since either may be cited by a shot's own control; the later one
   // is reported as a conflict — not as a file that could not be read, which it was not — naming
   // what holds the word, so a person can rename it.
-  for (const [index, prop] of props.entries()) {
-    const check = checkPropName(prop.name, props.slice(0, index), sheets);
+  for (const [index, { prop, path }] of propEntries.entries()) {
+    const earlier = propEntries.slice(0, index);
+    // Two files claiming one id: a shot's own control cites a prop by id, and would find either.
+    const sameId = earlier.find((entry) => entry.prop.id === prop.id);
+    if (sameId) {
+      problems.push({ kind: "conflict", path, message: `prop "${prop.name}" carries the id ${prop.id}, as does "${sameId.prop.name}" (${sameId.path}) — one record per id; remove or re-id one` });
+    }
+    const check = checkPropName(prop.name, earlier.map((entry) => entry.prop), sheets);
     if (check.ok) continue;
+    const holder = check.reason === "prop" ? earlier.find((entry) => propSlug(entry.prop.name) === check.slug) : undefined;
     problems.push({
       kind: "conflict",
-      path: propPaths.get(prop.id) ?? toPortable(`references/${prop.id}/prop.json`),
+      path,
       message:
         check.reason === "empty"
           ? `prop "${prop.name}" has no letter or number to be cited by — rename it`
           : check.reason === "sheet"
             ? `prop "${prop.name}" answers to @${check.slug}, the sheet ${check.holder.name}'s id — rename the prop; a mention cites one thing`
-            : `prop "${prop.name}" answers to @${check.slug}, as does "${check.holder.name}" (${propPaths.get(check.holder.id) ?? `references/${check.holder.id}/prop.json`}) — rename one; a mention cites one thing`,
+            : `prop "${prop.name}" answers to @${check.slug}, as does "${holder?.prop.name ?? check.holder.name}" (${holder?.path ?? "another record"}) — rename one; a mention cites one thing`,
     });
   }
 
