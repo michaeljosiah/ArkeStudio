@@ -31,7 +31,7 @@ import { CharacterDialog } from "./character-dialog.js";
 import { FrameActions } from "./frame-actions.js";
 import { frameRunShotState, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
-import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
+import { stagedShotChanges, useSceneWriter, type SceneWriter } from "./scene-writer.js";
 import { SelectionProvider, type WorkspaceSubject } from "./selection.js";
 import { ShotFields } from "./shot-fields.js";
 import { SceneStage } from "./stage.js";
@@ -62,7 +62,7 @@ export function ShotPage() {
     if (!orderedShots(record).some((shot) => shot.id === shotId)) {
       return <Navigate to={`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${record.id}`} replace />;
     }
-    return <ShotWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}/${shotId}`} world={world} production={production} scene={record} shotId={shotId} pendingGenerator={pendingGenerator} lightbox={lightbox} setLightbox={setLightbox} />;
+    return <SceneShots key={`${world.meta.worldId}/${production.meta.id}/${record.id}`} world={world} production={production} scene={record} shotId={shotId} pendingGenerator={pendingGenerator} lightbox={lightbox} setLightbox={setLightbox} />;
   }
   return (
     <Screen id="shot">
@@ -71,9 +71,12 @@ export function ShotPage() {
   );
 }
 
-type PendingGenerator = { requestId: string; sceneKey: string };
-
-function ShotWorkspace({
+/**
+ * The scene's writer, keyed by scene and shared by every shot page under it: a write sent
+ * before a step of the filmstrip is still the one in flight on the next shot, so the next edit
+ * waits for the version rather than going out against the same base and coming back stale.
+ */
+function SceneShots({
   world,
   production,
   scene,
@@ -90,18 +93,43 @@ function ShotWorkspace({
   lightbox: boolean;
   setLightbox: (open: boolean) => void;
 }) {
+  const writer = useSceneWriter(world, production, scene);
+  return <ShotWorkspace key={shotId} world={world} production={production} scene={scene} shotId={shotId} writer={writer} pendingGenerator={pendingGenerator} lightbox={lightbox} setLightbox={setLightbox} />;
+}
+
+type PendingGenerator = { requestId: string; sceneKey: string };
+
+function ShotWorkspace({
+  world,
+  production,
+  scene,
+  shotId,
+  writer,
+  pendingGenerator,
+  lightbox,
+  setLightbox,
+}: {
+  world: WorldBundle;
+  production: ProductionBundle;
+  scene: SceneRecord;
+  shotId: string;
+  writer: SceneWriter;
+  pendingGenerator: MutableRefObject<PendingGenerator | null>;
+  lightbox: boolean;
+  setLightbox: (open: boolean) => void;
+}) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const state = useClientState();
   const connection = useStore().connection;
   const digests = useBlockDigests(legacySceneView(scene));
-  const writer = useSceneWriter(world, production, scene);
   const { workingScene, staged, write, locked, commandPending, refusalVersion, sceneFile } = writer;
   // The page reads the staged scene, as the list does — unless the staged proposal removes the
   // very shot the address names, when it reads the accepted record so the page, the selection
   // and the dock stay about one shot until the proposal is decided.
   const workingShots = orderedShots(workingScene);
-  const shots = workingShots.some((candidate) => candidate.id === shotId) ? workingShots : orderedShots(scene);
+  const pageScene = workingShots.some((candidate) => candidate.id === shotId) ? workingScene : scene;
+  const shots = orderedShots(pageScene);
   const index = shots.findIndex((candidate) => candidate.id === shotId);
   const shot: Shot = shots[index]!;
   const previous = index > 0 ? shots[index - 1] ?? null : null;
@@ -217,7 +245,7 @@ function ShotWorkspace({
             : coverage === "changed"
               ? { word: "Script changed", tone: "stale" }
               : { word: "Frame ready", tone: "ready" };
-  const staging = shot.staging === undefined ? null : resolvedShotStaging(workingScene, shot.staging);
+  const staging = shot.staging === undefined ? null : resolvedShotStaging(pageScene, shot.staging);
   const stagingWord = staging === null ? "Not staged" : `v${shot.staging!.version} · ${staging.keys.length} key${staging.keys.length === 1 ? "" : "s"} · ${stagingMotionWord(staging, durationSec)}`;
 
   useEffect(() => {
@@ -491,7 +519,7 @@ function ShotWorkspace({
                 <ShotFields
                   world={world}
                   production={production}
-                  scene={workingScene}
+                  scene={pageScene}
                   shot={shot}
                   previous={previous}
                   digests={digests}
@@ -506,7 +534,7 @@ function ShotWorkspace({
             <SceneStage
               head={false}
               fullscreen={fullscreen ? { leave: () => setFull(false) } : null}
-              scene={workingScene}
+              scene={pageScene}
               production={production}
               world={world}
               aspect={aspect}

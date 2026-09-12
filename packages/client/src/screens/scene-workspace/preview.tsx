@@ -151,16 +151,6 @@ export function ScenePreview({
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
-  // The named shot's span is known once the spans are; seek there once, on the first render
-  // that has it, and never again — a later step of the playhead is the person's.
-  const sought = useRef(false);
-  useEffect(() => {
-    if (sought.current || startShotId === undefined) return;
-    const span = spans.find((candidate) => candidate.shot.id === startShotId);
-    if (span === undefined) return;
-    sought.current = true;
-    setTime(span.startSec);
-  }, [spans, startShotId]);
 
   // Play lines (SPEC-044 R-33): the scene's spoken lines that have a read — a selected one, or the
   // table-read cache — in shot order through the one player; the rest are counted, not played, and
@@ -237,6 +227,16 @@ export function ScenePreview({
     setPosition(next);
     setTime(next);
   }, [setPosition, totalSec]);
+  // The named shot's span is known once the spans are; seek there once, through the transport
+  // so play starts where the clock reads, and never again — a later step is the person's.
+  const sought = useRef(false);
+  useEffect(() => {
+    if (sought.current || startShotId === undefined) return;
+    const span = spans.find((candidate) => candidate.shot.id === startShotId);
+    if (span === undefined) return;
+    sought.current = true;
+    seek(span.startSec);
+  }, [seek, spans, startShotId]);
 
   // The end holds (R-29), so play pressed there goes back to the top rather than doing nothing.
   const play = () => {

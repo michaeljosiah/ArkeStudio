@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { newId, PropSchema, ProvenanceSchema } from "../src/index.js";
+import { newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
 
 /** Prop identity and the five provenance fields (design turn 105, Option C; issue 534). */
 describe("props", () => {
@@ -31,5 +31,16 @@ describe("props", () => {
       () => ProvenanceSchema.parse({ canonRevision: 3, sheets: {}, propStates: [{ propId: prop.id, resolutionSource: "shot" }] }),
       "absence is written down, never left out",
     );
+  });
+
+  it("a prop uncited by its chip loses its mention by the parser's own grammar, wherever it sits (SPEC-036 R-10)", () => {
+    // `@car` is never the start of `@carter`, and punctuation is as good a boundary as a space.
+    assert.equal(withoutMention("@car and @carter, (@car) again", "car"), "and @carter, () again");
+    assert.equal(withoutMention("@carter only", "car"), "@carter only");
+    assert.equal(withoutMention("The @the-vigil at dusk", "the-vigil"), "The at dusk");
+    for (const text of ["(@car)", "@car, then", "then @car"]) {
+      assert.ok(parseMentions(text).includes("car"), `${text} cites the prop`);
+      assert.ok(!parseMentions(withoutMention(text, "car")).includes("car"), `${text} no longer does`);
+    }
   });
 });

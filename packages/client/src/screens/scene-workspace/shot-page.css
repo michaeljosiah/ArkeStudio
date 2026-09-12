@@ -96,7 +96,8 @@
 :where([data-screen="shot"]) .fy-shot__link:disabled { opacity: .45; cursor: default; }
 :where([data-screen="shot"]) .fy-shot__add { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); text-decoration: none; }
 :where([data-screen="shot"]) .fy-shot__add:hover:not(:disabled) { color: var(--foreground); }
-:where([data-screen="shot"]) .fy-shot__cite { height: 26px; max-width: 200px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot"]) .fy-shot__cite { max-width: 200px; }
+:where([data-screen="shot"]) .fy-shot__cite > .fy-shot__select { height: 26px; font: 400 var(--text-xs)/1.4 var(--font-sans); }
 
 /* The script and the prompt: the row's editor, in a box that says it is one. */
 :where([data-screen="shot"]) .fy-shot__script, :where([data-screen="shot"]) .fy-shot__prompt { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); }
@@ -128,10 +129,12 @@
 :where([data-screen="shot"]) .fy-shot__field--wide { padding-bottom: 2px; }
 :where([data-screen="shot"]) .fy-shot__field > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
 :where([data-screen="shot"]) .fy-shot__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--foreground); }
-:where([data-screen="shot"]) .fy-shot__field > select, :where([data-screen="shot"]) .fy-shot__field > input { width: 100%; height: 28px; box-sizing: border-box; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
-:where([data-screen="shot"]) .fy-shot__field > select:disabled, :where([data-screen="shot"]) .fy-shot__field > input:disabled { opacity: .6; }
+:where([data-screen="shot"]) .fy-shot__selectwrap { width: 100%; }
+:where([data-screen="shot"]) .fy-shot__select { height: 28px; padding: 0 28px 0 10px; border-color: var(--border); border-radius: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot"]) .fy-shot__field > input { width: 100%; height: 28px; box-sizing: border-box; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot"]) .fy-shot__field > input:disabled { opacity: .6; }
 :where([data-screen="shot"]) .fy-shot__field > input::placeholder { color: var(--muted-foreground); }
-:where([data-screen="shot"]) .fy-shot__field:not([data-own]) > select { color: var(--muted-foreground); }
+:where([data-screen="shot"]) .fy-shot__field:not([data-own]) .fy-shot__select { color: var(--muted-foreground); }
 
 /* The rows of Timing, Continuity, Sound and Props: a 64px label, then the control. */
 :where([data-screen="shot"]) .fy-shot__row { display: flex; align-items: center; gap: 12px; min-height: 26px; }
@@ -145,12 +148,11 @@
 :where([data-screen="shot"]) .fy-shot__remove { border-color: transparent; }
 :where([data-screen="shot"]) .fy-shot__stepper > button:hover:not(:disabled), :where([data-screen="shot"]) .fy-shot__remove:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
 :where([data-screen="shot"]) .fy-shot__stepper > button:disabled, :where([data-screen="shot"]) .fy-shot__remove:disabled { opacity: .45; cursor: default; }
-:where([data-screen="shot"]) .fy-shot__check { display: flex; align-items: center; gap: 9px; min-height: 26px; font: 400 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; }
-:where([data-screen="shot"]) .fy-shot__check[data-inert="true"] { color: var(--muted-foreground); cursor: default; }
-:where([data-screen="shot"]) .fy-shot__check > input { width: 14px; height: 14px; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="shot"]) .fy-shot__check { align-items: center; gap: 9px; min-height: 26px; }
+:where([data-screen="shot"]) .fy-shot__check .ui-check__label { font: 400 var(--text-sm)/1.4 var(--font-sans); }
 :where([data-screen="shot"]) .fy-shot__prop { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
 :where([data-screen="shot"]) .fy-shot__prop > svg { color: var(--muted-foreground); }
-:where([data-screen="shot"]) .fy-shot__propstate { width: 220px; flex: none; height: 28px; box-sizing: border-box; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot"]) .fy-shot__propstate { width: 220px; flex: none; }
 
 /* The footer, as the scene page's. */
 :where([data-screen="shot"]) .fy-sw__footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; min-height: 50px; border-top: 1px solid var(--border); font: 400 var(--text-sm)/1.4 var(--font-sans); }

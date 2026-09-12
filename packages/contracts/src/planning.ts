@@ -66,6 +66,21 @@ export function parseMentions(description: string): string[] {
   return out;
 }
 
+/**
+ * The text without every mention of one slug, by the grammar `parseMentions` reads: a mention is
+ * `@` and the slug run to its end, wherever it sits — `(@car)` is a mention as much as ` @car `,
+ * and `@car` is never the start of `@carter`. The space a mention leaves is folded, so removing
+ * the chip removes the token and nothing else (SPEC-036 R-10).
+ */
+export function withoutMention(text: string, slug: string): string {
+  const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text
+    .replace(new RegExp(`@${escaped}(?![a-z0-9-])`, "g"), "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/^ | $/gm, "")
+    .trim();
+}
+
 export interface ResolvedCast {
   /** In order of first appearance — the budget's third ranking key. */
   cast: Array<{ sheet: Sheet; retired: boolean }>;

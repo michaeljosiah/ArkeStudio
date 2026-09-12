@@ -10,6 +10,7 @@ import {
   resolvePropStates,
   shotCoverage,
   shotSpeakers,
+  withoutMention,
   type ClientMessage,
   type ProductionBundle,
   type SceneRecord,
@@ -18,6 +19,7 @@ import {
   type WorldBundle,
 } from "@arke-studio/contracts";
 import { BenchBrief } from "../../components/bench-brief.js";
+import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 
@@ -367,15 +369,17 @@ export function ShotFields({
             return (
               <label key={field.key} className="fy-shot__field" data-own={own === undefined ? undefined : "true"}>
                 <span>{field.label}{own === undefined ? null : <i className="fy-shot__dot" title="overrides the scene" aria-label="overrides the scene" />}</span>
-                <select
-                  aria-label={`Shot ${field.label}`}
+                <Select
+                  label={`Shot ${field.label}`}
+                  className="fy-shot__select"
+                  wrapClassName="fy-shot__selectwrap"
                   value={own ?? ""}
                   disabled={disabled}
                   onChange={(event) => framingSet(field.key, event.target.value === "" ? undefined : event.target.value)}
                 >
                   <option value="">{inherited !== undefined ? `${inherited} · from scene` : "from scene"}</option>
                   {field.options.map((option) => <option key={option} value={option}>{option}</option>)}
-                </select>
+                </Select>
               </label>
             );
           })}
@@ -454,16 +458,22 @@ export function ShotFields({
       </Section>
 
       <Section icon={<LinkMark size={15} />} name="Continuity">
-        <label className="fy-shot__check" data-inert={previous === null ? "true" : undefined}>
-          <input type="checkbox" disabled={disabled || previous === null} checked={shot.continuity?.openOnPrevious ?? false} onChange={(event) => continuitySet({ openOnPrevious: event.target.checked || undefined })} />
-          <span>{previous === null ? "Opens on the previous shot’s last frame" : `Opens on shot ${previous.number}’s last frame`}</span>
-        </label>
+        <Checkbox
+          className="fy-shot__check"
+          label={previous === null ? "Opens on the previous shot’s last frame" : `Opens on shot ${previous.number}’s last frame`}
+          disabled={disabled || previous === null}
+          checked={shot.continuity?.openOnPrevious ?? false}
+          onChange={(event) => continuitySet({ openOnPrevious: event.target.checked || undefined })}
+        />
         {/* SPEC-019 R-50: the stronger neighbour of the box above — a frame keeps the
             composition and loses the motion and the audio under it. */}
-        <label className="fy-shot__check" data-inert={previous === null ? "true" : undefined}>
-          <input type="checkbox" disabled={disabled || previous === null} checked={shot.continuity?.continuesPrevious ?? false} onChange={(event) => continuitySet({ continuesPrevious: event.target.checked || undefined })} />
-          <span>{previous === null ? "Continues the previous shot" : `Continues shot ${previous.number}`}</span>
-        </label>
+        <Checkbox
+          className="fy-shot__check"
+          label={previous === null ? "Continues the previous shot" : `Continues shot ${previous.number}`}
+          disabled={disabled || previous === null}
+          checked={shot.continuity?.continuesPrevious ?? false}
+          onChange={(event) => continuitySet({ continuesPrevious: event.target.checked || undefined })}
+        />
         <div className="fy-shot__row">
           <span className="fy-shot__rowlabel">keep out</span>
           <input
@@ -506,9 +516,10 @@ export function ShotFields({
           <>
             <span className="fy-shot__spacer" />
             {citing ? (
-              <select
-                className="fy-shot__cite"
-                aria-label="Cite a prop"
+              <Select
+                label="Cite a prop"
+                className="fy-shot__select"
+                wrapClassName="fy-shot__cite"
                 autoFocus
                 defaultValue=""
                 disabled={disabled}
@@ -522,7 +533,7 @@ export function ShotFields({
               >
                 <option value="" disabled>Pick a prop…</option>
                 {uncited.map((prop) => <option key={prop.id} value={prop.id}>{prop.name}</option>)}
-              </select>
+              </Select>
             ) : (
               <button type="button" className="fy-shot__link fy-shot__add" disabled={disabled || uncited.length === 0} onClick={() => setCiting(true)}>
                 <Plus size={12} />Cite a prop
@@ -536,9 +547,10 @@ export function ShotFields({
           return (
             <div key={entry.propId} className="fy-shot__row">
               <span className="fy-shot__prop"><Archive size={13} />{entry.propName}</span>
-              <select
-                className="fy-shot__propstate"
-                aria-label={`${entry.propName} state for this shot`}
+              <Select
+                label={`${entry.propName} state for this shot`}
+                className="fy-shot__select"
+                wrapClassName="fy-shot__propstate"
                 value={entry.stateId ?? ""}
                 disabled={disabled}
                 onChange={(event) => {
@@ -550,7 +562,7 @@ export function ShotFields({
               >
                 <option value="">unresolved</option>
                 {prop.states.map((state) => <option key={state.id} value={state.id}>{state.name}{state.reference ? "" : " · no reference"}</option>)}
-              </select>
+              </Select>
               <button
                 type="button"
                 className="fy-shot__remove"
@@ -581,15 +593,6 @@ function Section({ icon, name, head, children, onBlur }: { icon: ReactNode; name
       <div className="fy-shot__sectionbody">{children}</div>
     </section>
   );
-}
-
-/**
- * The script without one `@slug` mention. Mentions are exact tokens (`@car` is not `@carter`),
- * so the slug is matched to its own end — a substring replace once turned `@carter` into `ter`.
- */
-function withoutMention(script: string, slug: string): string {
-  const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return script.replace(new RegExp(`(^|\\s)@${escaped}(?![\\w-])`, "g"), "$1").replace(/ {2,}/g, " ").trim();
 }
 
 function formatSeconds(seconds: number): string {

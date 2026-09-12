@@ -469,6 +469,30 @@ describe("the shot page (design turn 145)", () => {
     assert.match(q(removed, "h1")?.textContent ?? "", /^Shot 12 · Maren at the rail, listening/, "the page reads the accepted record while the proposal removes its shot");
     assert.match(q(removed, ".fy-arke")?.textContent ?? "", /Arke · Shot 12/, "and the dock is about the same shot");
     assert.match(q(removed, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren at the rail, listening/);
+    await click(byText(q(removed, ".fy-sw__tabs")!, "Stage"));
+    assert.ok(q(removed, '[data-testid="workspace-stage"]'), "the Stage opens");
+    assert.match(q(removed, "h1")?.textContent ?? "", /^Shot 12/, "on the same shot (codex round 3)");
+    assert.equal(q(removed, ".fy-shot__staging")?.textContent, "Not staged", "reading shot 12's staging, not the first remaining shot's");
+  });
+
+  it("a write sent before a step of the filmstrip is still the one in flight on the next shot (codex round 3)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    await chooseOption(q(mounted, 'select[aria-label="Shot angle"]')!, "Low angle");
+    assert.equal(commands(sent).length, 1, "the first edit went out");
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, "Saving…");
+    await click(q(mounted, '.fy-shot__step[aria-label="Next shot"]')!);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /^Shot 13/);
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, "Saving…", "the step does not forget the write in flight");
+    await chooseOption(q(mounted, 'select[aria-label="Shot angle"]')!, "High angle");
+    assert.equal(commands(sent).length, 1, "a second command against the same base is refused until the first lands");
+    const landed = structuredClone(FIXTURE_STATE) as ClientState;
+    sceneOf(landed).version += 1;
+    await act(async () => __setStateForTest(landed));
+    assert.equal(q(mounted, ".fy-sw__save")?.textContent, `Connected · v${sceneOf(landed).version}`, "the version moving releases the next write");
+    await chooseOption(q(mounted, 'select[aria-label="Shot angle"]')!, "High angle");
+    assert.equal(commands(sent).length, 2);
   });
 
   it("a shot that is not in the scene lands on the scene", async () => {
