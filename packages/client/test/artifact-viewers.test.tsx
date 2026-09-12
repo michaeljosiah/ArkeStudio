@@ -389,16 +389,20 @@ describe("what opens", () => {
     // The rule the app has had since SPEC-011. The dock is a stand-in for the browser's audio
     // element, sounding; pressing play on the opened artifact — the browser fires `play` on the
     // <video> or <audio> — pauses it.
-    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() { dock.paused = true; }, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, paused: false };
+    // The stand-in keeps the element's own `paused`: play() clears it, pause() sets it — because
+    // playClip pauses the element while it swaps the source in, and a stand-in that only recorded
+    // the pause would read as paused before the artifact ever sounded.
+    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, paused: true, async play() { dock.paused = false; }, pause() { dock.paused = true; }, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {} };
     setAudioFactoryForTest(() => dock as never);
     try {
       for (const [subject, tag] of [[CLIP, "video"], [BELLS, "audio"]] as const) {
-        dock.paused = false;
-        await playClip({ id: "dock-clip", url: "media/dock.wav", title: "The dock" });
+        await playClip({ id: `dock-${tag}`, url: `media/dock-${tag}.wav`, title: "The dock" });
         assert.equal(playbackSnapshot().status, "playing", "the dock is sounding");
+        assert.equal(dock.paused, false, "and its element is playing, right up to the press");
         const mounted = await mountShelf();
         await open(mounted, subject);
         const media = panel(mounted)!.querySelector<HTMLMediaElement>(`${tag}.fy-artview__media`)!;
+        assert.equal(dock.paused, false, "opening the viewer alone does not hush it");
         await act(async () => media.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
         assert.equal(dock.paused, true, `${tag}: the dock was paused`);
         await unmount(mounted);
