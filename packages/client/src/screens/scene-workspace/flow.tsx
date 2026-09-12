@@ -643,7 +643,7 @@ export function SceneFlow({
       return [
         { label: "Open in generator", disabled: locked || generatorPending, act: () => { closeMenu(false); onOpenShotInGenerator(shotId); } },
         ...(onOpenStage === undefined ? [] : [{ label: "Stage this shot", act: () => { closeMenu(false); onOpenStage(shotId); } }]),
-        ...(onEditShot === undefined ? [] : [{ label: "Advanced", disabled: locked, act: () => { closeMenu(false); onEditShot(shotId); } }]),
+        ...(onEditShot === undefined ? [] : [{ label: "Open the shot", disabled: locked, act: () => { closeMenu(false); onEditShot(shotId); } }]),
         { label: "Duplicate", disabled: locked, act: () => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId }); } },
         {
           label: "Delete",

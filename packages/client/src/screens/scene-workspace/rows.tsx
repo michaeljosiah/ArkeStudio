@@ -1,16 +1,11 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
-  assemblePrompt,
   assembleBoardPrompt,
   boardPromptFor,
   DEFAULT_SHOT_SEC,
   stageLineCrossings,
   orderedShots,
-  productionShape,
-  promptFor,
-  resolveCast,
-  shotSpeakers,
   shotCardState,
   shotCoverage,
   UNTITLED_SHOT,
@@ -28,14 +23,14 @@ import {
 } from "@arke-studio/contracts";
 import { mediaUrl } from "../../lib/media.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
-import { shotHasFrame, type WorkspaceBoardPack } from "./boards.js";
+import { shotFramePath, type WorkspaceBoardPack } from "./boards.js";
 import { selectedShotId, subjectMatchesBoard, useWorkspaceSelection } from "./selection.js";
 import { acceptTake, clearShotFrame, frameRunCommand, importShotFrame, retryJobFinalization } from "../../lib/store.js";
 import { finalizationRetryJobId, frameRunShotState } from "./frame-run.js";
 import { BenchBrief } from "../../components/bench-brief.js";
 import { FrameActions } from "./frame-actions.js";
-import { ChevronDown, ChevronRight, ChevronUp, Cog, FileText, Grid2x2, Grip, ImageMark, Lines, MapPin, More, Pencil, Plus, StickyNote } from "../../components/icons.js";
-import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { ChevronRight, Grid2x2, Grip, ImageMark, Lines, More, Pencil, Plus } from "../../components/icons.js";
+import { characterPortraitPath, locationPortraitPath } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
@@ -106,14 +101,10 @@ export function StoryboardRows({
   onGenerateFrame,
   onEditShot,
   onOpenShotInGenerator,
-  onStageShot,
   onPreviewShot,
   onTalkToArke,
   onPlanVideo,
   onRenderBoard,
-  onOpenCharacter,
-  locationName,
-  onOpenLocation,
 }: {
   layout?: "list" | "grid";
   scene: SceneRecord;
@@ -140,28 +131,18 @@ export function StoryboardRows({
   worldId: string;
   onViewBoardSheet: (board: PackedBoard, trigger: HTMLElement) => void;
   onGenerateFrame: (shotId: string, trigger: HTMLButtonElement) => void;
+  /** Opens the shot's page (turn 145). */
   onEditShot: (shotId: string) => void;
   onOpenShotInGenerator: (shotId: string) => void;
-  onStageShot: (shotId: string) => void;
   onPreviewShot: (shotId: string) => void;
   onTalkToArke: () => void;
   onPlanVideo: () => void;
   onRenderBoard: (memberShotIds: string[]) => void;
-  /** A band's character chip leads to the character dialog (SPEC-044 R-22). */
-  onOpenCharacter: (sheetId: string, trigger: HTMLElement) => void;
-  /** The scene's place, named on the open row's timing line as a chip that opens it (turn 143). */
-  locationName: string | null;
-  onOpenLocation: (trigger: HTMLElement) => void;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
   const { subject, select } = useWorkspaceSelection();
   const current = selectedShotId(subject);
-  // One row open at a time, and the open row is the selected row (turn 143): there is no
-  // selected-and-closed state, so the selection the views already share is the open state too.
-  // The Grid keeps its cards; opening is the List's form of selection.
-  const openShotId = layout === "list" && current !== null && shots.some((shot) => shot.id === current) ? current : null;
-  const closeRow = useCallback(() => select({ kind: "scene" }), [select]);
   const rowBands = useRef(new Map<string, HTMLDivElement>());
   const rowsRoot = useRef<HTMLDivElement | HTMLOListElement | null>(null);
   const rowsOwnFocus = useRef(false);
@@ -262,6 +243,8 @@ export function StoryboardRows({
         ref={(element) => { rowsRoot.current = element; }}
         className="fy-swrows"
         data-layout={layout}
+        // The Grid's columns follow the production's aspect (turn 145): a card stands up or lies down.
+        data-aspect={aspectIsPortrait(aspect) ? "portrait" : "landscape"}
         data-testid="workspace-rows"
         aria-label={`Shots in scene ${scene.number}`}
         tabIndex={-1}
@@ -343,13 +326,7 @@ export function StoryboardRows({
                 slug={slug}
                 digests={digests}
                 aspect={aspect}
-                layout={layout}
                 selected={shot.id === current}
-                open={shot.id === openShotId}
-                folded={openShotId !== null && shot.id !== openShotId}
-                onClose={closeRow}
-                locationName={locationName}
-                onOpenLocation={onOpenLocation}
                 staged={stagedShotIds.has(shot.id)}
                 newShot={newShotIds.has(shot.id)}
                 locked={locked}
@@ -386,9 +363,7 @@ export function StoryboardRows({
                 onGenerateFrame={(trigger) => onGenerateFrame(shot.id, trigger)}
                 onEdit={() => onEditShot(shot.id)}
                 onOpenInGenerator={() => onOpenShotInGenerator(shot.id)}
-                onStage={() => onStageShot(shot.id)}
                 onPreview={() => onPreviewShot(shot.id)}
-                onOpenCharacter={onOpenCharacter}
               />
             </li>
           );
@@ -418,6 +393,12 @@ export function StoryboardRows({
       </div> : null}
     </>
   );
+}
+
+/** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
+export function aspectIsPortrait(aspect: string): boolean {
+  const [w, h] = aspect.split(":").map(Number);
+  return Number.isFinite(w) && Number.isFinite(h) && h! > 0 && w! > 0 && w! < h!;
 }
 
 function Divider({
@@ -746,13 +727,7 @@ function Row({
   slug,
   digests,
   aspect,
-  layout,
   selected,
-  open,
-  folded,
-  onClose,
-  locationName,
-  onOpenLocation,
   staged,
   newShot,
   locked,
@@ -774,9 +749,7 @@ function Row({
   onGenerateFrame,
   onEdit,
   onOpenInGenerator,
-  onStage,
   onPreview,
-  onOpenCharacter,
   prevShotId,
   nextShotId,
 }: {
@@ -790,14 +763,7 @@ function Row({
   slug: string | undefined;
   digests: ReadonlyMap<string, string>;
   aspect: string;
-  layout: "list" | "grid";
   selected: boolean;
-  /** The row open in place (turn 143): its panels shown, the others folded. List only. */
-  open: boolean;
-  folded: boolean;
-  onClose: () => void;
-  locationName: string | null;
-  onOpenLocation: (trigger: HTMLElement) => void;
   staged: boolean;
   newShot: boolean;
   locked: boolean;
@@ -817,11 +783,10 @@ function Row({
   onRetryFinalization: (() => void) | null;
   worldId: string;
   onGenerateFrame: (trigger: HTMLButtonElement) => void;
+  /** Opens the shot's page (turn 145): the number, the frame, the title and the chevron all lead there. */
   onEdit: () => void;
   onOpenInGenerator: () => void;
-  onStage: () => void;
   onPreview: () => void;
-  onOpenCharacter: (sheetId: string, trigger: HTMLElement) => void;
   /** The rows either side, for moving without a pointer. */
   prevShotId: string | null;
   nextShotId: string | null;
@@ -833,9 +798,6 @@ function Row({
   const variantsDialog = useRef<HTMLDialogElement | null>(null);
   const menuReturnFocus = useRef<HTMLElement | null>(null);
   const restored = useRef(false);
-  const promptDirty = useRef(false);
-  const preservedRefusal = useRef<number | null>(null);
-  const pendingRebuildVersion = useRef<number | null>(null);
   const focusWhenVisible = useRef(false);
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -848,39 +810,12 @@ function Row({
   const durationTrigger = useRef<HTMLButtonElement>(null);
   const editReturnFocus = useRef<"title" | "duration" | null>(null);
   const [durationDraft, setDurationDraft] = useState(String(shot.durationSec ?? DEFAULT_SHOT_SEC));
-  const [promptOpen, setPromptOpen] = useState(false);
-  const [promptDraft, setPromptDraft] = useState<string | null>(null);
-  const [pendingHide, setPendingHide] = useState<{
-    expected: string | null;
-    draft: string;
-    refusalVersion: number;
-    /** What the acknowledged write closes: the Grid card's prompt, or the whole open row. */
-    closes: "prompt" | "row";
-  } | null>(null);
-  // The open row's own state (turn 143): which panels are folded to their head, whether the
-  // prompt is shown whole, and the notes draft. None of it outlives the row.
-  const [foldedPanels, setFoldedPanels] = useState<ReadonlySet<"description" | "prompt" | "notes">>(new Set());
-  const [promptWhole, setPromptWhole] = useState(false);
-  const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
-  /** The note last written and not yet durable, so leaving the row does not write it twice. */
-  const notesSent = useRef<string | null>(null);
-  const wasOpen = useRef(open);
-  const pressTop = useRef<number | null>(null);
-  /**
-   * A prompt write the blur (or Rebuild) admitted and the durable override has not yet matched.
-   * Close waits on this rather than inferring a write from the draft: a draft that differs from
-   * the durable prompt with nothing in flight is a refused write, and Close must send it again.
-   */
-  const promptWrite = useRef<{ expected: string | null; refusalVersion: number } | null>(null);
-  // In the Grid a card's prompt opens on its toggle; in the List the prompt is one of the open
-  // row's panels, so it is shown exactly when the row is. A card also shows it while a draft is
-  // dirty, in the very render that leaves the List, so the switch never unmounts the editor.
-  const promptShown = layout === "grid" ? promptOpen || promptDirty.current : open;
   const accepted = newShot ? null : acceptedTakeId(production, shot.id);
   const takes = takesForShot(production, shot.id);
   const acceptedTake = accepted === null ? undefined : takes.find((take) => take.id === accepted);
   const coverage = shotCoverage(shot, digests);
-  const hasFrame = shotHasFrame(production, artifacts, shot.id);
+  const frame = shotFramePath(production, artifacts, shot.id, newShot);
+  const hasFrame = frame.hasFrame;
   const state = shotCardState({
     blankScript: shot.description.trim() === "",
     clipAccepted: acceptedTake?.kind === "clip",
@@ -889,49 +824,11 @@ function Row({
   });
   const waitingSessions = waitingTakeSessions(world.benchSessions, production.meta.id, scene.id, shot.id);
   const waitingTakeCount = waitingSessions.reduce((total, summary) => total + summary.waitingCount, 0);
-  const artifactId = production.selections[shot.id]?.startFrameArtifactId ?? null;
-  const artifact = artifactId === null ? undefined : artifacts.find((candidate) => candidate.id === artifactId);
-  const hasFramePointer =
-    artifactId !== null || (production.selections[shot.id]?.startFrameTakeId ?? null) !== null;
-  const legacyStill = acceptedTake?.kind === "frame" || acceptedTake?.kind === "still" ? acceptedTake : undefined;
-  const framePath = artifact !== undefined && hasFrame
-    ? `artifacts/${artifact.file}`
-    : legacyStill?.media === undefined
-      ? null
-      : `productions/${production.meta.id}/takes/${legacyStill.id}/${legacyStill.media}`;
-  const src = slug === undefined || framePath === null ? null : mediaUrl(slug, framePath);
+  const src = slug === undefined || frame.path === null ? null : mediaUrl(slug, frame.path);
   const frameVariants = takes.filter(
     (take) => (take.kind === "frame" || take.kind === "still") && take.media !== undefined,
   );
-  const refs = resolveCast(shot.description, [...sheets]).cast;
-  // What a cited character brings to this shot (SPEC-044 R-22): voice where they speak in it,
-  // by the same resolution the planner and the dialog use; look where the shot cites them.
-  const speakers = shotSpeakers(scene, [shot]).speakers;
-  const structuredOverrides = [
-    shot.framing?.size,
-    shot.framing?.angle,
-    shot.framing?.lens,
-    shot.framing?.focus,
-    shot.framing?.movement,
-    shot.framing?.pace,
-    shot.framing?.lighting,
-    shot.framing?.timeOfDay,
-    shot.framing?.grade,
-  ].filter((value): value is string => value !== undefined && value.trim() !== "");
-  // Older scenes carry the same authored camera decisions in one line. Keeping that line visible
-  // is more honest than presenting an empty override payload until the shot is opened and saved.
-  const overrides = (structuredOverrides.length > 0
-    ? structuredOverrides
-    : (shot.camera?.split("·").map((value) => value.trim()).filter(Boolean) ?? []))
-    .map((value) => `${value} override`)
-    .slice(0, 2);
   const runScriptChanged = runState !== null && run !== null && sceneVersionMoved(run, production, shot.id);
-  const style = production.meta.styleOverride?.trim() || world.artDirection.description;
-  const capability = productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
-  const assembledPrompt = assemblePrompt(world.meta, world.sheets, scene, shot, style, undefined, capability);
-  const currentPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, capability);
-  const durablePromptOverride = shot.promptOverride?.text ?? null;
-  const promptValue = promptDraft ?? currentPrompt.text;
   const mentionOptions = sheets.map((sheet) => ({
     token: sheet.id,
     kind: "image" as const,
@@ -993,73 +890,16 @@ function Row({
     }
     if (restored.current || band.current === null) return;
     restored.current = true;
-    // A press on the title or the script opened the row with the editor already focused; the
-    // band takes focus only when nothing inside it holds it.
-    const focusBand = () => {
-      if (band.current === null) return;
-      const active = typeof document === "undefined" ? null : document.activeElement;
-      if (active !== null && active !== band.current && band.current.contains(active)) return;
-      band.current.focus({ preventScroll: true });
-    };
-    if (pressTop.current !== null) {
-      // The row a person pressed keeps its top edge where it was (turn 143): the rows above it
-      // have just folded, so it moved up by their loss, and the list scrolls back by the same.
-      // Measured here, after the commit and before paint, so the row never paints elsewhere.
-      const delta = band.current.getBoundingClientRect().top - pressTop.current;
-      pressTop.current = null;
-      const scroller = band.current.closest<HTMLElement>(".fy-swrows");
-      if (delta !== 0 && scroller !== null) scroller.scrollTop += delta;
-      focusBand();
-      return;
-    }
+    // A press on the script selected the row with the editor already focused; the band takes
+    // focus only when nothing inside it holds it.
     band.current.scrollIntoView?.({ block: "nearest" });
-    focusBand();
+    const active = typeof document === "undefined" ? null : document.activeElement;
+    if (active !== null && active !== band.current && band.current.contains(active)) return;
+    band.current.focus({ preventScroll: true });
   }, [selected]);
-  // The draft follows the durable note and nothing else: a refused write leaves the person's
-  // words in the box to blur again, rather than putting the old note back over them.
-  useEffect(() => {
-    notesSent.current = null;
-    setNotesDraft(shot.notes ?? "");
-  }, [shot.notes]);
   useEffect(() => {
     setScriptDraft(shot.description);
   }, [shot.description]);
-  useEffect(() => {
-    if (promptWrite.current !== null && durablePromptOverride === promptWrite.current.expected) promptWrite.current = null;
-    if (pendingHide !== null) {
-      if (durablePromptOverride === pendingHide.expected) {
-        pendingRebuildVersion.current = null;
-        preservedRefusal.current = null;
-        promptDirty.current = false;
-        setPromptDraft(null);
-        setPendingHide(null);
-        // A row opened in the meantime is the selection now; this one's close is already done.
-        if (pendingHide.closes === "row") { if (open) onClose(); }
-        else setPromptOpen(false);
-      }
-    }
-    if (durablePromptOverride === null) pendingRebuildVersion.current = null;
-  }, [durablePromptOverride, onClose, open, pendingHide]);
-  useEffect(() => {
-    // A refusal answers the write in flight: the draft is the person's again, to send once more.
-    notesSent.current = null;
-    if (promptWrite.current !== null && promptWrite.current.refusalVersion !== refusalVersion) {
-      promptWrite.current = null;
-      promptDirty.current = true;
-    }
-    if (pendingHide !== null) {
-      if (pendingHide.refusalVersion === refusalVersion) return;
-      preservedRefusal.current = refusalVersion;
-      promptDirty.current = true;
-      setPromptDraft(pendingHide.draft);
-      setPendingHide(null);
-      return;
-    }
-    if (pendingRebuildVersion.current === null || pendingRebuildVersion.current === refusalVersion) return;
-    pendingRebuildVersion.current = null;
-    promptDirty.current = false;
-    setPromptDraft(null);
-  }, [pendingHide, refusalVersion]);
   useLayoutEffect(() => {
     if (!menuOpen) return;
     if (menuPosition === null) {
@@ -1128,122 +968,8 @@ function Row({
       setScriptDraft(shot.description);
     }
   };
-  const commitPrompt = (value = promptValue) => {
-    const next = value.trim();
-    promptDirty.current = false;
-    if (next === currentPrompt.text.trim()) {
-      setPromptDraft(null);
-      return true;
-    }
-    const replacement = next === "" || next === assembledPrompt.trim() ? null : next;
-    if (!onCommand({
-      kind: "set-prompt-override",
-      shotId: shot.id,
-      text: replacement,
-      capability,
-    })) {
-      setPromptDraft(null);
-      return false;
-    }
-    promptWrite.current = { expected: replacement, refusalVersion };
-    setPromptDraft(replacement === null ? assembledPrompt : next);
-    return true;
-  };
-  // Rebuild and Re-read share this: drop whatever was typed and read the prompt off the current
-  // script again. Only a durable override needs a command; a local draft is just let go.
-  const canRebuild = durablePromptOverride !== null || promptDraft !== null;
-  const rebuildPrompt = () => {
-    promptDirty.current = false;
-    if (durablePromptOverride === null) {
-      setPromptDraft(null);
-      return;
-    }
-    if (onCommand({ kind: "set-prompt-override", shotId: shot.id, text: null })) {
-      pendingRebuildVersion.current = refusalVersion;
-      promptWrite.current = { expected: null, refusalVersion };
-      setPromptDraft(assembledPrompt);
-    } else {
-      setPromptDraft(null);
-    }
-  };
-  // Hide (a Grid card's prompt) and Close (the open row) share this: an unchanged prompt
-  // closes at once and writes nothing; a changed one is written and closes only when the
-  // durable override comes back matching, so a refused write leaves the draft on screen.
-  const hidePrompt = (value: string, closes: "prompt" | "row") => {
-    const next = value.trim();
-    if (next === currentPrompt.text.trim()) {
-      preservedRefusal.current = null;
-      promptDirty.current = false;
-      if (closes === "row") onClose();
-      else setPromptOpen(false);
-      return;
-    }
-    const expected = next === "" || next === assembledPrompt.trim() ? null : next;
-    if (!onCommand({ kind: "set-prompt-override", shotId: shot.id, text: expected, capability })) {
-      promptDirty.current = true;
-      setPromptDraft(value);
-      return;
-    }
-    promptDirty.current = false;
-    setPromptDraft(value);
-    setPendingHide({ expected, draft: value, refusalVersion, closes });
-  };
-  const openRow = () => {
-    if (staged || open) return;
-    pressTop.current = band.current?.getBoundingClientRect().top ?? null;
-    onSelect();
-  };
-  // Close takes focus like any button, so whichever editor held it blurs and writes first —
-  // the script, the notes, or the prompt — and one write is in flight at most. A prompt write
-  // the blur admitted is waited on rather than sent again; a refused one is the draft's again
-  // and goes through hidePrompt, which resends it and waits.
-  const closeRow = () => {
-    if (pendingHide !== null) return;
-    if (promptWrite.current !== null) {
-      setPendingHide({ expected: promptWrite.current.expected, draft: promptDraft ?? promptValue, refusalVersion, closes: "row" });
-      return;
-    }
-    hidePrompt(promptValue, "row");
-  };
-  const commitNotes = (value: string) => {
-    const next = value.trim();
-    if (disabled || next === (shot.notes ?? "") || next === notesSent.current) return;
-    // A write that is not taken (one is already in flight) keeps the draft, as a refusal does.
-    const accepted = next === ""
-      ? onCommand({ kind: "edit-shot", shotId: shot.id, change: {}, clear: ["notes"] })
-      : onCommand({ kind: "edit-shot", shotId: shot.id, change: { notes: next } });
-    if (accepted) notesSent.current = next;
-  };
-  // The prompt panel and Notes exist only in the open row, so they leave with it. A press
-  // elsewhere blurred and wrote them first; the List/Grid switch holds focus instead (turn 138)
-  // and unmounts them without a blur. Then the card's prompt opens on the same editor, draft and
-  // focus intact, and a note — which the card has no box for — is written on the way out.
-  useEffect(() => {
-    if (wasOpen.current && !open) {
-      if (promptDirty.current) {
-        if (layout === "grid") setPromptOpen(true);
-        else commitPrompt(promptValue);
-      }
-      commitNotes(notesDraft);
-    }
-    wasOpen.current = open;
-    // Runs on the transition only; the drafts and commit paths it reads are the current ones.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-  const togglePanel = (panel: "description" | "prompt" | "notes") => {
-    // The fold control sits inside the prompt's blur boundary, so folding that panel would
-    // unmount the editor without the blur that writes it; the fold writes a dirty draft first.
-    if (panel === "prompt" && !foldedPanels.has("prompt") && promptDirty.current) commitPrompt(promptValue);
-    setFoldedPanels((current) => {
-      const next = new Set(current);
-      if (next.has(panel)) next.delete(panel);
-      else next.add(panel);
-      return next;
-    });
-  };
-  // The select offers the lengths a shot is usually cut to, and always the length it has.
   const durationSec = shot.durationSec ?? DEFAULT_SHOT_SEC;
-  const durationOptions = [...new Set([1, 2, 3, 4, 5, 6, 8, 10, 12, 15, durationSec])].sort((a, b) => a - b);
+  // The title opens the page (turn 145); the pencil beside it is the editor.
   const titleControl = editingTitle ? (
     <input
       className="fy-swrow__title-input" aria-label={`Title for shot ${shot.number}`} value={titleDraft} disabled={disabled} autoFocus
@@ -1263,15 +989,16 @@ function Row({
         setEditingTitle(false);
       }}
     />
-  ) : <button ref={titleTrigger} type="button" className="fy-swrow__title-edit" aria-label={`Edit title for shot ${shot.number}`} disabled={disabled} onClick={() => setEditingTitle(true)}><span className="fy-swrow__title">{shot.title}</span><Pencil size={14} /></button>;
+  ) : (
+    <span className="fy-swrow__title-edit">
+      <button type="button" className="fy-swrow__title fy-swrow__open" aria-label={`Open shot ${shot.number}`} disabled={staged} onClick={(event) => { event.stopPropagation(); onEdit(); }}>{shot.title}</button>
+      <button ref={titleTrigger} type="button" className="fy-swrow__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={(event) => { event.stopPropagation(); setEditingTitle(true); }}><Pencil size={14} /></button>
+    </span>
+  );
   const stateChip = state === "needs attention" || state === "story"
     ? <span className="fy-swchip" data-state={state}><span aria-hidden="true" />{state === "needs attention" ? "Needs attention" : "Needs frame"}</span>
     : null;
-  // The open row's duration is set from Shot settings, so its timing line reads rather than
-  // edits (turn 143); the wide and folded rows keep the metadata editable, as 138 binds.
-  const durationControl = open || folded ? (
-    <span>{durationSec}s</span>
-  ) : editingDuration ? (
+  const durationControl = editingDuration ? (
     <input
       aria-label={`Duration for shot ${shot.number}`} type="number" min="0.01" step="any" value={durationDraft} disabled={disabled} autoFocus
       onChange={(event) => setDurationDraft(event.target.value)}
@@ -1312,98 +1039,6 @@ function Row({
       />
     </div>
   );
-  const promptToggle = promptShown ? null : (
-    <button
-      type="button"
-      className="fy-swrow__prompt-toggle"
-      aria-expanded={false}
-      onClick={(event) => { event.stopPropagation(); if (layout === "grid") setPromptOpen(true); else openRow(); }}
-    >
-      <ChevronRight size={14} />Frame prompt{shot.promptOverride === undefined ? null : <span>Authored</span>}
-    </button>
-  );
-  const promptMeta = !promptShown || (refs.length === 0 && overrides.length === 0) ? null : (
-    <div className="fy-swrow__meta">
-      <div className="fy-swrow__refs">
-        {refs.map((entry) => {
-          const title = `${entry.sheet.type} · v${entry.sheet.version}`;
-          const inner = (
-            <>
-              <span className="fy-swrow__refthumb">
-                <Portrait
-                  worldSlug={slug}
-                  path={entry.sheet.type === "location" ? locationPortraitPath(world, entry.sheet.id) : characterPortraitPath(world, entry.sheet.id)}
-                  label=""
-                  radius={99}
-                />
-              </span>
-              {entry.sheet.name}
-              {entry.sheet.type === "character" ? (
-                <span className="fy-swrow__refwords">{speakers.includes(entry.sheet.id) ? "voice · look" : "look"}</span>
-              ) : null}
-            </>
-          );
-          return entry.sheet.type === "character" ? (
-            <button
-              key={entry.sheet.id}
-              type="button"
-              className="fy-swrow__ref fy-swrow__ref--door"
-              title={title}
-              aria-haspopup="dialog"
-              onClick={(event) => { event.stopPropagation(); onOpenCharacter(entry.sheet.id, event.currentTarget); }}
-            >
-              {inner}
-            </button>
-          ) : (
-            <span key={entry.sheet.id} className="fy-swrow__ref" title={title}>{inner}</span>
-          );
-        })}
-      </div>
-      <div className="fy-swrow__overrides">
-        {overrides.map((label) => <span key={label} className="fy-swrow__override" title="overrides the scene">{label}</span>)}
-      </div>
-    </div>
-  );
-  const promptEditor = (
-    <BenchBrief
-      value={promptValue}
-      onChange={(value) => {
-        promptDirty.current = true;
-        setPromptDraft(value);
-      }}
-      options={mentionOptions}
-      worldSlug={slug}
-      underlay={promptValue}
-      label={`Image prompt for shot ${shot.number}`}
-      disabled={disabled}
-    />
-  );
-  const rebuildButton = (
-    <button
-      type="button"
-      title="Rebuild from the script, references and camera"
-      disabled={disabled || !canRebuild}
-      onClick={rebuildPrompt}
-    >
-      Rebuild
-    </button>
-  );
-  const commitPromptOnBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
-    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-    if (!promptDirty.current) return;
-    commitPrompt(event.currentTarget.querySelector("textarea")?.value ?? promptValue);
-  };
-  const panelFold = (panel: "description" | "prompt" | "notes", label: string) => (
-    <button
-      type="button"
-      className="fy-swrow__panelfold"
-      aria-label={`${foldedPanels.has(panel) ? "Show" : "Fold"} ${label} for shot ${shot.number}`}
-      aria-expanded={!foldedPanels.has(panel)}
-      onClick={() => togglePanel(panel)}
-    >
-      {foldedPanels.has(panel) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-    </button>
-  );
   const rowActions = (
     <div className="fy-swrow__actions" onClick={(event) => event.stopPropagation()}>
       <div className="fy-swrow__actionline">
@@ -1435,19 +1070,17 @@ function Row({
         >
           <More size={15} />
         </button>
-        {layout === "grid" ? null : (
-          <button
-            type="button"
-            className="fy-swedit fy-swrow__more fy-swrow__fold"
-            title={open ? "Close" : "Open"}
-            aria-label={`${open ? "Close" : "Open"} shot ${shot.number}`}
-            aria-expanded={open}
-            disabled={staged || pendingHide !== null}
-            onClick={() => (open ? closeRow() : openRow())}
-          >
-            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-          </button>
-        )}
+        {/* The chevron that opens the page: the row's one door, beside its overflow (turn 145). */}
+        <button
+          type="button"
+          className="fy-swedit fy-swrow__more fy-swrow__chevron"
+          title="Open the shot"
+          aria-label={`Open shot ${shot.number}`}
+          disabled={staged}
+          onClick={onEdit}
+        >
+          <ChevronRight size={15} />
+        </button>
       </div>
     </div>
   );
@@ -1462,8 +1095,6 @@ function Row({
       data-shot-id={shot.id}
       data-state={state}
       data-selected={selected ? "true" : undefined}
-      data-open={open ? "true" : undefined}
-      data-folded={folded ? "true" : undefined}
       data-staged={staged ? "true" : undefined}
       role="group"
       tabIndex={staged ? -1 : 0}
@@ -1472,16 +1103,10 @@ function Row({
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
       onDragOver={(event) => !disabled && event.preventDefault()}
       onDrop={(event) => { event.preventDefault(); onDrop(); }}
-      onClick={() => !staged && openRow()}
+      // A press anywhere on the row is the selection, which Flow and the dock follow (R-25) and
+      // which opens nothing; the number, the frame, the title and the chevron open the page.
+      onClick={() => !staged && onSelect()}
       onKeyDown={(event) => {
-        // Escape closes the open row from anywhere in it — a menu that took the key (the @
-        // picker) has prevented it — and the band takes the focus the editor is about to lose.
-        if (event.key === "Escape" && open && !event.defaultPrevented && event.target !== event.currentTarget) {
-          event.preventDefault();
-          closeRow();
-          event.currentTarget.focus({ preventScroll: true });
-          return;
-        }
         if (event.target !== event.currentTarget) return;
         if (staged) return;
         if (event.key === "Delete") {
@@ -1490,10 +1115,7 @@ function Row({
           openDelete();
         } else if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          openRow();
-        } else if (event.key === "Escape" && open) {
-          event.preventDefault();
-          closeRow();
+          onEdit();
         } else if (event.altKey && (event.key === "ArrowUp" || event.key === "ArrowDown") && !disabled) {
           // The grip is the pointer's way to reorder; this is the keyboard's (the menu lost its
           // Move entries to the design). The row keeps focus, so a second press keeps moving.
@@ -1511,15 +1133,17 @@ function Row({
       {selected ? <span className="fy-swrow__ring" aria-hidden="true" /> : null}
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
       <div className="fy-swrow__frame fy-imghost">
+        {/* The picture and the number open the page; the toolbar over the foot is the image's own. */}
         {src === null ? (
-          <div className="fy-swrow__hatch"><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
+          <div className="fy-swrow__hatch fy-swrow__open" role="button" tabIndex={-1} aria-label={`Open shot ${shot.number}`} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }}><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
         ) : (
-          <img className="fy-swrow__img" alt={shot.title} src={src} draggable={false} />
+          <img className="fy-swrow__img fy-swrow__open" alt={shot.title} src={src} draggable={false} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }} />
         )}
         <span
-          className="fy-swrow__label"
-          title="Drag to reorder"
+          className="fy-swrow__label fy-swrow__open"
+          title="Open the shot · drag to reorder"
           draggable={!disabled}
+          onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }}
           onDragStart={(event) => {
             event.stopPropagation();
             onDragStart();
@@ -1531,73 +1155,68 @@ function Row({
         <span className="fy-swrow__chipmeta">
           {durationSec}s
         </span>
-        {/* A folded row's strip is too small for the hover toolbar; the row opens to it. */}
-        {folded ? null : (
-          <>
-            <FrameActions
-              shotNumber={shot.number}
-              title={shot.title}
-              slug={slug}
-              framePath={framePath}
-              variants={frameVariants.length}
-              disabled={disabled}
-              canUpload={canPickFiles()}
-              canClear={hasFramePointer}
-              onPreview={onPreview}
-              onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
-              onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
-              onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
-              readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
-            />
-            <dialog
-              ref={variantsDialog}
-              className="fy-swvariants"
-              aria-label={`Frame variants for shot ${shot.number}`}
-              onClose={() => variantsTrigger.current?.focus()}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) variantsDialog.current?.close();
-              }}
-            >
-              <div className="fy-swvariants__panel">
-                <header>
-                  <div>
-                    <span>Shot {shot.number} · frame history</span>
-                    <h2>{shot.title}</h2>
-                  </div>
-                  <button type="button" aria-label="Close frame variants" onClick={() => variantsDialog.current?.close()}>Close</button>
-                </header>
-                <div className="fy-swvariants__grid">
-                  {frameVariants.map((take) => {
-                    const path = `productions/${production.meta.id}/takes/${take.id}/${take.media!}`;
-                    const current = production.selections[shot.id]?.startFrameTakeId === take.id || artifact?.links.includes(take.id) === true;
-                    return (
-                      <article key={take.id} data-current={current ? "true" : undefined}>
-                        <img
-                          src={slug === undefined ? undefined : mediaUrl(slug, path)}
-                          alt={`Variant for shot ${shot.number}`}
-                          style={{ aspectRatio: aspect.replace(":", " / ") }}
-                        />
-                        <div>
-                          <span>{take.model}</span>
-                          <button
-                            type="button"
-                            disabled={current || disabled}
-                            onClick={() => {
-                              acceptTake(worldId, production.meta.id, take.id, shot.id);
-                              variantsDialog.current?.close();
-                            }}
-                          >
-                            {current ? "Current" : "Use frame"}
-                          </button>
-                        </div>
-                      </article>
-                    );
-                  })}
-                </div>
+        <FrameActions
+          shotNumber={shot.number}
+          title={shot.title}
+          slug={slug}
+          framePath={frame.path}
+          variants={frameVariants.length}
+          disabled={disabled}
+          canUpload={canPickFiles()}
+          canClear={frame.pointer}
+          onPreview={onPreview}
+          onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
+          onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
+          onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
+          readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
+        />
+        <dialog
+          ref={variantsDialog}
+          className="fy-swvariants"
+          aria-label={`Frame variants for shot ${shot.number}`}
+          onClose={() => variantsTrigger.current?.focus()}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) variantsDialog.current?.close();
+          }}
+        >
+          <div className="fy-swvariants__panel">
+            <header>
+              <div>
+                <span>Shot {shot.number} · frame history</span>
+                <h2>{shot.title}</h2>
               </div>
-            </dialog>
-          </>
-        )}
+              <button type="button" aria-label="Close frame variants" onClick={() => variantsDialog.current?.close()}>Close</button>
+            </header>
+            <div className="fy-swvariants__grid">
+              {frameVariants.map((take) => {
+                const path = `productions/${production.meta.id}/takes/${take.id}/${take.media!}`;
+                const current = production.selections[shot.id]?.startFrameTakeId === take.id || frame.artifact?.links.includes(take.id) === true;
+                return (
+                  <article key={take.id} data-current={current ? "true" : undefined}>
+                    <img
+                      src={slug === undefined ? undefined : mediaUrl(slug, path)}
+                      alt={`Variant for shot ${shot.number}`}
+                      style={{ aspectRatio: aspect.replace(":", " / ") }}
+                    />
+                    <div>
+                      <span>{take.model}</span>
+                      <button
+                        type="button"
+                        disabled={current || disabled}
+                        onClick={() => {
+                          acceptTake(worldId, production.meta.id, take.id, shot.id);
+                          variantsDialog.current?.close();
+                        }}
+                      >
+                        {current ? "Current" : "Use frame"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </div>
+        </dialog>
         {runState === null ? null : (
           <FrameState
             state={runState}
@@ -1606,162 +1225,33 @@ function Row({
           />
         )}
       </div>
-      {folded ? (
-        <div className="fy-swrow__body">
+      {/* One body for the row and the card, so an editor keeps its place in the tree — and its
+          focus and draft — across List and Grid (turn 138). */}
+      <div className="fy-swrow__body">
+        <div className="fy-swrow__head">
           <div className="fy-swrow__titleline">
             {titleControl}
+            {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
+            {shot.staging?.playblast === undefined ? null : <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>}
+          </div>
+          <div className="fy-swrow__timing" onClick={(event) => event.stopPropagation()}>
+            {durationControl}
+            <span aria-hidden="true">·</span><span>{aspect}</span>
             {stateChip}
-            <span className="fy-swrow__timing">{durationControl}<span aria-hidden="true">·</span><span>{aspect}</span>{shot.promptOverride === undefined ? null : <span className="fy-swrow__authored">Authored</span>}</span>
           </div>
-          <div className="fy-swrow__script fy-swrow__scriptline">{shot.description}</div>
-        </div>
-      ) : (
-        /* One body for the wide row, the card and the open row, so an editor keeps its place in
-           the tree — and its focus and draft — across List and Grid (turn 138) and across the
-           row opening (turn 143). The open row places these children on the band's grid. */
-        <div className="fy-swrow__body">
-          <div className="fy-swrow__head">
-            {/* The title and the script open the row (turn 143), so their presses reach the band;
-                the editor the press landed in keeps its focus. */}
-            <div className="fy-swrow__titleline">
-              {titleControl}
-              {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
-              {shot.staging?.playblast === undefined ? null : <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>}
+          <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
+          {coverage === "changed" || runScriptChanged ? (
+            // The prompt this script no longer matches is on the page, with its Rebuild (turn 145).
+            <div className="fy-swrow__stale">
+              <span className="fy-swrow__stalelabel">script changed</span>
+              <button type="button" disabled={staged} onClick={(event) => { event.stopPropagation(); onEdit(); }}>Re-read</button>
             </div>
-            <div className="fy-swrow__timing" onClick={(event) => event.stopPropagation()}>
-              {durationControl}
-              <span aria-hidden="true">·</span><span>{aspect}</span>
-              {open && locationName !== null ? (
-                <>
-                  <span aria-hidden="true">·</span>
-                  <button
-                    type="button"
-                    className="fy-swrow__place"
-                    title={locationName}
-                    aria-haspopup="dialog"
-                    onClick={(event) => onOpenLocation(event.currentTarget)}
-                  >
-                    <MapPin size={13} />{locationName}
-                  </button>
-                </>
-              ) : null}
-              {stateChip}
-            </div>
-            <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
-            {coverage === "changed" || runScriptChanged ? (
-              <div className="fy-swrow__stale">
-                <span className="fy-swrow__stalelabel">script changed</span>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={() => {
-                    rebuildPrompt();
-                    if (layout === "grid") setPromptOpen(true);
-                    else openRow();
-                  }}
-                >
-                  Re-read
-                </button>
-              </div>
-            ) : null}
-            {/* The open row reads its script under the title and edits it in the Description
-                panel (turn 143): the same draft, clamped to two lines here. */}
-            {open ? <div className="fy-swrow__script fy-swrow__scriptread">{scriptDraft}</div> : null}
-          </div>
-          <section
-            className={open ? "fy-swrow__panel fy-swrow__panel--description" : "fy-swrow__descwrap"}
-            data-folded={open && foldedPanels.has("description") ? "true" : undefined}
-          >
-            {open ? (
-              <div className="fy-swrow__panelhead">
-                <FileText size={15} /><span>Description</span>{panelFold("description", "the description")}
-              </div>
-            ) : null}
-            {open && foldedPanels.has("description") ? null : scriptEditor}
-          </section>
-          {promptShown ? (
-            <section
-              className={open ? "fy-swrow__panel fy-swrow__panel--prompt fy-swrow__prompt" : "fy-swrow__prompt"}
-              data-folded={open && foldedPanels.has("prompt") ? "true" : undefined}
-              data-whole={open && promptWhole ? "true" : undefined}
-              onClick={(event) => event.stopPropagation()}
-              onBlur={commitPromptOnBlur}
-            >
-              {open ? (
-                <div className="fy-swrow__panelhead">
-                  <FileText size={15} /><span>Frame prompt</span>
-                  {shot.promptOverride === undefined ? null : <span className="fy-swrow__authored">Authored</span>}
-                  {rebuildButton}
-                  <button type="button" className="fy-swrow__wholeprompt" aria-pressed={promptWhole} onClick={() => setPromptWhole(!promptWhole)}>
-                    {promptWhole ? "Show less" : "View full prompt"}
-                  </button>
-                  {panelFold("prompt", "the frame prompt")}
-                </div>
-              ) : (
-                <div className="fy-swrow__prompthead">
-                  <span>image prompt</span>
-                  {rebuildButton}
-                  <button type="button" disabled={pendingHide !== null} onClick={() => hidePrompt(promptValue, "prompt")}>
-                    Hide
-                  </button>
-                </div>
-              )}
-              {open && foldedPanels.has("prompt") ? null : promptEditor}
-              {open && foldedPanels.has("prompt") ? null : promptMeta}
-            </section>
-          ) : promptToggle}
-          {open ? (
-            <section className="fy-swrow__panel fy-swrow__panel--notes" data-folded={foldedPanels.has("notes") ? "true" : undefined} onClick={(event) => event.stopPropagation()}>
-              <div className="fy-swrow__panelhead">
-                <StickyNote size={15} /><span>Notes</span>{panelFold("notes", "the notes")}
-              </div>
-              {foldedPanels.has("notes") ? null : (
-                <textarea
-                  className="fy-swrow__notes"
-                  aria-label={`Notes for shot ${shot.number}`}
-                  placeholder="Add notes about this shot…"
-                  value={notesDraft}
-                  disabled={disabled}
-                  rows={1}
-                  onChange={(event) => setNotesDraft(event.target.value)}
-                  onKeyDown={(event) => { if (event.key !== "Escape") event.stopPropagation(); }}
-                  onBlur={(event) => commitNotes(event.currentTarget.value)}
-                />
-              )}
-            </section>
-          ) : null}
-          {open ? (
-            <section className="fy-swrow__panel fy-swrow__panel--settings" onClick={(event) => event.stopPropagation()}>
-              <div className="fy-swrow__panelhead">
-                <Cog size={15} /><span>Shot settings</span>
-              </div>
-              <div className="fy-swrow__settingsgrid">
-                <label>
-                  <span>Duration</span>
-                  <select
-                    aria-label={`Duration for shot ${shot.number}`}
-                    value={String(durationSec)}
-                    disabled={disabled}
-                    onChange={(event) => {
-                      const next = Number(event.target.value);
-                      if (Number.isFinite(next) && next > 0 && next !== durationSec) onCommand({ kind: "edit-shot", shotId: shot.id, change: { durationSec: next } });
-                    }}
-                  >
-                    {durationOptions.map((seconds) => <option key={seconds} value={String(seconds)}>{seconds}s</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>Aspect ratio</span>
-                  {/* The production's, read here and set on the production (turn 143). */}
-                  <select aria-label={`Aspect ratio for shot ${shot.number}`} value={aspect} disabled title="Set on the production" onChange={() => {}}>
-                    <option value={aspect}>{aspect}</option>
-                  </select>
-                </label>
-              </div>
-            </section>
           ) : null}
         </div>
-      )}
+        <section className="fy-swrow__descwrap">
+          {scriptEditor}
+        </section>
+      </div>
       {rowActions}
       {menuOpen && typeof document !== "undefined"
         ? createPortal(
@@ -1831,11 +1321,9 @@ function Row({
                 </>
               ) : (
                 <>
-                  <button type="button" role="menuitem" disabled={staged} onClick={() => { closeMenu(true); onStage(); }}>Stage this shot</button>
                   <button type="button" role="menuitem" disabled={disabled || generatorPending} onClick={onOpenInGenerator}>
                     {generatorPending ? "Opening…" : "Open in generator"}
                   </button>
-                  <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onEdit(); }}>Advanced</button>
                   <button type="button" role="menuitem" disabled={disabled} onClick={() => { closeMenu(true); onCommand({ kind: "duplicate-shot", shotId: shot.id }); }}>Duplicate</button>
                   <button
                     type="button"

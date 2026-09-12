@@ -46,7 +46,8 @@
 :where([data-screen="scene-detail"]) .fy-swrows { padding: 1px 3px 20px 1px; align-items: stretch; scrollbar-gutter: stable; }
 :where([data-screen="scene-detail"]) .fy-swrow, :where([data-screen="scene-detail"]) .fy-swaddshot { width: 100%; }
 :where([data-screen="scene-detail"]) .fy-swrow { flex: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 54px 285px minmax(0, 1fr); align-items: stretch; min-height: 208px; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
+/* 14px above and below the frame (turn 145): the picture sits inside the row, not on its border. */
+:where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 54px 285px minmax(0, 1fr); align-items: stretch; min-height: 236px; padding: 14px 0; border-radius: 12px; box-shadow: none; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
 :where([data-screen="scene-detail"]) .fy-swrow__band:hover { box-shadow: none; border-color: color-mix(in srgb, var(--muted-foreground) 35%, var(--border)); }
 :where([data-screen="scene-detail"]) .fy-swrow__band[data-selected="true"] { background: color-mix(in srgb, var(--secondary) 70%, var(--background)); }
 :where([data-screen="scene-detail"]) .fy-swrow__ring { border: 1px solid color-mix(in srgb, var(--muted-foreground) 70%, var(--border)); border-radius: 12px; }
@@ -65,11 +66,14 @@
 :where([data-screen="scene-detail"]) .fy-swrow__nofr { font: 400 11px var(--font-sans); }
 :where([data-screen="scene-detail"]) .fy-swrow__body { padding: 18px 30px; gap: 6px; }
 :where([data-screen="scene-detail"]) .fy-swrow__titleline { min-height: 30px; padding-right: 210px; flex-wrap: wrap; }
-:where([data-screen="scene-detail"]) .fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 10px; min-width: 0; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--foreground); cursor: text; text-align: left; }
-:where([data-screen="scene-detail"]) .fy-swrow__title-edit svg { flex: none; color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__title-edit:hover svg { color: var(--foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__title-edit:disabled { cursor: default; }
-:where([data-screen="scene-detail"]) .fy-swrow__title { font: 500 19px/1.4 var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrow__title { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--foreground); font: 500 19px/1.4 var(--font-sans); text-align: left; cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swrow__title:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
+:where([data-screen="scene-detail"]) .fy-swrow__title:disabled { cursor: default; }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="scene-detail"]) .fy-swrow__pencil:disabled { opacity: .45; cursor: default; }
+:where([data-screen="scene-detail"]) .fy-swrow__open { cursor: pointer; }
 :where([data-screen="scene-detail"]) .fy-swrow__title-input { width: 100%; min-width: 80px; padding: 2px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); font: 600 16px/1.4 var(--font-sans); }
 :where([data-screen="scene-detail"]) .fy-swrow__timing { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted-foreground); font: 400 14px/1.4 var(--font-sans); }
 :where([data-screen="scene-detail"]) .fy-swrow__timing > button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: text; text-underline-offset: 3px; }
@@ -81,12 +85,7 @@
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder,
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefmirror,
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__brieftext { font: 400 15px/1.55 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__prompt-toggle { display: flex; align-items: center; gap: 9px; align-self: flex-start; margin-top: auto; padding: 4px 0; border: 0; background: transparent; color: var(--muted-foreground); font: 400 14px var(--font-sans); cursor: pointer; }
-:where([data-screen="scene-detail"]) .fy-swrow__prompt-toggle:hover:not(:disabled) { color: var(--foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__prompt-toggle:disabled { cursor: default; opacity: .45; }
-:where([data-screen="scene-detail"]) .fy-swrow__prompt-toggle > span { font-size: 10px; color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__prompt { margin-top: 8px; }
-:where([data-screen="scene-detail"]) .fy-swrow__actions { position: absolute; top: 20px; right: 20px; border: 0; padding: 0; }
+:where([data-screen="scene-detail"]) .fy-swrow__actions { position: absolute; top: 34px; right: 20px; border: 0; padding: 0; }
 :where([data-screen="scene-detail"]) .fy-swrow__actionline { align-items: center; gap: 10px; }
 :where([data-screen="scene-detail"]) .fy-swrow__generate { flex: none; padding: 8px 16px; min-height: 36px; font-size: 13px; font-weight: 400; }
 :where([data-screen="scene-detail"]) .fy-swrow__more { height: 30px; }
@@ -113,83 +112,15 @@
 .fy-swimage-menu button:hover:not(:disabled), .fy-swimage-menu button:focus-visible { background: var(--accent); }
 .fy-swimage-menu button:disabled { opacity: .45; cursor: default; }
 
-/* Design turn 143: one row open in place; the others fold to a strip while it is. The open row is
-   the selected row, so [data-open] rides on the selection the views already share. */
+/* The row head: title line, then timing; one column, as 145a draws it. */
 :where([data-screen="scene-detail"]) .fy-swrow__head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-/* The open band is one grid: the frame, then the head beside it, then two equal panel columns
-   under both — the frame's column and the head's first stretch add up to one panel. The body is
-   display: contents so its children sit on this grid without leaving the tree position that
-   keeps an editor alive across List, Grid and the row opening. */
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] { grid-template-columns: 260px calc((100% - 12px) / 2 - 260px) 12px calc((100% - 12px) / 2); grid-template-rows: auto auto auto; column-gap: 0; row-gap: 12px; align-items: start; min-height: 0; padding: 16px; cursor: default; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__grip { display: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__frame { grid-column: 1; grid-row: 1; width: 260px; height: 110px; aspect-ratio: auto; border-radius: 8px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__body { display: contents; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__head { grid-column: 2 / 5; grid-row: 1; padding: 2px 0 0 22px; gap: 8px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--description { grid-column: 1 / 3; grid-row: 2; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--prompt { grid-column: 4; grid-row: 2; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--notes { grid-column: 1 / 3; grid-row: 3; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--settings { grid-column: 4; grid-row: 3; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__titleline { min-height: 24px; padding-right: 210px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__title { font: 600 15px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__timing { font-size: 13px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actions { top: 16px; right: 16px; }
-/* Read under the title, edited in the Description panel: the same draft, clamped to two lines. */
-:where([data-screen="scene-detail"]) .fy-swrow__scriptread { margin: 2px 0 0; max-width: 600px; min-height: 0; font: 400 13px/1.55 var(--font-sans); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; white-space: pre-wrap; }
-:where([data-screen="scene-detail"]) .fy-swrow__place { display: inline-flex; align-items: center; gap: 6px; height: 24px; box-sizing: border-box; padding: 0 9px 0 7px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 400 13px/1.4 var(--font-sans); cursor: pointer; }
-:where([data-screen="scene-detail"]) .fy-swrow__place > svg { flex: none; color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__place:hover { border-color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__authored { padding: 1px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-foreground); font: 400 11px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__panel { box-sizing: border-box; min-width: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--background); cursor: default; }
-:where([data-screen="scene-detail"]) .fy-swrow__panelhead { display: flex; align-items: center; gap: 9px; min-height: 22px; color: var(--foreground); font: 500 13px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__panelhead > svg { flex: none; color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__panelhead > span:first-of-type { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel > .fy-swrow__panelhead > button { border: 0; background: transparent; color: var(--muted-foreground); cursor: pointer; font: 400 12px/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; padding: 0; opacity: 1; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel > .fy-swrow__panelhead > button:hover:not(:disabled) { color: var(--foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__panel > .fy-swrow__panelhead > button:disabled { cursor: default; opacity: .45; text-decoration: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel > .fy-swrow__panelhead > .fy-swrow__panelfold { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; text-decoration: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel > .fy-swrow__panelhead > .fy-swrow__panelfold:hover { background: var(--accent); color: var(--foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); }
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor:focus-within { background: var(--muted); border-color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor .fy-bench__briefstack { min-height: 61px; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor .fy-bench__briefunder,
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor .fy-bench__briefmirror,
-:where([data-screen="scene-detail"]) .fy-swrow__panel .fy-swrow__scripteditor .fy-bench__brieftext { font: 400 13px/1.55 var(--font-sans); }
-/* The prompt as the drawing has it: three lines of the same script face, scrolling inside its box
-   until View full prompt shows it whole. The panel is the prompt container, so Rebuild and the
-   editor keep the relationship the card's prompt has. */
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt { margin: 0; gap: 10px; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt > .fy-bench__briefstack { height: 69px; min-height: 69px; max-height: 69px; resize: none; overflow: hidden; }
-/* Whole: the stack's children are absolute, so the underlay joins the flow and the box takes
-   the prompt's own height; the textarea over it still fills the stack. */
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt[data-whole="true"] > .fy-bench__briefstack { height: auto; max-height: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt[data-whole="true"] > .fy-bench__briefstack > .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__briefunder,
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__briefmirror,
-:where([data-screen="scene-detail"]) .fy-swrow__panel.fy-swrow__prompt .fy-bench__brieftext { padding: 8px 10px; font: 400 13px/1.55 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__notes { width: 100%; box-sizing: border-box; min-height: 34px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); color: var(--foreground); font: 400 13px/1.4 var(--font-sans); resize: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__notes::placeholder { color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__notes:focus { outline: none; border-color: var(--muted-foreground); }
-:where([data-screen="scene-detail"]) .fy-swrow__settingsgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-:where([data-screen="scene-detail"]) .fy-swrow__settingsgrid > label { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted-foreground); font: 400 12px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__settingsgrid select { width: 100%; height: 34px; box-sizing: border-box; padding: 0 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 13px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__settingsgrid select:disabled { opacity: .6; }
-/* Folded: the grip, the frame as a strip with the number on it, title and timing, one line of
-   script, the action, the overflow and the chevron. 60px, the drawing's height. */
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 54px 228px minmax(0, 1fr); min-height: 0; height: 60px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__grip { padding-top: 0; align-items: center; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { width: 228px; height: 100%; aspect-ratio: auto; align-self: stretch; border-radius: 8px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__label { top: 6px; left: 6px; min-width: 28px; height: 28px; font-size: 13px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__chipmeta { display: none; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { padding: 0 210px 0 24px; justify-content: center; gap: 3px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__titleline { min-height: 22px; padding-right: 0; flex-wrap: nowrap; gap: 12px; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__title { font: 600 15px/1.4 var(--font-sans); }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__timing { flex: none; flex-wrap: nowrap; white-space: nowrap; font-size: 13px; }
-:where([data-screen="scene-detail"]) .fy-swrow__scriptline { margin: 0; min-height: 18px; font: 400 13px/1.4 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-:where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__actions { top: 50%; right: 20px; transform: translateY(-50%); }
 
 /* The overview reuses the same rows and editors, so switching layout preserves drafts and selection. */
-:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-content: start; gap: 18px; }
-:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__band { display: flex; flex-direction: column; height: calc(100% - 18px); min-height: 0; }
+/* The columns follow the production's aspect (turn 145): four across at portrait and three at
+   landscape at the drawing's width, one fewer whenever a card would fall under 176 or 280 wide. */
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(max(176px, calc((100% - 54px) / 4)), 1fr)); align-content: start; gap: 18px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"][data-aspect="landscape"] { grid-template-columns: repeat(auto-fill, minmax(max(280px, calc((100% - 36px) / 3)), 1fr)); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__band { display: flex; flex-direction: column; height: calc(100% - 18px); min-height: 0; padding: 0; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child { padding-top: 18px; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child .fy-swrow__band { height: 100%; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 0; left: 10px; z-index: 1; }
@@ -316,60 +247,9 @@
   :where([data-screen="scene-detail"]) .fy-swrow__titleline { padding-right: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
   :where([data-screen="scene-detail"]) .fy-swrow__actionline { justify-content: space-between; }
-  /* The open row stacks: frame, head, actions, then the panels one under another. The rules
-     above place the actions in column 3, which on this grid is the 12px seam. */
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; row-gap: 12px; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__frame { grid-column: 1; grid-row: 1; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__head { grid-column: 1; grid-row: 2; padding: 0; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__titleline { padding-right: 0; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actions { position: static; grid-column: 1; grid-row: 3; padding: 0; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actionline { justify-content: flex-start; gap: 10px; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--description { grid-column: 1; grid-row: 4; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--prompt { grid-column: 1; grid-row: 5; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--notes { grid-column: 1; grid-row: 6; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__panel--settings { grid-column: 1; grid-row: 7; }
-  /* A folded row keeps its one line: a shorter strip, the overflow and the chevron over the right
-     edge, and the action left to the open row, one press away. */
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 54px 120px minmax(0, 1fr); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { width: 120px; grid-row: auto; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { padding: 0 96px 0 16px; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__actions { position: absolute; grid-column: auto; top: 50%; right: 12px; padding: 0; transform: translateY(-50%); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__generate { display: none; }
 }
 @container (max-width: 560px) {
   :where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
   :where([data-screen="scene-detail"]) .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, 285px); }
   :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] { grid-template-columns: minmax(0, 1fr); padding: 12px; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] > .fy-swrow__frame { grid-column: 1; width: min(100%, 260px); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-open="true"] .fy-swrow__actions { grid-column: 1; }
-  :where([data-screen="scene-detail"]) .fy-swrow__settingsgrid { grid-template-columns: minmax(0, 1fr); }
-  /* The strip drops its picture: number, title, timing, one line of script, and the actions. */
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] { grid-template-columns: 26px 44px minmax(0, 1fr); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame { grid-column: 2; width: 44px; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__label { top: 50%; left: 50%; transform: translate(-50%, -50%); }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] .fy-swrow__hatch > *,
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__frame > .fy-swrow__img { display: none; }
-  :where([data-screen="scene-detail"]) .fy-swrow__band[data-folded="true"] > .fy-swrow__body { grid-column: 3; padding: 0 88px 0 12px; }
-  :where([data-screen="scene-detail"]) .fy-sw__headline { flex-wrap: wrap; }
-  :where([data-screen="scene-detail"]) .fy-sw__headline > .fy-sw__title { flex-basis: 100%; font-size: 24px; }
-  :where([data-screen="scene-detail"]) .fy-sw__context { gap: 12px; }
-  :where([data-screen="scene-detail"]) .fy-sw__location { border: 0; padding-left: 0; }
-  :where([data-screen="scene-detail"]) .fy-sw__metrics { gap: 12px; }
-  :where([data-screen="scene-detail"]) .fy-sw__metrics > span:first-child { border: 0; padding-left: 0; }
-  :where([data-screen="scene-detail"]) .fy-sw__tab { padding-inline: 11px; }
-  :where([data-screen="scene-detail"]) .fy-sw__toolbar { gap: 8px; }
-  :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 900px) {
-  :where([data-screen="scene-detail"]) .fy-sw__headline { align-items: stretch; }
-}
-@media (hover: none) {
-  :where([data-screen="scene-detail"]) .fy-swrow__frameactions { opacity: 1; pointer-events: auto; }
-  :where([data-screen="scene-detail"]) .fy-swrow__frameactions > button { pointer-events: auto; }
-}
-@media (pointer: coarse) {
-  :where([data-screen="scene-detail"]) .fy-swrow__frameactions > button { width: 44px; height: 44px; }
-  :where([data-screen="scene-detail"]) .fy-sw__tile { width: 44px; height: 44px; }
-}

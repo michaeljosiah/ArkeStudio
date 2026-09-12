@@ -1,0 +1,164 @@
+/* The shot page · design turn 145 (145b–145e). After fidelity.css and workspace.css; the shell
+   rules of .fy-sw apply, and these say what the page adds. Type goes through the tokens (turn 139). */
+.fy-sw:where([data-screen="shot-page"]) { grid-template-columns: minmax(0, 1fr) clamp(300px, 23vw, 364px); }
+:where([data-screen="shot-page"]) .fy-sw__centre { padding-inline: 32px 24px; }
+:where([data-screen="shot-page"]) .fy-sw__head { padding: 18px 0 12px; animation: none; }
+:where([data-screen="shot-page"]) .fy-sw__breadcrumb { margin-bottom: 6px; color: var(--muted-foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__crumb { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__crumb:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 3px; }
+:where([data-screen="shot-page"]) .fy-sw__headline { align-items: center; gap: 12px; }
+:where([data-screen="shot-page"]) .fy-shot__title { display: flex; align-items: center; gap: 12px; min-width: 0; margin: 0; font: var(--type-title); letter-spacing: var(--tracking-tighter); }
+:where([data-screen="shot-page"]) .fy-shot__title > span { white-space: nowrap; }
+:where([data-screen="shot-page"]) .fy-shot__title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+:where([data-screen="shot-page"]) .fy-shot__title-input { flex: 1; min-width: 120px; max-width: 520px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 600 var(--text-xl)/1.3 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__pencil { flex: none; display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__pencil:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__pencil:disabled { opacity: .45; cursor: default; }
+:where([data-screen="shot-page"]) .fy-sw__actions { display: flex; align-items: center; gap: 8px; flex: none; }
+:where([data-screen="shot-page"]) .fy-sw__actions > .ui-btn { min-height: 36px; padding-inline: 14px; font: 500 var(--text-sm)/1.4 var(--font-sans); }
+
+/* The overflow: a details element, so it needs no portal and closes on Escape and on blur. */
+:where([data-screen="shot-page"]) .fy-shot__menu { position: relative; }
+:where([data-screen="shot-page"]) .fy-shot__menu > summary { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; list-style: none; }
+:where([data-screen="shot-page"]) .fy-shot__menu > summary::-webkit-details-marker { display: none; }
+:where([data-screen="shot-page"]) .fy-shot__menu > summary:hover, :where([data-screen="shot-page"]) .fy-shot__menu[open] > summary { background: var(--accent); color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__menupanel { position: absolute; z-index: 30; top: calc(100% + 6px); right: 0; min-width: 176px; display: flex; flex-direction: column; padding: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); }
+:where([data-screen="shot-page"]) .fy-shot__menupanel > button { border: 0; border-radius: 5px; padding: 8px 10px; background: transparent; color: inherit; font: 400 var(--text-sm)/1.4 var(--font-sans); text-align: left; cursor: pointer; white-space: nowrap; }
+:where([data-screen="shot-page"]) .fy-shot__menupanel > button:hover:not(:disabled), :where([data-screen="shot-page"]) .fy-shot__menupanel > button:focus-visible { background: var(--accent); }
+:where([data-screen="shot-page"]) .fy-shot__menupanel > button:disabled { opacity: .45; cursor: default; }
+:where([data-screen="shot-page"]) .fy-shot__menupanel > .fy-shot__danger { color: var(--destructive); }
+:where([data-screen="shot-page"]) .fy-shot__confirm { position: fixed; z-index: 60; left: 50%; top: 40%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-lg); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__confirm > button { min-height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: 500 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__confirm > button:first-of-type { background: var(--foreground); color: var(--background); border-color: var(--foreground); }
+
+/* The filmstrip: every shot of the scene at 71px tall in the production's aspect, the open one ringed. */
+:where([data-screen="shot-page"]) .fy-shot__strip { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+:where([data-screen="shot-page"]) .fy-shot__thumbs { display: flex; align-items: center; gap: 10px; margin: 0; padding: 2px; list-style: none; overflow-x: auto; scrollbar-width: none; }
+:where([data-screen="shot-page"]) .fy-shot__thumb { position: relative; display: block; height: 71px; aspect-ratio: var(--shot-aspect); box-sizing: border-box; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: var(--neutral-950); color: var(--muted-foreground); cursor: pointer; flex: none; }
+:where([data-screen="shot-page"]) .fy-shot__thumb > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+:where([data-screen="shot-page"]) .fy-shot__thumb[data-empty="true"] { display: grid; place-items: center; background: var(--muted); border: 1px dashed var(--border); }
+:where([data-screen="shot-page"]) .fy-shot__thumb > span { position: absolute; top: 4px; left: 4px; min-width: 18px; height: 18px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; padding: 0 4px; border-radius: 4px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); font: 500 var(--text-2xs)/1 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__thumb[aria-current="true"] { outline: 2px solid var(--foreground); outline-offset: 2px; }
+:where([data-screen="shot-page"]) .fy-shot__thumb:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+:where([data-screen="shot-page"]) .fy-shot__step { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; flex: none; }
+:where([data-screen="shot-page"]) .fy-shot__step:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__step:disabled { opacity: .35; cursor: default; }
+:where([data-screen="shot-page"]) .fy-shot__count { color: var(--muted-foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); white-space: nowrap; }
+
+/* The view row: Shot · Stage, and the state word at the right. */
+:where([data-screen="shot-page"]) .fy-sw__toolbar { max-width: none; gap: 12px; padding: 0 0 12px; }
+:where([data-screen="shot-page"]) .fy-sw__tabs { border-radius: 10px; padding: 3px; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
+:where([data-screen="shot-page"]) .fy-sw__tab { min-height: 30px; padding: 0 14px; border-radius: 7px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-sw__tab[data-on="true"] { background: var(--background); box-shadow: var(--shadow-xs); font-weight: 500; }
+:where([data-screen="shot-page"]) .fy-shot__state { display: inline-flex; align-items: center; gap: 9px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__state > span { width: 9px; height: 9px; border-radius: 50%; background: var(--neutral-400); }
+:where([data-screen="shot-page"]) .fy-shot__state[data-tone="ready"] > span { background: var(--success); }
+:where([data-screen="shot-page"]) .fy-shot__state[data-tone="pending"] > span { background: var(--warning); }
+:where([data-screen="shot-page"]) .fy-shot__state[data-tone="stale"] > span { background: var(--warning); }
+:where([data-screen="shot-page"]) .fy-shot__state[data-tone="failed"] > span { background: var(--destructive); }
+:where([data-screen="shot-page"]) .fy-shot__staging { color: var(--neutral-400); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="shot-page"]) .fy-sw__full { width: 30px; height: 30px; }
+
+/* The body: the frame whole at the production's aspect, filling the height; the fields beside it,
+   one column that scrolls while the frame holds its place. The body is a size container so the
+   frame can be as tall as the room and as wide as the aspect makes it, capped at half the width. */
+:where([data-screen="shot-page"]) .fy-shot__body { flex: 1; min-height: 0; display: flex; gap: 28px; padding: 1px 0 18px 1px; container-type: size; }
+:where([data-screen="shot-page"]) .fy-shot__framecol { flex: none; display: flex; flex-direction: column; gap: 10px; max-width: 50%; }
+:where([data-screen="shot-page"]) .fy-shot__frame { position: relative; box-sizing: border-box; width: min(calc(100cqh * var(--shot-aspect)), 50cqw); aspect-ratio: var(--shot-aspect); border-radius: 10px; overflow: hidden; background: var(--neutral-950); }
+:where([data-screen="shot-page"]) .fy-shot__frame[data-empty="true"] { background: var(--muted); border: 1px dashed var(--border); }
+:where([data-screen="shot-page"]) .fy-shot__img { display: block; width: 100%; height: 100%; object-fit: contain; }
+:where([data-screen="shot-page"]) .fy-shot__hatch { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__label { position: absolute; top: 9px; left: 9px; z-index: 1; min-width: 32px; height: 32px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); font: 500 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__chipmeta { position: absolute; left: 9px; bottom: 9px; z-index: 1; padding: 3px 7px; border-radius: 5px; background: color-mix(in srgb, var(--media-overlay-bg) 72%, transparent); color: var(--media-overlay-fg); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="shot-page"]) .fy-shot__frame:hover .fy-shot__chipmeta, :where([data-screen="shot-page"]) .fy-shot__frame:focus-within .fy-shot__chipmeta { opacity: 0; }
+/* The same four-glyph toolbar the row has (138), over the frame's foot. */
+:where([data-screen="shot-page"]) .fy-swrow__frameactions { left: auto; right: 8px; bottom: 8px; transform: none; width: max-content; max-width: calc(100% - 16px); justify-content: center; flex-wrap: wrap; gap: 6px; padding: 5px; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); border-radius: 9px; background: color-mix(in srgb, var(--media-overlay-bg) 90%, transparent); backdrop-filter: blur(8px); pointer-events: none; }
+:where([data-screen="shot-page"]) .fy-swrow__frameactions > button { position: static; transform: none; opacity: 1; pointer-events: none; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; padding: 0; border: 1px solid color-mix(in srgb, var(--media-overlay-fg) 16%, transparent); background: transparent; border-radius: 6px; color: var(--media-overlay-fg); backdrop-filter: none; }
+:where([data-screen="shot-page"]) .fy-shot__frame:hover .fy-swrow__frameactions,
+:where([data-screen="shot-page"]) .fy-shot__frame:focus-within .fy-swrow__frameactions,
+:where([data-screen="shot-page"]) .fy-swrow__frameactions[data-open] { opacity: 1; pointer-events: auto; }
+:where([data-screen="shot-page"]) .fy-shot__frame:hover .fy-swrow__frameactions > button, :where([data-screen="shot-page"]) .fy-shot__frame:focus-within .fy-swrow__frameactions > button, :where([data-screen="shot-page"]) .fy-swrow__frameactions[data-open] > button { pointer-events: auto; }
+:where([data-screen="shot-page"]) .fy-swrow__frameactions > button:focus-visible { outline: 2px solid var(--media-overlay-fg); outline-offset: 1px; }
+
+/* The fields: one column of cards that scrolls, 10px apart. */
+:where([data-screen="shot-page"]) .fy-shot__column { flex: 1; min-width: 0; min-height: 0; overflow: hidden auto; padding-right: 12px; scrollbar-gutter: stable; }
+:where([data-screen="shot-page"]) .fy-shot__fields { display: flex; flex-direction: column; gap: 10px; }
+:where([data-screen="shot-page"]) .fy-shot__section { box-sizing: border-box; border: 1px solid var(--border); border-radius: 12px; background: var(--background); }
+:where([data-screen="shot-page"]) .fy-shot__sectionhead { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 12px; }
+:where([data-screen="shot-page"]) .fy-shot__sectionicon { display: inline-flex; color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__sectionname { font: 500 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__sectionbody { display: flex; flex-direction: column; gap: 6px; padding: 0 12px 10px; }
+:where([data-screen="shot-page"]) .fy-shot__spacer { flex: 1; }
+:where([data-screen="shot-page"]) .fy-shot__tag { padding: 1px 7px; border-radius: 5px; background: var(--secondary); color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__tag[data-tone="warning"] { color: var(--warning); }
+:where([data-screen="shot-page"]) .fy-shot__link { border: 0; padding: 0 4px; background: transparent; color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__link:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__link:disabled { opacity: .45; cursor: default; }
+:where([data-screen="shot-page"]) .fy-shot__add { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); text-decoration: none; }
+:where([data-screen="shot-page"]) .fy-shot__add:hover:not(:disabled) { color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__cite { height: 26px; max-width: 200px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+
+/* The script and the prompt: the row's editor, in a box that says it is one. */
+:where([data-screen="shot-page"]) .fy-shot__script, :where([data-screen="shot-page"]) .fy-shot__prompt { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); }
+:where([data-screen="shot-page"]) .fy-shot__script:focus-within, :where([data-screen="shot-page"]) .fy-shot__prompt:focus-within { border-color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__script .fy-bench__briefstack { min-height: 40px; }
+:where([data-screen="shot-page"]) .fy-shot__script .fy-bench__briefunder, :where([data-screen="shot-page"]) .fy-shot__script .fy-bench__briefmirror, :where([data-screen="shot-page"]) .fy-shot__script .fy-bench__brieftext,
+:where([data-screen="shot-page"]) .fy-shot__prompt .fy-bench__briefunder, :where([data-screen="shot-page"]) .fy-shot__prompt .fy-bench__briefmirror, :where([data-screen="shot-page"]) .fy-shot__prompt .fy-bench__brieftext { font: 400 var(--text-sm)/1.55 var(--font-sans); }
+/* Three lines of the prompt, scrolling inside the box, until View full prompt shows it whole. */
+:where([data-screen="shot-page"]) .fy-shot__prompt > .fy-bench__briefstack { height: 61px; min-height: 61px; max-height: 61px; resize: none; overflow: hidden; }
+:where([data-screen="shot-page"]) .fy-shot__prompt[data-whole="true"] > .fy-bench__briefstack { height: auto; max-height: none; }
+:where([data-screen="shot-page"]) .fy-shot__prompt[data-whole="true"] > .fy-bench__briefstack > .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
+:where([data-screen="shot-page"]) .fy-shot__stale { margin: 0; color: var(--warning); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__refs { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
+:where([data-screen="shot-page"]) .fy-shot__ref { display: inline-flex; align-items: center; gap: 8px; height: 26px; box-sizing: border-box; padding: 0 9px 0 3px; border: 1px solid var(--border); border-radius: 99px; background: var(--background); color: var(--foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__ref--door { cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__ref--door:hover { border-color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__refthumb { width: 20px; height: 20px; border-radius: 50%; overflow: hidden; flex: none; }
+:where([data-screen="shot-page"]) .fy-shot__refwords { color: var(--muted-foreground); }
+
+/* Notes: one line until written in — the line is the card. */
+:where([data-screen="shot-page"]) .fy-shot__section--notes { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px; }
+:where([data-screen="shot-page"]) .fy-shot__notes { flex: 1; min-width: 0; min-height: 24px; max-height: 240px; margin: 0; padding: 6px 0; border: 0; background: transparent; color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); resize: none; overflow: hidden; }
+:where([data-screen="shot-page"]) .fy-shot__notes::placeholder { color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__notes:focus { outline: none; }
+
+/* Camera: 97's nine, three to a row, the label above with a dot once the shot overrides the scene. */
+:where([data-screen="shot-page"]) .fy-shot__camera { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
+:where([data-screen="shot-page"]) .fy-shot__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+:where([data-screen="shot-page"]) .fy-shot__field--wide { padding-bottom: 2px; }
+:where([data-screen="shot-page"]) .fy-shot__field > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__field > select, :where([data-screen="shot-page"]) .fy-shot__field > input { width: 100%; height: 28px; box-sizing: border-box; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__field > select:disabled, :where([data-screen="shot-page"]) .fy-shot__field > input:disabled { opacity: .6; }
+:where([data-screen="shot-page"]) .fy-shot__field > input::placeholder { color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__field:not([data-own]) > select { color: var(--muted-foreground); }
+
+/* The rows of Timing, Continuity, Sound and Props: a 64px label, then the control. */
+:where([data-screen="shot-page"]) .fy-shot__row { display: flex; align-items: center; gap: 12px; min-height: 26px; }
+:where([data-screen="shot-page"]) .fy-shot__rowlabel { width: 64px; flex: none; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__input, :where([data-screen="shot-page"]) .fy-shot__beattext { flex: 1; min-width: 0; height: 28px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__input::placeholder, :where([data-screen="shot-page"]) .fy-shot__beattext::placeholder, :where([data-screen="shot-page"]) .fy-shot__beatspan::placeholder { color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__beatspan { width: 64px; flex: none; height: 28px; box-sizing: border-box; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--muted-foreground); font: 400 var(--text-2xs)/1.4 var(--font-mono); }
+:where([data-screen="shot-page"]) .fy-shot__stepper { display: inline-flex; align-items: center; gap: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__stepper > span { min-width: 34px; text-align: center; }
+:where([data-screen="shot-page"]) .fy-shot__stepper > button, :where([data-screen="shot-page"]) .fy-shot__remove { display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--muted-foreground); cursor: pointer; flex: none; }
+:where([data-screen="shot-page"]) .fy-shot__remove { border-color: transparent; }
+:where([data-screen="shot-page"]) .fy-shot__stepper > button:hover:not(:disabled), :where([data-screen="shot-page"]) .fy-shot__remove:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__stepper > button:disabled, :where([data-screen="shot-page"]) .fy-shot__remove:disabled { opacity: .45; cursor: default; }
+:where([data-screen="shot-page"]) .fy-shot__check { display: flex; align-items: center; gap: 9px; min-height: 26px; font: 400 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; }
+:where([data-screen="shot-page"]) .fy-shot__check[data-inert="true"] { color: var(--muted-foreground); cursor: default; }
+:where([data-screen="shot-page"]) .fy-shot__check > input { width: 14px; height: 14px; margin: 0; accent-color: var(--foreground); }
+:where([data-screen="shot-page"]) .fy-shot__prop { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-shot__prop > svg { color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-shot__propstate { width: 220px; flex: none; height: 28px; box-sizing: border-box; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+
+/* The footer, as the scene page's. */
+:where([data-screen="shot-page"]) .fy-sw__footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex: none; min-height: 50px; border-top: 1px solid var(--border); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+:where([data-screen="shot-page"]) .fy-sw__save { display: inline-flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
+:where([data-screen="shot-page"]) .fy-sw__save > span { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+:where([data-screen="shot-page"]) .fy-sw__save[data-pending] > span { background: var(--neutral-400); }
+:where([data-screen="shot-page"]) .fy-sw__back { display: inline-flex; align-items: center; gap: 12px; border: 0; background: transparent; color: var(--foreground); font: 500 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; padding: 8px 0; }
+:where([data-screen="shot-page"]) .fy-sw__back:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* Full screen: the Stage alone, as on the scene page (135, 144). */
+.fy-sw[data-full="true"]:where([data-screen="shot-page"]) .fy-sw__centre > :not(.fy-swstage):not(.fy-sw__fullpill) { display: none; }
