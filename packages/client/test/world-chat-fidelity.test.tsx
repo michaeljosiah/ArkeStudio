@@ -171,7 +171,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "running" | "completed"; older?: boolean } = {},
+  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean } = {},
 ): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -219,6 +219,7 @@ function renderActionConversation(
             quantity: 1,
             output: "One image",
             cost: "Estimate unavailable",
+            ...(options.cancellable ? { cancellationSupported: true } : {}),
           }
         : {
             family,
@@ -337,6 +338,17 @@ describe("conversation permission cards", () => {
     assert.match(html, /Estimate unavailable/);
     assert.match(html, /<button[^>]*>Approve<\/button>/);
     assert.doesNotMatch(html, /This card type is not available in this version/);
+  });
+
+  it("offers the way to Bench only while a cancellable generation is queued or running", () => {
+    // A mutation sample found the status guard untested: inverted, the card offered to cancel a
+    // finished generation and never a running one, and nothing noticed.
+    const bench = /Manage or cancel in Bench/;
+    for (const status of ["queued", "running"] as const) {
+      assert.match(renderActionConversation("generation", { status, cancellable: true }), bench, `${status}: there is still something to cancel`);
+    }
+    assert.doesNotMatch(renderActionConversation("generation", { status: "completed", cancellable: true }), bench, "nothing left to cancel");
+    assert.doesNotMatch(renderActionConversation("generation", { status: "running" }), bench, "a provider that cannot cancel is not offered as if it could");
   });
 
   it("renders playable take evidence, destination, history, and rejection citation", () => {

@@ -331,6 +331,27 @@ describe("World Chat authority adapters", () => {
     assert.deepEqual(episodes.map((episode) => episode.order).sort((a, b) => a - b), [1, 5, 6, 7]);
   });
 
+  it("names a created episode after its title, and a second of the same title after that", async () => {
+    // A mutation sample found the id untested: with the slug's fallback flipped, every created
+    // episode's id stem became `episode`, and the season kept accepting them.
+    const w = await setup();
+    const productionId = await createProduction(w.store, { title: "Named season", medium: "video", productionKind: "microdrama", seriesTitle: "Named series" });
+    const create = async (title: string) => {
+      const proposal = await stageWorldChatProductionAuthoredAction(w.store, w.gate, { actionId: newId("act"), conversationId: w.conversationId }, {
+        kind: "world-chat-production-episode",
+        worldId: w.store.worldId,
+        action: { kind: "production-episode", productionId, change: { operation: "create", title, scenes: [] }, checkReceiptIds: [] },
+      });
+      assert.equal((await w.gate.accept(proposal.id)).status, "accepted");
+    };
+    await create("The Missing Night");
+    await create("The Missing Night");
+    await create("   ");
+    const production = w.store.getBundle().productions.find((entry) => entry.meta.id === productionId)!;
+    assert.deepEqual(production.episodes.map((episode) => episode.id), ["ep_the-missing-night", "ep_the-missing-night-2", "ep_episode"], "the title, the title stepped, and the fallback for a title that slugs to nothing");
+    assert.deepEqual(Object.values(production.episodeFiles).sort(), ["episode", "the-missing-night", "the-missing-night-2"], "and the file stems follow the ids");
+  });
+
   it("requires a coordinator-issued complete timeline receipt when a live run prepares an editor request", async () => {
     const context = { kind: "production" as const, productionId: PRODUCTION };
     const w = await setup(context);

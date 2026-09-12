@@ -534,6 +534,28 @@ describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () =
     assert.equal(merge.getAttribute("title"), "Remove this hand split");
   });
 
+  it("offers Render board and Plan video only where the scene can be written", async () => {
+    // A mutation sample found both controls' `disabled` guards untested: with `locked || staged`
+    // flipped to `&&`, Plan video stayed pressable on a scene that cannot take a write. A scene
+    // with no file on disk is locked and nothing on it is staged, which is the case that tells the
+    // two apart.
+    const open = await mountState(split());
+    await click(q(open, ".fy-sw__boards-toggle")!);
+    const band = (m: Mounted) => q(m, '[data-testid="workspace-board-A"] .fy-swboard__line')!;
+    const control = (m: Mounted, text: string) => [...band(m).querySelectorAll("button")].find((b) => b.textContent?.trim() === text) as unknown as HTMLButtonElement;
+    assert.equal(control(open, "Plan video").disabled, false, "a scene that can be written offers the plan");
+    assert.equal(control(open, "Render board").disabled, false);
+    await act(async () => open.root.unmount());
+
+    const state = split();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    delete production.sceneFiles["sc_04"];
+    const locked = await mountState(state);
+    await click(q(locked, ".fy-sw__boards-toggle")!);
+    assert.equal(control(locked, "Plan video").disabled, true, "no file to write the plan against");
+    assert.equal(control(locked, "Render board").disabled, true);
+  });
+
   it("removes a hand split instead of leaving a latent merge override", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
