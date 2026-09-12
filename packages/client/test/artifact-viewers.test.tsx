@@ -461,11 +461,6 @@ describe("text and markdown", () => {
   });
 
   it("goes to the markdown stage for a .md and reads it, rather than drawing document lines", async () => {
-    /*
-     * Stopped at the read, deliberately. The rich editor mounts into an effect against a real
-     * browser — the bible's own tests assert around it for the same reason — so what is driven
-     * here is the branch and the fetch, and the read-only wiring is pinned below.
-     */
     const mounted = await mountShelf();
     await withFetch(async () => new Promise(() => {}), async () => {
       await open(mounted, TREATMENT);
@@ -475,6 +470,33 @@ describe("text and markdown", () => {
     assert.equal(frame?.querySelector(".fy-artview__stage")?.getAttribute("data-viewer"), "markdown");
     assert.match(frame?.textContent ?? "", /Reading…/, "and it is reading the file, not guessing at it");
     assert.equal(frame?.querySelector(".fy-doclines"), null, "no generic document placeholder");
+    await unmount(mounted);
+  });
+
+  it("opens a .md read-only: artifacts are immutable, and an editor with nowhere to file would be the worse half", async () => {
+    // Superseding an artifact files new bytes as a new artifact carrying `supersedes` (SPEC-015
+    // R-5), and no such filing path exists from the shelf yet. The rich editor's ProseMirror view
+    // mounts against a real browser; what a test DOM can see is the shell it is given and the
+    // mode it is given it in. ProseMirror measures the window when it mounts, and a test DOM has
+    // no window metrics to give it.
+    const metrics = { innerWidth: 1024, innerHeight: 768, pageXOffset: 0, pageYOffset: 0, scrollX: 0, scrollY: 0 };
+    Object.assign(dom.window, metrics);
+    Object.assign(globalThis, metrics);
+    // And a selection it can read: none, which is what a freshly mounted read-only view has.
+    const selection = { rangeCount: 0, anchorNode: null, focusNode: null, anchorOffset: 0, focusOffset: 0, isCollapsed: true, getRangeAt: () => { throw new Error("no range"); }, removeAllRanges() {}, addRange() {}, collapse() {}, extend() {} };
+    Object.assign(dom.document, { getSelection: () => selection });
+    Object.assign(dom.window, { getSelection: () => selection });
+    const mounted = await mountShelf();
+    await withFetch(textReply(["# Treatment", "", "The tide turns."].join("\n")), async () => {
+      await open(mounted, TREATMENT);
+      await act(async () => {});
+      await act(async () => {});
+    });
+    const frame = panel(mounted);
+    assert.equal(frame?.querySelector(".fy-artview__stage")?.getAttribute("data-viewer"), "markdown");
+    assert.doesNotMatch(frame?.textContent ?? "", /Reading…/, "the read landed");
+    assert.ok(frame?.querySelector(".fy-rme.fy-rme--read"), "the editor is mounted in its read-only mode");
+    assert.equal(frame?.querySelector(".fy-rme [contenteditable=\"true\"]"), null, "nothing in it takes keystrokes");
     await unmount(mounted);
   });
 

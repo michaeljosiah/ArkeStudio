@@ -56,6 +56,13 @@ const WITHOUT_CHROME = new Set([
 ]);
 
 describe("app chrome", () => {
+  it("mounts one app-level queue toaster, on every screen", () => {
+    // Sonner portals on the client, but its root is mounted once, at the app; a screen that lost
+    // it would lose every notification. The region it renders is the surface that proves it.
+    for (const path of ["/worlds", "/settings/providers", `/w/${FIXTURE_WORLD_ID}`]) {
+      assert.equal(count(renderAt(path), 'aria-label="Notifications alt+T"'), 1, path);
+    }
+  });
 
   for (const screen of SCREENS) {
     it(`${screen.id} carries exactly one wordmark, centred`, () => {

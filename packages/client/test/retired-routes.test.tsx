@@ -96,5 +96,9 @@ describe("retired addresses land where their content went", () => {
   it("sends the retired audio page into the Cut's library, filtered to audio", async () => {
     const landed = await landAt(`${production}/audio`);
     assert.equal(screenOf(landed), "cut");
+    // The query rides the redirect: the library is open and its Audio filter is the one pressed,
+    // or a person following the old link would land on the whole library.
+    const pressed = [...landed.querySelectorAll<HTMLElement>('[aria-label="Library filters"] button')].find((b) => b.getAttribute("aria-pressed") === "true");
+    assert.equal(pressed?.textContent, "Audio");
   });
 });

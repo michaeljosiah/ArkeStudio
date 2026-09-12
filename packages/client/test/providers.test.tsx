@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import type { ClientState, ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { SettingsGeneralScreen } from "../src/screens/shell.js";
@@ -220,17 +223,42 @@ describe("AI models holds the switch (SPEC-042 R-4, R-8, R-12, R-13)", () => {
     assert.match(sectionFor(models(), "Higgsfield"), /class="fy-by__fix"[^>]*>Sign in</);
   });
 
-  it("renders the remedy in place, never as a route to Providers (R-4)", () => {
+  it("renders the remedy in place, never as a route to Providers (R-4)", async () => {
     // The previous split died of exactly this: Cloud AI shipped an `Open Providers` button
-    // because the switch it filtered by lived on another tab. The remedy here is a disclosure that
-    // opens the key line on this page; nothing on the page is a way to the other one.
+    // because the switch it filtered by lived on another tab. So the remedy is pressed, for real:
+    // the key line opens under the heading and the page is still AI models.
+    const dom = parseHTML("<!doctype html><html><body></body></html>");
+    Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+    // A DOM for this case alone; the rest of the file renders to strings.
+    const globals = { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0) };
+    const before = Object.fromEntries(Object.keys(globals).map((key) => [key, (globalThis as Record<string, unknown>)[key]]));
+    Object.assign(globalThis, globals);
     __setStateForTest(stateWith({}));
-    const html = models();
-    const openai = sectionFor(html, "OpenAI");
-    assert.match(openai, /class="fy-by__fix" aria-expanded="false"/, "the remedy opens in place");
-    // The pane, not the page: the settings rail beside it lists Providers as a tab, as it should.
-    const pane = html.slice(html.indexOf('data-screen="settings-models"'));
-    assert.doesNotMatch(pane, /Open Providers|href="\/settings\/providers"/, "and nothing in the pane leaves it for Providers");
+    const host = dom.document.createElement("div") as unknown as HTMLElement;
+    dom.document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(
+        <MemoryRouter initialEntries={["/settings/models?half=cloud&kind=image"]}>
+          <App />
+        </MemoryRouter>,
+      ));
+      const section = [...host.querySelectorAll<HTMLElement>('[data-testid="models-section"]')].find((node) => node.textContent?.includes("OpenAI"))!;
+      const remedy = section.querySelector<HTMLButtonElement>(".fy-by__fix")!;
+      assert.equal(remedy.textContent, "Add a key");
+      assert.equal(remedy.getAttribute("aria-expanded"), "false");
+      await act(async () => remedy.click());
+      assert.equal(remedy.getAttribute("aria-expanded"), "true", "the remedy is a disclosure");
+      assert.ok(section.querySelector('input[type="password"], input[aria-label*="key" i]'), "and what it discloses is the key line, here");
+      assert.ok(host.querySelector('[data-screen="settings-models"]'), "the page is still AI models — nothing went to Providers");
+    } finally {
+      await act(async () => root.unmount());
+      __setStateForTest(FIXTURE_STATE);
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+        else (globalThis as Record<string, unknown>)[key] = value;
+      }
+    }
   });
 
   it("does not offer models the key cannot reach, capability by capability", () => {

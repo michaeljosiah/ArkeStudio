@@ -85,14 +85,33 @@ describe("generation dialog", () => {
     dom.document.body.append(trigger);
     let focused = 0;
     trigger.focus = () => { focused += 1; };
-    const { host, seen } = await mount({ returnFocus: { current: trigger } });
-    const dialog = host.querySelector<HTMLDialogElement>("dialog.fy-gendialog")!;
+    const { host, render, seen } = await mount({ returnFocus: { current: trigger } });
+    const dialog = () => host.querySelector<HTMLDialogElement>("dialog.fy-gendialog")!;
     // A click that lands on the dialog itself rather than its panel is the backdrop.
-    await act(async () => dialog.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    await act(async () => dialog().dispatchEvent(new dom.window.Event("click", { bubbles: true })));
     assert.equal(seen.closed, 1, "the backdrop closes it");
     assert.equal(focused, 1, "and the keyboard goes back to the control that opened it, not the top of the document");
     // A click inside the panel is not.
-    await act(async () => dialog.firstElementChild!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    await render({ open: true });
+    await act(async () => dialog().firstElementChild!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
     assert.equal(seen.closed, 1, "a press inside the panel leaves it open");
+    // Escape: the browser fires `cancel` on the dialog and, unless that is prevented, closes it —
+    // which is the `close` event again. With no picker panel open, the brief is not in the way.
+    const cancel = new dom.window.Event("cancel", { bubbles: false, cancelable: true });
+    await act(async () => dialog().dispatchEvent(cancel));
+    assert.equal(cancel.defaultPrevented, false, "nothing stands between Escape and the close");
+    await act(async () => dialog().close());
+    assert.equal(seen.closed, 2, "Escape closes it");
+    assert.equal(focused, 2, "and the focus comes back the same way");
+  });
+
+  it("Escape inside the reference picker steps back to the brief instead of throwing it away", async () => {
+    let backToBrief = 0;
+    const { host } = await mount({ panel: <div data-testid="picker">pick</div>, onPanelClose: () => { backToBrief += 1; } });
+    const dialog = host.querySelector<HTMLDialogElement>("dialog.fy-gendialog")!;
+    const cancel = new dom.window.Event("cancel", { bubbles: false, cancelable: true });
+    await act(async () => dialog.dispatchEvent(cancel));
+    assert.equal(cancel.defaultPrevented, true, "the dialog keeps itself open");
+    assert.equal(backToBrief, 1, "and the picker is what closes");
   });
 });
