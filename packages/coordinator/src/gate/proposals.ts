@@ -33,6 +33,7 @@ import {
   type RippleItem,
   type RipplePreview,
   orderedShots,
+  propSlug,
 } from "@arke-studio/contracts";
 import { ripplesForCanonEntry, ripplesForSheet } from "../index-db/queries.js";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
@@ -1224,6 +1225,18 @@ export class ProposalManager {
         const malformedChapter = chapterProblem(file.path, file.content);
         if (malformedChapter) {
           problems.push({ path: file.path, message: malformedChapter });
+          continue;
+        }
+      }
+      // A new sheet takes its id from its path, and a mention cites one thing (issue 1116): the
+      // slug was minted past the props' at staging, but a prop named between the staging and the
+      // press would make the sheet its twin — `createProp` sees no live sheet to refuse. Asked
+      // again here, under the lock, so the last writer is the one turned away.
+      const fresh = file.baseHash === null ? /^(?:characters|locations|factions)\/([^/]+)\.md$/.exec(file.path) : null;
+      if (fresh) {
+        const held = this.store.getBundle().props.find((prop) => propSlug(prop.name) === fresh[1]);
+        if (held) {
+          problems.push({ path: file.path, message: `@${fresh[1]} already cites the prop "${held.name}" — one mention cites one thing; rename one` });
           continue;
         }
       }

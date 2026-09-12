@@ -48,14 +48,14 @@ export function PropsScreen() {
   // The box clears when the prop arrives, not when the button is pressed: a snapshot can be
   // behind another window, and the coordinator's refusal is silent, so a name cleared on the
   // press would be lost with nothing said. Kept, it meets the refreshed snapshot and the line
-  // above says which word took it.
+  // above says which word took it. And only while the box still holds the name that was sent —
+  // the next name, begun before the snapshot lands, is not cleared by the last one's arrival.
   const awaiting = useRef<string | null>(null);
   useEffect(() => {
     const slug = awaiting.current;
-    if (slug !== null && props.some((prop) => propSlug(prop.name) === slug)) {
-      awaiting.current = null;
-      setName("");
-    }
+    if (slug === null || !props.some((prop) => propSlug(prop.name) === slug)) return;
+    awaiting.current = null;
+    setName((current) => (propSlug(current) === slug ? "" : current));
   }, [props]);
   return (
     <div data-screen="props">

@@ -110,6 +110,15 @@ describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
     await act(async () => { __setStateForTest(arrived); });
     assert.equal(input.value, "");
     assert.equal(note(), null);
+    // A name sent, and the next one begun before its snapshot lands: the arrival clears only
+    // the name it answers to.
+    await type(input, "Lamp");
+    await act(async () => create.click());
+    await type(input, "Compass");
+    const lamp = structuredClone(arrived) as ClientState;
+    lamp.world!.props = [...lamp.world!.props, { id: "prop_01J8P0000000000000000000P3", name: "Lamp", states: [] }];
+    await act(async () => { __setStateForTest(lamp); });
+    assert.equal(input.value, "Compass", "the next name is not the last one's to clear");
   });
 
   it("a record in conflict is loaded, and said so — not filed with the files that could not be read", async () => {

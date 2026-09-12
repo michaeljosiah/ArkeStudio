@@ -15,6 +15,7 @@ import {
   SheetSchema,
   StoryOverviewSchema,
   orderedShots,
+  propSlugs,
   type GraphScene,
   type SceneRecord,
   type Sheet,
@@ -169,7 +170,8 @@ export function planIdentities(
   const canonIds = [...reservedCanonIds];
   const slugBy = new Map<string, string>();
   const canonIdBy = new Map<string, string>();
-  const taken = bundle.sheets.map((s) => s.id);
+  // Past every sheet's id and every prop's slug: a mention cites one thing (issue 1116).
+  const taken = [...bundle.sheets.map((s) => s.id), ...propSlugs(bundle.props)];
 
   for (const candidate of carried) {
     if (candidate.classification !== "sheet.create") continue;

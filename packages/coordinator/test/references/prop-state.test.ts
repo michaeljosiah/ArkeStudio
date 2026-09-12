@@ -7,6 +7,8 @@ import { acceptPropStateReference, createProp } from "../../src/references/props
 import { WorldStore } from "../../src/world/store.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { createSheetFromSentence } from "../../src/sheets/authoring.js";
+import { planIdentities } from "../../src/world-chat/materialise.js";
+import type { WorldChangeCandidate } from "@arke-studio/contracts";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -63,8 +65,11 @@ describe("prop-state references", () => {
     const twin = newId("prop");
     const namesake = newId("prop");
     for (const [id, name] of [[hidden, "Tea cup"], [twin, "Tea-cup"], [namesake, "Maren Kest"]] as const) {
-      await mkdir(join(dir, "references", id), { recursive: true });
-      await writeFile(join(dir, "references", id, "prop.json"), `${JSON.stringify({ id, name, states: [] }, null, 2)}\n`);
+      // The namesake's file sits under a directory that is not its id, as a hand-moved record can:
+      // the report has to name the file as read, not the id the file claims.
+      const folder = id === namesake ? "moved-by-hand" : id;
+      await mkdir(join(dir, "references", folder), { recursive: true });
+      await writeFile(join(dir, "references", folder, "prop.json"), `${JSON.stringify({ id, name, states: [] }, null, 2)}\n`);
     }
     const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
     closeOnCleanup(() => store.close());
@@ -76,7 +81,9 @@ describe("prop-state references", () => {
     const twins = reported.filter((problem) => problem.path.includes(hidden) || problem.path.includes(twin));
     assert.equal(twins.length, 1, JSON.stringify(reported));
     assert.match(twins[0]!.message, /answers to @tea-cup, as does "Tea[ -]cup" \(references\/prop_[0-9A-Z]+\/prop\.json\) — rename one/);
-    assert.match(reported.find((problem) => problem.path.includes(namesake))?.message ?? "", /@maren-kest, the sheet Maren Kest's id/);
+    const moved = reported.find((problem) => problem.message.includes("Maren Kest"));
+    assert.equal(moved?.path, "references/moved-by-hand/prop.json", "the path a person can open, not the id the file claims");
+    assert.match(moved?.message ?? "", /@maren-kest, the sheet Maren Kest's id/);
     assert.equal(reported.length, 2);
 
     assert.equal(await createProp(store, "Tea Cup"), null, "the slug is another prop's");
@@ -108,5 +115,22 @@ describe("prop-state references", () => {
       sentence: "The counting room where the ledger is kept.",
     });
     assert.equal(draft.slug, "ledger-2", "the prop holds @ledger; the sheet is cited by its own word");
+    // The wrap-up's allocator walks the same set.
+    const candidate = { id: "cand_1", classification: "sheet.create", draft: { type: "location", name: "Ledger" } } as unknown as WorldChangeCandidate;
+    assert.equal(planIdentities([candidate], [], store.getBundle()).slugBy.get("cand_1"), "ledger-2");
+  });
+
+  it("a sheet staged before the prop is refused at the press, under the lock (issue 1116)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+    const draft = await createSheetFromSentence(store, gate, { sheetType: "location", name: "Lantern", sentence: "A lamp by the stair." });
+    assert.equal(draft.slug, "lantern", "minted while the word was free");
+    assert.equal((await createProp(store, "Lantern"))?.name, "Lantern", "the prop lands first: no live sheet holds the word yet");
+    const outcome = await gate.accept(draft.proposal.id);
+    assert.equal(outcome.status, "invalid", JSON.stringify(outcome));
+    assert.match(outcome.status === "invalid" ? outcome.problems[0]!.message : "", /@lantern already cites the prop "Lantern"/);
+    assert.equal(store.getBundle().sheets.some((sheet) => sheet.id === "lantern"), false, "the sheet did not land as the prop's twin");
   });
 });

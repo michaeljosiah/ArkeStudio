@@ -430,6 +430,9 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   const referenceKits = [];
   const props = [];
+  // Where each prop record was read from — a hand-edited file may claim another id than its
+  // directory's, and a report has to name the file a person can open.
+  const propPaths = new Map<string, string>();
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
   for (const sheetId of await listDir(join(dir, "references"))) {
@@ -443,7 +446,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // walk below finds its takes and candidates without learning what a prop is (issue 535).
     if (await exists(join(dir, "references", sheetId, "prop.json"))) {
       const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
-      if (prop) props.push(prop);
+      if (prop) {
+        props.push(prop);
+        propPaths.set(prop.id, toPortable(`references/${sheetId}/prop.json`));
+      }
     }
     const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
@@ -1104,13 +1110,13 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     if (check.ok) continue;
     problems.push({
       kind: "conflict",
-      path: toPortable(`references/${prop.id}/prop.json`),
+      path: propPaths.get(prop.id) ?? toPortable(`references/${prop.id}/prop.json`),
       message:
         check.reason === "empty"
           ? `prop "${prop.name}" has no letter or number to be cited by — rename it`
           : check.reason === "sheet"
             ? `prop "${prop.name}" answers to @${check.slug}, the sheet ${check.holder.name}'s id — rename the prop; a mention cites one thing`
-            : `prop "${prop.name}" answers to @${check.slug}, as does "${check.holder.name}" (references/${check.holder.id}/prop.json) — rename one; a mention cites one thing`,
+            : `prop "${prop.name}" answers to @${check.slug}, as does "${check.holder.name}" (${propPaths.get(check.holder.id) ?? `references/${check.holder.id}/prop.json`}) — rename one; a mention cites one thing`,
     });
   }
 
