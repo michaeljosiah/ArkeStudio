@@ -119,7 +119,8 @@
 
 /* Notes: one line until written in — the line is the card. */
 :where([data-screen="shot"]) .fy-shot__section--notes { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px; }
-:where([data-screen="shot"]) .fy-shot__notes { flex: 1; min-width: 0; min-height: 24px; max-height: 240px; margin: 0; padding: 6px 0; border: 0; background: transparent; color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); resize: none; overflow: hidden; }
+/* As tall as the note up to 240px, then the note scrolls inside the line rather than hiding its rest. */
+:where([data-screen="shot"]) .fy-shot__notes { flex: 1; min-width: 0; min-height: 24px; max-height: 240px; margin: 0; padding: 6px 0; border: 0; background: transparent; color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); resize: none; overflow: hidden auto; }
 :where([data-screen="shot"]) .fy-shot__notes::placeholder { color: var(--muted-foreground); }
 :where([data-screen="shot"]) .fy-shot__notes:focus { outline: none; }
 
