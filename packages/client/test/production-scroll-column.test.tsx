@@ -128,24 +128,6 @@ describe("the production column's scroll", () => {
     assert.equal(new Set(UNDER_PRODUCTION.map((s) => s.id)).size, 20, "one entry per screen");
   });
 
-  it("gives .fy-prodscroll a scroll and a containing block", () => {
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const rule = /\.fy-prodscroll\s*\{([^}]*)\}/.exec(css);
-    assert.ok(rule, "the stylesheet still declares .fy-prodscroll");
-    assert.match(rule[1]!, /overflow-y\s*:\s*auto/, "the screen can reach the rest of itself");
-    assert.match(rule[1]!, /min-height\s*:\s*0/, "or the flex item refuses to shrink and clips again");
-    // Without this an absolutely positioned control resolves against .fy-app and lands against
-    // the window, a rail's width from the column it was placed in.
-    assert.match(rule[1]!, /position\s*:\s*relative/, "the screen is its own containing block");
-  });
-
-  it("leaves the column clipping, so the screens keep choosing", () => {
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const rule = /\.fy-prodwrap\s*\{([^}]*)\}/.exec(css);
-    assert.ok(rule, "the stylesheet still declares .fy-prodwrap");
-    assert.match(rule[1]!, /overflow\s*:\s*hidden/, "the Cut and the workspaces size against it");
-  });
-
   it("never leaves a screen with no scroll and no scrolling panes", () => {
     for (const screen of UNDER_PRODUCTION) {
       const { classes, markup } = screenRoot(screen.samplePath);

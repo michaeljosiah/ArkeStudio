@@ -11,12 +11,12 @@ import {
   jobOrigin,
   REFERENCE_FINALIZATION_TARGETS,
   spendSummary,
-  vendorAuthUnavailable,
   type ClientState,
   type Job,
   type LedgerEntry,
 } from "@arke-studio/contracts";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import { emptyClientState } from "../client-state.js";
 import { makeTempRoot } from "../world/helpers.js";
 
 const WORLD = "01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -42,56 +42,9 @@ function job(overrides: Partial<Job>): Job {
   };
 }
 
+
 function baseState(overrides: Partial<ClientState["app"]> = {}, world: ClientState["world"] = null): ClientState {
-  return {
-    app: {
-      version: "t",
-      health: {
-        coordinator: { status: "healthy" },
-        harness: { status: "unavailable", reason: "x" },
-        voice: { status: "unavailable", reason: "x" },
-      },
-      jobs: [],
-      builds: [],
-      worldGenesis: {},
-      ledger: [],
-      ledgerUnavailable: false,
-      providers: [],
-      providerTools: [],
-      vendorAuth: vendorAuthUnavailable("not configured"),
-      manifest: null,
-      routing: { defaults: {}, faults: [] },
-      models: { disabled: [] },
-        presets: [],
-      spend: null,
-      backgroundNotifications: "issues-only",
-      activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
-      research: { web: false },
-        narrator: null,
-      appearance: { theme: "system" },
-      runtime: null,
-      harness: null,
-      comfyui: null,
-      voiceRuntime: null,
-      drift: [],
-      agents: [],
-      harnessModels: [],
-      harnessInfo: null,
-      queues: [],
-      setup: null,
-      update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null },
-      env: null,
-      sampleWorld: { available: false, installing: false, note: null },
-      ...overrides,
-    },
-    worlds: [],
-    world,
-    worldOpenFailure: null,
-    worldChat: null,
-    bench: null,
-    authoringRuns: [],
-    frameRuns: [],
-  };
+  return emptyClientState({ version: "t", ...overrides }, { world });
 }
 
 describe("needs-you is derived, never appended to (R-3, D1, §3.2)", () => {

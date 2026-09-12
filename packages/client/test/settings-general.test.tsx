@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -130,15 +127,6 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     assert.match(app, /data-screen="settings-general"/);
     assert.match(plain(app), /General/);
     assert.doesNotMatch(plain(app), /Who does what|Cloud AI/);
-  });
-
-  it("sends each old address where its content went, rather than to a hole", async () => {
-    // Asserted on the routes rather than on a render: `<Navigate>` needs a second pass and
-    // `renderToString` makes one. `agents` named the per-agent overrides, and those are on
-    // Harness now — sending it to Cloud AI would land it on the screen defined by not having them.
-    const app = await readFile(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "App.tsx"), "utf8");
-    assert.match(app, /path="who-does-what" element=\{<Navigate to="\/settings\/general" replace \/>\}/);
-    assert.match(app, /path="agents" element=\{<Navigate to="\/settings\/harness" replace \/>\}/);
   });
 
   it("lists a local model beside a cloud one, which R-61 forbade", () => {

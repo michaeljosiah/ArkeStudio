@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -17,6 +16,12 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
  * notice, so the edit sheet's Save, World Chat's composer and the key art all sat below the
  * fold. `fy-content--fill` makes the column measure itself and hand the screen the remainder;
  * a page that scrolls must not get it, or its own scrolling is what breaks.
+ *
+ * What the fill does at a width — the floor under art direction, the banner keeping its own
+ * height, the stacked gate released from the fill below 1100px — is layout, which no text read
+ * of the stylesheet can show; the reasons stand beside those rules in fidelity.css, and the
+ * measurement belongs to a browser: the headless layout check is issue 1110, run beside the
+ * design gate rather than from this suite.
  */
 
 function at(path: string): string {
@@ -60,74 +65,5 @@ describe("the world's fixed-frame screens (issue 1007)", () => {
     for (const path of [W, `${W}/cast`, `${W}/canon`, `${W}/artifacts`, `${W}/productions`, `${W}/bible`]) {
       assert.doesNotMatch(at(path), /fy-content--fill/, path);
     }
-  });
-});
-
-/*
- * The fill and the columns go together (codex, 2026-09-09).
- *
- * Below 1100px the gate stacks, and a stacked gate held to the viewport gives the whole column
- * to the understanding rail — `flex: none` at its own intrinsic height — while the conversation
- * shrinks under its `overflow: hidden` and takes the transcript and composer with it. One column
- * on top of another has to scroll the page.
- */
-const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
-
-/*
- * A banner above a fixed screen costs the column height, not the screen's whole existence
- * (codex round five). A world with enough external edits or unreadable files raises one of its
- * own height, and a flex item at `min-height: 0` will shrink to nothing to make room — so Save
- * and the composer, the controls this issue is about, would have had no height at all.
- */
-describe("a condition banner cannot take the screen's whole height", () => {
-  it("gives the fixed screens a floor and the banner its own height", () => {
-    const floored = /\.fy-content--fill > \.fy-artdirection,\s*\.fy-content--fill > \.fy-gate,\s*\.fy-content--fill > \.fy-chat__wrap \{ flex: 1 1 auto; height: auto; min-height: 460px; \}/;
-    assert.match(css, floored, "460px is art direction's own minimum: 180 + 14 + 168 and the padding");
-    assert.match(css, /\.fy-content--fill > \.fy-worldconditions \{ flex: none; \}/,
-      "and the banner is not squashed to make that floor fit");
-  });
-
-  /*
-   * R-46 puts the cause on the notice. One line with a `title` holding the rest was a copy no
-   * keyboard or touch screen could reach; a two-line clamp was the same failure one line later.
-   * The notice draws on Overview, which scrolls, so the cause simply wraps.
-   */
-  it("clips the build notice's cause at nothing", () => {
-    const cause = /\.fy-buildnotice__cause \{([^}]*)\}/.exec(css)?.[1] ?? "";
-    assert.ok(cause.length > 0, "the cause has its own rule");
-    assert.doesNotMatch(cause, /line-clamp/, "no clamp");
-    assert.doesNotMatch(cause, /text-overflow/, "no ellipsis");
-    assert.doesNotMatch(cause, /white-space:\s*nowrap/, "and it is allowed to wrap");
-  });
-});
-
-describe("the fill releases the gate when the gate stacks", () => {
-
-  /**
-   * The narrow block that stacks the chat gate. The stylesheet has several `max-width: 1100px`
-   * blocks, so this one is found by the rule that stacks the gate and read back to its own
-   * `@media` — which is the whole point of the assertion below: the release has to be in the
-   * same block as the stack, not merely somewhere in the file.
-   */
-  function narrowBlock(): string {
-    const stack = css.indexOf(".fy-chat__wrap .fy-gate { flex-direction: column; }");
-    assert.ok(stack > 0, "the gate stacks somewhere");
-    const at = css.lastIndexOf("@media (max-width: 1100px) {", stack);
-    assert.ok(at > 0, "inside a max-width: 1100px block");
-    const close = css.indexOf("\n}", at);
-    assert.ok(close > stack, "and that block closes after it");
-    return css.slice(at, close);
-  }
-
-  it("stacks the gate and releases it in the same block", () => {
-    const block = narrowBlock();
-    assert.match(block, /\.fy-chat__wrap \.fy-gate \{ flex-direction: column; \}/, "the gate stacks here");
-    assert.match(block, /\.fy-content--fill > \.fy-chat__wrap > \.fy-gate \{ flex: 0 0 auto; height: auto; \}/,
-      "and the fill lets go of it here");
-    assert.doesNotMatch(block, /fy-artdirection/, "art direction is a row at this width and keeps the fill");
-    // And only the gate that stacks is released. The edit sheet, the canon thread and the
-    // new-entry gate are still two columns here, and two columns that each scroll are exactly
-    // what the fill is for — releasing them would put Save back below the fold.
-    assert.doesNotMatch(block, /fy-content--fill > \.fy-gate/, "the gates that stay rows keep the fill");
   });
 });

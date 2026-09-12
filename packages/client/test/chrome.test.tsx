@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
@@ -20,8 +17,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  */
 
 __setStateForTest(FIXTURE_STATE);
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 function renderAt(path: string): string {
   return renderToString(
@@ -61,13 +56,12 @@ const WITHOUT_CHROME = new Set([
 ]);
 
 describe("app chrome", () => {
-  it("mounts one app-level queue toaster", () => {
-    const app = readFileSync(join(here, "../src/App.tsx"), "utf8");
-    assert.equal(
-      count(app, "<QueueToaster"),
-      1,
-      "Sonner portals on the client, but its root is mounted once here",
-    );
+  it("mounts one app-level queue toaster, on every screen", () => {
+    // Sonner portals on the client, but its root is mounted once, at the app; a screen that lost
+    // it would lose every notification. The region it renders is the surface that proves it.
+    for (const path of ["/worlds", "/settings/providers", `/w/${FIXTURE_WORLD_ID}`]) {
+      assert.equal(count(renderAt(path), 'aria-label="Notifications alt+T"'), 1, path);
+    }
   });
 
   for (const screen of SCREENS) {
@@ -180,24 +174,4 @@ describe("app chrome", () => {
     assert.ok(proposalControl(orphaned).includes("fy-iconbtn__dot"));
   });
 
-  it("centres the wordmark on the window, not on the row", () => {
-    // Desktop parks its native window controls in the top-right ~138px and the bar reserves that
-    // margin, so a flex-centred mark lands ~69px left of true centre on desktop and dead centre
-    // in a browser — the same code drawing two different layouts. Absolute placement is the fix,
-    // and this is the assertion that keeps it.
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    const rule = css.slice(css.indexOf(".fy-titlebar__brand {"));
-    const body = rule.slice(0, rule.indexOf("}"));
-    assert.ok(body.includes("position: absolute"), "the wordmark is placed, not flowed");
-    assert.ok(body.includes("left: 50%") && body.includes("translateX(-50%)"), "and placed at the middle");
-  });
-
-  it("keeps narrow context out of the centred wordmark", () => {
-    const css = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-    assert.match(
-      css,
-      /\.fy-titlebar__side:first-child\s*\{[^}]*padding-right:\s*48px/,
-      "the ellipsised left context reserves the wordmark's half-width before it can overlap",
-    );
-  });
 });
