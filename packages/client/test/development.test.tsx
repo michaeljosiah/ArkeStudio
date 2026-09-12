@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
-import { legacySceneView, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
+import { parseHTML } from "linkedom";
+import { legacySceneView, type ClientMessage, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { ProductionChatScreen, StoryScreen, takeMediaPath } from "../src/screens/production.js";
 import { EpisodeChatScreen, EpisodeDetailScreen, StoryStructureScreen } from "../src/screens/development.js";
 import { acceptedTakeId, isDayOne, mediaTakeFor, takesForShot } from "../src/lib/selectors.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 
@@ -125,6 +126,55 @@ it("uses a scene number instead of its file id on the episode card (#1005)", () 
   assert.ok(!html.includes(`${scene.id} ·`));
 });
 
+it("adopting a drafted scene amends this episode — the frame names it — and the result is shown here", async () => {
+  // The episodeId is what selects the coordinator's amendment branch: without it the same press
+  // would stage the creation of a new episode. Pressed for real, and read off the wire.
+  const dom = parseHTML("<!doctype html><html><body></body></html>");
+  Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
+  // A DOM for this case alone: the rest of the file renders to strings, and a `window` left behind
+  // changes what those renders do.
+  const globals = { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true, requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0) };
+  const before = Object.fromEntries(Object.keys(globals).map((key) => [key, (globalThis as Record<string, unknown>)[key]]));
+  Object.assign(globalThis, globals);
+  const state = withMicrodramaScenes([structuredClone(ONE)], [FIXTURE_STATE.world!.productions[0]!.scenes[0]!]);
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "bell-watch-season-1")!;
+  const scene = production.scenes[0]!;
+  production.episodes[0]!.scenes = [];
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  __setStateForTest(state);
+  const host = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/${production.meta.id}/episodes/${ONE.id}`]}>
+        <Routes><Route path="/w/:worldId/p/:prodId/episodes/:episodeId" element={<EpisodeDetailScreen />} /></Routes>
+      </MemoryRouter>,
+    ));
+    const adopt = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "add to this episode");
+    assert.ok(adopt, "the drafted scene offers itself to this episode");
+    await act(async () => adopt.click());
+    const frame = sent.find((message): message is Extract<ClientMessage, { kind: "propose-episode" }> => message.kind === "propose-episode");
+    assert.ok(frame, "one propose-episode frame");
+    assert.equal(frame.episodeId, ONE.id, "naming this episode, so the coordinator amends rather than creates");
+    assert.deepEqual(frame.scenes, [scene.id]);
+    await act(async () => __applyEventForTest({
+      type: "single-act.result", at: "2026-09-12T08:00:00.000Z", requestId: frame.requestId, worldId: FIXTURE_WORLD_ID, operation: "episode-edit",
+      path: `productions/${production.meta.id}/episodes/${ONE.id}.json`, disposition: "refused", reason: "The episode changed underneath you.",
+    }));
+    assert.match(host.querySelector('[role="alert"]')?.textContent ?? "", /The episode changed underneath you\./, "and the single-act result lands beside the control that asked");
+  } finally {
+    await act(async () => root.unmount());
+    __setBridgeForTest(null);
+    __setStateForTest(FIXTURE_STATE);
+    for (const [key, value] of Object.entries(before)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else (globalThis as Record<string, unknown>)[key] = value;
+    }
+  }
+});
+
 it("distinguishes an episode wait from missing episode and production ids (issue 1000)", () => {
   const state = withMicrodrama([ONE]);
   const base = `/w/${FIXTURE_WORLD_ID}/p/bell-watch-season-1`;
@@ -139,24 +189,6 @@ it("distinguishes an episode wait from missing episode and production ids (issue
   const missingProduction = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/missing/episodes/${ONE.id}`);
   assert.match(missingProduction, /Production not found/);
   assert.match(missingProduction, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/productions"`));
-});
-
-describe("Development single-act reachability", () => {
-  const screens = ["development.tsx", "production.tsx"].map((file) =>
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/screens", file), "utf8"),
-  );
-
-  it("correlates the reachable existing-episode edit at its initiating control", () => {
-    assert.match(screens[0]!, /edit\.track\(proposeEpisode\(worldId, prodId, \{[\s\S]*?episodeId: episode\.id/);
-    assert.match(screens[0]!, /<SingleActFeedback result=\{edit\.result\}/);
-  });
-
-  it("has no reachable story-overview or season form sender to misclassify", () => {
-    for (const source of screens) {
-      assert.doesNotMatch(source, /proposeStoryOverview\(/);
-      assert.doesNotMatch(source, /proposeSeason\(/);
-    }
-  });
 });
 
 describe("shot take selection", () => {

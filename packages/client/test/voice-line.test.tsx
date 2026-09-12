@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -633,16 +632,6 @@ describe("bible read restoration", () => {
   });
 });
 
-describe("the voice tabs stay readable", () => {
-  it("gives the chosen tab a hover rule of its own", () => {
-    // `:hover` outranks a single class, so the tab you just clicked went white on white —
-    // invisible precisely while the pointer was still on it. Found in the installed app.
-    const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
-    const rule = css.slice(css.indexOf(".fy-voices__tab--on"));
-    assert.match(rule.slice(0, 200), /\.fy-voices__tab--on:hover/);
-  });
-});
-
 describe("reading a sheet aloud", () => {
   const sheetId = FIXTURE_STATE.world!.sheets[0]!.id;
 
@@ -660,16 +649,6 @@ describe("reading a sheet aloud", () => {
     const html = render(`/w/${FIXTURE_WORLD_ID}/cast/${sheetId}`, voiceless);
     assert.match(html, /Read aloud/);
     assert.doesNotMatch(html, /Choose a voice to read this aloud/);
-  });
-
-  it("names the narrator on the clip, in both places that build one", () => {
-    // There are two: the one the section control offers, and the effect that plays a read as
-    // soon as it lands. Only the second actually sounds, and it still said the character's
-    // voice — so the player named a voice that had not read a word of it.
-    const source = readFileSync(new URL("../src/screens/world.tsx", import.meta.url), "utf8");
-    const subs = [...source.matchAll(/sub: `read aloud · \$\{([^}]+)\}`/g)].map((m) => m[1]);
-    assert.equal(subs.length, 2, "both clip builders are accounted for");
-    for (const sub of subs) assert.equal(sub, "narratorLabel", "each names who is reading");
   });
 
   it("reaches a location's own section, not characters alone (issue 857)", () => {

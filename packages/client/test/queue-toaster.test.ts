@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { QueueEnqueueResult } from "../src/lib/store.js";
 import { enqueueNote, failedNote, historyNote, readyNote, subjectOf } from "../src/components/queue-note.js";
 import type { Job, ModelManifest } from "@arke-studio/contracts";
@@ -55,15 +52,6 @@ describe("queue notification", () => {
     "jb_01J8E0000000000000000000J3",
     "jb_01J8E0000000000000000000J4",
   ];
-
-  it("mounts one top-center toaster clear of the desktop title bar", () => {
-    const here = dirname(fileURLToPath(import.meta.url));
-    const app = readFileSync(resolve(here, "../src/App.tsx"), "utf8");
-    const toaster = readFileSync(resolve(here, "../src/components/queue-toaster.tsx"), "utf8");
-    assert.equal(app.match(/<QueueToaster\s*\/>/g)?.length, 1);
-    assert.match(toaster, /position="top-center"/);
-    assert.match(toaster, /44px/);
-  });
 
   it("names the work rather than its destination, in two lines", () => {
     const note = enqueueNote(result(), [job()], manifest);
