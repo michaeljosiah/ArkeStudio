@@ -57,10 +57,22 @@ import type { Prop } from "./prop.js";
 // Mentions (R-9, D5): `@slug` is the source of the shot's cast
 // ---------------------------------------------------------------------------
 
+/**
+ * Every mention in the text, where it sits: the grammar the cast list, the prop chips and the
+ * editors' underlays all read, so a mention drawn as a chip or as a name is exactly a mention
+ * the dispatch will resolve — never a second regex of a screen's own.
+ */
+export function mentionSpans(text: string): Array<{ slug: string; start: number; end: number }> {
+  const out: Array<{ slug: string; start: number; end: number }> = [];
+  for (const match of text.matchAll(/@([a-z0-9][a-z0-9-]*)/g)) {
+    out.push({ slug: match[1]!, start: match.index, end: match.index + match[0].length });
+  }
+  return out;
+}
+
 export function parseMentions(description: string): string[] {
   const out: string[] = [];
-  for (const match of description.matchAll(/@([a-z0-9][a-z0-9-]*)/g)) {
-    const slug = match[1]!;
+  for (const { slug } of mentionSpans(description)) {
     if (!out.includes(slug)) out.push(slug);
   }
   return out;

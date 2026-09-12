@@ -103,6 +103,10 @@
 :where([data-screen="shot"]) .fy-shot__script, :where([data-screen="shot"]) .fy-shot__prompt { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--muted); }
 :where([data-screen="shot"]) .fy-shot__script:focus-within, :where([data-screen="shot"]) .fy-shot__prompt:focus-within { border-color: var(--muted-foreground); }
 :where([data-screen="shot"]) .fy-shot__script .fy-bench__briefstack { min-height: 40px; }
+/* As on the row: the underlay sizes the card, so the script shows whole (145b) and read mode's
+   names never fall behind a height the tokens set. */
+:where([data-screen="shot"]) .fy-shot__script .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
+:where([data-screen="shot"]) .fy-shot__script:not(:focus-within) .fy-bench__brieftext { overflow: hidden; }
 :where([data-screen="shot"]) .fy-shot__script .fy-bench__briefunder, :where([data-screen="shot"]) .fy-shot__script .fy-bench__briefmirror, :where([data-screen="shot"]) .fy-shot__script .fy-bench__brieftext,
 :where([data-screen="shot"]) .fy-shot__prompt .fy-bench__briefunder, :where([data-screen="shot"]) .fy-shot__prompt .fy-bench__briefmirror, :where([data-screen="shot"]) .fy-shot__prompt .fy-bench__brieftext { font: 400 var(--text-sm)/1.55 var(--font-sans); }
 /* Three lines of the prompt, scrolling inside the box, until View full prompt shows it whole. */
@@ -127,7 +131,6 @@
 /* Camera: 97's nine, three to a row, the label above with a dot once the shot overrides the scene. */
 :where([data-screen="shot"]) .fy-shot__camera { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
 :where([data-screen="shot"]) .fy-shot__field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-:where([data-screen="shot"]) .fy-shot__field--wide { padding-bottom: 2px; }
 :where([data-screen="shot"]) .fy-shot__field > span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
 :where([data-screen="shot"]) .fy-shot__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--foreground); }
 :where([data-screen="shot"]) .fy-shot__selectwrap { width: 100%; }

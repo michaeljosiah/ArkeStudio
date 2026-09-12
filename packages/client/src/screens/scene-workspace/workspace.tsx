@@ -429,9 +429,10 @@ export function SceneWorkspace({
             </>
           ) : null}
           <header className="fy-sw__head">
+            {/* Levels part on slashes (turn 139); a dot is a name's own, as in "Scene 4 · Night". */}
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
-              {episode === undefined ? ` · scene ${scene.number}` : ` · episode ${episode.order} · ${episode.title}`}
+              {episode === undefined ? ` \u00a0/\u00a0 Scene ${scene.number}` : ` \u00a0/\u00a0 Episode ${episode.order} \u00a0/\u00a0 ${episode.title}`}
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title">

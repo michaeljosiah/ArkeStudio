@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
+import { mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
 
 /** Prop identity and the five provenance fields (design turn 105, Option C; issue 534). */
 describe("props", () => {
@@ -42,5 +42,16 @@ describe("props", () => {
       assert.ok(parseMentions(text).includes("car"), `${text} cites the prop`);
       assert.ok(!parseMentions(withoutMention(text, "car")).includes("car"), `${text} no longer does`);
     }
+  });
+
+  it("the spans a screen draws are the mentions the parser reads, in place (issue 1114)", () => {
+    const text = "(@car) beside @the-vigil, @car again; @Car and @ never";
+    assert.deepEqual(mentionSpans(text), [
+      { slug: "car", start: 1, end: 5 },
+      { slug: "the-vigil", start: 14, end: 24 },
+      { slug: "car", start: 26, end: 30 },
+    ]);
+    assert.deepEqual(parseMentions(text), ["car", "the-vigil"]);
+    assert.deepEqual(mentionSpans("no mention here"), []);
   });
 });

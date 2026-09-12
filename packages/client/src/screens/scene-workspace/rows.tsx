@@ -32,6 +32,7 @@ import { FrameActions } from "./frame-actions.js";
 import { ChevronRight, Grid2x2, Grip, ImageMark, Lines, More, Pencil, Plus } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath } from "../../components/portrait.js";
 import { Button } from "../../components/ui.js";
+import { mentionNames, scriptWords } from "./mentions.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
@@ -803,6 +804,7 @@ function Row({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const [scriptDraft, setScriptDraft] = useState(shot.description);
+  const [scriptFocused, setScriptFocused] = useState(false);
   const [titleDraft, setTitleDraft] = useState(shot.title);
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingDuration, setEditingDuration] = useState(false);
@@ -836,6 +838,7 @@ function Row({
     meta: `${sheet.type} · v${sheet.version}`,
     imagePath: sheet.type === "location" ? locationPortraitPath(world, sheet.id) : characterPortraitPath(world, sheet.id),
   }));
+  const names = useMemo(() => mentionNames(sheets, world.props), [sheets, world.props]);
   const disabled = locked || staged;
   useEffect(() => {
     if (editingTitle || editingDuration || disabled || editReturnFocus.current === null) return;
@@ -991,7 +994,9 @@ function Row({
     />
   ) : (
     <span className="fy-swrow__title-edit">
-      <button type="button" className="fy-swrow__title fy-swrow__open" aria-label={`Open shot ${shot.number}`} disabled={staged} onClick={(event) => { event.stopPropagation(); onEdit(); }}>{shot.title}</button>
+      {/* The words sit in their own span: a button cannot be the -webkit-box the card's two-line
+          clamp needs (Chromium blockifies it), so the span is where the clamp lands. */}
+      <button type="button" className="fy-swrow__title fy-swrow__open" aria-label={`Open shot ${shot.number}`} disabled={staged} onClick={(event) => { event.stopPropagation(); onEdit(); }}><span>{shot.title}</span></button>
       <button ref={titleTrigger} type="button" className="fy-swrow__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={(event) => { event.stopPropagation(); setEditingTitle(true); }}><Pencil size={14} /></button>
     </span>
   );
@@ -1022,8 +1027,10 @@ function Row({
       className="fy-swrow__script fy-swrow__scripteditor"
       title="Write what happens · type @ to name anything in the world"
       onKeyDown={(event) => { if (event.key !== "Escape") event.stopPropagation(); }}
+      onFocus={() => setScriptFocused(true)}
       onBlur={(event) => {
         if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setScriptFocused(false);
         commitScript(event.currentTarget.querySelector("textarea")?.value ?? scriptDraft);
       }}
     >
@@ -1032,7 +1039,7 @@ function Row({
         onChange={setScriptDraft}
         options={mentionOptions}
         worldSlug={slug}
-        underlay={scriptDraft}
+        underlay={scriptWords(scriptDraft, names, scriptFocused ? "edit" : "read")}
         label={`Script for shot ${shot.number}`}
         placeholder="Write what happens."
         disabled={disabled}
@@ -1132,13 +1139,89 @@ function Row({
       ><Grip size={14} /></span>
       {selected ? <span className="fy-swrow__ring" aria-hidden="true" /> : null}
       {staged ? <span className="fy-swrow__staged">staged</span> : null}
-      <div className="fy-swrow__frame fy-imghost">
-        {/* The picture and the number open the page; the toolbar over the foot is the image's own. */}
-        {src === null ? (
-          <div className="fy-swrow__hatch fy-swrow__open" role="button" tabIndex={-1} aria-label={`Open shot ${shot.number}`} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }}><ImageMark size={17} /><span className="fy-swrow__nofr">no frame yet</span></div>
-        ) : (
-          <img className="fy-swrow__img fy-swrow__open" alt={shot.title} src={src} draggable={false} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }} />
-        )}
+      {/* The frame sits in a wrap so the number can ride the wrap's corner: on the card the frame
+          is inset and the number straddles its edge (145f), on the row the two boxes coincide. */}
+      <div className="fy-swrow__framewrap">
+        <div className="fy-swrow__frame fy-imghost" data-empty={src === null ? "true" : undefined}>
+          {/* The picture and the number open the page; the toolbar over the foot is the image's own. */}
+          {src === null ? (
+            <div className="fy-swrow__hatch fy-swrow__open" role="button" tabIndex={-1} aria-label={`Open shot ${shot.number}`} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }}><ImageMark size={17} /></div>
+          ) : (
+            <img className="fy-swrow__img fy-swrow__open" alt={shot.title} src={src} draggable={false} onClick={(event) => { event.stopPropagation(); if (!staged) onEdit(); }} />
+          )}
+          <span className="fy-swrow__chipmeta">
+            {durationSec}s
+          </span>
+          <FrameActions
+            shotNumber={shot.number}
+            title={shot.title}
+            slug={slug}
+            framePath={frame.path}
+            variants={frameVariants.length}
+            disabled={disabled}
+            canUpload={canPickFiles()}
+            canClear={frame.pointer}
+            onPreview={onPreview}
+            onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
+            onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
+            onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
+            readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
+          />
+          <dialog
+            ref={variantsDialog}
+            className="fy-swvariants"
+            aria-label={`Frame variants for shot ${shot.number}`}
+            onClose={() => variantsTrigger.current?.focus()}
+            onClick={(event) => {
+              if (event.target === event.currentTarget) variantsDialog.current?.close();
+            }}
+          >
+            <div className="fy-swvariants__panel">
+              <header>
+                <div>
+                  <span>Shot {shot.number} · frame history</span>
+                  <h2>{shot.title}</h2>
+                </div>
+                <button type="button" aria-label="Close frame variants" onClick={() => variantsDialog.current?.close()}>Close</button>
+              </header>
+              <div className="fy-swvariants__grid">
+                {frameVariants.map((take) => {
+                  const path = `productions/${production.meta.id}/takes/${take.id}/${take.media!}`;
+                  const current = production.selections[shot.id]?.startFrameTakeId === take.id || frame.artifact?.links.includes(take.id) === true;
+                  return (
+                    <article key={take.id} data-current={current ? "true" : undefined}>
+                      <img
+                        src={slug === undefined ? undefined : mediaUrl(slug, path)}
+                        alt={`Variant for shot ${shot.number}`}
+                        style={{ aspectRatio: aspect.replace(":", " / ") }}
+                      />
+                      <div>
+                        <span>{take.model}</span>
+                        <button
+                          type="button"
+                          disabled={current || disabled}
+                          onClick={() => {
+                            acceptTake(worldId, production.meta.id, take.id, shot.id);
+                            variantsDialog.current?.close();
+                          }}
+                        >
+                          {current ? "Current" : "Use frame"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+          </dialog>
+          {runState === null ? null : (
+            <FrameState
+              state={runState}
+              onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)}
+              onRetryFinalization={onRetryFinalization}
+            />
+          )}
+        </div>
         <span
           className="fy-swrow__label fy-swrow__open"
           title="Open the shot · drag to reorder"
@@ -1152,78 +1235,6 @@ function Row({
         >
           {shot.number}
         </span>
-        <span className="fy-swrow__chipmeta">
-          {durationSec}s
-        </span>
-        <FrameActions
-          shotNumber={shot.number}
-          title={shot.title}
-          slug={slug}
-          framePath={frame.path}
-          variants={frameVariants.length}
-          disabled={disabled}
-          canUpload={canPickFiles()}
-          canClear={frame.pointer}
-          onPreview={onPreview}
-          onVariants={(trigger) => { variantsTrigger.current = trigger; variantsDialog.current?.showModal(); }}
-          onUpload={() => importShotFrame(worldId, production.meta.id, shot.id)}
-          onClear={() => clearShotFrame(worldId, production.meta.id, shot.id)}
-          readAloud={{ source: { of: "shot", productionId: production.meta.id, sceneId: scene.id, shotId: shot.id }, title: `Shot ${shot.number} · script`, text: shot.description }}
-        />
-        <dialog
-          ref={variantsDialog}
-          className="fy-swvariants"
-          aria-label={`Frame variants for shot ${shot.number}`}
-          onClose={() => variantsTrigger.current?.focus()}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) variantsDialog.current?.close();
-          }}
-        >
-          <div className="fy-swvariants__panel">
-            <header>
-              <div>
-                <span>Shot {shot.number} · frame history</span>
-                <h2>{shot.title}</h2>
-              </div>
-              <button type="button" aria-label="Close frame variants" onClick={() => variantsDialog.current?.close()}>Close</button>
-            </header>
-            <div className="fy-swvariants__grid">
-              {frameVariants.map((take) => {
-                const path = `productions/${production.meta.id}/takes/${take.id}/${take.media!}`;
-                const current = production.selections[shot.id]?.startFrameTakeId === take.id || frame.artifact?.links.includes(take.id) === true;
-                return (
-                  <article key={take.id} data-current={current ? "true" : undefined}>
-                    <img
-                      src={slug === undefined ? undefined : mediaUrl(slug, path)}
-                      alt={`Variant for shot ${shot.number}`}
-                      style={{ aspectRatio: aspect.replace(":", " / ") }}
-                    />
-                    <div>
-                      <span>{take.model}</span>
-                      <button
-                        type="button"
-                        disabled={current || disabled}
-                        onClick={() => {
-                          acceptTake(worldId, production.meta.id, take.id, shot.id);
-                          variantsDialog.current?.close();
-                        }}
-                      >
-                        {current ? "Current" : "Use frame"}
-                      </button>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-        </dialog>
-        {runState === null ? null : (
-          <FrameState
-            state={runState}
-            onRetry={run === null ? null : retryForShot(run, runState, shot.id, worldId, production.meta.id)}
-            onRetryFinalization={onRetryFinalization}
-          />
-        )}
       </div>
       {/* One body for the row and the card, so an editor keeps its place in the tree — and its
           focus and draft — across List and Grid (turn 138). */}
@@ -1231,13 +1242,13 @@ function Row({
         <div className="fy-swrow__head">
           <div className="fy-swrow__titleline">
             {titleControl}
+            {stateChip}
             {lineWarning ? <span className="fy-swrow__playblast" title={lineWarning}>180° line</span> : null}
             {shot.staging?.playblast === undefined ? null : <span className="fy-swrow__playblast" title="Staged · a playblast is filed">staged</span>}
           </div>
           <div className="fy-swrow__timing" onClick={(event) => event.stopPropagation()}>
             {durationControl}
             <span aria-hidden="true">·</span><span>{aspect}</span>
-            {stateChip}
           </div>
           <WaitingTakeLinks sessions={waitingSessions} worldId={worldId} />
           {coverage === "changed" || runScriptChanged ? (

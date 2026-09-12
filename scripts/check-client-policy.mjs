@@ -43,6 +43,51 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   fail('typography.css must name --font-sans "Geist Sans" exactly', join(TOKENS_DIR, "typography.css"));
 }
 
+// Every stylesheet closes what it opens. Vite serves each file as its own <style> in
+// development, where the parser closes an unfinished block or comment at end-of-file and the
+// page looks right; the production bundle concatenates the imports, so a block — or a comment
+// — left open in one file swallows every stylesheet after it. The shot page and the Activity
+// panel shipped unstyled that way (issue 1113). Nothing else can see it: the tests render
+// without CSS and the dev app cannot fail. One pass in the tokenizer's order — a string is a
+// string before a comment can start inside it, a comment is a comment before a brace can count
+// inside it — with the line kept so a failure names where the open thing began.
+{
+  const offenders = [];
+  for (const path of walk(SRC)) {
+    if (!path.endsWith(".css")) continue;
+    const text = read(path);
+    const file = relative(SRC, path);
+    const open = [];
+    let line = 1;
+    let stray = null;
+    let comment = null;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "\n") { line += 1; continue; }
+      if (ch === '"' || ch === "'") {
+        // To the closing quote; a backslash escapes the next character; a bare newline ends
+        // the string as the tokenizer does (a bad string), so a stray quote cannot hide a file.
+        for (i += 1; i < text.length && text[i] !== ch && text[i] !== "\n"; i++) if (text[i] === "\\") i += 1;
+        if (text[i] === "\n") line += 1;
+        continue;
+      }
+      if (ch === "/" && text[i + 1] === "*") {
+        const close = text.indexOf("*/", i + 2);
+        if (close === -1) { comment = line; break; }
+        for (let j = i; j < close; j++) if (text[j] === "\n") line += 1;
+        i = close + 1;
+        continue;
+      }
+      if (ch === "{") open.push(line);
+      else if (ch === "}" && open.pop() === undefined && stray === null) stray = line;
+    }
+    if (comment !== null) offenders.push(`${file}:${comment} opens a comment that never closes`);
+    if (stray !== null) offenders.push(`${file}:${stray} closes a block nothing opened`);
+    if (open.length > 0) offenders.push(`${file}:${open[open.length - 1]} opens a block that never closes`);
+  }
+  if (offenders.length > 0) fail("a stylesheet must close every block and comment it opens — the bundle nests every later stylesheet inside an open one", offenders.join("; "));
+}
+
 // No colour is hard-coded outside the token files (R-11).
 {
   const hex = /#[0-9a-fA-F]{3,8}\b/;
@@ -119,4 +164,4 @@ if (failures.length > 0) {
   console.error(`client policy: ${failures.length} rule${failures.length === 1 ? "" : "s"} broken\n${failures.join("\n")}`);
   process.exit(1);
 }
-console.log("client policy: tokens match the baseline, no hard-coded colour, ramp surfaces darken, no credential material");
+console.log("client policy: tokens match the baseline, every stylesheet closes its blocks, no hard-coded colour, ramp surfaces darken, no credential material");

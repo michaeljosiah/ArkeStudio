@@ -208,6 +208,7 @@ export function SceneStage({
   const [exporting, setExporting] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const inspection = useRef<HTMLDetailsElement | null>(null);
   const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
@@ -220,6 +221,11 @@ export function SceneStage({
     const base = draft ?? resolvedPersisted;
     return base === null ? null : stagingRetimed(base, durationSec);
   }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
+  // A hand edit strips the build's provenance (the draft is no longer what the model said), and a
+  // native <details> keeps its own open state regardless — so the disclosure is shut here, not
+  // left expanded over an empty body while its dress says it cannot open.
+  const inspected = working?.authorship !== undefined;
+  useEffect(() => { if (!inspected) inspection.current?.removeAttribute("open"); }, [inspected]);
   const motionSpeeds = useMemo(() => working ? stageMotionSpeeds(working, durationSec) : [], [working, durationSec]);
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
   const motionChanged = draft !== null && (
@@ -1024,7 +1030,19 @@ export function SceneStage({
         <Button size="sm" className="fy-tip--end" disabled={frozen || moved} hint="Uses the configured language model · up to 3 turns / 5 minutes" onClick={() => construct()}>Build with Arke</Button>
         {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
         {note ? <span role="status">{note}</span> : null}
-        {draft?.authorship ? <details><summary>AI inspection and assumptions</summary><p>{draft.authorship.assessment}</p><ul>{draft.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{draft.authorship.model} · {draft.authorship.inspectedFrames} views inspected</small></details> : null}
+        {/* The disclosure ends the bar as 144a draws it, and opens once a build has something to
+            say — the kept staging's record as much as a draft's; until then it is shut and says
+            so by its dress, rather than absent — a person should see where a build's assessment
+            will land before asking for one. */}
+        <details
+          ref={inspection}
+          className="fy-swstage__inspection"
+          aria-disabled={working?.authorship ? undefined : "true"}
+          onToggle={(event) => { if (!working?.authorship && event.currentTarget.open) event.currentTarget.open = false; }}
+        >
+          <summary tabIndex={working?.authorship ? undefined : -1} onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />AI inspection and assumptions</summary>
+          {working?.authorship ? <><p>{working.authorship.assessment}</p><ul>{working.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{working.authorship.model} · {working.authorship.inspectedFrames} views inspected</small></> : null}
+        </details>
       </div>
       <div className="fy-swstage__work">
         <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode}>
