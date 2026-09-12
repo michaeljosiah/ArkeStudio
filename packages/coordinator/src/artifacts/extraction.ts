@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   SHEET_SHAPES,
   ArtifactSidecarSchema,
+  propSlugs,
   sheetDir,
   type ArtifactSidecar,
   type ExtractionCandidate,
@@ -228,7 +229,8 @@ export async function resolveCandidate(
       if (outcome.status !== "accepted") throw new Error(`canon candidate did not land: ${outcome.status}`);
     } else {
       const kind = candidate.kind as SheetKind;
-      const slug = uniqueSlug(candidate.name, kind, store.getBundle().sheets.map((s) => s.id));
+      // Past every sheet's id and every prop's slug: a mention cites one thing (issue 1116).
+      const slug = uniqueSlug(candidate.name, kind, [...store.getBundle().sheets.map((s) => s.id), ...propSlugs(store.getBundle().props)]);
       const shape = SHEET_SHAPES[kind];
       const section = candidate.section ?? shape.sections[0]!.heading;
       const content = buildSheetContent({

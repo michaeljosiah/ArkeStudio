@@ -29,6 +29,9 @@ import {
   ProductionSchema,
   ProposalSchema,
   PropSchema,
+  type Prop,
+  checkPropName,
+  propSlug,
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
@@ -429,6 +432,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
 
   const referenceKits = [];
   const props = [];
+  // Each prop record beside the path it was read from, in scan order — a hand-edited file may
+  // claim another id than its directory's, two files may even claim one id, and a report has to
+  // name the file a person can open, so the path rides the record rather than a map by id.
+  const propEntries: Array<{ prop: Prop; path: string }> = [];
   const referenceCandidates: Record<string, string[]> = {};
   const referenceTakes = [];
   for (const sheetId of await listDir(join(dir, "references"))) {
@@ -442,7 +449,10 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     // walk below finds its takes and candidates without learning what a prop is (issue 535).
     if (await exists(join(dir, "references", sheetId, "prop.json"))) {
       const prop = await tryParse(`references/${sheetId}/prop.json`, (raw) => PropSchema.parse(JSON.parse(raw)));
-      if (prop) props.push(prop);
+      if (prop) {
+        props.push(prop);
+        propEntries.push({ prop, path: toPortable(`references/${sheetId}/prop.json`) });
+      }
     }
     const candidates = (await listDir(join(dir, "references", sheetId, "candidates")))
       .filter((file) => /\.(png|jpe?g|webp)$/i.test(file))
@@ -1092,6 +1102,34 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     performanceBibles.push({ sheetId, events, hash: manifest[path] ?? null,
       ...(damaged ? { problem: "Performance bible history needs repair." } : {}) });
   }
+  // One mention cites one thing (issue 1116): creation refuses a prop whose slug another prop
+  // or a sheet holds, but a world written before that gate — or by hand — can still carry the
+  // collision, and every reader would take it as it finds it (`resolvePropStates` cites both).
+  // Both records stay loaded, since either may be cited by a shot's own control; the later one
+  // is reported as a conflict — not as a file that could not be read, which it was not — naming
+  // what holds the word, so a person can rename it.
+  for (const [index, { prop, path }] of propEntries.entries()) {
+    const earlier = propEntries.slice(0, index);
+    // Two files claiming one id: a shot's own control cites a prop by id, and would find either.
+    const sameId = earlier.find((entry) => entry.prop.id === prop.id);
+    if (sameId) {
+      problems.push({ kind: "conflict", path, message: `prop "${prop.name}" carries the id ${prop.id}, as does "${sameId.prop.name}" (${sameId.path}) — one record per id; remove or re-id one` });
+    }
+    const check = checkPropName(prop.name, earlier.map((entry) => entry.prop), sheets);
+    if (check.ok) continue;
+    const holder = check.reason === "prop" ? earlier.find((entry) => propSlug(entry.prop.name) === check.slug) : undefined;
+    problems.push({
+      kind: "conflict",
+      path,
+      message:
+        check.reason === "empty"
+          ? `prop "${prop.name}" has no letter or number to be cited by — rename it`
+          : check.reason === "sheet"
+            ? `prop "${prop.name}" answers to @${check.slug}, the sheet ${check.holder.name}'s id — rename the prop; a mention cites one thing`
+            : `prop "${prop.name}" answers to @${check.slug}, as does "${holder?.prop.name ?? check.holder.name}" (${holder?.path ?? "another record"}) — rename one; a mention cites one thing`,
+    });
+  }
+
   const bundle: WorldBundle = {
     meta,
     bible,

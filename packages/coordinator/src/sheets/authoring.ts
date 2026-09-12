@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  propSlugs,
   sheetDir,
   worldSheets,
   type Proposal,
@@ -40,6 +41,9 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
     const entries = await readdir(toExtendedLength(join(store.dir, dir))).catch(() => [] as string[]);
     slugs.push(...entries.filter((f) => f.endsWith(".md")).map((f) => f.slice(0, -3)));
   }
+  // The props' slugs are taken too: a mention cites one thing, and a prop refuses a sheet's word
+  // at its own creation (issue 1116), so a sheet minted after the prop steps past it likewise.
+  slugs.push(...propSlugs(store.getBundle().props));
   void type;
   return slugs;
 }

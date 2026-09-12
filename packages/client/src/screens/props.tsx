@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { orderedShots, propSlug, parseMentions, type Prop, type PropState, type Take, type WorldBundle } from "@arke-studio/contracts";
+import { checkPropName, orderedShots, propSlug, parseMentions, type Prop, type PropState, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
 import { Button, Callout, Input } from "../components/ui.js";
 import { SheetKindNav } from "./world.js";
@@ -41,6 +41,24 @@ export function PropsScreen() {
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const props = world?.props ?? [];
+  // One mention cites one thing (issue 1116): the slug the name would be cited by has to be free
+  // of every other prop's and every sheet's id, and the coordinator refuses the same collision
+  // silently — so the word that holds it is said here, beside the box, before anything is sent.
+  const check = name.trim() === "" ? null : checkPropName(name, props, world?.sheets ?? []);
+  // The box clears when the prop arrives, not when the button is pressed: a snapshot can be
+  // behind another window, and the coordinator's refusal is silent, so a name cleared on the
+  // press would be lost with nothing said. Kept, it meets the refreshed snapshot and the line
+  // above says which word took it. The arrival is the name as it was sent — another window's
+  // other spelling of the same slug is that collision, shown, not this creation — and it clears
+  // only while the box still holds that name, so the next one begun before the snapshot lands
+  // is not the last one's to clear.
+  const awaiting = useRef<string | null>(null);
+  useEffect(() => {
+    const sent = awaiting.current;
+    if (sent === null || !props.some((prop) => prop.name === sent)) return;
+    awaiting.current = null;
+    setName((current) => (current.trim() === sent ? "" : current));
+  }, [props]);
   return (
     <div data-screen="props">
       <SheetKindNav active="prop" />
@@ -69,15 +87,21 @@ export function PropsScreen() {
             />
             <Button
               variant="primary"
-              disabled={name.trim() === "" || !worldId}
+              disabled={check === null || !check.ok || !worldId}
               onClick={() => {
-                if (worldId) createProp(worldId, name.trim());
-                setName("");
+                if (!worldId || check === null || !check.ok) return;
+                awaiting.current = name.trim();
+                createProp(worldId, name.trim());
               }}
             >
               Create prop
             </Button>
           </div>
+          {check !== null && !check.ok ? (
+            <p className="fy-mono" role="status" data-testid="prop-name-check">
+              {check.reason === "empty" ? "Needs a letter or number" : `@${check.slug} is ${check.holder.name}`}
+            </p>
+          ) : null}
         </div>
         <div className="fy-sheetsec">
           <div className="fy-sheetrefs">

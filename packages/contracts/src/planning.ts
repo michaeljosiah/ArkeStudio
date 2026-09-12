@@ -120,6 +120,45 @@ export function propSlug(name: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/**
+ * Whether a prop may carry this name: one mention cites one thing (issue 1116).
+ *
+ * A prop is cited by the slug of its name, and nothing else about it is addressable, so the slug
+ * has to be free: not another prop's ("Tea cup" and "Tea-cup" both answer to `@tea-cup`, and
+ * `resolvePropStates` would put both on the dispatch), not a sheet's id (`@maren-kest` is the
+ * character's), and not empty (a name of punctuation alone has nothing to cite it by). The
+ * screen asks this before it sends and says which holds the word; the coordinator asks it
+ * again as the gate of record; the scan asks it of what is already on disk.
+ */
+export type PropNameCheck =
+  | { ok: true; slug: string }
+  | { ok: false; slug: string; reason: "empty" }
+  | { ok: false; slug: string; reason: "prop" | "sheet"; holder: { id: string; name: string } };
+
+export function checkPropName(
+  name: string,
+  props: readonly Pick<Prop, "id" | "name">[],
+  sheets: readonly Pick<Sheet, "id" | "name">[],
+  except?: string,
+): PropNameCheck {
+  const slug = propSlug(name);
+  if (slug === "") return { ok: false, slug, reason: "empty" };
+  const sheet = sheets.find((candidate) => candidate.id === slug);
+  if (sheet) return { ok: false, slug, reason: "sheet", holder: { id: sheet.id, name: sheet.name } };
+  const prop = props.find((candidate) => candidate.id !== except && propSlug(candidate.name) === slug);
+  if (prop) return { ok: false, slug, reason: "prop", holder: { id: prop.id, name: prop.name } };
+  return { ok: true, slug };
+}
+
+/**
+ * The other half of the same rule, for the side that mints rather than refuses: a sheet's id is
+ * chosen by `uniqueSlug` past every slug already taken, and the props' slugs are taken too — a
+ * sheet named Ledger after a prop named Ledger becomes `ledger-2`, not the prop's twin.
+ */
+export function propSlugs(props: readonly Pick<Prop, "name">[]): string[] {
+  return props.map((prop) => propSlug(prop.name)).filter((slug) => slug !== "");
+}
+
 /** One prop as a shot dispatches it: turn 105's five fields, plus the names a screen shows. */
 export interface ShotPropResolution {
   propId: string;

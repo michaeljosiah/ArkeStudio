@@ -258,13 +258,21 @@
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-chat__runsummary > summary > span { width: 20px; height: 20px; }
 .fy-sw:where([data-screen="scene-detail"], [data-screen="shot"]) .fy-chat__runsummary[data-state="complete"] > summary > span::after { content: "✓"; display: grid; place-items: center; height: 100%; color: var(--success-bg); font-size: 13px; }
 
-@container (max-width: 780px) {
-  :where([data-screen="scene-detail"]) .fy-sw__actions { flex-wrap: wrap; }
+/* The row's actions sit beside the title only where the title keeps its room: the title line
+   is the centre column less the grip, the frame, the body's padding and the 210px the actions
+   reserve, which is 353px at the design's 1360 window and 193px at the 1200 × 790 default,
+   where "Maren at the rail, listening" became "Maren at the r…" and the state chip fell under
+   it (issue 1117). Under 900px the actions take the line below the body instead, as they do
+   on the card, and the title line has the width 145a draws it with. */
+@container (max-width: 900px) {
   :where([data-screen="scene-detail"]) .fy-swrow__framewrap { grid-row: span 2; }
   :where([data-screen="scene-detail"]) .fy-swrow__body { padding: 14px 16px 12px; }
   :where([data-screen="scene-detail"]) .fy-swrow__titleline { padding-right: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
   :where([data-screen="scene-detail"]) .fy-swrow__actionline { justify-content: space-between; }
+}
+@container (max-width: 780px) {
+  :where([data-screen="scene-detail"]) .fy-sw__actions { flex-wrap: wrap; }
 }
 @container (max-width: 560px) {
   :where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
