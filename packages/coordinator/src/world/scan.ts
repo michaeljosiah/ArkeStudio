@@ -29,6 +29,7 @@ import {
   ProductionSchema,
   ProposalSchema,
   PropSchema,
+  checkPropName,
   ReferenceKitSchema,
   ReviewDecisionSchema,
   RipplePreviewSchema,
@@ -1092,6 +1093,26 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
     performanceBibles.push({ sheetId, events, hash: manifest[path] ?? null,
       ...(damaged ? { problem: "Performance bible history needs repair." } : {}) });
   }
+  // One mention cites one thing (issue 1116): creation refuses a prop whose slug another prop
+  // or a sheet holds, but a world written before that gate — or by hand — can still carry the
+  // collision, and every reader would take it as it finds it (`resolvePropStates` cites both).
+  // Both records stay loaded, since either may be cited by a shot's own control; the later one
+  // is reported the way a duplicate scene id is, naming what holds the word, so a person can
+  // rename it.
+  for (const [index, prop] of props.entries()) {
+    const check = checkPropName(prop.name, props.slice(0, index), sheets);
+    if (check.ok) continue;
+    problems.push({
+      path: toPortable(`references/${prop.id}/prop.json`),
+      message:
+        check.reason === "empty"
+          ? `prop "${prop.name}" has no letter or number to be cited by — rename it`
+          : check.reason === "sheet"
+            ? `prop "${prop.name}" answers to @${check.slug}, the sheet ${check.holder.name}'s id — rename the prop; a mention cites one thing`
+            : `prop "${prop.name}" answers to @${check.slug}, as does "${check.holder.name}" (references/${check.holder.id}/prop.json) — rename one; a mention cites one thing`,
+    });
+  }
+
   const bundle: WorldBundle = {
     meta,
     bible,

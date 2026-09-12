@@ -1,6 +1,6 @@
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { newId, PropSchema, type Prop, type PropState, type Take } from "@arke-studio/contracts";
+import { checkPropName, newId, PropSchema, type Prop, type PropState, type Take } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
 import type { WorldStore } from "../world/store.js";
@@ -119,8 +119,16 @@ export async function acceptPropStateReference(
   return { status: "accepted", takeId: accepted.id };
 }
 
-/** A prop is born as a name and an empty, ordered list of states — nothing owned beyond them (turn 105f; issue 537). */
-export async function createProp(store: WorldStore, name: string): Promise<Prop> {
+/**
+ * A prop is born as a name and an empty, ordered list of states — nothing owned beyond them
+ * (turn 105f; issue 537). The name's slug is what shots cite, so it has to be free of every
+ * other prop's and every sheet's id (issue 1116): the screen says which holds the word before
+ * it sends, and this is the gate of record — silent, as the accept's refusal is, since nothing
+ * changed and the name is still in the box.
+ */
+export async function createProp(store: WorldStore, name: string): Promise<Prop | null> {
+  const bundle = store.getBundle();
+  if (!checkPropName(name, bundle.props, bundle.sheets).ok) return null;
   const prop: Prop = { id: newId("prop"), name: name.trim(), states: [] };
   await commitReferenceRecord(store, [
     { path: propPath(prop.id), action: "create", content: `${JSON.stringify(prop, null, 2)}\n`, baseHash: null },

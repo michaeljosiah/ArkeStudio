@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
+import { checkPropName, mentionSpans, newId, parseMentions, PropSchema, ProvenanceSchema, withoutMention } from "../src/index.js";
 
 /** Prop identity and the five provenance fields (design turn 105, Option C; issue 534). */
 describe("props", () => {
@@ -42,6 +42,18 @@ describe("props", () => {
       assert.ok(parseMentions(text).includes("car"), `${text} cites the prop`);
       assert.ok(!parseMentions(withoutMention(text, "car")).includes("car"), `${text} no longer does`);
     }
+  });
+
+  it("a prop's name must leave its slug free: not another prop's, not a sheet's id, not empty (issue 1116)", () => {
+    const props = [{ id: "prop_1", name: "Tea cup" }, { id: "prop_2", name: "Polaroid" }];
+    const sheets = [{ id: "maren-kest", name: "Maren Kest" }];
+    assert.deepEqual(checkPropName("Ledger", props, sheets), { ok: true, slug: "ledger" });
+    assert.deepEqual(checkPropName("Tea-cup", props, sheets), { ok: false, slug: "tea-cup", reason: "prop", holder: { id: "prop_1", name: "Tea cup" } });
+    assert.deepEqual(checkPropName("  TEA CUP ", props, sheets), { ok: false, slug: "tea-cup", reason: "prop", holder: { id: "prop_1", name: "Tea cup" } });
+    assert.deepEqual(checkPropName("Maren Kest", props, sheets), { ok: false, slug: "maren-kest", reason: "sheet", holder: { id: "maren-kest", name: "Maren Kest" } });
+    assert.deepEqual(checkPropName("!!!", props, sheets), { ok: false, slug: "", reason: "empty" });
+    // A rename against itself is not a collision.
+    assert.deepEqual(checkPropName("Tea Cup", props, sheets, "prop_1"), { ok: true, slug: "tea-cup" });
   });
 
   it("the spans a screen draws are the mentions the parser reads, in place (issue 1114)", () => {
