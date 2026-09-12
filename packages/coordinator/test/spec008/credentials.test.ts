@@ -7,7 +7,7 @@ import { CredentialStore, type Cipher } from "../../src/credentials/store.js";
 import { AppLog } from "../../src/app-log.js";
 import { REDACTED, redactDeep, SecretRegistry } from "../../src/redact.js";
 import { buildDiagnosticsBundle } from "../../src/diagnostics.js";
-import { vendorAuthUnavailable, type ClientState } from "@arke-studio/contracts";
+import { emptyClientState } from "../client-state.js";
 
 /** A reversible fake cipher that is very visibly not the plaintext. */
 const fakeCipher: Cipher = {
@@ -213,19 +213,9 @@ describe("redaction at the logging boundary (R-7, §3.2)", () => {
 
 describe("the diagnostics bundle (R-6, §3.2)", () => {
   it("contains no key material and no world content", async () => {
-    const state: ClientState = {
-      app: {
+    const state = emptyClientState(
+      {
         version: "0.1.0-test",
-        health: {
-          coordinator: { status: "healthy" },
-          harness: { status: "unavailable", reason: "not configured" },
-          voice: { status: "unavailable", reason: "not configured" },
-        },
-        jobs: [],
-        builds: [],
-        worldGenesis: {},
-        ledger: [],
-        ledgerUnavailable: false,
         providers: [
           {
             id: "fal",
@@ -235,50 +225,21 @@ describe("the diagnostics bundle (R-6, §3.2)", () => {
             fault: null,
           },
         ],
-        providerTools: [],
-        vendorAuth: vendorAuthUnavailable("not configured"),
-        manifest: null,
-        routing: { defaults: {}, faults: [] },
-        models: { disabled: [] },
-        presets: [],
-        spend: null,
-        backgroundNotifications: "issues-only",
-        activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
-        research: { web: false },
-        narrator: null,
-        appearance: { theme: "system" },
-        runtime: null,
-        harness: null,
-        comfyui: null,
-        voiceRuntime: null,
-        drift: [],
-        agents: [],
-        harnessModels: [],
-        harnessInfo: null,
-        queues: [],
-        setup: null,
-        update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null },
-        env: null,
-        sampleWorld: { available: false, installing: false, note: null },
       },
-      worlds: [
-        {
-          worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
-          slug: "the-undersong",
-          name: "The Undersong",
-          logline: "A drowned god still sings beneath the harbour.",
-          counts: { characters: 3, locations: 2, factions: 1, canonEntries: 6, productions: 1 },
-          keyArt: null,
-          updated: "2026-07-30T18:22:00Z",
-        },
-      ],
-      world: null,
-      worldOpenFailure: null,
-      worldChat: null,
-      bench: null,
-      authoringRuns: [],
-      frameRuns: [],
-    };
+      {
+        worlds: [
+          {
+            worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC",
+            slug: "the-undersong",
+            name: "The Undersong",
+            logline: "A drowned god still sings beneath the harbour.",
+            counts: { characters: 3, locations: 2, factions: 1, canonEntries: 6, productions: 1 },
+            keyArt: null,
+            updated: "2026-07-30T18:22:00Z",
+          },
+        ],
+      },
+    );
     const registry = new SecretRegistry();
     registry.register(KEY);
     const dir = await tempDir("arke-diag-");

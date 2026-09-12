@@ -3,62 +3,17 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it, type TestContext } from "node:test";
 import WebSocket from "ws";
-import { FrameSchema, vendorAuthUnavailable, type ClientState, type Frame } from "@arke-studio/contracts";
+import { FrameSchema, type Frame } from "@arke-studio/contracts";
 import { Transport } from "../src/transport.js";
 import { FsWorldProvider } from "../src/world/provider.js";
+import { emptyClientState } from "./client-state.js";
 import { tempDir } from "./tmp.js";
 
 const TOKEN = "a".repeat(64);
 const AUTH = { token: TOKEN, allowedOrigins: ["file://", "null", "http://localhost:5173"] };
 
-const STATE: ClientState = {
-  app: {
-    version: "0.0.0-test",
-    health: {
-      coordinator: { status: "healthy" },
-      harness: { status: "unavailable", reason: "not configured" },
-      voice: { status: "unavailable", reason: "not configured" },
-    },
-    jobs: [],
-    builds: [],
-    worldGenesis: {},
-    ledger: [],
-    ledgerUnavailable: false,
-    providers: [],
-    providerTools: [],
-    vendorAuth: vendorAuthUnavailable("not configured"),
-    manifest: null,
-    routing: { defaults: {}, faults: [] },
-    models: { disabled: [] },
-    presets: [],
-    spend: null,
-    backgroundNotifications: "issues-only",
-    activitySeen: { inboxSeenAt: null, whatsNewSeenVersion: null },
-    research: { web: false },
-  narrator: null,
-    appearance: { theme: "system" },
-    runtime: null,
-    harness: null,
-    comfyui: null,
-    voiceRuntime: null,
-    drift: [],
-    agents: [],
-    harnessModels: [],
-      harnessInfo: null,
-    queues: [],
-    setup: null,
-    update: { status: "idle", targetVersion: null, progressPercent: null, flow: null, detail: null, releaseName: null, releaseNotes: null },
-    env: null,
-    sampleWorld: { available: false, installing: false, note: null },
-  },
-  worlds: [],
-  world: null,
-  worldOpenFailure: null,
-  worldChat: null,
-  bench: null,
-  authoringRuns: [],
-  frameRuns: [],
-};
+const STATE = emptyClientState();
+
 
 const EVENT = {
   at: "2026-08-01T10:00:00Z",
