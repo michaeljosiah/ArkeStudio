@@ -1228,24 +1228,30 @@ export class ProposalManager {
           continue;
         }
       }
-      // A new sheet takes its id from its path, and a mention cites one thing (issue 1116): the
-      // slug was minted past the props' at staging, but a prop named between the staging and the
-      // press would make the sheet its twin — `createProp` sees no live sheet to refuse. Asked
-      // again here, under the lock, so the last writer is the one turned away.
-      const fresh = file.baseHash === null && file.content !== undefined ? /^(?:characters|locations|factions)\/([^/]+)\.md$/.exec(file.path) : null;
-      if (fresh) {
-        // The id the scan will read is the front matter's, not the path's, and a session can
-        // edit one without the other: a new sheet's id is held to its file's name, and the
-        // word checked is that one.
-        const id = sheetIdOf(file.content!);
-        if (id !== null && id !== fresh[1]) {
-          problems.push({ path: file.path, message: `id is "${id}" but the file is ${fresh[1]}.md — a new sheet's id is its file's name` });
-          continue;
-        }
-        const held = this.store.getBundle().props.find((prop) => propSlug(prop.name) === fresh[1]);
-        if (held) {
-          problems.push({ path: file.path, message: `@${fresh[1]} already cites the prop "${held.name}" — one mention cites one thing; rename one` });
-          continue;
+      // A sheet's word is its id, and a mention cites one thing (issue 1116). The id the scan
+      // will read is the front matter's, not the path's, and a session can edit one without the
+      // other — on a new sheet or an amended one — so a sheet that takes a word it did not
+      // already hold is held to its file's name, and that word to the props: a prop named
+      // between the staging and the press would otherwise make the sheet its twin, since
+      // `createProp` sees no live sheet to refuse. Asked here, under the lock, so the last
+      // writer is the one turned away. A word the live file already carries is kept as it is,
+      // as the role is: what this proposal did not change is not its to be refused for.
+      const sheetTarget = file.content !== undefined ? /^(?:characters|locations|factions)\/([^/]+)\.md$/.exec(file.path) : null;
+      if (sheetTarget) {
+        const slug = sheetTarget[1]!;
+        const id = sheetIdOf(file.content!) ?? slug;
+        const live = file.baseHash === null ? null : await this.readLive(file.path);
+        const heldAlready = live !== null && sheetIdOf(live) === id;
+        if (!heldAlready) {
+          if (id !== slug) {
+            problems.push({ path: file.path, message: `id is "${id}" but the file is ${slug}.md — a sheet's id is its file's name` });
+            continue;
+          }
+          const held = this.store.getBundle().props.find((prop) => propSlug(prop.name) === id);
+          if (held) {
+            problems.push({ path: file.path, message: `@${id} already cites the prop "${held.name}" — one mention cites one thing; rename one` });
+            continue;
+          }
         }
       }
       if (!file.path.startsWith("characters/") || file.content === undefined) continue;

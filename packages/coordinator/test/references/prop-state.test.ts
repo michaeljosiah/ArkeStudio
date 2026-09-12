@@ -11,6 +11,7 @@ import { planIdentities } from "../../src/world-chat/materialise.js";
 import type { WorldChangeCandidate } from "@arke-studio/contracts";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
+import { MarkdownFile } from "../../src/world/text-files.js";
 
 /** The prop-state accept path (design turn 105, `referenceOwner: accepted-state-record`; issue 535). */
 describe("prop-state references", () => {
@@ -165,5 +166,25 @@ describe("prop-state references", () => {
     const outcome = await gate.accept(draft.proposal.id);
     assert.equal(outcome.status, "invalid", JSON.stringify(outcome));
     assert.match(outcome.status === "invalid" ? outcome.problems[0]!.message : "", /id is "bar" but the file is foo\.md/);
+  });
+
+  it("an amended sheet cannot take a prop's word either, while a word it already holds is not its to lose (codex round 5)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+    assert.equal((await createProp(store, "Bar"))?.name, "Bar");
+    const live = await readFile(join(dir, "characters", "bray-half-hitch.md"), "utf8");
+    const turned = MarkdownFile.parse(live);
+    turned.setData({ id: "bar" });
+    const staged = await gate.stage({ kind: "sheet-edit", summary: "Bray takes the prop's word", source: "form", targets: [{ path: "characters/bray-half-hitch.md", content: turned.serialize() }] });
+    const outcome = await gate.accept(staged.id);
+    assert.equal(outcome.status, "invalid", JSON.stringify(outcome));
+    assert.match(outcome.status === "invalid" ? outcome.problems[0]!.message : "", /id is "bar" but the file is bray-half-hitch\.md/);
+    // The same sheet amended in a field, its id untouched, still lands.
+    const kept = MarkdownFile.parse(live);
+    kept.setData({ role: "Rigger who sings" });
+    const plain = await gate.stage({ kind: "sheet-edit", summary: "Bray sings", source: "form", targets: [{ path: "characters/bray-half-hitch.md", content: kept.serialize() }] });
+    assert.equal((await gate.accept(plain.id)).status, "accepted");
   });
 });
