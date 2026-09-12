@@ -202,8 +202,9 @@ describe("design tokens", () => {
       // keeps only the outline/continuity view choice. Provider credentials remain forbidden.
       const inspected = sourcePath === join("lib", "dev-session.ts") || sourcePath === join("lib", "continuity.ts")
         ? source.replaceAll("sessionStorage", "")
-        : sourcePath === join("components", "character-voice-sample.tsx")
-          // This panel persists only a schema-validated preparation UUID for restart recovery.
+        : sourcePath === join("components", "character-voice-sample.tsx") || sourcePath === join("lib", "storyboard-layout.ts")
+          // The voice panel persists only a schema-validated preparation UUID for restart
+          // recovery; the storyboard remembers which of two layouts it opens on (turn 145).
           // Strip that storage vocabulary only; provider keys, auth and decryption still fail.
           ? source.replaceAll("localStorage", "")
           : sourcePath === join("lib", "continuity.ts")

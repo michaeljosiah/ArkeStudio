@@ -44,17 +44,8 @@ import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { PlansPanel } from "./plans.js";
 import { useSceneWriter } from "./scene-writer.js";
+import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
 
-const LAYOUT_KEY = "arke.storyboard.layout";
-
-/** Grid unless this person chose the List last time (turn 145); a browser without storage answers Grid. */
-function rememberedLayout(): "list" | "grid" {
-  try {
-    return window.localStorage?.getItem(LAYOUT_KEY) === "list" ? "list" : "grid";
-  } catch {
-    return "grid";
-  }
-}
 
 /**
  * The scene authoring shell (SPEC-029 R-21..R-29), mounted for every scene detail route.
@@ -117,7 +108,7 @@ export function SceneWorkspace({
   const [storyboardLayout, setStoryboardLayoutState] = useState<"list" | "grid">(rememberedLayout);
   const setStoryboardLayout = (layout: "list" | "grid") => {
     setStoryboardLayoutState(layout);
-    try { window.localStorage?.setItem(LAYOUT_KEY, layout); } catch { /* a browser that refuses storage keeps the session's choice */ }
+    rememberLayout(layout);
   };
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.

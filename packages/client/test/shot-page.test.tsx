@@ -125,7 +125,7 @@ describe("the shot page (design turn 145)", () => {
     const page = q(mounted, '[data-testid="shot-page"]')!;
     assert.ok(page, "the route lands on the page, not the old sheet");
     assert.equal(page.querySelector(".fy-shot__crumb")?.textContent, "Scene 4 · The verse rises", "the breadcrumb ends on the scene");
-    assert.match(page.querySelector("h1")?.textContent ?? "", /^Shot 12· Maren at the rail, listening/);
+    assert.match(page.querySelector("h1")?.textContent ?? "", /^Shot 12 · Maren at the rail, listening/);
     const thumbs = all(mounted, ".fy-shot__thumb");
     assert.deepEqual(thumbs.map((thumb) => thumb.getAttribute("aria-label")), ["Shot 12 · Maren at the rail, listening", "Shot 13 · The lamps answer"]);
     assert.equal(thumbs[0]!.getAttribute("aria-current"), "true", "the open shot is ringed");

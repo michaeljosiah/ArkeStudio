@@ -691,9 +691,10 @@ export function ProductionLayout() {
   const newScene = useNewScene(worldId, prodId);
   const newChapter = useNewChapter(worldId, prodId);
   // A chapter opened is a workspace as much as a scene opened is (turn 126), and folds by the
-  // same default: the manuscript wants the width, and the width is the person's afterwards.
+  // same default: the manuscript wants the width, and the width is the person's afterwards. The
+  // shot's page (turn 145) is the scene's workspace one level down, and folds with it.
   const sceneDetailDefault =
-    /\/scenes\/[^/]+\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
+    /\/scenes\/[^/]+(\/shots\/[^/]+)?\/?$/.test(location.pathname) || /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const folded = railChoice ?? (location.pathname.endsWith("/cut") || sceneDetailDefault);
   /*
    * A mark for every destination, without exception (turn 101). Folded, the label is the tooltip

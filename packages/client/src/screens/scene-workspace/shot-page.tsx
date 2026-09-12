@@ -287,7 +287,7 @@ function ShotWorkspace({
             </p>
             <div className="fy-sw__headline">
               <h1 className="fy-sw__title fy-shot__title">
-                <span>Shot {shot.number}</span>
+                {editingTitle ? <span>Shot {shot.number} ·</span> : null}
                 {editingTitle ? (
                   <input
                     className="fy-shot__title-input"
@@ -308,7 +308,7 @@ function ShotWorkspace({
                   />
                 ) : (
                   <>
-                    <span className="fy-shot__title-text">· {shot.title}</span>
+                    <span className="fy-shot__title-text">Shot {shot.number} · {shot.title}</span>
                     <button ref={titleTrigger} type="button" className="fy-shot__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={() => setEditingTitle(true)}>
                       <Pencil size={16} />
                     </button>
