@@ -688,6 +688,7 @@ export function SceneWorkspace({
               aspect={aspect}
               onEditShot={(shotId) => navigate(shotPage(shotId))}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              {...(linkedShotId === null ? {} : { startShotId: linkedShotId })}
             />
           )}
           <PlansPanel

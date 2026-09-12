@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
@@ -49,13 +49,17 @@ export function ShotPage() {
   const { worldId, prodId, sceneId, shotId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const record = production?.scenes.find((candidate) => candidate.id === sceneId);
+  // Open in generator answers by request id, and the person may step the filmstrip before it
+  // does. The workspace below is keyed by shot, so the pending request lives here, on the route
+  // element that outlives the step, and the answer still opens the session it made.
+  const pendingGenerator = useRef<PendingGenerator | null>(null);
   if (world && production && record && shotId !== undefined) {
     // A shot that has gone — deleted from the list, or an address that never named one — lands
     // on its scene rather than on a page about nothing.
     if (!orderedShots(record).some((shot) => shot.id === shotId)) {
       return <Navigate to={`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${record.id}`} replace />;
     }
-    return <ShotWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}/${shotId}`} world={world} production={production} scene={record} shotId={shotId} />;
+    return <ShotWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}/${shotId}`} world={world} production={production} scene={record} shotId={shotId} pendingGenerator={pendingGenerator} />;
   }
   return (
     <Screen id="shot">
@@ -64,16 +68,20 @@ export function ShotPage() {
   );
 }
 
+type PendingGenerator = { requestId: string; sceneKey: string };
+
 function ShotWorkspace({
   world,
   production,
   scene,
   shotId,
+  pendingGenerator,
 }: {
   world: WorldBundle;
   production: ProductionBundle;
   scene: SceneRecord;
   shotId: string;
+  pendingGenerator: MutableRefObject<PendingGenerator | null>;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -141,7 +149,11 @@ function ShotWorkspace({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(shot.title);
-  const [generatorPending, setGeneratorPending] = useState(false);
+  // Enter and Escape both unmount the input, and the blur that unmounting fires must not commit
+  // a second time — or commit at all after an Escape. One flag, set by whichever key settled it.
+  const titleSettled = useRef(false);
+  const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
+  const [generatorPending, setGeneratorPending] = useState(() => pendingGenerator.current?.sceneKey === sceneKey);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
   const generateReturnFocus = useRef<HTMLElement>(null);
   const doorFocus = useRef<HTMLElement | null>(null);
@@ -149,10 +161,8 @@ function ShotWorkspace({
   const variantsDialog = useRef<HTMLDialogElement | null>(null);
   const titleTrigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDetailsElement>(null);
-  const pendingGenerator = useRef<{ requestId: string; key: string } | null>(null);
-  const pageKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}/${shotId}`;
-  const currentKey = useRef(pageKey);
-  currentKey.current = pageKey;
+  const currentKey = useRef(sceneKey);
+  currentKey.current = sceneKey;
   useEffect(() => { setTitleDraft(shot.title); }, [shot.title, refusalVersion]);
   useEffect(() => {
     if (openMember === null) doorFocus.current?.focus();
@@ -206,7 +216,7 @@ function ShotWorkspace({
     () =>
       subscribeBenchSubjectOpened((event) => {
         const pending = pendingGenerator.current;
-        if (pending === null || pending.key !== currentKey.current || event.worldId !== world.meta.worldId || event.requestId !== pending.requestId) return;
+        if (pending === null || pending.sceneKey !== currentKey.current || event.worldId !== world.meta.worldId || event.requestId !== pending.requestId) return;
         pendingGenerator.current = null;
         setGeneratorPending(false);
         if (event.sessionId === null) {
@@ -216,6 +226,7 @@ function ShotWorkspace({
         setGeneratorError(null);
         void navigate(`/w/${world.meta.worldId}/artifacts/bench/${event.sessionId}`);
       }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [navigate, world.meta.worldId],
   );
   useEffect(() => {
@@ -234,7 +245,7 @@ function ShotWorkspace({
       ...(mode === undefined ? {} : { mode }),
     });
     if (requestId !== null) {
-      pendingGenerator.current = { requestId, key: pageKey };
+      pendingGenerator.current = { requestId, sceneKey };
       setGeneratorPending(true);
       setGeneratorError(null);
     } else {
@@ -260,6 +271,12 @@ function ShotWorkspace({
     if (title === "" || title === shot.title || disabled || !write({ kind: "edit-shot", shotId: shot.id, change: { title } })) setTitleDraft(shot.title);
     setEditingTitle(false);
   };
+  const settleTitle = (commit: boolean, value: string) => {
+    titleSettled.current = true;
+    if (commit) commitTitle(value);
+    else { setTitleDraft(shot.title); setEditingTitle(false); }
+    requestAnimationFrame(() => titleTrigger.current?.focus());
+  };
   const conversationSubject: WorldChatSubject = { kind: "shot", sceneId: scene.id, shotId: shot.id as never };
   const shotLabel = (target: string) => {
     const named = shots.find((candidate) => candidate.id === target);
@@ -269,7 +286,7 @@ function ShotWorkspace({
 
   return (
     <SelectionProvider value={selection}>
-      <div className="fy-sw" data-screen="shot-page" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
+      <div className="fy-sw" data-screen="shot" data-testid="shot-page" data-dock={dock ? "true" : "false"} data-full={fullscreen ? "true" : undefined} style={{ "--shot-aspect": aspect.replace(":", " / ") } as CSSProperties}>
         <main className="fy-sw__centre">
           {fullscreen ? (
             <div className="fy-sw__fullpill">
@@ -300,11 +317,12 @@ function ShotWorkspace({
                     onKeyDown={(event) => {
                       if (event.key !== "Enter" && event.key !== "Escape") return;
                       event.preventDefault();
-                      if (event.key === "Escape") { setTitleDraft(shot.title); setEditingTitle(false); }
-                      else commitTitle(event.currentTarget.value);
-                      requestAnimationFrame(() => titleTrigger.current?.focus());
+                      settleTitle(event.key === "Enter", event.currentTarget.value);
                     }}
-                    onBlur={(event) => commitTitle(event.currentTarget.value)}
+                    onBlur={(event) => {
+                      if (titleSettled.current) { titleSettled.current = false; return; }
+                      commitTitle(event.currentTarget.value);
+                    }}
                   />
                 ) : (
                   <>

@@ -113,6 +113,7 @@ export function ScenePreview({
   aspect,
   onEditShot,
   onOpenShotInGenerator,
+  startShotId,
 }: {
   production: ProductionBundle;
   scene: SceneRecord;
@@ -126,6 +127,8 @@ export function ScenePreview({
   // caller that has not wired them yet still compiles, in which case those two buttons just close.
   onEditShot?: (shotId: string) => void;
   onOpenShotInGenerator?: (shotId: string) => void;
+  /** Play from here (turn 145): the clock opens at this shot's start rather than the scene's. */
+  startShotId?: string;
 }) {
   const fingerprintInputs = useMemo(() => [...new Set(orderedShots(scene)
     .filter(shot => shot.staging?.playblast?.sourceFingerprint !== undefined)
@@ -148,6 +151,16 @@ export function ScenePreview({
   const totalSec = spans.at(-1)?.endSec ?? 0;
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
+  // The named shot's span is known once the spans are; seek there once, on the first render
+  // that has it, and never again — a later step of the playhead is the person's.
+  const sought = useRef(false);
+  useEffect(() => {
+    if (sought.current || startShotId === undefined) return;
+    const span = spans.find((candidate) => candidate.shot.id === startShotId);
+    if (span === undefined) return;
+    sought.current = true;
+    setTime(span.startSec);
+  }, [spans, startShotId]);
 
   // Play lines (SPEC-044 R-33): the scene's spoken lines that have a read — a selected one, or the
   // table-read cache — in shot order through the one player; the rest are counted, not played, and

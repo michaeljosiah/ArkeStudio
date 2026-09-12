@@ -163,6 +163,15 @@ export function ShotFields({
   const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
   /** The note last written and not yet durable, so a second blur does not write it twice. */
   const notesSent = useRef<string | null>(null);
+  // One line until written in, then as tall as the note: measured on mount and on every change,
+  // not only while typing, or a saved note of three lines opens clipped to one.
+  const notesBox = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const box = notesBox.current;
+    if (box === null || typeof box.scrollHeight !== "number") return;
+    box.style.height = "auto";
+    box.style.height = `${box.scrollHeight}px`;
+  }, [notesDraft]);
   useEffect(() => {
     notesSent.current = null;
     setNotesDraft(shot.notes ?? "");
@@ -323,17 +332,14 @@ export function ShotFields({
         <span className="fy-shot__sectionicon"><StickyNote size={15} /></span>
         <span className="fy-shot__sectionname">Notes</span>
         <textarea
+          ref={notesBox}
           className="fy-shot__notes"
           aria-label={`Notes for shot ${shot.number}`}
           placeholder="Add notes about this shot…"
           value={notesDraft}
           disabled={disabled}
           rows={1}
-          onChange={(event) => {
-            setNotesDraft(event.target.value);
-            event.currentTarget.style.height = "auto";
-            event.currentTarget.style.height = `${event.currentTarget.scrollHeight}px`;
-          }}
+          onChange={(event) => setNotesDraft(event.target.value)}
           onBlur={(event) => commitNotes(event.currentTarget.value)}
         />
       </section>
@@ -551,7 +557,7 @@ export function ShotFields({
                 aria-label={`Remove ${entry.propName}`}
                 disabled={disabled}
                 onClick={() => {
-                  const cleaned = shot.description.replaceAll(`@${propSlug(prop.name)}`, "").replace(/ {2,}/g, " ").trim();
+                  const cleaned = withoutMention(shot.description, propSlug(prop.name));
                   const others = (shot.propStates ?? []).filter((candidate) => candidate.propId !== entry.propId);
                   edit({ description: cleaned, propStates: others });
                 }}
@@ -575,6 +581,15 @@ function Section({ icon, name, head, children, onBlur }: { icon: ReactNode; name
       <div className="fy-shot__sectionbody">{children}</div>
     </section>
   );
+}
+
+/**
+ * The script without one `@slug` mention. Mentions are exact tokens (`@car` is not `@carter`),
+ * so the slug is matched to its own end — a substring replace once turned `@carter` into `ter`.
+ */
+function withoutMention(script: string, slug: string): string {
+  const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return script.replace(new RegExp(`(^|\\s)@${escaped}(?![\\w-])`, "g"), "$1").replace(/ {2,}/g, " ").trim();
 }
 
 function formatSeconds(seconds: number): string {

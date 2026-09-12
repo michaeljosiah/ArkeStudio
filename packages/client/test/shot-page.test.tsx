@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import type { ClientMessage, ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
-import { __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -326,6 +326,62 @@ describe("the shot page (design turn 145)", () => {
     const band = q(mounted, '.fy-swrow__band[data-shot-id="sh_12"]');
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "back on the scene");
     assert.equal(band?.dataset.selected, "true", "with the shot selected");
+  });
+
+  it("Play from here opens the scene's Preview on the shot it names (codex round 1)", async () => {
+    const mounted = await mountState(FIXTURE_STATE, `${SCENE_PATH}/shots/sh_13`);
+    await act(async () => { q(mounted, ".fy-shot__menu")!.setAttribute("open", ""); });
+    await click(byText(q(mounted, ".fy-shot__menupanel")!, "Play from here"));
+    assert.equal(q(mounted, '.fy-sw__tab[data-on="true"]')?.textContent, "Preview");
+    assert.equal(q(mounted, '.fy-swpreview__filmstrip [data-current="true"]')?.getAttribute("aria-label"), "Seek to shot 13", "the clock opens at the named shot, not at the scene's start");
+  });
+
+  it("Escape restores the title without writing, and Enter writes it once (codex round 1)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    await click(q(mounted, 'button[aria-label="Edit title for shot 12"]')!);
+    const input = q(mounted, 'input[aria-label="Title for shot 12"]') as HTMLInputElement;
+    await act(async () => {
+      input.value = "A title nobody wanted";
+      props<{ onChange: (event: { target: HTMLInputElement }) => void }>(input).onChange({ target: input });
+    });
+    // The unmount blurs the input with its edited value still on the node; the handler is taken
+    // before the key, as the browser holds it, since React drops the props on unmount.
+    const blur = props<{ onBlur: (event: { currentTarget: HTMLInputElement }) => void }>(input).onBlur;
+    const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(escape, "key", { value: "Escape" });
+    await act(async () => input.dispatchEvent(escape));
+    await act(async () => blur({ currentTarget: input }));
+    assert.deepEqual(commands(sent), [], "Escape commits nothing, not even through the blur that follows it");
+    assert.equal(q(mounted, 'input[aria-label="Title for shot 12"]'), null);
+    await click(q(mounted, 'button[aria-label="Edit title for shot 12"]')!);
+    const again = q(mounted, 'input[aria-label="Title for shot 12"]') as HTMLInputElement;
+    await act(async () => {
+      again.value = "Maren lets go";
+      props<{ onChange: (event: { target: HTMLInputElement }) => void }>(again).onChange({ target: again });
+    });
+    const blurAgain = props<{ onBlur: (event: { currentTarget: HTMLInputElement }) => void }>(again).onBlur;
+    const enter = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(enter, "key", { value: "Enter" });
+    await act(async () => again.dispatchEvent(enter));
+    await act(async () => blurAgain({ currentTarget: again }));
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { title: "Maren lets go" } }], "Enter writes once; the blur after it writes nothing");
+  });
+
+  it("a generator handoff answered after stepping the filmstrip still opens the session (codex round 1)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    __connectionStatusForTest("open");
+    const mounted = await mountState();
+    await act(async () => { q(mounted, ".fy-shot__menu")!.setAttribute("open", ""); });
+    await click(byText(q(mounted, ".fy-shot__menupanel")!, "Open in generator"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "bench-open-subject" }> => message.kind === "bench-open-subject");
+    assert.ok(request, "the request went out");
+    await click(q(mounted, '.fy-shot__step[aria-label="Next shot"]')!);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /^Shot 13/);
+    await act(async () => __applyEventForTest({ type: "bench.subject-opened", at: "2026-09-12T10:00:00.000Z", worldId: FIXTURE_WORLD_ID, requestId: request.requestId, sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HE" }));
+    assert.ok(q(mounted, '[data-screen="bench"]'), "the answer opened the session it made");
   });
 
   it("a shot that is not in the scene lands on the scene", async () => {
