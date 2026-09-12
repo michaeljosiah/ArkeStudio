@@ -253,3 +253,4 @@
   :where([data-screen="scene-detail"]) .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, 285px); }
   :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
+}

@@ -43,6 +43,36 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   fail('typography.css must name --font-sans "Geist Sans" exactly', join(TOKENS_DIR, "typography.css"));
 }
 
+// Every stylesheet closes every block it opens. Vite serves each file as its own <style> in
+// development, where the parser closes an unfinished block at end-of-file and the page looks
+// right; the production bundle concatenates the imports, so a block left open in one file
+// swallows every stylesheet after it — the shot page and the Activity panel shipped unstyled
+// that way (issue 1113). Nothing else can see it: the tests render without CSS and the dev
+// app cannot fail. Comments and strings are set aside (a `content: "{"` is not a block), the
+// newlines kept so a failure names the line whose block is still open.
+{
+  const blank = (match) => match.replace(/[^\n]/g, " ");
+  const offenders = [];
+  for (const path of walk(SRC)) {
+    if (!path.endsWith(".css")) continue;
+    const text = read(path)
+      .replace(/\/\*[\s\S]*?\*\//g, blank)
+      .replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, blank);
+    const open = [];
+    let line = 1;
+    let stray = null;
+    for (const ch of text) {
+      if (ch === "\n") line += 1;
+      else if (ch === "{") open.push(line);
+      else if (ch === "}" && open.pop() === undefined && stray === null) stray = line;
+    }
+    const file = relative(SRC, path);
+    if (stray !== null) offenders.push(`${file}:${stray} closes a block nothing opened`);
+    if (open.length > 0) offenders.push(`${file}:${open[open.length - 1]} opens a block that never closes`);
+  }
+  if (offenders.length > 0) fail("a stylesheet's braces must balance — the bundle nests every later stylesheet inside an open block", offenders.join("; "));
+}
+
 // No colour is hard-coded outside the token files (R-11).
 {
   const hex = /#[0-9a-fA-F]{3,8}\b/;
@@ -119,4 +149,4 @@ if (failures.length > 0) {
   console.error(`client policy: ${failures.length} rule${failures.length === 1 ? "" : "s"} broken\n${failures.join("\n")}`);
   process.exit(1);
 }
-console.log("client policy: tokens match the baseline, no hard-coded colour, ramp surfaces darken, no credential material");
+console.log("client policy: tokens match the baseline, every stylesheet closes its blocks, no hard-coded colour, ramp surfaces darken, no credential material");
