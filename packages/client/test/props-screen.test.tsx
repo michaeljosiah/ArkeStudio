@@ -119,6 +119,15 @@ describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
     lamp.world!.props = [...lamp.world!.props, { id: "prop_01J8P0000000000000000000P3", name: "Lamp", states: [] }];
     await act(async () => { __setStateForTest(lamp); });
     assert.equal(input.value, "Compass", "the next name is not the last one's to clear");
+    // Another window spelled the same slug differently and won: this window's request was
+    // refused, so the arrival is a collision to show, not a creation to clear.
+    await type(input, "Sea-glass");
+    await act(async () => create.click());
+    const other = structuredClone(lamp) as ClientState;
+    other.world!.props = [...other.world!.props, { id: "prop_01J8P0000000000000000000P4", name: "Sea glass", states: [] }];
+    await act(async () => { __setStateForTest(other); });
+    assert.equal(input.value, "Sea-glass", "the name stays");
+    assert.equal(note(), "@sea-glass is Sea glass", "beside the word that took it");
   });
 
   it("a record in conflict is loaded, and said so — not filed with the files that could not be read", async () => {

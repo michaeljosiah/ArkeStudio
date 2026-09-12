@@ -48,14 +48,16 @@ export function PropsScreen() {
   // The box clears when the prop arrives, not when the button is pressed: a snapshot can be
   // behind another window, and the coordinator's refusal is silent, so a name cleared on the
   // press would be lost with nothing said. Kept, it meets the refreshed snapshot and the line
-  // above says which word took it. And only while the box still holds the name that was sent —
-  // the next name, begun before the snapshot lands, is not cleared by the last one's arrival.
+  // above says which word took it. The arrival is the name as it was sent — another window's
+  // other spelling of the same slug is that collision, shown, not this creation — and it clears
+  // only while the box still holds that name, so the next one begun before the snapshot lands
+  // is not the last one's to clear.
   const awaiting = useRef<string | null>(null);
   useEffect(() => {
-    const slug = awaiting.current;
-    if (slug === null || !props.some((prop) => propSlug(prop.name) === slug)) return;
+    const sent = awaiting.current;
+    if (sent === null || !props.some((prop) => prop.name === sent)) return;
     awaiting.current = null;
-    setName((current) => (propSlug(current) === slug ? "" : current));
+    setName((current) => (current.trim() === sent ? "" : current));
   }, [props]);
   return (
     <div data-screen="props">
@@ -88,7 +90,7 @@ export function PropsScreen() {
               disabled={check === null || !check.ok || !worldId}
               onClick={() => {
                 if (!worldId || check === null || !check.ok) return;
-                awaiting.current = check.slug;
+                awaiting.current = name.trim();
                 createProp(worldId, name.trim());
               }}
             >

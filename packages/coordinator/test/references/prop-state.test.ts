@@ -133,4 +133,20 @@ describe("prop-state references", () => {
     assert.match(outcome.status === "invalid" ? outcome.problems[0]!.message : "", /@lantern already cites the prop "Lantern"/);
     assert.equal(store.getBundle().sheets.some((sheet) => sheet.id === "lantern"), false, "the sheet did not land as the prop's twin");
   });
+
+  it("a new sheet whose front matter names another id than its file is refused at the press (issue 1116)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+    assert.equal((await createProp(store, "Bar"))?.name, "Bar");
+    const draft = await createSheetFromSentence(store, gate, { sheetType: "location", name: "Foo", sentence: "A bar by the water." });
+    // A session edits the staged sheet so its id is the prop's word while the file keeps its own.
+    const path = join(dir, ".proposals", draft.proposal.id, "locations", "foo.md");
+    const staged = await readFile(path, "utf8");
+    await writeFile(path, staged.replace(/^id: foo$/m, "id: bar"));
+    const outcome = await gate.accept(draft.proposal.id);
+    assert.equal(outcome.status, "invalid", JSON.stringify(outcome));
+    assert.match(outcome.status === "invalid" ? outcome.problems[0]!.message : "", /id is "bar" but the file is foo\.md/);
+  });
 });
