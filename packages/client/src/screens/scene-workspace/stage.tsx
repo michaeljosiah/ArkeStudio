@@ -118,6 +118,7 @@ export function SceneStage({
   playblastRequest,
   constructionRequest,
   fullscreen = null,
+  head = true,
 }: {
   scene: SceneRecord;
   production: ProductionBundle;
@@ -134,6 +135,12 @@ export function SceneStage({
   playblastRequest?: { actionId: string; conversationId: string; shotId: string };
   /** In full screen the way out sits on this head row (turn 144); null means the page is not in it. */
   fullscreen?: { leave: () => void } | null;
+  /**
+   * The head row — the shot stepper and the staging words. On the shot page (turn 145) the
+   * filmstrip steps and the view row carries the words, so the row goes; in full screen it comes
+   * back for the way out alone, which 144 put on this row.
+   */
+  head?: boolean;
 }) {
   const shots = orderedShots(scene);
   const { subject, select } = useWorkspaceSelection();
@@ -970,38 +977,44 @@ export function SceneStage({
   const busy = staging && persisted === null;
   return (
     <section ref={stageRoot} className="fy-swstage" data-testid="workspace-stage" aria-label="Stage" tabIndex={0} onKeyDown={timelineKey}>
-      <div className="fy-swstage__head">
-        <button
-          type="button"
-          className="fy-swstage__step"
-          aria-label="Previous shot"
-          disabled={index === 0 || exporting !== null}
-          onClick={() => shots[index - 1] && select({ kind: "shot", shotId: shots[index - 1]!.id })}
-        >
-          <ChevronLeft size={12} />
-        </button>
-        <strong>Shot {shot.number}</strong>
-        <button
-          type="button"
-          className="fy-swstage__step"
-          aria-label="Next shot"
-          disabled={index >= shots.length - 1 || exporting !== null}
-          onClick={() => shots[index + 1] && select({ kind: "shot", shotId: shots[index + 1]!.id })}
-        >
-          <ChevronRight size={12} />
-        </button>
-        <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
-        {working === null ? null : (
-          <span className="fy-swstage__version">
-            v{persisted?.version ?? 1} · {keys.length} keys · {stagingMotionWord(working,durationSec)}
-          </span>
-        )}
-        {fullscreen === null ? null : (
-          <button type="button" className="fy-swstage__exit" title="Leave full screen · Esc" aria-label="Leave full screen" onClick={fullscreen.leave}>
-            <Minimize2 size={14} />
-          </button>
-        )}
-      </div>
+      {head || fullscreen !== null ? (
+        <div className="fy-swstage__head" data-stepper={head ? "true" : undefined}>
+          {head ? (
+            <>
+              <button
+                type="button"
+                className="fy-swstage__step"
+                aria-label="Previous shot"
+                disabled={index === 0 || exporting !== null}
+                onClick={() => shots[index - 1] && select({ kind: "shot", shotId: shots[index - 1]!.id })}
+              >
+                <ChevronLeft size={12} />
+              </button>
+              <strong>Shot {shot.number}</strong>
+              <button
+                type="button"
+                className="fy-swstage__step"
+                aria-label="Next shot"
+                disabled={index >= shots.length - 1 || exporting !== null}
+                onClick={() => shots[index + 1] && select({ kind: "shot", shotId: shots[index + 1]!.id })}
+              >
+                <ChevronRight size={12} />
+              </button>
+            </>
+          ) : null}
+          <span className="fy-swstage__meta">{shot.title} · {durationSec.toFixed(1)}s</span>
+          {working === null ? null : (
+            <span className="fy-swstage__version">
+              v{persisted?.version ?? 1} · {keys.length} keys · {stagingMotionWord(working,durationSec)}
+            </span>
+          )}
+          {fullscreen === null ? null : (
+            <button type="button" className="fy-swstage__exit" title="Leave full screen · Esc" aria-label="Leave full screen" onClick={fullscreen.leave}>
+              <Minimize2 size={14} />
+            </button>
+          )}
+        </div>
+      ) : null}
 
       <div className="fy-swstage__construction">
         <input aria-label="Blockout instruction" placeholder="Describe the blockout or changes…" value={instruction} onChange={e => setInstruction(e.target.value)} disabled={constructing} maxLength={4000} />

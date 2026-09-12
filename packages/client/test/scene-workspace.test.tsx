@@ -115,6 +115,15 @@ const chooseOption = async (element: HTMLElement, value: string): Promise<void> 
 const click = async (element: HTMLElement): Promise<void> => {
   await act(async () => element.click());
 };
+/**
+ * The Stage is the shot page's second view (turn 145): the selected row's chevron, else the
+ * first row's, opens the page, and the page's Stage tab opens the Stage.
+ */
+const openStage = async (m: Mounted): Promise<void> => {
+  const chevron = q(m, '.fy-swrow__band[data-selected="true"] .fy-swrow__chevron') ?? q(m, ".fy-swrow__chevron");
+  await click(chevron!);
+  await click(all(m, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+};
 const editTextarea = async (textarea: HTMLTextAreaElement, value: string): Promise<void> => {
   await act(async () => {
     textarea.value = value;
@@ -170,23 +179,22 @@ describe("scene detail owns the workspace", () => {
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
     assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
     assert.equal(q(mounted, ".fy-cx__placeholder")?.textContent, "Ask Arke about this scene…", "the dock names its current subject");
-    assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Stage"));
-    assert.ok(all(mounted, ".fy-sw__tab").some((tab) => tab.textContent === "Preview"));
+    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Preview"], "the Stage is the shot page's (turn 145)");
   });
 
   it("opens the Stage on the selected shot, offers to stage it, and keeps the selection shared", async () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mount();
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
-    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    assert.match(stage.textContent ?? "", /Shot 12/);
-    assert.match(stage.textContent ?? "", /Nothing staged yet\./);
-    // Stepping to the next shot is the same selection the storyboard and Arke share.
+    await openStage(mounted);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 12/);
+    assert.match(q(mounted, '[data-testid="workspace-stage"]')?.textContent ?? "", /Nothing staged yet\./);
+    // Stepping to the next shot on the filmstrip is the same selection Arke shares.
     await click(q(mounted, '[aria-label="Next shot"]')!);
-    assert.match(stage.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
     assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/);
     await click(q(mounted, '[aria-label="Previous shot"]')!);
+    const stage = q(mounted, '[data-testid="workspace-stage"]')!;
 
     // Staging writes the scene block and this shot's camera atomically.
     const stageButton = [...stage.querySelectorAll("button")].find((button) => button.textContent === "Quick layout") as unknown as HTMLElement;
@@ -209,7 +217,7 @@ describe("scene detail owns the workspace", () => {
 
   it("holds an AI blockout as an editable private draft until Keep, including object motion and provenance",async()=>{
     const sent:ClientMessage[]=[];__setBridgeForTest(capture(sent));const mounted=await mount();
-    await click(all(mounted,".fy-sw__tab").find(tab=>tab.textContent==="Stage")!);
+    await openStage(mounted);
     await click(all(mounted,"button").find(button=>button.textContent==="Build with Arke")!);
     const request=sent.find((message):message is Extract<ClientMessage,{kind:"stage-construct"}>=>message.kind==="stage-construct");
     assert.ok(request);
@@ -297,8 +305,8 @@ describe("scene detail owns the workspace", () => {
     state.worldChat = null; // Navigation closes the originating chat before the scene mounts.
     const mounted = await mountState(state);
     const stage = q(mounted, '[data-testid="workspace-stage"]');
-    assert.ok(stage, "the awaiting host action opens Stage without another gesture");
-    assert.match(stage.textContent ?? "", /Shot 13/);
+    assert.ok(stage, "the awaiting host action opens the shot's Stage without another gesture");
+    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
     assert.equal(
       all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")?.getAttribute("aria-checked"),
       "true",
@@ -334,7 +342,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(q(mounted, '[aria-label="Next shot"]')!);
     await click(all(mounted, '[data-testid="workspace-stage"] button').find((button) => button.textContent === "Quick layout")!);
     const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
@@ -358,7 +366,7 @@ describe("scene detail owns the workspace", () => {
     const shared: ClientMessage[] = [];
     __setBridgeForTest(capture(shared));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(stageItem(mounted, "Maren Kest"));
     await click(stageLink(mounted, "Set a walk"));
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
@@ -371,7 +379,7 @@ describe("scene detail owns the workspace", () => {
     const local: ClientMessage[] = [];
     __setBridgeForTest(capture(local));
     const remounted = await mountState(structuredClone(state));
-    await click(all(remounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(remounted);
     await click(all(remounted, ".fy-swstage__chips button").find((button) => button.textContent === "This shot")!);
     await click([...q(remounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     const localCommand = (local.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command;
@@ -403,7 +411,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
     assert.ok(stageItem(mounted, "Maren Kest"), "the promoted cast remains visible");
 
@@ -441,7 +449,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(stageItem(mounted, "Maren Kest"));
     await click(stageLink(mounted, "Set a walk"));
     // Pressing the selected line again clears the selection: the shot's form, with the scope, is back.
@@ -478,7 +486,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
 
@@ -502,7 +510,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
     await click(stageItem(mounted, "Maren Kest"));
@@ -534,7 +542,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
 
     await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
@@ -558,7 +566,7 @@ describe("scene detail owns the workspace", () => {
     const secondSent: ClientMessage[] = [];
     __setBridgeForTest(capture(secondSent));
     const second = await mountState(secondState);
-    await click(all(second, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(second);
     await click(all(second, ".fy-swstage__item").find((item) => item.querySelector("span:nth-child(2)")?.textContent === "Maren Kest")!);
     await click(all(second, ".fy-swstage__link").find((link) => link.textContent === "Set a walk")!);
     const cameraMoved = structuredClone(secondState);
@@ -591,7 +599,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(all(mounted, ".fy-swstage__chips button").find((button) => button.textContent === "Scene")!);
 
     const moved = structuredClone(state);
@@ -614,7 +622,7 @@ describe("scene detail owns the workspace", () => {
       .scenes.find((candidate) => candidate.id === "sc_04")!;
     orderedShots(scene)[0]!.staging = { version: 1, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }] };
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await click(stageItem(mounted, "camera"));
     await click(q(mounted, '[aria-label="Raise"]')!);
 
@@ -647,9 +655,10 @@ describe("scene detail owns the workspace", () => {
       ],
     };
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    assert.match(stage.textContent ?? "", /v2 · 3 keys · orbit/);
+    // The staging's words sit on the page's view row (turn 145), beside the full-screen glyph.
+    assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /v2 · 3 keys · orbit/);
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /walks/);
     assert.match(stage.textContent ?? "", /not filed/);
     // The camera's numbers are on the camera's form (turn 144): the value in its box, the unit beside it.
@@ -738,7 +747,7 @@ describe("scene detail owns the workspace", () => {
       keys: [{ t: 0, p: [0, 1.5, 3], l: [0, 1, 0] }, { t: 3, p: [0, 1.5, 3], l: [0, 1, 0] }],
     };
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /Maren Kest.*walks.*too fast/);
   });
 
@@ -756,7 +765,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     assert.match(stageItem(mounted, "Maren Kest").textContent ?? "", /sits/);
     await click(stageItem(mounted, "Maren Kest"));
     await chooseOption(q(mounted, '[aria-label="Maren Kest pose"]')!, "lie");
@@ -778,7 +787,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
 
     await click(all(mounted, "button").find((button) => button.textContent === "Add set")!);
     await editInput(q(mounted, '[aria-label="Set 1 name"]') as HTMLInputElement, "counter");
@@ -812,7 +821,7 @@ describe("scene detail owns the workspace", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     await chooseOption(q(mounted, '[aria-label="Camera rig"]')!, "crane");
     await click(q(mounted, '[aria-label="More rig motion"]')!);
     await click([...q(mounted, '[data-testid="stage-moved"]')!.querySelectorAll("button")].find((button) => button.textContent === "Keep") as unknown as HTMLElement);
@@ -843,7 +852,7 @@ describe("scene detail owns the workspace", () => {
       ],
     };
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
     const keys = all(mounted, ".fy-swstage__key").map((key) => key.getAttribute("title") ?? "");
     assert.match(keys[2]!, /4.0s/, "the end key sits at the shot's length");
@@ -868,7 +877,7 @@ describe("scene detail owns the workspace", () => {
     // The schema reads a staging with no keys; the Stage must not throw on it.
     (shot as { staging?: unknown }).staging = { version: 1, cast: [], sets: [], keys: [] };
     const mounted = await mountState(state);
-    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
+    await openStage(mounted);
     assert.equal(all(mounted, ".fy-swstage__key").length, 0);
     await click(q(mounted, '[aria-label="Add a camera key at the playhead"]')!);
     const keys = all(mounted, ".fy-swstage__key").map((key) => key.getAttribute("title") ?? "");
@@ -878,7 +887,7 @@ describe("scene detail owns the workspace", () => {
     assert.ok(q(mounted, '[data-testid="stage-moved"]'), "and it is a move to keep");
   });
 
-  it("reaches the Stage from a row's menu and draws a staged shot's blocking on the canvas", async () => {
+  it("reaches the Stage through the shot's page and draws a staged shot's blocking on the canvas", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
       .scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -893,13 +902,14 @@ describe("scene detail owns the workspace", () => {
     const mounted = await mountState(state);
     const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
     assert.match(row.querySelector(".fy-swrow__playblast")?.textContent ?? "", /staged/);
-    await click(row.querySelector(".fy-swedit") as HTMLElement);
-    await click(menuButtons().find((button) => button.textContent === "Stage this shot") as unknown as HTMLElement);
+    await click(row.querySelector(".fy-swrow__chevron") as HTMLElement);
+    await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Stage")!);
     const stage = q(mounted, '[data-testid="workspace-stage"]')!;
-    assert.match(stage.textContent ?? "", /Shot 13/);
-    assert.match(stage.textContent ?? "", /v1 · 2 keys · static/);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /Shot 13/);
+    assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /v1 · 2 keys · static/);
     assert.match(stage.textContent ?? "", /filed/);
 
+    await click(q(mounted, ".fy-sw__back")!);
     await click(all(mounted, ".fy-sw__tab").find((tab) => tab.textContent === "Flow")!);
     const block = q(mounted, '[data-testid="flow-node-k:sh_13"]')!;
     assert.equal(block.getAttribute("data-kind"), "block");
@@ -1678,24 +1688,20 @@ describe("Preview plays the accepted scene on its authored clock (R-28)", () => 
 });
 
 describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () => {
-  it("keeps frame actions, the mention-aware script, prompt disclosure, and Edit on the row", async () => {
+  it("keeps frame actions, the mention-aware script, and the chevron to the page on the row", async () => {
     const mounted = await mount();
     const row = q(mounted, ".fy-swrow")!;
     const labels = [...row.querySelectorAll("button")].map((button) => button.textContent?.trim());
-    assert.ok(labels.includes("Frame prompt"));
+    assert.ok(!labels.includes("Frame prompt"), "the prompt is the page's (turn 145)");
     assert.equal(row.querySelectorAll('.fy-swrow__frameactions > button').length, 4);
     assert.ok(row.querySelector('[aria-label="Expand image for shot 12"] svg'));
     assert.ok(row.querySelector('[aria-label="Frame variants for shot 12"] svg'));
     assert.ok(row.querySelector('[aria-label="More image actions for shot 12"] svg'));
     assert.ok(row.querySelector('[aria-label="Edit title for shot 12"]'));
-    assert.equal(row.querySelector(".fy-swrow__meta"), null, "secondary references are folded with the prompt at rest");
-    await click(row.querySelector(".fy-swrow__prompt-toggle") as HTMLElement);
-    assert.match(row.querySelector(".fy-swrow__refs")?.textContent ?? "", /Maren Kest.*The Vigil/);
-    assert.match(row.querySelector(".fy-swrow__overrides")?.textContent ?? "", /MCU override.*slow push-in override/);
+    assert.ok(row.querySelector('.fy-swrow__chevron[aria-label="Open shot 12"]'), "the chevron beside the overflow opens the page");
+    assert.equal(row.querySelector(".fy-swrow__refs"), null, "the references sit on the page's prompt");
     assert.equal(row.querySelector(".fy-swchip"), null, "a rendered shot has no missing-frame exception");
-    // The toggle opened the row (turn 143), and the editor now lives in its Description panel.
-    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), "true", "Frame prompt opens the row");
-    const script = row.querySelector(".fy-swrow__panel .fy-swrow__script textarea") as HTMLTextAreaElement | null;
+    const script = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement | null;
     assert.equal(script?.getAttribute("role"), "combobox", "the shared @ picker remains live in-place");
     assert.ok(script);
     // linkedom's textarea has no defaultValue, so an editor mounted after the first render reads
@@ -1733,8 +1739,6 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       }
     }
 
-    const prompt = row.querySelector('.fy-swrow__prompt textarea[aria-label^="Image prompt for shot"]');
-    assert.equal(prompt?.getAttribute("role"), "combobox", "the image prompt uses the shared @ picker too");
   });
 
   it("opens its action menu out of layout without losing the row's interaction scope", async () => {
@@ -1760,21 +1764,21 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
       assert.equal(menu.parentElement, dom.document.body, "viewport coordinates live outside the query container");
       assert.doesNotMatch(menu.getAttribute("style") ?? "", /NaN/);
       assert.doesNotMatch(menu.getAttribute("style") ?? "", /visibility:\s*hidden/, "the menu is visible before focus enters it");
-      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Stage this shot", "opening moves focus into the menu");
-      assert.deepEqual(portalFocus.filter((entry) => entry.label === "Stage this shot"), [{ label: "Stage this shot", hidden: false }]);
+      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Open in generator", "opening moves focus into the menu");
+      assert.deepEqual(portalFocus.filter((entry) => entry.label === "Open in generator"), [{ label: "Open in generator", hidden: false }]);
 
       const down = new dom.window.Event("keydown", { bubbles: true });
       Object.defineProperty(down, "key", { value: "ArrowDown" });
       await act(async () => menu?.dispatchEvent(down));
-      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Open in generator", "arrow keys traverse enabled commands");
+      assert.equal((focused as unknown as HTMLElement | null)?.textContent, "Duplicate", "arrow keys traverse enabled commands");
 
       await act(async () => dom.window.dispatchEvent(new dom.window.Event("scroll")));
       assert.equal(
         (focused as unknown as HTMLElement | null)?.textContent,
-        "Open in generator",
+        "Duplicate",
         "viewport repositioning does not reset menu focus",
       );
-      assert.equal(portalFocus.filter((entry) => entry.label === "Stage this shot").length, 1);
+      assert.equal(portalFocus.filter((entry) => entry.label === "Open in generator").length, 1);
 
       const tab = new dom.window.Event("keydown", { bubbles: true });
       Object.defineProperty(tab, "key", { value: "Tab" });
@@ -1821,57 +1825,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     }
   });
 
-  it("rebuilds a dirty prompt without saving the draft first", async () => {
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
-    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
-    const shot = orderedShots(scene)[0]!;
-    shot.promptOverride = { text: "A hand-written prompt", sheetVersions: {} };
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mountState(state);
-    const row = q(mounted, `[data-testid="workspace-row-${shot.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
-    const prompt = row.querySelector(".fy-swrow__prompt") as unknown as HTMLElement;
-    const textarea = prompt.querySelector("textarea") as HTMLTextAreaElement;
-    const rebuild = [...prompt.querySelectorAll("button")].find((button) => button.textContent === "Rebuild") as HTMLElement;
-    textarea.value = "A dirty draft that must not land";
-    const before = sent.length;
-    const movingInside = new dom.window.Event("focusout", { bubbles: true });
-    Object.defineProperty(movingInside, "relatedTarget", { value: rebuild });
-    await act(async () => prompt.dispatchEvent(movingInside));
-    assert.equal(sent.length, before, "moving from the prompt to Rebuild does not commit the draft");
-    await click(rebuild);
-    const command = sent.at(-1) as Extract<ClientMessage, { kind: "scene-command" }>;
-    assert.deepEqual(command.command, { kind: "set-prompt-override", shotId: shot.id, text: null });
-    assert.notEqual(textarea.value, "A dirty draft that must not land");
-    assert.notEqual(textarea.value, "A hand-written prompt", "the assembled prompt is visible while the clear is pending");
-  });
 
-  it("closes an unchanged shot prompt immediately without writing", async () => {
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
-    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
-    const shots = orderedShots(scene);
-    shots[0]!.promptOverride = { text: "Stored shot prompt", sheetVersions: {} };
-    scene.boards = {
-      splits: [shots[1]!.id],
-      merges: [],
-      prompts: [{ members: [shots[0]!.id], text: "Stored board prompt" }],
-    };
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mountState(state);
-    const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
-    await editTextarea(row.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement, "Stored shot prompt");
-    const cleanShotCommands = sent.filter((message) => message.kind === "scene-command").length;
-    // The open row closes from its chevron (turn 143); an unchanged prompt lets it close at once.
-    await click(row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
-    assert.equal(sent.filter((message) => message.kind === "scene-command").length, cleanShotCommands);
-    assert.equal(row.querySelector(".fy-swrow__prompt") === null, true, "an unchanged shot prompt closes immediately");
-    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "and the row is closed");
-  });
 
   it("closes an unchanged board prompt immediately without writing", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
@@ -1896,7 +1850,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(sent.filter((message) => message.kind === "scene-command").length, cleanBoardCommands);
   });
 
-  it("waits for durable shot and board prompt props before Close and Hide close", async () => {
+  it("waits for the durable board prompt before Hide closes", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -1910,31 +1864,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
-    const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    const shotPrompt = shotEditor.querySelector("textarea") as HTMLTextAreaElement;
-    await editTextarea(shotPrompt, "Committed shot draft");
-    const close = row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement;
-    await click(close);
-    assert.deepEqual((sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>).command, {
-      kind: "set-prompt-override",
-      shotId: shots[0]!.id,
-      text: "Committed shot draft",
-      capability: "video",
-    });
-    assert.ok(row.querySelector(".fy-swrow__prompt"), "command admission alone does not close the row");
-    assert.equal(close.disabled, true, "Close waits for the durable override");
-
     const advanced = structuredClone(state) as ClientState;
-    const advancedScene = advanced.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
-      .scenes.find((candidate) => candidate.id === "sc_04")!;
-    advancedScene.version += 1;
-    orderedShots(advancedScene)[0]!.promptOverride = { text: "Committed shot draft", sheetVersions: {} };
-    await act(async () => __setStateForTest(advanced));
-    assert.equal(row.querySelector(".fy-swrow__prompt"), null, "the matching durable shot override acknowledges Close");
-    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "and the row closes on it");
-
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const board = q(mounted, "[data-testid=workspace-board-A]")!;
     await click(board.querySelector('button[title="Consolidated prompt"]') as HTMLElement);
@@ -1958,7 +1888,7 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.equal(board.querySelector(".fy-swboard__prompt"), null, "the matching durable board override acknowledges Hide");
   });
 
-  it("keeps admitted shot Close and board Hide drafts open for retry after asynchronous refusal", async () => {
+  it("keeps an admitted board Hide draft open for retry after asynchronous refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
@@ -1972,26 +1902,6 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(state);
-    const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-
-    await click([...row.querySelectorAll("button")].find((button) => button.classList.contains("fy-swrow__prompt-toggle")) as HTMLElement);
-    const shotEditor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    await editTextarea(shotEditor.querySelector("textarea") as HTMLTextAreaElement, "Retry this exact shot draft  ");
-    await click(row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
-    assert.ok(row.querySelector(".fy-swrow__prompt"));
-    await apply({
-      at: "2026-09-01T10:02:00.000Z",
-      type: "scene.write-refused",
-      worldId: FIXTURE_WORLD_ID,
-      productionId: "saltlight",
-      sceneFile: "04-the-verse-rises",
-      reason: "The shot prompt version moved.",
-    });
-    const refusedShot = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    assert.ok(refusedShot, "the asynchronously refused shot Close leaves the row open");
-    assert.equal((refusedShot.querySelector("textarea") as HTMLTextAreaElement).value, "Retry this exact shot draft  ");
-    assert.equal((row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement).disabled, false, "the draft can be retried");
-
     await click(q(mounted, ".fy-sw__boards-toggle")!);
     const board = q(mounted, "[data-testid=workspace-board-A]")!;
     await click(board.querySelector('button[title="Consolidated prompt"]') as HTMLElement);
@@ -2014,184 +1924,12 @@ describe("Storyboard rows expose their authoring controls (SPEC-036 R-6)", () =>
     assert.match(dom.document.body.textContent ?? "", /The board prompt version moved/, "the workspace still shows the refusal");
   });
 
-  it("resends a blur-written prompt that was refused when the row is closed, and waits for it (codex round 1)", async () => {
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
-    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
-    const shots = orderedShots(scene);
-    shots[0]!.promptOverride = { text: "Stored shot prompt", sheetVersions: {} };
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mountState(state);
-    const row = q(mounted, `[data-testid="workspace-row-${shots[0]!.id}"]`)!;
-    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
-    const editor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    await editTextarea(editor.querySelector("textarea") as HTMLTextAreaElement, "Blur-written draft");
-    // Tabbing into another panel blurs the prompt and writes it.
-    await act(async () => editor.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    const writes = () => sent.filter((message) => message.kind === "scene-command" && message.command.kind === "set-prompt-override");
-    assert.equal(writes().length, 1, "the blur admitted one write");
-    await apply({
-      at: "2026-09-01T10:04:00.000Z",
-      type: "scene.write-refused",
-      worldId: FIXTURE_WORLD_ID,
-      productionId: "saltlight",
-      sceneFile: "04-the-verse-rises",
-      reason: "The shot prompt version moved.",
-    });
-    assert.equal((editor.querySelector("textarea") as HTMLTextAreaElement).value, "Blur-written draft", "the refused draft is still the person's");
-    const close = row.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLButtonElement;
-    assert.equal(close.disabled, false, "nothing is in flight after the refusal");
-    await click(close);
-    assert.equal(writes().length, 2, "Close sends the refused draft again rather than waiting on a write that is not there");
-    assert.deepEqual((writes().at(-1) as Extract<ClientMessage, { kind: "scene-command" }>).command, {
-      kind: "set-prompt-override",
-      shotId: shots[0]!.id,
-      text: "Blur-written draft",
-      capability: "video",
-    });
-    assert.equal(close.disabled, true, "and now waits on that write");
-    const landed = structuredClone(state) as ClientState;
-    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
-      .scenes.find((candidate) => candidate.id === "sc_04")!;
-    landedScene.version += 1;
-    orderedShots(landedScene)[0]!.promptOverride = { text: "Blur-written draft", sheetVersions: {} };
-    await act(async () => __setStateForTest(landed));
-    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "the durable override closes the row");
-  });
 
-  it("Close takes focus like any button, so the editor that held it blurs and writes before the row closes", async () => {
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mount();
-    const row = q(mounted, ".fy-swrow")!;
-    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
-    const close = row.querySelector('[aria-label="Close shot 12"]') as HTMLButtonElement;
-    const key = Object.keys(close).find((candidate) => candidate.startsWith("__reactProps$"))!;
-    const props = (close as unknown as Record<string, { onPointerDown?: unknown }>)[key]!;
-    assert.equal(props.onPointerDown, undefined, "no pointer-down guard keeps the notes or the script from blurring");
-    // What the browser does on the press: the notes editor blurs, its write goes, then Close runs.
-    const notes = row.querySelector('[aria-label="Notes for shot 12"]') as HTMLTextAreaElement;
-    await editTextarea(notes, "Hold on the hands.");
-    await act(async () => notes.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    await click(close);
-    const command = sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>;
-    assert.deepEqual(command.command, { kind: "edit-shot", shotId: "sh_12", change: { notes: "Hold on the hands." } });
-    assert.equal(row.querySelector(".fy-swrow__band")?.getAttribute("data-open"), null, "an unchanged prompt lets the row close at once");
-  });
 
-  it("keeps a note draft through a refused write, and writes it again on the next blur (codex round 2)", async () => {
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mount();
-    const row = q(mounted, ".fy-swrow")!;
-    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
-    const notes = () => row.querySelector('[aria-label="Notes for shot 12"]') as HTMLTextAreaElement;
-    await editTextarea(notes(), "Hold on the hands.");
-    await act(async () => notes().dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    const noteWrites = () => sent.filter((message) => message.kind === "scene-command" && message.command.kind === "edit-shot");
-    assert.equal(noteWrites().length, 1);
-    await apply({
-      at: "2026-09-01T10:05:00.000Z",
-      type: "scene.write-refused",
-      worldId: FIXTURE_WORLD_ID,
-      productionId: "saltlight",
-      sceneFile: "04-the-verse-rises",
-      reason: "The scene version moved.",
-    });
-    assert.equal(notes().value, "Hold on the hands.", "the refusal leaves the person's words in the box");
-    await act(async () => notes().dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
-    assert.equal(noteWrites().length, 2, "and the next blur sends them again");
-  });
 
-  it("folding the Frame prompt panel writes a dirty prompt first, since its fold control sits inside the blur boundary (codex round 2)", async () => {
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mount();
-    const row = q(mounted, ".fy-swrow")!;
-    await click(row.querySelector(".fy-swrow__band") as HTMLElement);
-    const editor = row.querySelector(".fy-swrow__prompt") as HTMLElement;
-    await editTextarea(editor.querySelector("textarea") as HTMLTextAreaElement, "Folded away mid-edit");
-    await click(row.querySelector('[aria-label="Fold the frame prompt for shot 12"]') as HTMLElement);
-    assert.equal(editor.querySelector("textarea"), null, "the panel is folded to its head");
-    const command = sent.findLast((message) => message.kind === "scene-command") as Extract<ClientMessage, { kind: "scene-command" }>;
-    assert.deepEqual(command.command, { kind: "set-prompt-override", shotId: "sh_12", text: "Folded away mid-edit", capability: "video" });
-  });
 
-  it("Escape closes the open row from inside its editors, and the band takes the focus (codex round 2)", async () => {
-    const mounted = await mount();
-    const row = q(mounted, ".fy-swrow")!;
-    const band = row.querySelector(".fy-swrow__band") as HTMLElement;
-    await click(band);
-    const reactProps = <T,>(element: Element): T => {
-      const key = Object.keys(element).find((candidate) => candidate.startsWith("__reactProps$"))!;
-      return (element as unknown as Record<string, T>)[key]!;
-    };
-    type KeyHandler = { onKeyDown: (event: { key: string; stopPropagation: () => void }) => void };
-    // The editors keep their keys to themselves — a space in the script is not a row press —
-    // and let Escape through to the band. (A keydown dispatched on a text input itself would
-    // route through React's change-event polyfill, which linkedom cannot host; the handlers are
-    // exercised directly and the bubbling from the panel they sit in.)
-    for (const editor of [row.querySelector(".fy-swrow__panel .fy-swrow__scripteditor")!, row.querySelector('[aria-label="Notes for shot 12"]')!]) {
-      let stopped = 0;
-      reactProps<KeyHandler>(editor).onKeyDown({ key: " ", stopPropagation: () => { stopped += 1; } });
-      reactProps<KeyHandler>(editor).onKeyDown({ key: "Escape", stopPropagation: () => { stopped += 1; } });
-      assert.equal(stopped, 1, "every key but Escape stays in the editor");
-    }
-    const escapeFrom = async (element: HTMLElement, taken = false) => {
-      const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
-      Object.defineProperty(escape, "key", { value: "Escape" });
-      if (taken) escape.preventDefault();
-      await act(async () => element.dispatchEvent(escape));
-    };
-    await escapeFrom(row.querySelector(".fy-swrow__panel--notes") as HTMLElement);
-    assert.equal(band.getAttribute("data-open"), null, "Escape from inside a panel closes the row");
-    await click(band);
-    await escapeFrom(row.querySelector(".fy-swrow__panel--notes") as HTMLElement, true);
-    assert.equal(band.getAttribute("data-open"), "true", "an Escape a menu already took leaves the row open");
-  });
 
-  it("the title and the script open the row, and the editor the press landed in survives the opening (codex round 3)", async () => {
-    const mounted = await mount();
-    const row = q(mounted, ".fy-swrow")!;
-    const band = row.querySelector(".fy-swrow__band") as HTMLElement;
-    const editor = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
-    await click(editor);
-    assert.equal(band.getAttribute("data-open"), "true", "a press on the script opens the row");
-    assert.equal(row.querySelector(".fy-swrow__panel--description .fy-swrow__script textarea"), editor, "in the same editor, now in its panel");
-    await click(row.querySelector('[aria-label="Close shot 12"]') as HTMLElement);
-    assert.equal(band.getAttribute("data-open"), null);
-    await click(row.querySelector('[aria-label="Edit title for shot 12"]') as HTMLElement);
-    assert.equal(band.getAttribute("data-open"), "true", "a press on the title opens the row");
-    assert.ok(row.querySelector('input[aria-label="Title for shot 12"]'), "with the title open for typing");
-  });
 
-  it("a close waiting on its write does not close a row opened in the meantime (codex round 3)", async () => {
-    const state = structuredClone(FIXTURE_STATE) as ClientState;
-    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
-    const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
-    const shots = orderedShots(scene);
-    shots[0]!.promptOverride = { text: "Stored shot prompt", sheetVersions: {} };
-    const sent: ClientMessage[] = [];
-    __setBridgeForTest(capture(sent));
-    const mounted = await mountState(state);
-    const [first, second] = all(mounted, ".fy-swrow__band");
-    await click(first!);
-    await editTextarea(first!.querySelector(".fy-swrow__prompt textarea") as HTMLTextAreaElement, "Written on the way out");
-    await click(first!.querySelector(`[aria-label="Close shot ${shots[0]!.number}"]`) as HTMLElement);
-    assert.equal(first!.getAttribute("data-open"), "true", "the row waits for its write");
-    await click(second!);
-    assert.equal(second!.getAttribute("data-open"), "true");
-    assert.equal(first!.getAttribute("data-folded"), "true");
-    const landed = structuredClone(state) as ClientState;
-    const landedScene = landed.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!
-      .scenes.find((candidate) => candidate.id === "sc_04")!;
-    landedScene.version += 1;
-    orderedShots(landedScene)[0]!.promptOverride = { text: "Written on the way out", sheetVersions: {} };
-    await act(async () => __setStateForTest(landed));
-    assert.equal(second!.getAttribute("data-open"), "true", "the write landing does not take the newer row's place");
-    assert.equal(first!.getAttribute("data-folded"), "true");
-  });
 
   it("clears a dirty consolidated prompt without a blur write and restores stored copy on refusal", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
@@ -3460,10 +3198,6 @@ describe("shot authoring and the season length (#931)", () => {
     const row = q(mounted, '[data-testid="workspace-row-sh_13"]')!;
     assert.equal(row.querySelector('input'), null, "fields are revealed only while editing");
     const edit = async (field: "title" | "duration", value: string) => {
-      // A press on the title opens the row (turn 143), where the duration is set from Shot
-      // settings; the timing line's number box belongs to the wide row, so it is closed first.
-      const band = row.querySelector(".fy-swrow__band") as HTMLElement;
-      if (field === "duration" && band.getAttribute("data-open") === "true") await click(row.querySelector('[aria-label="Close shot 13"]') as HTMLElement);
       await click(row.querySelector(`[aria-label="Edit ${field} for shot 13"]`) as HTMLElement);
       const input = row.querySelector(field === "title" ? 'input[aria-label^="Title"]' : 'input[type="number"]') as HTMLInputElement;
       input.value = value;

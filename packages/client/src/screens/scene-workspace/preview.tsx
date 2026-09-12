@@ -113,6 +113,7 @@ export function ScenePreview({
   aspect,
   onEditShot,
   onOpenShotInGenerator,
+  startShotId,
 }: {
   production: ProductionBundle;
   scene: SceneRecord;
@@ -126,6 +127,8 @@ export function ScenePreview({
   // caller that has not wired them yet still compiles, in which case those two buttons just close.
   onEditShot?: (shotId: string) => void;
   onOpenShotInGenerator?: (shotId: string) => void;
+  /** Play from here (turn 145): the clock opens at this shot's start rather than the scene's. */
+  startShotId?: string;
 }) {
   const fingerprintInputs = useMemo(() => [...new Set(orderedShots(scene)
     .filter(shot => shot.staging?.playblast?.sourceFingerprint !== undefined)
@@ -224,6 +227,16 @@ export function ScenePreview({
     setPosition(next);
     setTime(next);
   }, [setPosition, totalSec]);
+  // The named shot's span is known once the spans are; seek there once, through the transport
+  // so play starts where the clock reads, and never again — a later step is the person's.
+  const sought = useRef(false);
+  useEffect(() => {
+    if (sought.current || startShotId === undefined) return;
+    const span = spans.find((candidate) => candidate.shot.id === startShotId);
+    if (span === undefined) return;
+    sought.current = true;
+    seek(span.startSec);
+  }, [seek, spans, startShotId]);
 
   // The end holds (R-29), so play pressed there goes back to the top rather than doing nothing.
   const play = () => {

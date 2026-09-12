@@ -159,7 +159,7 @@ describe("Preview lightbox (SPEC-036 R-1, R-19)", () => {
     assert.equal(q(mounted, ".fy-swlightbox"), null);
   });
 
-  it("hands Advanced and Generate frame back to its owner after closing, and asks it to step", async () => {
+  it("hands Open the shot and Generate frame back to its owner after closing, and asks it to step", async () => {
     const production = FIXTURE_STATE.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
     const scene = production.scenes.find((candidate) => candidate.id === "sc_04")!;
     const calls: string[] = [];
@@ -178,7 +178,7 @@ describe("Preview lightbox (SPEC-036 R-1, R-19)", () => {
       />
     );
     const mounted = await render(box("sh_12"));
-    await click(all(mounted, ".fy-swlightbox__foot button").find((button) => button.textContent === "Advanced")!);
+    await click(all(mounted, ".fy-swlightbox__foot button").find((button) => button.textContent === "Open the shot")!);
     assert.deepEqual(calls.splice(0), ["close", "edit sh_12"]);
 
     await click(q(mounted, '[aria-label="Previous shot"]')!);

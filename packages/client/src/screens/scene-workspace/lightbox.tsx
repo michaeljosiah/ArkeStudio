@@ -137,7 +137,7 @@ export function ShotLightbox({
         </div>
         <div className="fy-swlightbox__foot">
           <p>{shot.description}</p>
-          <button type="button" onClick={() => { onClose(); onEditShot(shot.id); }}>Advanced</button>
+          <button type="button" onClick={() => { onClose(); onEditShot(shot.id); }}>Open the shot</button>
         </div>
       </div>
     </dialog>

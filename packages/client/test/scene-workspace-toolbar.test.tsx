@@ -384,18 +384,24 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
 });
 
 describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
-  it("carries the glyph on Flow and Stage only", async () => {
+  it("carries the glyph on Flow, and on the shot page's Stage", async () => {
     const item = await mount(FIXTURE_STATE);
     const glyph = () => one(item, ".fy-sw__full");
     assert.equal(glyph(), null, "not on Storyboard");
-    for (const [tab, present] of [["Flow", true], ["Stage", true], ["Preview", false], ["Storyboard", false]] as const) {
+    // The Stage left the scene's view row for the shot page (turn 145); Flow keeps the glyph here.
+    for (const [tab, present] of [["Flow", true], ["Preview", false], ["Storyboard", false]] as const) {
       await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === tab)!);
       assert.equal(glyph() !== null, present, `${tab}: ${present ? "a" : "no"} glyph`);
     }
+    await click(one(item, ".fy-swrow__chevron")!);
+    assert.equal(glyph(), null, "not on the shot page's Shot view");
+    await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
+    assert.ok(glyph(), "the Stage carries it on the page");
   });
 
-  it("sits at the row's right end, and fills the frame with the Stage as it does with Flow", async () => {
+  it("sits at the row's right end, and fills the frame with the Stage on the shot page as it does with Flow on the scene's", async () => {
     const item = await mount(FIXTURE_STATE);
+    await click(one(item, ".fy-swrow__chevron")!);
     await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Stage")!);
     const row = one(item, ".fy-sw__full")!.parentElement!;
     assert.equal(row.lastElementChild?.className, "fy-sw__full", "the glyph is the row's last control (R-37)");
@@ -403,7 +409,7 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
     const workspace = one(item, ".fy-sw")!;
     assert.equal(workspace.getAttribute("data-full"), "true");
     const pill = one(item, ".fy-sw__fullpill")?.textContent ?? "";
-    assert.match(pill, /scene 4/);
+    assert.match(pill, /scene 4 · shot 12/);
     assert.match(pill, /Stage$/);
     assert.ok(one(item, ".fy-swstage") !== null, "the Stage is the view that fills");
     // The Stage's way out is on its own head row, where the way in stood (turn 144); the corner
@@ -416,11 +422,13 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
     await click(exit);
     assert.equal(workspace.getAttribute("data-full"), null, "the reversed glyph returns");
     assert.equal(one(item, ".fy-swstage__exit"), null, "and leaves with the mode");
+    assert.equal(one(item, ".fy-swstage__head"), null, "and the head row with it: the filmstrip steps");
 
+    await click(one(item, ".fy-sw__back")!);
     await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === "Flow")!);
     await click(one(item, ".fy-sw__full")!);
     assert.ok(one(item, ".fy-sw__fullexit"), "the Flow keeps the corner pill");
     await click(one(item, ".fy-sw__fullexit")!);
-    assert.equal(workspace.getAttribute("data-full"), null);
+    assert.equal(one(item, ".fy-sw")!.getAttribute("data-full"), null);
   });
 });

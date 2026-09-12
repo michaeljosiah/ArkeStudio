@@ -5,8 +5,8 @@ import {
   seasonFindings,
   orderedShots,
   legacySceneView,
-  type ClientMessage,
   type ArtifactSidecar,
+  type ClientMessage,
   type FrameRunState,
   type PackedBoard,
   type ProductionBundle,
@@ -21,11 +21,9 @@ import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
   frameRunCommand,
   dispatchScenePlanned,
-  sceneCommand,
   sendBenchOpenSubject,
   subscribeBenchSubjectOpened,
   subscribePlanResults,
-  subscribeSceneRefusals,
   useClientState,
   useStore,
 } from "../../lib/store.js";
@@ -44,16 +42,17 @@ import { Button } from "../../components/ui.js";
 import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Pin, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
-import { SceneStage } from "./stage.js";
 import { PlansPanel } from "./plans.js";
+import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
+import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
 
-type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 
 /**
  * The scene authoring shell (SPEC-029 R-21..R-29), mounted for every scene detail route.
  *
- * Storyboard is the default, with the cast and place above it and Arke beside it (design 138).
- * List and Grid share the same rows so changing the layout preserves an unfinished edit.
+ * Storyboard is the default, with the cast and place above it and Arke beside it (design 138);
+ * the Grid is the storyboard's default (turn 145), and List and Grid share the same rows so
+ * changing the layout preserves an unfinished edit. The Stage is the shot page's (turn 145).
  *
  * The selection lives HERE, above the tabs, which is the whole of why switching views keeps it
  * (T-18). A per-view selection is unmounted with its view; that is not a bug you can patch
@@ -69,20 +68,30 @@ export function SceneWorkspace({
   scene: SceneRecord;
 }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // The same digests the strip compares citations against — one hook, cached on the blocks
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
   const connection = useStore().connection;
   const digests = useBlockDigests(legacySceneView(scene));
-  const [view, setView] = useState<"storyboard" | "flow" | "stage" | "preview">("storyboard");
+  // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
+  // and the choice stays a choice, never a bookmark.
+  const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
+  useEffect(() => {
+    // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
+    if (searchParams.get("view") !== "preview") return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Full screen (SPEC-044 R-37, R-38): session state like the put-away, never written. The view
   // stays where it is in the tree and the page around it steps aside by CSS, so Flow's positions
   // and zoom and the Stage's draft survive the move without a remount.
   const [full, setFull] = useState(false);
-  // Full screen belongs to Flow and the Stage (R-37): a Flow menu entry that moves the view to
-  // Storyboard takes the page out of it, since the rows it lands on are not a view that fills.
-  const fullscreen = full && (view === "flow" || view === "stage");
+  // Full screen belongs to Flow here (R-37; the Stage took its own to the shot page, turn 145): a
+  // Flow menu entry that moves the view to Storyboard takes the page out of it.
+  const fullscreen = full && view === "flow";
   useEffect(() => {
     if (!fullscreen) return;
     const onKey = (event: KeyboardEvent) => {
@@ -102,7 +111,13 @@ export function SceneWorkspace({
     };
   }, [fullscreen]);
   const [showBoards, setShowBoards] = useState(false);
-  const [storyboardLayout, setStoryboardLayout] = useState<"list" | "grid">("list");
+  // The Grid is the storyboard's default (turn 145); the choice is remembered per person, not
+  // per scene, and never written to the world.
+  const [storyboardLayout, setStoryboardLayoutState] = useState<"list" | "grid">(rememberedLayout);
+  const setStoryboardLayout = (layout: "list" | "grid") => {
+    setStoryboardLayoutState(layout);
+    rememberLayout(layout);
+  };
   // The one lightbox: the row preview, the run bar's Review and Preview's Larger all open it,
   // and its arrows walk the scene's shots carrying the selection with them.
   const [lightboxShotId, setLightboxShotId] = useState<string | null>(null);
@@ -110,8 +125,6 @@ export function SceneWorkspace({
   const [sceneReviewOpen, setSceneReviewOpen] = useState(false);
   const [boardSheetKey, setBoardSheetKey] = useState<string | null>(null);
   const [boardSheetTrigger, setBoardSheetTrigger] = useState<HTMLElement | null>(null);
-  const [refusalVersion, setRefusalVersion] = useState(0);
-  const [commandPending, setCommandPending] = useState(false);
   const [generatorPending, setGeneratorPending] = useState(false);
   const [generatorError, setGeneratorError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
@@ -129,7 +142,6 @@ export function SceneWorkspace({
   useEffect(() => {
     if (picker === null && openMember === null && openPlace === null) doorFocus.current?.focus();
   }, [picker, openMember, openPlace]);
-  const pendingCommand = useRef(false);
   const sceneKey = `${world.meta.worldId}/${production.meta.id}/${scene.id}`;
   const currentSceneKey = useRef(sceneKey);
   currentSceneKey.current = sceneKey;
@@ -167,31 +179,10 @@ export function SceneWorkspace({
     }
   }, [linkedShotId, scene]);
 
-  const sceneFile = production.sceneFiles[scene.id];
-  const scenePath = sceneFile === undefined ? null : `productions/${production.meta.id}/scenes/${sceneFile}.json`;
-  const staged = [...world.proposals]
-    .filter((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined)
-    .sort((left, right) =>
-      left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
-    )
-    .at(-1);
-  const workingScene = scenePath === null ? scene : (staged?.scenes?.[scenePath] ?? scene);
+  const { sceneFile, staged, workingScene, write, locked, commandPending, refusalVersion } = useSceneWriter(world, production, scene);
   const shots = orderedShots(scene);
   const workingShots = orderedShots(workingScene);
-  const acceptedById = new Map(shots.map((shot) => [shot.id, shot]));
-  const acceptedOrder = shots.map((shot) => shot.id);
-  const workingOrder = workingShots.map((shot) => shot.id);
-  const stagedShotIds = new Set(
-    workingShots
-      .filter((shot, index) => {
-        const accepted = acceptedById.get(shot.id);
-        return accepted === undefined || JSON.stringify(accepted) !== JSON.stringify(shot) || acceptedOrder[index] !== workingOrder[index];
-      })
-      .map((shot) => shot.id),
-  );
-  const newShotIds = new Set(workingShots.filter((shot) => !acceptedById.has(shot.id)).map((shot) => shot.id));
-  const workingIds = new Set(workingShots.map((shot) => shot.id));
-  const removedShots = shots.filter((shot) => !workingIds.has(shot.id));
+  const { stagedShotIds, newShotIds, removedShots } = stagedShotChanges(scene, workingScene);
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
   const aspect = production.meta.aspect ?? "16:9";
   // The cap the boards pack against, so Flow packs exactly as the rows do. Absent a model, the
@@ -276,24 +267,6 @@ export function SceneWorkspace({
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
   const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? scene.inherits.location;
-  // What the title editor already knows: a staged proposal or a command in flight refuses a write.
-  const locked = staged !== undefined || sceneFile === undefined || commandPending;
-  const write = (command: Command): boolean => {
-    if (sceneFile === undefined || staged !== undefined || pendingCommand.current) return false;
-    const sent = sceneCommand({
-          worldId: world.meta.worldId,
-          productionId: production.meta.id,
-          sceneFile,
-          sceneId: scene.id,
-          baseVersion: scene.version,
-          command,
-        });
-    if (sent) {
-      pendingCommand.current = true;
-      setCommandPending(true);
-    }
-    return sent;
-  };
   const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
@@ -331,17 +304,6 @@ export function SceneWorkspace({
 
   useEffect(
     () =>
-      subscribeSceneRefusals((event) => {
-        if (event.productionId === production.meta.id && event.sceneFile === sceneFile) {
-          pendingCommand.current = false;
-          setCommandPending(false);
-          setRefusalVersion((version) => version + 1);
-        }
-      }),
-    [production.meta.id, sceneFile],
-  );
-  useEffect(
-    () =>
       subscribePlanResults((event) => {
         if (
           event.worldId !== world.meta.worldId ||
@@ -355,10 +317,6 @@ export function SceneWorkspace({
       }),
     [world.meta.worldId, production.meta.id],
   );
-  useEffect(() => {
-    pendingCommand.current = false;
-    setCommandPending(false);
-  }, [scene.id, sceneFile, scene.version]);
   useEffect(
     () =>
       subscribeBenchSubjectOpened((event) => {
@@ -413,24 +371,20 @@ export function SceneWorkspace({
       setGeneratorError("Not connected - try again.");
     }
   };
-  // The Stage is reached from a row's menu and a Flow staging node as well as its tab: one
-  // gesture selects the shot and changes the view, so the tab opens on the shot that asked.
-  const openStage = (shotId: string) => {
-    setSubject({ kind: "shot", shotId: shotId as never });
-    setView("stage");
-  };
+  // The Stage is the shot page's second view (turn 145): a Flow staging node, and a blockout or
+  // playblast Arke was asked for in the production's chat, all open that shot's page on it.
+  const shotPage = (shotId: string, stage = false) =>
+    `/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}${stage ? "?view=stage" : ""}`;
+  const openStage = (shotId: string) => { void navigate(shotPage(shotId, true)); };
   const constructionRequest = state?.stageConstructionRequests?.find(request => request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
-  useEffect(() => {
-    if (!constructionRequest) return;
-    setSubject({ kind: "shot", shotId: constructionRequest.shotId as never }); setView("stage");
-  }, [constructionRequest?.actionId, constructionRequest?.shotId]);
   const playblastRequest = state?.stagePlayblastRequests?.find((request) =>
     request.worldId === world.meta.worldId && request.productionId === production.meta.id && request.sceneId === scene.id);
+  const requestedShot = constructionRequest?.shotId ?? playblastRequest?.shotId;
+  const requestedAction = constructionRequest?.actionId ?? playblastRequest?.actionId;
   useEffect(() => {
-    if (playblastRequest === undefined) return;
-    setSubject({ kind: "shot", shotId: playblastRequest.shotId as never });
-    setView("stage");
-  }, [playblastRequest?.actionId, playblastRequest?.shotId]);
+    if (requestedShot !== undefined && orderedShots(workingScene).some((shot) => shot.id === requestedShot)) openStage(requestedShot);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedAction, requestedShot]);
   const planVideo = () => {
     if (pendingPlan.current !== null || sceneFile === undefined || videoModel == null) return;
     // The scene page chooses nothing per dispatch (SPEC-044 R-26): the coordinator resolves the
@@ -467,14 +421,11 @@ export function SceneWorkspace({
               <div className="fy-sw__fullpill">
                 {production.meta.title} · {episode === undefined ? "" : `episode ${episode.order} · `}scene {scene.number}
                 <i aria-hidden="true" />
-                <b>{view === "flow" ? "Flow" : "Stage"}</b>
+                <b>Flow</b>
               </div>
-              {/* The Stage carries its own way out on its head row (turn 144); the Flow keeps the corner pill of 135h. */}
-              {view === "stage" ? null : (
-                <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
-                  <Minimize2 size={14} /><span>Esc</span>
-                </button>
-              )}
+              <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
+                <Minimize2 size={14} /><span>Esc</span>
+              </button>
             </>
           ) : null}
           <header className="fy-sw__head">
@@ -570,7 +521,7 @@ export function SceneWorkspace({
           */}
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
-              {(["storyboard", "flow", "stage", "preview"] as const).map((candidate) => (
+              {(["storyboard", "flow", "preview"] as const).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -580,7 +531,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : candidate === "stage" ? "Stage" : "Preview"}
+                  {candidate === "storyboard" ? "Storyboard" : candidate === "flow" ? "Flow" : "Preview"}
                 </button>
               ))}
             </div>
@@ -618,7 +569,7 @@ export function SceneWorkspace({
             ) : null}
             {view === "storyboard" ? (
               <div className="fy-sw__layouts" role="group" aria-label="Storyboard layout">
-                {(["list", "grid"] as const).map((layout) => (
+                {(["grid", "list"] as const).map((layout) => (
                   <button
                     key={layout}
                     type="button"
@@ -633,7 +584,7 @@ export function SceneWorkspace({
                 ))}
               </div>
             ) : null}
-            {view === "flow" || view === "stage" ? (
+            {view === "flow" ? (
               <button type="button" className="fy-sw__full" title="Full screen" aria-label="Full screen" onClick={() => setFull(true)}>
                 <Maximize2 size={14} />
               </button>
@@ -681,12 +632,8 @@ export function SceneWorkspace({
                 generateReturnFocus.current = trigger;
                 setGenerateTarget({ shotId });
               }}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
-              onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
-              locationName={locationName}
-              onOpenLocation={(trigger) => { doorFocus.current = trigger; setOpenPlace(scene.inherits?.location ?? null); }}
-              onStageShot={openStage}
               onPreviewShot={setLightboxShotId}
               onTalkToArke={talkToArke}
               onPlanVideo={planVideo}
@@ -710,7 +657,7 @@ export function SceneWorkspace({
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
               onOpenCharacter={(sheetId, trigger) => { doorFocus.current = trigger; setOpenMember(sheetId); }}
               onOpenStage={openStage}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onViewBoardSheet={(memberShotIds, trigger) => {
                 setBoardSheetTrigger(trigger);
                 setBoardSheetKey(JSON.stringify(memberShotIds));
@@ -723,22 +670,6 @@ export function SceneWorkspace({
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={talkToArke}
             />
-          ) : view === "stage" ? (
-            <SceneStage
-              fullscreen={fullscreen ? { leave: () => setFull(false) } : null}
-              scene={workingScene}
-              production={production}
-              world={world}
-              aspect={aspect}
-              sceneFile={sceneFile}
-              locked={staged !== undefined || sceneFile === undefined || commandPending}
-              generatorPending={generatorPending}
-              refusalVersion={refusalVersion}
-              onCommand={write}
-              onRenderShot={(shotId) => openGenerator({ kind: "shot", shotId }, "video")}
-              {...(constructionRequest ? { constructionRequest } : {})}
-              {...(playblastRequest ? { playblastRequest } : {})}
-            />
           ) : (
             <ScenePreview
               key={`${production.meta.id}/${scene.id}`}
@@ -750,8 +681,9 @@ export function SceneWorkspace({
               worldSlug={world.meta.slug}
               sheets={world.sheets}
               aspect={aspect}
-              onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+              onEditShot={(shotId) => navigate(shotPage(shotId))}
               onOpenShotInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
+              {...(linkedShotId === null ? {} : { startShotId: linkedShotId })}
             />
           )}
           <PlansPanel
@@ -895,7 +827,7 @@ export function SceneWorkspace({
             setLightboxShotId(shotId);
             setSubject({ kind: "shot", shotId: shotId as never });
           }}
-          onEditShot={(shotId) => navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${scene.id}/shots/${shotId}`)}
+          onEditShot={(shotId) => navigate(shotPage(shotId))}
           onOpenInGenerator={(shotId) => openGenerator({ kind: "shot", shotId })}
         />
         <BoardSheet

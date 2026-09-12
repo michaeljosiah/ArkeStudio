@@ -329,8 +329,8 @@ describe("Flow context menus (§11.6)", () => {
 
     const shot = all(mounted, '.fy-swnode[data-kind="shot"]')[0]!;
     await act(async () => shot.dispatchEvent(contextMenu()));
-    assert.deepEqual(items(mounted), ["Open in generator", "Stage this shot", "Advanced", "Duplicate", "Delete"]);
-    await click(item(mounted, "Advanced"));
+    assert.deepEqual(items(mounted), ["Open in generator", "Stage this shot", "Open the shot", "Duplicate", "Delete"]);
+    await click(item(mounted, "Open the shot"));
     assert.deepEqual(edited, ["sh_12"]);
 
     const details = shot.querySelector('button[aria-label^="Details of"]') as HTMLElement | null;

@@ -72,7 +72,7 @@ import {
   VoiceLineDialogScreen,
 } from "./screens/production.js";
 import { ChapterScreen } from "./screens/chapter-workspace.js";
-import { ShotSheetScreen } from "./screens/storyboard.js";
+import { ShotPage } from "./screens/scene-workspace/shot-page.js";
 import { StoryStructureScreen } from "./screens/development.js";
 import { BranchMapScreen } from "./screens/branch-map.js";
 import { QueueToaster } from "./components/queue-toaster.js";
@@ -314,8 +314,8 @@ export function App() {
               a bookmark to the form lands on the list rather than on a route that writes on load. */}
           <Route path="scenes/new" element={<Navigate to="../scenes" replace />} />
           <Route path="scenes/:sceneId" element={<SceneDetailScreen />} />
-          {/* The full shot behind the card (turn 97, 14d). */}
-          <Route path="scenes/:sceneId/shots/:shotId" element={<ShotSheetScreen />} />
+          {/* The shot as a page (turn 145): the route 97's Advanced sheet used, now the shot's home. */}
+          <Route path="scenes/:sceneId/shots/:shotId" element={<ShotPage />} />
           {/* Interactive video's structural authority (epic 401) — linear seasons never route here. */}
           <Route path="branch-map" element={<BranchMapScreen />} />
           <Route path="generate" element={<GenerateScreen />} />

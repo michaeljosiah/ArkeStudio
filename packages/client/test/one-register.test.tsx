@@ -114,12 +114,9 @@ describe("a designed screen draws its own controls (U2)", () => {
     const html = renderRoute(
       `/w/${WORLD_ID}/p/${production.meta.id}/scenes/${scene.id}/shots/${scene.shots[0]!.id}`,
     );
-    assert.match(html, /class="ui-select__control fy-sheetselect"/, "the sheet's own type over the house control");
-    assert.doesNotMatch(
-      html,
-      /<select class="fy-sheetselect"/,
-      "and no select left wearing the platform's button",
-    );
+    assert.match(html, /class="ui-select__control fy-shot__select"/, "the page's camera fields wear the house control (turn 145)");
+    assert.doesNotMatch(html, /<select class="fy-shot__select"/, "and no select left wearing the platform's button");
+    assert.match(html, /class="ui-check fy-shot__check"/, "the continuity switches are the house checkbox");
   });
 });
 
