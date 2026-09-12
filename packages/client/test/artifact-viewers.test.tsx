@@ -316,16 +316,21 @@ describe("the card as an open target", () => {
     assert.match(tag, /class="fy-gridcard__open"/);
   });
 
-  it("leaves Lift facts and the audio transport exactly where they were", async () => {
+  it("leaves Lift facts and the audio transport exactly where they were, beside the open target and never inside it", async () => {
+    // A button inside a button is markup the browser resolves by dropping one of the two, and
+    // the one it drops is usually the one you wanted. So each secondary control is a sibling of
+    // the card's open target, and pressing one leaves the viewer closed.
     const mounted = await mountShelf();
-    assert.ok(
-      [...mounted.container.querySelectorAll("button.fy-liftfacts")].length >= 3,
-      "every document still offers extraction",
-    );
-    assert.ok(
-      mounted.container.querySelector('button[aria-label="Play harbour-bells.wav"]'),
-      "and the audio card still plays through the dock",
-    );
+    const lifts = [...mounted.container.querySelectorAll<HTMLButtonElement>("button.fy-liftfacts")];
+    assert.ok(lifts.length >= 3, "every document still offers extraction");
+    const play = mounted.container.querySelector<HTMLButtonElement>('button[aria-label="Play harbour-bells.wav"]')!;
+    assert.ok(play, "and the audio card still plays through the dock");
+    for (const control of [...lifts, play]) {
+      assert.equal(control.closest("button.fy-gridcard__open"), null, "a control inside the open target is a control the browser may drop");
+      assert.ok(control.closest(".fy-gridcard--openable"), "it sits on the card, beside the target");
+    }
+    await act(async () => lifts[0]!.click());
+    assert.equal(panel(mounted) === null, true, "pressing a secondary control does not open the viewer");
     await unmount(mounted);
   });
 
