@@ -460,8 +460,14 @@ async function createWindow(): Promise<void> {
   applyHostTheme(themePreference, false);
   const palette = themePalette(resolvedTheme);
   window = new BrowserWindow({
-    width: 1440,
-    height: 900,
+    /*
+     * Measured off a running window rather than picked: 1200 × 790 is the size the app is
+     * actually worked at. Unlike the 1440 × 900 it replaces, it also fits inside the work area
+     * of a 1920 × 1080 laptop at 125 % scaling, about 1536 × 816, so the window opens at its own
+     * default there instead of at whatever the screen cut it down to.
+     */
+    width: 1200,
+    height: 790,
     minWidth: 1024,
     minHeight: 640,
     icon: appIcon,
