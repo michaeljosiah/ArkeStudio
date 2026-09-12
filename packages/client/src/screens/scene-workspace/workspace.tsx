@@ -43,7 +43,7 @@ import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Pin, 
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
 import { PlansPanel } from "./plans.js";
-import { useSceneWriter } from "./scene-writer.js";
+import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
 import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
 
 
@@ -68,7 +68,7 @@ export function SceneWorkspace({
   scene: SceneRecord;
 }) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   // The same digests the strip compares citations against — one hook, cached on the blocks
   // array itself, so mounting this beside anything else costs no second sweep of the script.
   const state = useClientState();
@@ -77,6 +77,14 @@ export function SceneWorkspace({
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
   const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
+  useEffect(() => {
+    // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
+    if (searchParams.get("view") !== "preview") return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("view");
+    setSearchParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Full screen (SPEC-044 R-37, R-38): session state like the put-away, never written. The view
   // stays where it is in the tree and the page around it steps aside by CSS, so Flow's positions
   // and zoom and the Stage's draft survive the move without a remount.
@@ -174,20 +182,7 @@ export function SceneWorkspace({
   const { sceneFile, staged, workingScene, write, locked, commandPending, refusalVersion } = useSceneWriter(world, production, scene);
   const shots = orderedShots(scene);
   const workingShots = orderedShots(workingScene);
-  const acceptedById = new Map(shots.map((shot) => [shot.id, shot]));
-  const acceptedOrder = shots.map((shot) => shot.id);
-  const workingOrder = workingShots.map((shot) => shot.id);
-  const stagedShotIds = new Set(
-    workingShots
-      .filter((shot, index) => {
-        const accepted = acceptedById.get(shot.id);
-        return accepted === undefined || JSON.stringify(accepted) !== JSON.stringify(shot) || acceptedOrder[index] !== workingOrder[index];
-      })
-      .map((shot) => shot.id),
-  );
-  const newShotIds = new Set(workingShots.filter((shot) => !acceptedById.has(shot.id)).map((shot) => shot.id));
-  const workingIds = new Set(workingShots.map((shot) => shot.id));
-  const removedShots = shots.filter((shot) => !workingIds.has(shot.id));
+  const { stagedShotIds, newShotIds, removedShots } = stagedShotChanges(scene, workingScene);
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
   const aspect = production.meta.aspect ?? "16:9";
   // The cap the boards pack against, so Flow packs exactly as the rows do. Absent a model, the

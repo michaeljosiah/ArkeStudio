@@ -3,8 +3,8 @@ import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { MemoryRouter } from "react-router";
-import type { ClientMessage, ClientState } from "@arke-studio/contracts";
+import { MemoryRouter, useLocation } from "react-router";
+import { deleteShot, insertShot, orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __connectionStatusForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
@@ -43,6 +43,14 @@ interface Mounted {
 
 const open: Mounted[] = [];
 
+/** Where the router is, for the tests that care what the address says. */
+let where = "";
+function Where() {
+  const location = useLocation();
+  where = `${location.pathname}${location.search}`;
+  return null;
+}
+
 async function mountState(state: ClientState = FIXTURE_STATE, path = SHOT_PATH): Promise<Mounted> {
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
@@ -51,6 +59,7 @@ async function mountState(state: ClientState = FIXTURE_STATE, path = SHOT_PATH):
     __setStateForTest(state);
     root.render(
       <MemoryRouter initialEntries={[path]}>
+        <Where />
         <App />
       </MemoryRouter>,
     );
@@ -113,6 +122,31 @@ type SceneShape = {
   defaults?: Record<string, string>;
   shots: Array<{ id: string; number: number; title: string; description: string; durationSec: number; framing?: Record<string, string>; promptOverride?: { text: string; sheetVersions: Record<string, never> }; notes?: string; staging?: unknown }>;
 };
+
+/** The fixture with one attended scene-edit proposal staged over sc_04, drafted by `mutate`. */
+function withProposal(mutate: (accepted: Parameters<typeof insertShot>[0]) => ReturnType<typeof insertShot>): ClientState {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+  const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+  const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+  state.world!.proposals = [{
+    proposal: {
+      id: "pr_01J8H0000000000000000000Q2",
+      kind: "scene-edit",
+      summary: "A change to scene 4",
+      targets: [{ path, baseVersion: accepted.version, baseHash: `sha256:${"a".repeat(64)}` }],
+      baseCanonRevision: 42,
+      reservedCanonIds: [],
+      source: "chat:scene",
+      decision: { mode: "attended", owner: { kind: "proposal-conversation", surface: "scene-workspace", targetPath: path } },
+      created: "2026-08-30T12:00:00Z",
+      draftRevision: 1,
+    },
+    ripple: null,
+    scenes: { [path]: mutate(accepted) },
+  }] as never;
+  return state;
+}
 
 function sceneOf(state: ClientState): SceneShape {
   const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
@@ -382,6 +416,59 @@ describe("the shot page (design turn 145)", () => {
     assert.match(q(mounted, "h1")?.textContent ?? "", /^Shot 13/);
     await act(async () => __applyEventForTest({ type: "bench.subject-opened", at: "2026-09-12T10:00:00.000Z", worldId: FIXTURE_WORLD_ID, requestId: request.requestId, sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HE" }));
     assert.ok(q(mounted, '[data-screen="bench"]'), "the answer opened the session it made");
+  });
+
+  it("Play from here is read once and taken out of the address (codex round 2)", async () => {
+    const mounted = await mountState(FIXTURE_STATE, `${SCENE_PATH}?shot=sh_13&view=preview`);
+    assert.equal(q(mounted, '.fy-sw__tab[data-on="true"]')?.textContent, "Preview");
+    assert.doesNotMatch(where, /view=preview/, "the one-shot door is not a bookmark");
+    assert.match(where, /shot=sh_13/, "the selection stays in the address");
+  });
+
+  it("the lightbox stays open while its arrows walk the scene (codex round 2)", async () => {
+    // The fixture's shot 12 has a clip accepted, not a frame; Expand wants a frame, so the frame
+    // take stands in as the accepted one here.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections["sh_12"] = { acceptedTakeId: "tk_01J8A0000000000000000000A1" } as never;
+    const mounted = await mountState(state);
+    await click(q(mounted, 'button[aria-label="Expand image for shot 12"]')!);
+    assert.ok(q(mounted, ".fy-swlightbox"), "the lightbox opened on shot 12");
+    await click(q(mounted, '.fy-swlightbox [aria-label="Next shot"]')!);
+    assert.match(q(mounted, "h1")?.textContent ?? "", /^Shot 13/, "the arrow opened the neighbour's page");
+    assert.ok(q(mounted, ".fy-swlightbox"), "and the lightbox is still open on it");
+  });
+
+  it("a blur after an Escape-cancelled edit still writes the next rename (codex round 2)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState();
+    await click(q(mounted, 'button[aria-label="Edit title for shot 12"]')!);
+    const first = q(mounted, 'input[aria-label="Title for shot 12"]') as HTMLInputElement;
+    const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+    Object.defineProperty(escape, "key", { value: "Escape" });
+    // A browser that fires no blur for an input removed in its own key handler leaves the guard
+    // set; the next session must start clear.
+    await act(async () => first.dispatchEvent(escape));
+    await click(q(mounted, 'button[aria-label="Edit title for shot 12"]')!);
+    await blurInput(q(mounted, 'input[aria-label="Title for shot 12"]') as HTMLInputElement, "Maren, listening");
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { title: "Maren, listening" } }]);
+  });
+
+  it("a staged proposal reaches the page's dock as the decision it is, and a proposal that removes the routed shot leaves the page on the accepted record (codex round 2)", async () => {
+    const added = await mountState(withProposal((accepted) => insertShot(accepted, { at: { after: orderedShots(accepted).at(-1)!.id }, shot: { id: "sh_999", title: "Maren hears it land", description: "She does not move." } })));
+    assert.ok(all(added, "button").some((button) => button.textContent === "Accept"), "Accept stands in the dock, as on the scene page");
+    assert.match(q(added, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren hears it land/);
+    assert.equal(all(added, ".fy-shot__thumb").length, 3, "the filmstrip shows the staged scene");
+    assert.equal(q(added, ".fy-sw__save")?.textContent, "Changes awaiting review");
+    await act(async () => added.root.unmount());
+    added.container.remove();
+    open.splice(open.indexOf(added), 1);
+
+    const removed = await mountState(withProposal((accepted) => deleteShot(accepted, { shotId: "sh_12" })));
+    assert.match(q(removed, "h1")?.textContent ?? "", /^Shot 12 · Maren at the rail, listening/, "the page reads the accepted record while the proposal removes its shot");
+    assert.match(q(removed, ".fy-arke")?.textContent ?? "", /Arke · Shot 12/, "and the dock is about the same shot");
+    assert.match(q(removed, '[aria-label="Changes to scene 4"]')?.textContent ?? "", /Maren at the rail, listening/);
   });
 
   it("a shot that is not in the scene lands on the scene", async () => {

@@ -160,5 +160,14 @@
 :where([data-screen="shot"]) .fy-sw__back { display: inline-flex; align-items: center; gap: 12px; border: 0; background: transparent; color: var(--foreground); font: 500 var(--text-sm)/1.4 var(--font-sans); cursor: pointer; padding: 8px 0; }
 :where([data-screen="shot"]) .fy-sw__back:hover { text-decoration: underline; text-underline-offset: 3px; }
 
+/* A pointer that cannot hover sees the toolbar, and a coarse one gets the 44px it needs (138). */
+@media (hover: none) {
+  :where([data-screen="shot"]) .fy-swrow__frameactions { opacity: 1; pointer-events: auto; }
+  :where([data-screen="shot"]) .fy-swrow__frameactions > button { pointer-events: auto; }
+}
+@media (pointer: coarse) {
+  :where([data-screen="shot"]) .fy-swrow__frameactions > button { width: 44px; height: 44px; }
+}
+
 /* Full screen: the Stage alone, as on the scene page (135, 144). */
 .fy-sw[data-full="true"]:where([data-screen="shot"]) .fy-sw__centre > :not(.fy-swstage):not(.fy-sw__fullpill) { display: none; }

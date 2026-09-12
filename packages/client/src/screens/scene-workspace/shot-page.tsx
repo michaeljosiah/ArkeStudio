@@ -18,7 +18,7 @@ import {
   type WorldChatSubject,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
-import { ProductionConversation } from "../../components/conversation.js";
+import { ProductionConversation, StagedDecision } from "../../components/conversation.js";
 import { EmptyState, Screen } from "../../components/layout.js";
 import { Button } from "../../components/ui.js";
 import { ChevronLeft, ChevronRight, ImageMark, Maximize2, More, Pencil, Pin } from "../../components/icons.js";
@@ -31,7 +31,7 @@ import { CharacterDialog } from "./character-dialog.js";
 import { FrameActions } from "./frame-actions.js";
 import { frameRunShotState, GenerateFramesDialog } from "./frame-run.js";
 import { ShotLightbox } from "./lightbox.js";
-import { useSceneWriter } from "./scene-writer.js";
+import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
 import { SelectionProvider, type WorkspaceSubject } from "./selection.js";
 import { ShotFields } from "./shot-fields.js";
 import { SceneStage } from "./stage.js";
@@ -53,13 +53,16 @@ export function ShotPage() {
   // does. The workspace below is keyed by shot, so the pending request lives here, on the route
   // element that outlives the step, and the answer still opens the session it made.
   const pendingGenerator = useRef<PendingGenerator | null>(null);
+  // The lightbox's arrows walk the scene by opening the neighbouring shot's page; kept here, the
+  // box stays open across that step instead of closing with the workspace it was opened in.
+  const [lightbox, setLightbox] = useState(false);
   if (world && production && record && shotId !== undefined) {
     // A shot that has gone — deleted from the list, or an address that never named one — lands
     // on its scene rather than on a page about nothing.
     if (!orderedShots(record).some((shot) => shot.id === shotId)) {
       return <Navigate to={`/w/${world.meta.worldId}/p/${production.meta.id}/scenes/${record.id}`} replace />;
     }
-    return <ShotWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}/${shotId}`} world={world} production={production} scene={record} shotId={shotId} pendingGenerator={pendingGenerator} />;
+    return <ShotWorkspace key={`${world.meta.worldId}/${production.meta.id}/${record.id}/${shotId}`} world={world} production={production} scene={record} shotId={shotId} pendingGenerator={pendingGenerator} lightbox={lightbox} setLightbox={setLightbox} />;
   }
   return (
     <Screen id="shot">
@@ -76,12 +79,16 @@ function ShotWorkspace({
   scene,
   shotId,
   pendingGenerator,
+  lightbox,
+  setLightbox,
 }: {
   world: WorldBundle;
   production: ProductionBundle;
   scene: SceneRecord;
   shotId: string;
   pendingGenerator: MutableRefObject<PendingGenerator | null>;
+  lightbox: boolean;
+  setLightbox: (open: boolean) => void;
 }) {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -90,11 +97,16 @@ function ShotWorkspace({
   const digests = useBlockDigests(legacySceneView(scene));
   const writer = useSceneWriter(world, production, scene);
   const { workingScene, staged, write, locked, commandPending, refusalVersion, sceneFile } = writer;
-  const shots = orderedShots(workingScene);
-  const index = Math.max(0, shots.findIndex((candidate) => candidate.id === shotId));
-  const shot: Shot = shots[index] ?? orderedShots(scene).find((candidate) => candidate.id === shotId)!;
+  // The page reads the staged scene, as the list does — unless the staged proposal removes the
+  // very shot the address names, when it reads the accepted record so the page, the selection
+  // and the dock stay about one shot until the proposal is decided.
+  const workingShots = orderedShots(workingScene);
+  const shots = workingShots.some((candidate) => candidate.id === shotId) ? workingShots : orderedShots(scene);
+  const index = shots.findIndex((candidate) => candidate.id === shotId);
+  const shot: Shot = shots[index]!;
   const previous = index > 0 ? shots[index - 1] ?? null : null;
   const next = shots[index + 1] ?? null;
+  const changes = staged === undefined ? null : stagedShotChanges(scene, workingScene);
   const artifacts: readonly ArtifactSidecar[] = world.artifacts;
   const aspect = productionAspect(production.meta);
   const slug = world.meta.slug;
@@ -143,7 +155,6 @@ function ShotWorkspace({
   );
 
   const [dock, setDock] = useState(true);
-  const [lightbox, setLightbox] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [openMember, setOpenMember] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -327,7 +338,7 @@ function ShotWorkspace({
                 ) : (
                   <>
                     <span className="fy-shot__title-text">Shot {shot.number} · {shot.title}</span>
-                    <button ref={titleTrigger} type="button" className="fy-shot__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={() => setEditingTitle(true)}>
+                    <button ref={titleTrigger} type="button" className="fy-shot__pencil" aria-label={`Edit title for shot ${shot.number}`} title="Rename" disabled={disabled} onClick={() => { titleSettled.current = false; setEditingTitle(true); }}>
                       <Pencil size={16} />
                     </button>
                   </>
@@ -537,7 +548,23 @@ function ShotWorkspace({
             emptyLine={`Nothing written with Arke for shot ${shot.number} yet.`}
             placeholder={`Ask Arke about shot ${shot.number}…`}
             onSelectShot={goTo}
-            pointsEmpty="Nothing understood yet. As you talk, what Arke takes from the shot appears here."
+            {...(staged === undefined || changes === null
+              ? { pointsEmpty: "Nothing understood yet. As you talk, what Arke takes from the shot appears here." }
+              : {
+                  side: (
+                    <StagedDecision
+                      worldId={world.meta.worldId}
+                      subject={`scene ${scene.number}`}
+                      staged={staged}
+                      items={[
+                        ...workingShots
+                          .filter((candidate) => changes.stagedShotIds.has(candidate.id))
+                          .map((candidate) => ({ label: `Shot ${candidate.number} · ${candidate.title}`, meta: changes.newShotIds.has(candidate.id) ? "new" : "changed" })),
+                        ...changes.removedShots.map((candidate) => ({ label: `Shot ${candidate.number} · ${candidate.title}`, meta: "remove" })),
+                      ]}
+                    />
+                  ),
+                })}
           />
         ) : (
           <button type="button" className="fy-sw__rail" title="Pin the assistant back" onClick={() => setDock(true)}>

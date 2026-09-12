@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMessage, ProductionBundle, SceneRecord, WorldBundle } from "@arke-studio/contracts";
+import { orderedShots, type ClientMessage, type ProductionBundle, type SceneRecord, type Shot, type WorldBundle } from "@arke-studio/contracts";
 import { sceneCommand, subscribeSceneRefusals } from "../../lib/store.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
@@ -18,6 +18,34 @@ export interface SceneWriter {
   commandPending: boolean;
   /** Counts up on every refused scene write, so a draft can learn its write was turned away. */
   refusalVersion: number;
+}
+
+/**
+ * What a staged proposal changes, shot by shot: the ids it edits or moves, the ids it adds, and
+ * the accepted shots it removes. Both pages draw the decision from this, so the shot page names
+ * the same changes the scene page does.
+ */
+export function stagedShotChanges(accepted: SceneRecord, working: SceneRecord): {
+  stagedShotIds: Set<string>;
+  newShotIds: Set<string>;
+  removedShots: Shot[];
+} {
+  const shots = orderedShots(accepted);
+  const workingShots = orderedShots(working);
+  const acceptedById = new Map(shots.map((shot) => [shot.id, shot]));
+  const acceptedOrder = shots.map((shot) => shot.id);
+  const workingOrder = workingShots.map((shot) => shot.id);
+  const stagedShotIds = new Set(
+    workingShots
+      .filter((shot, index) => {
+        const before = acceptedById.get(shot.id);
+        return before === undefined || JSON.stringify(before) !== JSON.stringify(shot) || acceptedOrder[index] !== workingOrder[index];
+      })
+      .map((shot) => shot.id),
+  );
+  const newShotIds = new Set(workingShots.filter((shot) => !acceptedById.has(shot.id)).map((shot) => shot.id));
+  const workingIds = new Set(workingShots.map((shot) => shot.id));
+  return { stagedShotIds, newShotIds, removedShots: shots.filter((shot) => !workingIds.has(shot.id)) };
 }
 
 /**
