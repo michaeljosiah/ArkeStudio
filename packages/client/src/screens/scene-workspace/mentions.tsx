@@ -14,9 +14,16 @@ import { mentionSpans, propSlug, type Prop, type Sheet } from "@arke-studio/cont
 export function mentionNames(sheets: readonly Sheet[], props: readonly Prop[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>();
   for (const sheet of sheets) names.set(sheet.id, sheet.name);
+  // Two props can share a slug ("Tea cup", "Tea-cup" — nothing at creation forbids it) and
+  // dispatch cites both; naming one would claim the mention is the other's alone, so such a
+  // slug stays a slug.
+  const claimed = new Set<string>();
   for (const prop of props) {
     const slug = propSlug(prop.name);
-    if (!names.has(slug)) names.set(slug, prop.name);
+    if (names.has(slug) && !claimed.has(slug)) continue;
+    if (claimed.has(slug)) names.delete(slug);
+    else names.set(slug, prop.name);
+    claimed.add(slug);
   }
   return names;
 }

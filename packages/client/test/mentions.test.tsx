@@ -5,7 +5,12 @@ import type { Prop, Sheet } from "@arke-studio/contracts";
 import { mentionNames, scriptWords } from "../src/screens/scene-workspace/mentions.js";
 
 const sheets = [{ id: "carl", name: "Carl" }, { id: "the-vigil", name: "The Vigil" }] as unknown as Sheet[];
-const props = [{ id: "pr_1", name: "Carl", states: [] }, { id: "pr_2", name: "Polaroid", states: [] }] as unknown as Prop[];
+const props = [
+  { id: "pr_1", name: "Carl", states: [] },
+  { id: "pr_2", name: "Polaroid", states: [] },
+  { id: "pr_3", name: "Tea cup", states: [] },
+  { id: "pr_4", name: "Tea-cup", states: [] },
+] as unknown as Prop[];
 
 describe("the script's words (issues 1103, 1114)", () => {
   it("reads a mention as the sheet's or the prop's name, keeps a slug nothing answers to, and lets the sheet keep a word a prop also claims", () => {
@@ -13,6 +18,7 @@ describe("the script's words (issues 1103, 1114)", () => {
     assert.equal(names.get("the-vigil"), "The Vigil");
     assert.equal(names.get("polaroid"), "Polaroid", "a prop is named by its own slug");
     assert.equal(names.get("carl"), "Carl", "the sheet's id is the slug itself; the prop only fills a slug no sheet has");
+    assert.equal(names.get("tea-cup"), undefined, "two props reach one slug and dispatch cites both, so the slug stays a slug");
     const read = renderToStaticMarkup(<>{scriptWords("@carl lifts the @polaroid at @railway-hotel-lobby.", names, "read")}</>);
     assert.equal(read, '<span class="fy-mentionname" data-slug="carl">Carl</span> lifts the <span class="fy-mentionname" data-slug="polaroid">Polaroid</span> at <span class="fy-mentionname" data-slug="railway-hotel-lobby">railway-hotel-lobby</span>.');
   });

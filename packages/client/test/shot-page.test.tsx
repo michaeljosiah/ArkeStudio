@@ -378,6 +378,12 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(disclosure.querySelector("p")?.textContent, "Two keys, a slow push toward the rail.");
     assert.equal(disclosure.querySelector("li")?.textContent, "The rail is waist height.");
     assert.match(disclosure.querySelector("small")?.textContent ?? "", /claude-opus-5 · 3 views inspected/);
+    await act(async () => { disclosure.setAttribute("open", ""); });
+    // A hand edit strips the build's provenance (the kept record arrives without it); the
+    // element's own open state must not outlive it.
+    await act(async () => { __setStateForTest(((state) => { sceneOf(state).shots[0]!.staging = { version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 2], l: [0, 1, 0] }] }; return state; })(structuredClone(FIXTURE_STATE) as ClientState)); });
+    assert.equal(disclosure.getAttribute("aria-disabled"), "true", "nothing built stands behind the staging now");
+    assert.equal(disclosure.hasAttribute("open"), false, "and the disclosure shut with it");
   });
 
   it("Camera is the nine 145b draws: eight selects and the grade line, no intent field (issue 1114)", async () => {

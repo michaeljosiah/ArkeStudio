@@ -208,6 +208,7 @@ export function SceneStage({
   const [exporting, setExporting] = useState<number | null>(null);
   const [note, setNote] = useState<string | null>(null);
   const host = useRef<HTMLDivElement | null>(null);
+  const inspection = useRef<HTMLDetailsElement | null>(null);
   const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const viewport = useRef<StageViewport | null>(null);
   const playStart = useRef<{ wall: number; from: number } | null>(null);
@@ -220,6 +221,11 @@ export function SceneStage({
     const base = draft ?? resolvedPersisted;
     return base === null ? null : stagingRetimed(base, durationSec);
   }, [draft, resolvedPersisted, durationSec]) as ResolvedShotStaging | null;
+  // A hand edit strips the build's provenance (the draft is no longer what the model said), and a
+  // native <details> keeps its own open state regardless — so the disclosure is shut here, not
+  // left expanded over an empty body while its dress says it cannot open.
+  const inspected = working?.authorship !== undefined;
+  useEffect(() => { if (!inspected) inspection.current?.removeAttribute("open"); }, [inspected]);
   const motionSpeeds = useMemo(() => working ? stageMotionSpeeds(working, durationSec) : [], [working, durationSec]);
   const cameraChanged = draft !== null && cameraOf(draft) !== cameraOf(resolvedPersisted);
   const motionChanged = draft !== null && (
@@ -1029,6 +1035,7 @@ export function SceneStage({
             so by its dress, rather than absent — a person should see where a build's assessment
             will land before asking for one. */}
         <details
+          ref={inspection}
           className="fy-swstage__inspection"
           aria-disabled={working?.authorship ? undefined : "true"}
           onToggle={(event) => { if (!working?.authorship && event.currentTarget.open) event.currentTarget.open = false; }}
