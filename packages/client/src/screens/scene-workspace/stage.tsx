@@ -1024,7 +1024,18 @@ export function SceneStage({
         <Button size="sm" className="fy-tip--end" disabled={frozen || moved} hint="Uses the configured language model · up to 3 turns / 5 minutes" onClick={() => construct()}>Build with Arke</Button>
         {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
         {note ? <span role="status">{note}</span> : null}
-        {draft?.authorship ? <details><summary>AI inspection and assumptions</summary><p>{draft.authorship.assessment}</p><ul>{draft.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{draft.authorship.model} · {draft.authorship.inspectedFrames} views inspected</small></details> : null}
+        {/* The disclosure ends the bar as 144a draws it, and opens once a build has something to
+            say — the kept staging's record as much as a draft's; until then it is shut and says
+            so by its dress, rather than absent — a person should see where a build's assessment
+            will land before asking for one. */}
+        <details
+          className="fy-swstage__inspection"
+          aria-disabled={working?.authorship ? undefined : "true"}
+          onToggle={(event) => { if (!working?.authorship && event.currentTarget.open) event.currentTarget.open = false; }}
+        >
+          <summary onClick={(event) => { if (!working?.authorship) event.preventDefault(); }}><ChevronRight size={12} />AI inspection and assumptions</summary>
+          {working?.authorship ? <><p>{working.authorship.assessment}</p><ul>{working.authorship.assumptions.map((text,i) => <li key={i}>{text}</li>)}</ul><small>{working.authorship.model} · {working.authorship.inspectedFrames} views inspected</small></> : null}
+        </details>
       </div>
       <div className="fy-swstage__work">
         <div ref={setViewportElement} className="fy-swstage__viewport" data-mode={mode}>

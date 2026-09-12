@@ -337,8 +337,8 @@ function ShotWorkspace({
           <header className="fy-sw__head">
             <p className="fy-sw__breadcrumb">
               {production.meta.title}
-              {episode === undefined ? "" : ` · episode ${episode.order} · ${episode.title}`}
-              {" · "}
+              {episode === undefined ? "" : ` \u00a0/\u00a0 Episode ${episode.order} \u00a0/\u00a0 ${episode.title}`}
+              {" \u00a0/\u00a0 "}
               <button type="button" className="fy-shot__crumb" onClick={() => navigate(`${scenePath}?shot=${shot.id}`)}>Scene {scene.number} · {scene.title}</button>
             </p>
             <div className="fy-sw__headline">

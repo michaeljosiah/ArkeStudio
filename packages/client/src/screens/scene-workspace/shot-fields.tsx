@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FocusEvent, type ReactNode } from "react";
 import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
@@ -22,6 +22,7 @@ import { BenchBrief } from "../../components/bench-brief.js";
 import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { mentionNames, scriptWords } from "./mentions.js";
 
 type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 type EditShot = Extract<Command, { kind: "edit-shot" }>;
@@ -82,6 +83,8 @@ export function ShotFields({
 
   // ---- Script -------------------------------------------------------------------------------
   const [scriptDraft, setScriptDraft] = useState(shot.description);
+  const [scriptFocused, setScriptFocused] = useState(false);
+  const names = useMemo(() => mentionNames(sheets, world.props), [sheets, world.props]);
   useEffect(() => { setScriptDraft(shot.description); }, [shot.description]);
   const commitScript = (next: string) => {
     if (locked || next === shot.description) return;
@@ -239,8 +242,10 @@ export function ShotFields({
         <div
           className="fy-shot__script fy-swrow__scripteditor"
           title="Write what happens · type @ to name anything in the world"
+          onFocus={() => setScriptFocused(true)}
           onBlur={(event) => {
             if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+            setScriptFocused(false);
             commitScript(event.currentTarget.querySelector("textarea")?.value ?? scriptDraft);
           }}
         >
@@ -249,7 +254,7 @@ export function ShotFields({
             onChange={setScriptDraft}
             options={mentionOptions}
             worldSlug={slug}
-            underlay={scriptDraft}
+            underlay={scriptWords(scriptDraft, names, scriptFocused ? "edit" : "read")}
             label={`Script for shot ${shot.number}`}
             placeholder="What happens in this shot…"
             disabled={disabled}
@@ -346,22 +351,9 @@ export function ShotFields({
         />
       </section>
 
+      {/* Turn 97's nine as 145b draws them. 14d's intent line is not carried: the record keeps the
+          field and the prompt still reads it, but a control the turn does not draw is not a control. */}
       <Section icon={<VideoMark size={15} />} name="Camera">
-        <label className="fy-shot__field fy-shot__field--wide">
-          <span>intent</span>
-          <input
-            key={shot.intent ?? ""}
-            defaultValue={shot.intent ?? ""}
-            placeholder="How it should feel"
-            disabled={disabled}
-            onBlur={(event) => {
-              const next = event.currentTarget.value.trim();
-              if (next === (shot.intent ?? "")) return;
-              if (next === "") edit({}, ["intent"]);
-              else edit({ intent: next });
-            }}
-          />
-        </label>
         <div className="fy-shot__camera">
           {CAMERA_FIELDS.map((field) => {
             const own = shot.framing?.[field.key];

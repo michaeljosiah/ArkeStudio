@@ -56,16 +56,17 @@
 :where([data-screen="scene-detail"]) .fy-swrow__grip[draggable="true"] { cursor: grab; }
 :where([data-screen="scene-detail"]) .fy-swrow__grip[draggable="true"]:active { cursor: grabbing; }
 /* List previews match the approved image box; Expand keeps the full source composition. */
-:where([data-screen="scene-detail"]) .fy-swrow__frame { width: 100%; height: auto; aspect-ratio: 285 / 208; align-self: start; }
+:where([data-screen="scene-detail"]) .fy-swrow__framewrap { position: relative; align-self: start; min-width: 0; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame { box-sizing: border-box; width: 100%; height: auto; aspect-ratio: 285 / 208; border-radius: 8px; }
+:where([data-screen="scene-detail"]) .fy-swrow__frame[data-empty="true"] { border: 1px dashed var(--border); }
 :where([data-screen="scene-detail"]) .fy-swrow__img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .fy-swlightbox__frame > img { object-fit: contain; }
 :where([data-screen="scene-detail"]) .fy-swrow__label { min-width: 32px; height: 34px; box-sizing: border-box; display: grid; place-items: center; padding: 0 5px; background: var(--media-overlay-bg); color: var(--media-overlay-fg); border-color: color-mix(in srgb, var(--media-overlay-fg) 45%, transparent); border-radius: 6px; font: 400 16px var(--font-sans); }
 :where([data-screen="scene-detail"]) .fy-swrow__chipmeta { font: 400 13px var(--font-sans); bottom: 9px; top: auto; left: 9px; }
 :where([data-screen="scene-detail"]) .fy-swrow__frame:hover .fy-swrow__chipmeta, :where([data-screen="scene-detail"]) .fy-swrow__frame:focus-within .fy-swrow__chipmeta { opacity: 0; }
 :where([data-screen="scene-detail"]) .fy-swrow__hatch { position: absolute; inset: 0; background: var(--muted); }
-:where([data-screen="scene-detail"]) .fy-swrow__nofr { font: 400 11px var(--font-sans); }
 :where([data-screen="scene-detail"]) .fy-swrow__body { padding: 18px 30px; gap: 6px; }
-:where([data-screen="scene-detail"]) .fy-swrow__titleline { min-height: 30px; padding-right: 210px; flex-wrap: wrap; }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline { min-height: 30px; padding-right: 210px; gap: 12px; flex-wrap: wrap; }
 :where([data-screen="scene-detail"]) .fy-swrow__title-edit { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
 :where([data-screen="scene-detail"]) .fy-swrow__title { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--foreground); font: 500 19px/1.4 var(--font-sans); text-align: left; cursor: pointer; }
 :where([data-screen="scene-detail"]) .fy-swrow__title:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
@@ -79,7 +80,9 @@
 :where([data-screen="scene-detail"]) .fy-swrow__timing > button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: text; text-underline-offset: 3px; }
 :where([data-screen="scene-detail"]) .fy-swrow__timing > button:hover { text-decoration: underline; }
 :where([data-screen="scene-detail"]) .fy-swrow__timing > input { width: 72px; border: 1px solid var(--border); border-radius: 4px; background: var(--background); color: var(--foreground); font: inherit; }
-:where([data-screen="scene-detail"]) .fy-swrow__timing .fy-swchip { border-left: 1px solid var(--border); padding-left: 10px; font: 400 11px var(--font-sans); }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip { gap: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); color: var(--muted-foreground); }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip > span { width: 8px; height: 8px; }
+:where([data-screen="scene-detail"]) .fy-swrow__titleline .fy-swchip[data-state="story"] > span { background: var(--neutral-400); }
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor { margin-top: 12px; }
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefstack { min-height: 44px; }
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder,
@@ -123,8 +126,14 @@
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__band { display: flex; flex-direction: column; height: calc(100% - 18px); min-height: 0; padding: 0; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child { padding-top: 18px; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow:first-child .fy-swrow__band { height: 100%; }
-:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 0; left: 10px; z-index: 1; }
-:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__frame { align-self: center; height: auto; aspect-ratio: var(--shot-aspect); width: min(100%, calc(272px * var(--shot-aspect))); max-width: 100%; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__grip { position: absolute; top: 10px; right: 10px; z-index: 1; padding: 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__framewrap { display: flex; justify-content: center; width: 100%; box-sizing: border-box; padding: 14px 16px 0; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__frame { flex: none; width: min(100%, calc(272px * var(--shot-aspect))); aspect-ratio: var(--shot-aspect); background: var(--neutral-950); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__frame[data-empty="true"] { background: var(--muted); }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__label { top: 10px; left: 10px; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__title { white-space: normal; overflow: visible; text-overflow: clip; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__title > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__titleline > .fy-swchip { flex-basis: 100%; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__img { object-fit: contain; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__body { flex: 1; width: 100%; padding: 14px 16px; }
 :where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__titleline { padding-right: 0; }
@@ -242,7 +251,7 @@
 
 @container (max-width: 780px) {
   :where([data-screen="scene-detail"]) .fy-sw__actions { flex-wrap: wrap; }
-  :where([data-screen="scene-detail"]) .fy-swrow__frame { grid-row: span 2; }
+  :where([data-screen="scene-detail"]) .fy-swrow__framewrap { grid-row: span 2; }
   :where([data-screen="scene-detail"]) .fy-swrow__body { padding: 14px 16px 12px; }
   :where([data-screen="scene-detail"]) .fy-swrow__titleline { padding-right: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { position: static; grid-column: 3; padding: 0 16px 14px; }
@@ -250,7 +259,8 @@
 }
 @container (max-width: 560px) {
   :where([data-screen="scene-detail"]) .fy-swrow__band { grid-template-columns: 26px minmax(0, 1fr); }
-  :where([data-screen="scene-detail"]) .fy-swrow__frame { grid-column: 2; grid-row: auto; width: min(100%, 285px); }
+  :where([data-screen="scene-detail"]) .fy-swrow__framewrap { grid-column: 2; grid-row: auto; }
+  :where([data-screen="scene-detail"]) .fy-swrows[data-layout="list"] .fy-swrow__frame { width: min(100%, 285px); }
   :where([data-screen="scene-detail"]) .fy-swrow__body { grid-column: 2; padding-left: 0; }
   :where([data-screen="scene-detail"]) .fy-swrow__actions { grid-column: 2; padding-left: 0; }
 }

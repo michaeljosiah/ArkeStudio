@@ -320,6 +320,54 @@ describe("Storyboard rows follow the design's row anatomy (SPEC-036 R-6..R-8)", 
     assert.equal(q(mounted, ".fy-arke .fy-arke__model"), null);
     assert.equal(q(mounted, '.fy-arke select[aria-label="Language model"]'), null);
   });
+
+  it("the frame rides a wrap the number sits on, the empty slot is bare and says so by attribute, and the state sits on the title line (issue 1114)", async () => {
+    // The fixture's shot 12 has a clip accepted, not a frame; the frame take stands in as the
+    // accepted one so the row draws a picture. Shot 13 stays empty.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.selections["sh_12"] = { acceptedTakeId: "tk_01J8A0000000000000000000A1" } as never;
+    const mounted = await mountState(state);
+    const [framed, empty] = all(mounted, ".fy-swrow__band");
+    assert.ok(framed && empty);
+    assert.ok(framed.querySelector(".fy-swrow__frame > .fy-swrow__img"), "shot 12 draws its frame");
+    // The number is the wrap's, not the frame's: on the card the frame is inset and the number
+    // straddles its corner (145f); on the row the two boxes coincide.
+    assert.ok(framed.querySelector(".fy-swrow__framewrap > .fy-swrow__label"), "the number sits on the wrap");
+    assert.equal(framed.querySelector(".fy-swrow__frame .fy-swrow__label"), null);
+    assert.equal(framed.querySelector(".fy-swrow__frame")?.getAttribute("data-empty"), null);
+    const slot = empty.querySelector(".fy-swrow__frame")!;
+    assert.equal(slot.getAttribute("data-empty"), "true", "the dashed slot is drawn from the attribute the page's frame uses");
+    assert.ok(slot.querySelector(".fy-swrow__hatch svg"), "the slot holds the picture mark");
+    assert.equal(slot.querySelector(".fy-swrow__hatch")?.textContent, "", "and no caption of its own — Needs frame is the state, under the title");
+    assert.ok(empty.querySelector(".fy-swrow__titleline > .fy-swchip"), "the state sits on the title line, as 145a and 145f draw it");
+    assert.equal(empty.querySelector(".fy-swrow__timing .fy-swchip"), null);
+    assert.match(empty.querySelector(".fy-swrow__titleline > .fy-swchip")?.textContent ?? "", /Needs frame/);
+  });
+
+  it("the script reads a mention as its name until the editor is written in, then as its token (issues 1103, 1114)", async () => {
+    const mounted = await mountState();
+    const row = q(mounted, '[data-shot-id="sh_12"]')!;
+    const under = row.querySelector(".fy-swrow__script .fy-bench__briefunder")!;
+    assert.equal(under.textContent?.replace("\u200b", ""), "Maren Kest grips the rail of The Vigil.", "read mode: the sheet's name, not the slug");
+    assert.equal(under.querySelectorAll(".fy-mentionname").length, 2);
+    assert.equal(under.querySelector(".fy-bench__briefchip"), null);
+    const editor = row.querySelector(".fy-swrow__script textarea") as HTMLTextAreaElement;
+    assert.equal(editor.value, "@maren-kest grips the rail of @the-vigil.", "the record keeps the tokens");
+    // Focus arrives on the editor's box rather than the textarea: React's input-event polyfill
+    // reaches for attachEvent when a linkedom textarea gains focus, and the box's onFocus is the
+    // same handler.
+    await act(async () => q(mounted, ".fy-swrow__script")!.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })));
+    assert.equal(under.textContent?.replace("\u200b", ""), "@maren-kest grips the rail of @the-vigil.", "edit mode: the token, letter for letter with the caret above it");
+    assert.equal(under.querySelectorAll(".fy-bench__briefchip").length, 2, "chipped as the bench chips a citation");
+    await act(async () => q(mounted, ".fy-swrow__script")!.dispatchEvent(new dom.window.Event("focusout", { bubbles: true })));
+    assert.equal(under.querySelectorAll(".fy-mentionname").length, 2, "and back to names when the editor is left");
+  });
+
+  it("the breadcrumb parts its levels on slashes (turn 139)", async () => {
+    const mounted = await mountState();
+    assert.equal(q(mounted, ".fy-sw__breadcrumb")?.textContent, "Saltlight \u00a0/\u00a0 Scene 4");
+  });
 });
 
 describe("Board bands and dividers follow the design (SPEC-036 R-8, R-11)", () => {

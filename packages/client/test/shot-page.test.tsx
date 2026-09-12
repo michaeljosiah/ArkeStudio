@@ -159,6 +159,7 @@ describe("the shot page (design turn 145)", () => {
     const page = q(mounted, '[data-testid="shot-page"]')!;
     assert.ok(page, "the route lands on the page, not the old sheet");
     assert.equal(page.querySelector(".fy-shot__crumb")?.textContent, "Scene 4 · The verse rises", "the breadcrumb ends on the scene");
+    assert.equal(page.querySelector(".fy-sw__breadcrumb")?.textContent, "Saltlight \u00a0/\u00a0 Scene 4 · The verse rises", "levels part on slashes; the dot is the scene's own (turn 139)");
     assert.match(page.querySelector("h1")?.textContent ?? "", /^Shot 12 · Maren at the rail, listening/);
     const thumbs = all(mounted, ".fy-shot__thumb");
     assert.deepEqual(thumbs.map((thumb) => thumb.getAttribute("aria-label")), ["Shot 12 · Maren at the rail, listening", "Shot 13 · The lamps answer"]);
@@ -329,8 +330,6 @@ describe("the shot page (design turn 145)", () => {
         { kind: "edit-shot", shotId: "sh_12", change: { continuity: { keepOut: "Modern boats" } } }],
       ["a sound field, keeping the kind", async (m) => { await blurInput(q(m, 'input[aria-label="Sound · ambience"]') as HTMLInputElement, "Water under the boards"); },
         { kind: "edit-shot", shotId: "sh_12", change: { audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water", ambience: "Water under the boards" } } }],
-      ["the intent", async (m) => { await blurInput(q(m, 'input[placeholder="How it should feel"]') as HTMLInputElement, "Small figure, large silence."); },
-        { kind: "edit-shot", shotId: "sh_12", change: { intent: "Small figure, large silence." } }],
       ["the title behind its pencil", async (m) => {
         await click(q(m, 'button[aria-label="Edit title for shot 12"]')!);
         await blurInput(q(m, 'input[aria-label="Title for shot 12"]') as HTMLInputElement, "Maren lets go");
@@ -355,11 +354,50 @@ describe("the shot page (design turn 145)", () => {
     await click(byText(q(mounted, ".fy-sw__tabs")!, "Stage"));
     assert.match(q(mounted, ".fy-shot__staging")?.textContent ?? "", /^v3 · 2 keys · /);
     assert.ok(q(mounted, '.fy-sw__full[aria-label="Full screen"]'), "full screen from the glyph on the view row");
+    // 144a ends the instruction bar with the disclosure; hand-staged, it has nothing to open on.
+    const disclosure = q(mounted, ".fy-swstage__construction .fy-swstage__inspection")!;
+    assert.equal(disclosure.querySelector("summary")?.textContent, "AI inspection and assumptions");
+    assert.equal(disclosure.getAttribute("aria-disabled"), "true", "shut until a build has something to say");
+    assert.equal(disclosure.querySelector("p"), null);
     await click(byText(q(mounted, ".fy-sw__tabs")!, "Shot"));
     await click(q(mounted, ".fy-sw__back")!);
     const band = q(mounted, '.fy-swrow__band[data-shot-id="sh_12"]');
     assert.ok(q(mounted, '[data-testid="workspace-rows"]'), "back on the scene");
     assert.equal(band?.dataset.selected, "true", "with the shot selected");
+  });
+
+  it("the Stage's disclosure opens on what a build said, once there is one (issue 1114)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    sceneOf(state).shots[0]!.staging = {
+      version: 3, cast: [], sets: [], keys: [{ t: 0, p: [0, 1.5, 4], l: [0, 1, 0] }, { t: 4, p: [0, 1.5, 2], l: [0, 1, 0] }],
+      authorship: { model: "claude-opus-5", sourceVersion: 2, assumptions: ["The rail is waist height."], assessment: "Two keys, a slow push toward the rail.", inspectedFrames: 3 },
+    };
+    const mounted = await mountState(state, `${SHOT_PATH}?view=stage`);
+    const disclosure = q(mounted, ".fy-swstage__inspection")!;
+    assert.equal(disclosure.getAttribute("aria-disabled"), null);
+    assert.equal(disclosure.querySelector("p")?.textContent, "Two keys, a slow push toward the rail.");
+    assert.equal(disclosure.querySelector("li")?.textContent, "The rail is waist height.");
+    assert.match(disclosure.querySelector("small")?.textContent ?? "", /claude-opus-5 · 3 views inspected/);
+  });
+
+  it("Camera is the nine 145b draws: eight selects and the grade line, no intent field (issue 1114)", async () => {
+    const mounted = await mountState();
+    const camera = all(mounted, ".fy-shot__fields > section").find((section) => section.querySelector(".fy-shot__sectionname")?.textContent === "Camera")!;
+    assert.deepEqual(
+      all(mounted, ".fy-shot__camera > .fy-shot__field > span:first-child").map((label) => label.textContent),
+      ["size", "angle", "lens", "focus", "movement", "pace", "lighting", "time", "grade"],
+    );
+    assert.equal(camera.querySelectorAll("select").length, 8);
+    assert.equal(camera.querySelector('input[placeholder="How it should feel"]'), null, "14d's intent line is not carried by the turn");
+  });
+
+  it("the page's script reads a mention as its name until written in (issues 1103, 1114)", async () => {
+    const mounted = await mountState();
+    const under = q(mounted, ".fy-shot__script .fy-bench__briefunder")!;
+    assert.equal(under.textContent?.replace("\u200b", ""), "Maren Kest grips the rail of The Vigil.");
+    await act(async () => q(mounted, ".fy-shot__script")!.dispatchEvent(new dom.window.Event("focusin", { bubbles: true })));
+    assert.equal(under.textContent?.replace("\u200b", ""), "@maren-kest grips the rail of @the-vigil.");
+    assert.equal(under.querySelectorAll(".fy-bench__briefchip").length, 2);
   });
 
   it("Play from here opens the scene's Preview on the shot it names (codex round 1)", async () => {
