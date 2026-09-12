@@ -20,7 +20,8 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
  * What the fill does at a width — the floor under art direction, the banner keeping its own
  * height, the stacked gate released from the fill below 1100px — is layout, which no text read
  * of the stylesheet can show; the reasons stand beside those rules in fidelity.css, and the
- * measurement belongs to a browser (the headless layout check), not to this suite.
+ * measurement belongs to a browser: the headless layout check is issue 1110, run beside the
+ * design gate rather than from this suite.
  */
 
 function at(path: string): string {

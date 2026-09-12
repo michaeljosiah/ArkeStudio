@@ -82,7 +82,7 @@ describe("image dialog", () => {
    * never clickable at all. Keying it to the subject decides the same thing during render, and
    * still cannot enable for the previous picture, because the key changes with the path.
    */
-  it("enables for a picture that was already complete when it mounted, and not for the next one until it is", async () => {
+  it("enables for a picture that was already complete when it mounted, not for the next one until it is, and opens and closes from its own controls", async () => {
     const dom = parseHTML("<!doctype html><html><body></body></html>");
     Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
     Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node, Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true });
@@ -90,6 +90,11 @@ describe("image dialog", () => {
     // React can attach onLoad — and no load event to come.
     const image = Object.getPrototypeOf(dom.document.createElement("img")) as object;
     let cached = true;
+    // linkedom's <dialog> has neither method; a browser's close() ends in a `close` event.
+    Object.assign(dom.HTMLElement.prototype, {
+      showModal(this: HTMLDialogElement) { (this as { open: boolean }).open = true; },
+      close(this: HTMLDialogElement) { (this as { open: boolean }).open = false; this.dispatchEvent(new dom.window.Event("close")); },
+    });
     Object.defineProperty(image, "complete", { configurable: true, get: () => cached });
     Object.defineProperty(image, "naturalWidth", { configurable: true, get: () => (cached ? 640 : 0) });
     const host = dom.document.createElement("div") as unknown as HTMLElement;
@@ -106,6 +111,22 @@ describe("image dialog", () => {
       assert.equal(trigger().disabled, true, "a new subject starts unavailable");
       await act(async () => host.querySelector("img")!.dispatchEvent(new dom.window.Event("load")));
       assert.equal(trigger().disabled, false, "and becomes available when its own load arrives");
+
+      // Open it, then out again by the backdrop and by the button; the keyboard comes back to the trigger each time.
+      let focused = 0;
+      trigger().focus = () => { focused += 1; };
+      const dialog = () => host.querySelector<HTMLDialogElement>("dialog.fy-portrait-dialog")!;
+      await act(async () => trigger().click());
+      assert.equal(dialog().open, true, "the trigger opens the enlarged copy");
+      await act(async () => dialog().dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+      assert.equal(dialog().open, false, "a click on the dialog itself — the backdrop — closes it");
+      assert.equal(focused, 1, "and focus returns to the trigger");
+      await act(async () => trigger().click());
+      await act(async () => dialog().querySelector<HTMLElement>(".fy-portrait-dialog__panel")!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+      assert.equal(dialog().open, true, "a click inside the panel does not");
+      await act(async () => dialog().querySelector<HTMLButtonElement>('button[aria-label="Close"]')!.click());
+      assert.equal(dialog().open, false, "the close button does");
+      assert.equal(focused, 2);
     } finally {
       await act(async () => root.unmount());
       delete (image as { complete?: unknown }).complete;

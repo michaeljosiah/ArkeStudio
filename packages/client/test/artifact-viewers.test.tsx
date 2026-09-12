@@ -12,6 +12,7 @@ import { applyTimelineCommands, orderedShots, seedEmptyPictureTimeline, type Art
 import { App } from "../src/App.js";
 import { VoiceSampleFlow } from "../src/components/character-voice-sample.js";
 import { artifactIsServable, artifactOpenLabel, artifactUses, artifactViewer } from "../src/lib/artifact-view.js";
+import { dismissPlayback, playbackSnapshot, playClip, setAudioFactoryForTest } from "../src/lib/audio.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -31,6 +32,12 @@ const dom = parseHTML("<!doctype html><html><body></body></html>");
 // linkedom has no layout and no frame loop; the app-wide toaster asks for both before it draws.
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
 Object.assign(dom.HTMLElement.prototype, { focus() {} });
+// linkedom's <dialog> has neither method. A browser's close() ends in a `close` event, which is
+// what the viewer listens to, so the stub does the same.
+Object.assign(dom.HTMLElement.prototype, {
+  showModal(this: HTMLDialogElement) { (this as { open: boolean }).open = true; },
+  close(this: HTMLDialogElement) { (this as { open: boolean }).open = false; this.dispatchEvent(new dom.window.Event("close")); },
+});
 Object.assign(globalThis, {
   window: dom.window,
   document: dom.document,
@@ -373,6 +380,31 @@ describe("what opens", () => {
     await unmount(mounted);
   });
 
+  it("hushes the dock when an artifact starts to sound, video or audio, so one thing plays at a time", async () => {
+    // The rule the app has had since SPEC-011. The dock is a stand-in for the browser's audio
+    // element, sounding; pressing play on the opened artifact — the browser fires `play` on the
+    // <video> or <audio> — pauses it.
+    const dock = { playbackRate: 1, src: "", currentTime: 0, duration: NaN, play: async () => {}, pause() { dock.paused = true; }, load() {}, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, paused: false };
+    setAudioFactoryForTest(() => dock as never);
+    try {
+      for (const [subject, tag] of [[CLIP, "video"], [BELLS, "audio"]] as const) {
+        dock.paused = false;
+        await playClip({ id: "dock-clip", url: "media/dock.wav", title: "The dock" });
+        assert.equal(playbackSnapshot().status, "playing", "the dock is sounding");
+        const mounted = await mountShelf();
+        await open(mounted, subject);
+        const media = panel(mounted)!.querySelector<HTMLMediaElement>(`${tag}.fy-artview__media`)!;
+        await act(async () => media.dispatchEvent(new dom.window.Event("play", { bubbles: true })));
+        assert.equal(dock.paused, true, `${tag}: the dock was paused`);
+        await unmount(mounted);
+        dismissPlayback();
+      }
+    } finally {
+      dismissPlayback();
+      setAudioFactoryForTest(null);
+    }
+  });
+
   it("embeds a PDF, and keeps the identity and a save around it", async () => {
     const mounted = await mountShelf();
     await open(mounted, BIBLE);
@@ -535,20 +567,38 @@ describe("the frame itself", () => {
     await unmount(mounted);
   });
 
-  it("closes when the dialog closes — Escape, the backdrop, the button — and puts focus back on the card", async () => {
-    // A native <dialog> brings Escape, the focus trap and background inerting with it, and every
-    // way of dismissing it ends in the element's own `close` event; that event is what the screen
-    // listens to, so its state cannot disagree with the element however it was dismissed.
+  it("closes from its button, from the backdrop and from Escape, and puts focus back on the card each time", async () => {
+    // A native <dialog> brings Escape, the focus trap and background inerting with it; the
+    // backdrop click and the focus return are the viewer's own, and every way out ends in the
+    // element's `close` event, which is what the screen listens to.
     const mounted = await mountShelf([PICTURE, BOARD]);
     const trigger = mounted.container.querySelector<HTMLButtonElement>(`button.fy-gridcard__open[title="${PICTURE.file}"]`)!;
     let focused = 0;
     trigger.focus = () => { focused += 1; };
+    const dialog = () => mounted.container.querySelector<HTMLDialogElement>("dialog.fy-artview")!;
+    const gone = (how: string) => {
+      assert.equal(panel(mounted) === null, true, `${how}: the frame is gone`);
+      assert.equal(dialog().open, false, `${how}: and the element agrees`);
+    };
+    // The button.
     await open(mounted, PICTURE);
     assert.ok(panel(mounted), "open");
-    const dialog = mounted.container.querySelector("dialog.fy-artview")!;
-    await act(async () => dialog.dispatchEvent(new dom.window.Event("close", { bubbles: false })));
-    assert.equal(panel(mounted), null, "the frame is gone");
+    await act(async () => mounted.container.querySelector<HTMLButtonElement>('button[aria-label^="Close "]')!.click());
+    gone("the close button");
     assert.equal(focused, 1, "and the keyboard is back on the card it left from, not at the top of the document");
+    // The backdrop: a click that lands on the dialog itself rather than its panel.
+    await open(mounted, PICTURE);
+    await act(async () => dialog().dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    gone("the backdrop");
+    assert.equal(focused, 2);
+    // A click inside the panel is not the backdrop.
+    await open(mounted, PICTURE);
+    await act(async () => panel(mounted)!.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+    assert.ok(panel(mounted), "a press inside the frame leaves it open");
+    // Escape: the browser closes the element itself, and the close event is all the screen sees.
+    await act(async () => dialog().close());
+    gone("Escape");
+    assert.equal(focused, 3);
     await unmount(mounted);
   });
 

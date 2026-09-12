@@ -4,7 +4,8 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { GenerationDialog } from "../src/components/generation-dialog.js";
-import { __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -78,6 +79,35 @@ describe("generation dialog", () => {
     assert.equal(submit(host).disabled, false);
     await render({ prompt: "   ", promptOptional: true });
     assert.equal(submit(host).disabled, false, "a location view composes its brief without the line");
+  });
+
+  it("submits through the host and sends nothing itself", async () => {
+    // The host sends; the dialog arranges. A dialog that called the store as well would decide
+    // what every screen using it may ask for, and each host would pay for the same generation twice.
+    const sent: string[] = [];
+    __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(json); } } as unknown as ArkeBridge);
+    try {
+      const { host, seen } = await mount({ prompt: "A portrait" });
+      await act(async () => submit(host).click());
+      assert.equal(seen.submitted, 1, "the host's onSubmit ran once");
+      assert.deepEqual(sent, [], "and no frame left the dialog on its own");
+    } finally {
+      __setBridgeForTest(null);
+    }
+  });
+
+  it("gives a returned preview its pick and its download as siblings, and a save is not a pick", async () => {
+    let picked = 0;
+    const { host } = await mount({
+      previews: [{ key: "p1", path: "references/maren-kest/incoming/candidate-1.png", label: "Candidate 1" }],
+      selected: null,
+      onSelect: () => { picked += 1; },
+    });
+    const download = host.querySelector<HTMLButtonElement>('button[aria-label^="Download "]');
+    assert.ok(download, "the preview cell offers a save");
+    assert.equal(download.closest(".fy-imghost")?.querySelector("button:not(.fy-imgdl)") !== null, true, "beside the pick, in the same host box");
+    await act(async () => download.click());
+    assert.equal(picked, 0, "saving a copy chooses nothing");
   });
 
   it("closes on the backdrop and on Escape, and returns focus to whatever opened it", async () => {

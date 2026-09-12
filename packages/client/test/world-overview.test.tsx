@@ -13,7 +13,8 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * The design draws the fan as fixed-height cards, which only holds if the two lines on the card
  * are bounded. Height itself is layout: the fixed lines, the clamps and the levelled rows are
  * rules in fidelity.css with their reasons beside them, and only a browser can measure whether
- * they hold (reading the declarations back out of the stylesheet as text could not). What these
+ * they hold (reading the declarations back out of the stylesheet as text could not; the headless
+ * layout check is issue 1110). What these
  * assert is the input to them — that the role line carries the role and nothing else, that a
  * character with no role contributes no text rather than a sentence of essence prose, and that
  * long copy reaches the card whole for the CSS to clip.

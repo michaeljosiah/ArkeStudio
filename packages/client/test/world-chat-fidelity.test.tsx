@@ -156,7 +156,7 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean } = {},
+  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean } = {},
 ): string {
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
@@ -222,6 +222,14 @@ function renderActionConversation(
     },
     status: options.status ?? "pending",
     preparedAt: "2026-08-06T10:00:01Z",
+    // A finished generation, with its one video landed: what the receipt block draws.
+    ...(options.delivered ? { receipt: {
+      kind: "generation", id: "rc_01J8F3K2QW9VZX4N7M0RTYB6HC", summary: "1 video landed",
+      generation: { authorized: 1, completed: 1, failed: 0, cancelled: 0, unattempted: 0, actualMicroUsd: 120_000, results: [{
+        id: "rs_01J8F3K2QW9VZX4N7M0RTYB6HC", medium: "video", status: "completed", description: "World cover, take 1",
+        mediaPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/clip.mp4", posterPath: "productions/saltlight/takes/tk_01J8F0000000000000000000B2/frame.png",
+      }] },
+    } } : {}),
     availableDecisions: options.status === "stale" ? ["deny"] : options.status && options.status !== "pending" ? [] : ["approve", "deny"],
   }] as never;
   if (options.older) {
@@ -305,6 +313,16 @@ describe("conversation permission cards", () => {
     }
     assert.doesNotMatch(renderActionConversation("generation", { status: "completed", cancellable: true }), bench, "nothing left to cancel");
     assert.doesNotMatch(renderActionConversation("generation", { status: "running" }), bench, "a provider that cannot cancel is not offered as if it could");
+  });
+
+  it("gives a delivered generation result the platform's player, controls and all (SPEC-041 R-81)", () => {
+    // The one place the native player stays: a generation result owes seeking, volume and full
+    // screen. The take-review card below owes only playable media and uses the house player.
+    const html = renderActionConversation("generation", { status: "completed", delivered: true });
+    const receipt = html.slice(html.indexOf('class="fy-actioncard__receipt"'));
+    assert.match(receipt, /1 video landed/);
+    assert.match(receipt, /<video class="fy-actioncard__media" controls=""/, "native controls on the result's video");
+    assert.match(receipt, /poster="[^"]*frame\.png"/);
   });
 
   it("renders playable take evidence, destination, history, and rejection citation", () => {

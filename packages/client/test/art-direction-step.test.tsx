@@ -712,14 +712,32 @@ describe("location views ask in the dialog (design 66)", () => {
     assert.ok(dialog.includes("An angle needs a name"), "and says so while it is empty");
   });
 
-  it("lets the camera line be empty, because the brief is composed without it", () => {
+  it("lets the camera line be empty, because the brief is composed without it", async () => {
     // The one surface where the prompt adds to a brief rather than being it. Refusing an empty
-    // box here would demand a sentence nobody needs to write, so the dialog is told the line is
-    // optional and says so; that an optional line does not disable the submit is the dialog's
-    // own test (generation-dialog.test.tsx).
-    const html = locationHtml();
-    const dialog = html.slice(html.indexOf('<dialog class="fy-gendialog'));
-    assert.ok(dialog.includes("Optional. The place, its look and the angle&#x27;s name are sent whether or not you write here."));
+    // box here would demand a sentence nobody needs to write. Mounted, with the angle named and
+    // the camera line left blank, Generate stays available; the hint says why.
+    Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {} });
+    __setStateForTest(FIXTURE_STATE);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${WORLD_ID}/locations/the-vigil/reference`]}><App /></MemoryRouter>));
+      const dialog = container.querySelector<HTMLElement>("dialog.fy-gendialog")!;
+      assert.ok(dialog, "the view dialog is on the page");
+      assert.ok(dialog.textContent?.includes("Optional. The place, its look and the angle's name are sent whether or not you write here."));
+      const generate = () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Generate")!;
+      assert.equal(generate().disabled, true, "an angle needs a name");
+      const name = dialog.querySelector<HTMLInputElement>(".fy-locref__namefield input")!;
+      const props = (name as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(name).find((k) => k.startsWith("__reactProps$"))!]!;
+      await act(async () => props.onChange({ target: { value: "From the seaward stair" } }));
+      assert.equal(dialog.querySelector("textarea")?.value ?? "", "", "the camera line is still blank");
+      assert.equal(generate().disabled, false, "and that is not what stops a generation here");
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+      __setStateForTest(FIXTURE_STATE);
+    }
   });
 
 });
