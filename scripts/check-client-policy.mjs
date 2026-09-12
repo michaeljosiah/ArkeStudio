@@ -43,34 +43,49 @@ if (!/--font-sans:\s*"Geist Sans"/.test(typography) || /--font-sans:\s*"Geist"[;
   fail('typography.css must name --font-sans "Geist Sans" exactly', join(TOKENS_DIR, "typography.css"));
 }
 
-// Every stylesheet closes every block it opens. Vite serves each file as its own <style> in
-// development, where the parser closes an unfinished block at end-of-file and the page looks
-// right; the production bundle concatenates the imports, so a block left open in one file
-// swallows every stylesheet after it — the shot page and the Activity panel shipped unstyled
-// that way (issue 1113). Nothing else can see it: the tests render without CSS and the dev
-// app cannot fail. Comments and strings are set aside (a `content: "{"` is not a block), the
-// newlines kept so a failure names the line whose block is still open.
+// Every stylesheet closes what it opens. Vite serves each file as its own <style> in
+// development, where the parser closes an unfinished block or comment at end-of-file and the
+// page looks right; the production bundle concatenates the imports, so a block — or a comment
+// — left open in one file swallows every stylesheet after it. The shot page and the Activity
+// panel shipped unstyled that way (issue 1113). Nothing else can see it: the tests render
+// without CSS and the dev app cannot fail. One pass in the tokenizer's order — a string is a
+// string before a comment can start inside it, a comment is a comment before a brace can count
+// inside it — with the line kept so a failure names where the open thing began.
 {
-  const blank = (match) => match.replace(/[^\n]/g, " ");
   const offenders = [];
   for (const path of walk(SRC)) {
     if (!path.endsWith(".css")) continue;
-    const text = read(path)
-      .replace(/\/\*[\s\S]*?\*\//g, blank)
-      .replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, blank);
+    const text = read(path);
+    const file = relative(SRC, path);
     const open = [];
     let line = 1;
     let stray = null;
-    for (const ch of text) {
-      if (ch === "\n") line += 1;
-      else if (ch === "{") open.push(line);
+    let comment = null;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "\n") { line += 1; continue; }
+      if (ch === '"' || ch === "'") {
+        // To the closing quote; a backslash escapes the next character; a bare newline ends
+        // the string as the tokenizer does (a bad string), so a stray quote cannot hide a file.
+        for (i += 1; i < text.length && text[i] !== ch && text[i] !== "\n"; i++) if (text[i] === "\\") i += 1;
+        if (text[i] === "\n") line += 1;
+        continue;
+      }
+      if (ch === "/" && text[i + 1] === "*") {
+        const close = text.indexOf("*/", i + 2);
+        if (close === -1) { comment = line; break; }
+        for (let j = i; j < close; j++) if (text[j] === "\n") line += 1;
+        i = close + 1;
+        continue;
+      }
+      if (ch === "{") open.push(line);
       else if (ch === "}" && open.pop() === undefined && stray === null) stray = line;
     }
-    const file = relative(SRC, path);
+    if (comment !== null) offenders.push(`${file}:${comment} opens a comment that never closes`);
     if (stray !== null) offenders.push(`${file}:${stray} closes a block nothing opened`);
     if (open.length > 0) offenders.push(`${file}:${open[open.length - 1]} opens a block that never closes`);
   }
-  if (offenders.length > 0) fail("a stylesheet's braces must balance — the bundle nests every later stylesheet inside an open block", offenders.join("; "));
+  if (offenders.length > 0) fail("a stylesheet must close every block and comment it opens — the bundle nests every later stylesheet inside an open one", offenders.join("; "));
 }
 
 // No colour is hard-coded outside the token files (R-11).

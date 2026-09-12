@@ -5,11 +5,19 @@ import { mentionSpans, propSlug, type Prop, type Sheet } from "@arke-studio/cont
  * What a mention reads as when the words are read rather than written: a sheet's name, a
  * prop's name, and for a slug nothing in the world answers to — the scene's location before
  * it has a sheet, say — the slug itself without its sigil (issue 1103).
+ *
+ * The two namespaces are independent and can meet: `@car` may be a sheet named Carl and a
+ * prop named Car at once, and dispatch cites both. The sheet keeps the word here — a sheet's
+ * id is the slug itself, a prop's is derived from its name — so a prop only names a slug no
+ * sheet has claimed, rather than silently taking one over.
  */
 export function mentionNames(sheets: readonly Sheet[], props: readonly Prop[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>();
   for (const sheet of sheets) names.set(sheet.id, sheet.name);
-  for (const prop of props) names.set(propSlug(prop.name), prop.name);
+  for (const prop of props) {
+    const slug = propSlug(prop.name);
+    if (!names.has(slug)) names.set(slug, prop.name);
+  }
   return names;
 }
 

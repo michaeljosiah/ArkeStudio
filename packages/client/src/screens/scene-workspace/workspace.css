@@ -88,6 +88,15 @@
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder,
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefmirror,
 :where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__brieftext { font: 400 15px/1.55 var(--font-sans); }
+/* The words size the box: the underlay sits in flow and the transparent editor covers it, so a
+   script shows whole on the row as 145a draws it, and read mode's names — not the tokens'
+   length — never leave lines behind a fixed height or a scroll that counted the tokens. Written
+   in, the editor and the underlay hold the same characters and agree line for line; until then
+   the editor's own overflow stays out of sight. The card reads three lines (145f) and grows to
+   the whole script only while it is written in. */
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor .fy-bench__briefunder { position: static; height: auto; overflow: visible; }
+:where([data-screen="scene-detail"]) .fy-swrow__scripteditor:not(:focus-within) .fy-bench__brieftext { overflow: hidden; }
+:where([data-screen="scene-detail"]) .fy-swrows[data-layout="grid"] .fy-swrow__scripteditor:not(:focus-within) .fy-bench__briefunder { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 :where([data-screen="scene-detail"]) .fy-swrow__actions { position: absolute; top: 34px; right: 20px; border: 0; padding: 0; }
 :where([data-screen="scene-detail"]) .fy-swrow__actionline { align-items: center; gap: 10px; }
 :where([data-screen="scene-detail"]) .fy-swrow__generate { flex: none; padding: 8px 16px; min-height: 36px; font-size: 13px; font-weight: 400; }
