@@ -6199,6 +6199,9 @@ select.fy-set__pill { padding-right: 26px; }
   padding: 3px 7px; border-radius: 5px; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 40;
 }
 .fy-tip:hover::after, .fy-tip:focus-visible::after { opacity: 1; }
+/* A control at a row's right edge hangs its tip from its own end: centred, the tip's box would
+   run past the column and give it a scrollbar for a tip nobody is hovering. */
+.fy-tip--end::after { left: auto; right: 0; transform: none; }
 .fy-timeline__toolbar button:disabled { cursor: default; }
 .fy-timeline__refusal { padding: 6px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--destructive) 7%, var(--background)); color: var(--destructive); font: 500 9px/1.4 var(--font-mono); }
 /* The OV lane is shorter than V on purpose: it is not the film, it is what is laid over it. */
@@ -7490,7 +7493,8 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 /* Stage — a derived three.js block and an authored-camera playblast, not another shot editor. */
 /* The Stage — a greybox previs of one shot: viewport, panel, timeline (the design's Stage tab). */
 .fy-swstage { flex: 1; min-height: 0; padding: 0 0 18px; display: flex; flex-direction: column; gap: 11px; overflow: auto; }
-.fy-swstage--empty { align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
+.fy-swstage--empty { position: relative; align-items: center; justify-content: center; color: var(--muted-foreground); font-size: 12px; }
+.fy-swstage--empty > .fy-swstage__exit { position: absolute; top: 0; right: 0; }
 .fy-swstage__head { flex: none; display: flex; align-items: center; gap: 8px; }
 .fy-swstage__head > strong { font: 600 12.5px var(--font-sans); letter-spacing: -0.01em; }
 .fy-swstage__step { width: 22px; height: 22px; display: inline-grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
@@ -7533,57 +7537,28 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__label--camera { padding: 3px 8px; border: 0; background: var(--neutral-950); color: var(--neutral-50); box-shadow: var(--shadow-sm); font: 600 10px var(--font-sans); letter-spacing: .06em; }
 .fy-swstage__panel { width: 238px; flex: none; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
 .fy-swstage__note { margin: 0; color: var(--muted-foreground); font: 400 11.5px/1.6 var(--font-sans); text-wrap: pretty; }
-.fy-swstage__sel { display: flex; align-items: center; gap: 7px; padding: 7px 9px; border-radius: 8px; background: var(--secondary); color: var(--neutral-400); font: 400 10.5px var(--font-mono); }
-.fy-swstage__sel > span:first-child { width: 7px; height: 7px; flex: none; border: 1px solid var(--neutral-400); border-radius: 2px; transform: rotate(45deg); }
-.fy-swstage__sel > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fy-swstage__sel[data-selected="true"] { color: var(--foreground); font-weight: 500; }
-.fy-swstage__sel[data-selected="true"] > span:first-child { border: 0; background: var(--foreground); }
 .fy-swstage__block { display: flex; flex-direction: column; gap: 5px; }
-.fy-swstage__block + .fy-swstage__block, .fy-swstage__block--playblast { border-top: 1px solid var(--border); padding-top: 11px; }
-.fy-swstage__block--playblast { gap: 7px; }
+.fy-swstage__block + .fy-swstage__block { border-top: 1px solid var(--border); padding-top: 11px; }
 .fy-swstage__eyebrow { display: flex; align-items: baseline; gap: 8px; }
 .fy-swstage__eyebrow > span:first-child { flex: 1; color: var(--muted-foreground); font: 500 10px var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
 .fy-swstage__eyebrow > span:last-child:not(:first-child) { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
 .fy-swstage__row { display: flex; align-items: center; gap: 8px; min-height: 22px; }
 .fy-swstage__row > span:first-child { width: 48px; flex: none; color: var(--neutral-400); font: 400 10px var(--font-mono); }
 .fy-swstage__row > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
-.fy-swstage__block--playblast .fy-swstage__row > span:first-child { flex: 1; }
-.fy-swstage__block--playblast .fy-swstage__row > span:nth-child(2) { flex: none; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
-.fy-swstage__block--playblast .fy-swstage__row > span[data-filed="true"] { color: var(--success); }
 .fy-swstage__nudge { display: inline-flex; align-items: center; gap: 1px; flex: none; }
 .fy-swstage__nudge button { width: 19px; height: 19px; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; transition: var(--transition-control); }
 .fy-swstage__nudge button:hover { background: var(--accent); color: var(--foreground); }
-.fy-swstage__row--chips { align-items: flex-start; }
-.fy-swstage__row--chips > span:first-child { padding-top: 4px; }
 .fy-swstage__chips { display: flex; flex-wrap: wrap; gap: 3px; flex: 1; min-width: 0; }
 .fy-swstage__chips button { border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--muted-foreground); padding: 2px 7px; cursor: pointer; font: 400 10px var(--font-sans); transition: var(--transition-control); }
 .fy-swstage__chips button:hover { background: var(--accent); color: var(--foreground); }
 .fy-swstage__chips button[data-on="true"] { border-color: var(--foreground); background: var(--foreground); color: var(--background); font-weight: 500; cursor: default; }
 .fy-swstage__quiet { color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
-.fy-swstage__mover { display: flex; align-items: center; gap: 8px; min-height: 22px; border: 0; background: transparent; color: var(--foreground); padding: 0; cursor: pointer; text-align: left; }
-.fy-swstage__mover > span:first-child { width: 8px; height: 8px; flex: none; border-radius: 2px; }
-.fy-swstage__mover > span:nth-child(2) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px var(--font-sans); }
-.fy-swstage__mover > span:last-child { border: 1px solid var(--border); border-radius: 5px; padding: 2px 7px; color: var(--neutral-400); font: 400 9.5px var(--font-mono); }
-.fy-swstage__mover > span[data-walks="true"] { border-color: transparent; background: var(--secondary); color: var(--foreground); font-weight: 500; }
-.fy-swstage__sets { display: flex; flex-direction: column; gap: 7px; }
-.fy-swstage__set { display: flex; flex-direction: column; gap: 6px; padding: 7px; border: 1px solid var(--border); border-radius: 7px; }
-.fy-swstage__set-head { display: flex; align-items: center; gap: 5px; }
-.fy-swstage__set-head input { flex: 1; min-width: 0; }
-.fy-swstage__set-head button { width: 24px; height: 24px; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
-.fy-swstage__set-head button:hover:not(:disabled) { background: var(--accent); color: var(--foreground); }
-.fy-swstage__set input { box-sizing: border-box; height: 24px; border: 1px solid var(--border); border-radius: 5px; background: var(--background); color: var(--foreground); padding: 3px 5px; font: 400 10px var(--font-mono); }
-.fy-swstage__set-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
-.fy-swstage__set-fields label { min-width: 0; display: flex; align-items: center; gap: 3px; color: var(--neutral-400); font: 400 9px var(--font-mono); }
-.fy-swstage__set-fields input { width: 100%; min-width: 0; }
-.fy-swstage__set-add { width: 100%; }
 .fy-swstage__spacer { flex: 1; }
-.fy-swstage__block--playblast .ui-btn { width: 100%; }
 .fy-swstage__timeline { flex: none; display: grid; grid-template-columns: 180px minmax(0, 1fr) auto; align-items: center; gap: 6px 12px; max-height: 240px; overflow: auto; padding: 6px; }
 .fy-swstage__transport { display: flex; align-items: center; gap: 8px; }
 .fy-swstage__lane-label { display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: transparent; color: var(--foreground); font: 400 11px var(--font-mono); text-align: left; overflow: hidden; white-space: nowrap; cursor: pointer; }
 .fy-swstage__lane-label i { flex: none; width: 7px; height: 7px; border-radius: 50%; }
 .fy-swstage__lane-head { position: absolute; top: 0; height: 16px; border-left: 1px solid var(--foreground); pointer-events: none; z-index: 1; }
-.fy-swstage__motion-mark[data-motion-mark="selected"] { outline: 1px solid var(--ring); outline-offset: 2px; }
 .fy-swstage__play { width: 30px; height: 30px; flex: none; display: inline-grid; place-items: center; border: 0; border-radius: 999px; background: var(--foreground); color: var(--background); cursor: pointer; transition: var(--transition-control); }
 .fy-swstage__play:hover { opacity: .88; }
 .fy-swstage__time { flex: none; color: var(--muted-foreground); font: 400 11px var(--font-mono); }
@@ -7738,8 +7713,12 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
   .fy-swvariants__panel > header button, .fy-swvariants__grid article button,
   .fy-swpreview__transport button, .fy-swpreview__filmstrip button,
   .fy-swstage__step, .fy-swstage__play, .fy-swstage__keytools button, .fy-swstage__nudge button,
-  .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button,
-  .fy-swstage__set input, .fy-swstage__set-head button { min-width: 44px; min-height: 44px; }
+  .fy-swstage__modes button, .fy-swstage__ghost, .fy-swstage__chips button { min-width: 44px; min-height: 44px; }
+  /* The inspector's rows and boxes (turn 144) grow to the touch target in height only: they are
+     as wide as their column already, and a number box is as wide as its own text. */
+  .fy-swstage__item, .fy-swstage__add, .fy-swstage__markrow, .fy-swstage__link, .fy-swstage__select, .fy-swstage__field,
+  .fy-swstage__stepper > input, .fy-swstage__triad input, .fy-swstage__check, .fy-swstage__range, .fy-swstage__exit { min-height: 44px; }
+  .fy-swstage__check > input { width: 24px; height: 24px; }
   .fy-swstage__track { height: 44px; }
   .fy-swstage__key, .fy-swstage__lane-head { top: 18px; }
   .fy-swstage__rail, .fy-swstage__head-fill { top: 24px; }
@@ -8289,11 +8268,6 @@ button.fy-arke__who { border: 0; background: transparent; padding: 0; color: inh
 .fy-swstage__construction > span { font-size: 11px; opacity: .7; }
 .fy-swstage__construction details { width: 100%; }
 
-.fy-swstage__motion-mark { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0; }
-.fy-swstage__motion-mark label { display:flex; flex-direction:column; max-width:80px; }
-.fy-swstage__motion-mark input, .fy-swstage__row input { width:72px; }
-.fy-swstage__set > label { display:inline-flex; flex-direction:column; max-width:72px; margin:4px; }
-.fy-swstage__set > label input { max-width:64px; }
 
 .fy-prompt-review { font: 400 10.5px/1.6 var(--font-sans); color: var(--neutral-400); }
 .fy-prompt-review p { margin: 6px 0; }

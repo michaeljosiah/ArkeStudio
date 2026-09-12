@@ -3,8 +3,9 @@ import { afterEach, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type Shot } from "@arke-studio/contracts";
+import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
+import { sameLine } from "../src/screens/scene-workspace/stage-inspector.js";
 import { SelectionProvider } from "../src/screens/scene-workspace/selection.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -70,6 +71,10 @@ function capturePointer(target: HTMLElement) {
   });
 }
 const click = async (target: HTMLElement) => { await act(async () => target.click()); };
+/** The Stage inspector's list (turn 144): one line per thing on the stage, pressed to select it. */
+const stageItem = (q: (selector: string) => HTMLElement, name: string): HTMLElement =>
+  [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].find((item) => item.querySelector("span:nth-child(2)")?.textContent === name)!;
+const selectedItem = (q: (selector: string) => HTMLElement): string => q('.fy-swstage__item[data-selected="true"]')?.textContent ?? "";
 const tick = async () => {
   const pending = [...frames.values()];
   frames.clear();
@@ -176,10 +181,8 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   const first = performance.querySelector<HTMLElement>("button")!;
   await click(first);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1");
-  assert.ok(q('[data-motion-mark="selected"]').closest("details")!.open);
-  assert.match(q(".fy-swstage__sel").textContent ?? "", /Maren/);
-  assert.equal((await key(q('[data-motion-mark="selected"]').closest("details")!.querySelector("summary")!, " ")).defaultPrevented, false);
-  assert.ok(q('[aria-label="Play"]'), "Space leaves summary activation to the browser");
+  assert.match(selectedItem(q), /Maren/, "a pressed mark selects its figure, whose form shows the mark");
+  assert.match(q('[data-motion-mark="selected"]').textContent ?? "", /1\.00 s/);
   capturePointer(performance);
   capturePointer(first);
   await pointer(first, "pointerdown", 200);
@@ -192,13 +195,14 @@ it("selects timed marks, retimes within neighbours, and Keeps the same performan
   await pointer(first, "pointerup", 225);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "1.25", "the first action mark is not pinned");
   await click(performance.querySelectorAll<HTMLElement>("button")[1]!);
-  assert.match(q(".fy-swstage__sel").textContent ?? "", /Maren Kest · mark 2/);
+  assert.match(selectedItem(q), /Maren Kest/);
+  assert.match(q('[data-motion-mark="selected"]').textContent ?? "", /3\.00 s/, "mark 2");
   const last = object.querySelectorAll<HTMLElement>("button")[2]!;
   capturePointer(object);
   capturePointer(last);
   await pointer(last, "pointerdown", 450);
-  assert.match(q(".fy-swstage__sel").textContent ?? "", /cart/);
-  assert.ok(q('[data-motion-mark="selected"]').closest("details")!.open);
+  assert.match(selectedItem(q), /Cart/, "an object mark selects a set of its group");
+  assert.ok(q('[data-motion-mark="selected"]'));
   await pointer(last, "pointermove", 600);
   await pointer(last, "pointerup", 600);
   assert.equal(q('[aria-label="Stage playhead"]').getAttribute("aria-valuenow"), "4");
@@ -282,6 +286,7 @@ it("distinguishes equal coordinates in different anchor spaces and pins a termin
   assert.equal(q('[aria-label="Hold from 0.00 to 2.00 seconds"]'), null);
   assert.ok(q('[aria-label="Hold from 2.00 to 4.00 seconds"]'));
   assert.equal((q('[aria-label="Retime hold ending at 4.00 seconds"]') as HTMLButtonElement).disabled, true);
+  await click(stageItem(q, "camera"));
   await render(true);
   assert.equal((q('[aria-label="Ease in"]') as HTMLInputElement).disabled, true);
 });
@@ -289,16 +294,17 @@ it("distinguishes equal coordinates in different anchor spaces and pins a termin
 it("clears a motion selection when its mark is removed or an earlier mark is inserted", async () => {
   const { q } = await mount(movingShot);
   await click(q('[aria-label="Maren Kest mark 2 at 3.00 seconds"]'));
-  const selected = q('[data-motion-mark="selected"]');
-  await click([...selected.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Remove mark")!);
+  assert.ok(q('[data-motion-mark="selected"]'));
+  const links = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__link")];
+  await click(links().find(button => button.textContent === "Remove mark")!);
   assert.equal(q('[data-motion-mark="selected"]'), null);
-  assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
+  assert.match(selectedItem(q), /Maren Kest/, "the figure the mark belonged to stays selected");
   await click(q('[aria-label="cart mark 2 at 2.00 seconds"]'));
-  const details = q('[data-motion-mark="selected"]').closest("details")!;
+  assert.ok(q('[data-motion-mark="selected"]'));
   await key(q('[aria-label="Stage playhead"]'), "Home");
-  await click([...details.querySelectorAll<HTMLElement>("button")].find(button => button.textContent === "Mark motion here")!);
-  assert.equal(q('[data-motion-mark="selected"]'), null);
-  assert.match(q(".fy-swstage__sel").textContent ?? "", /nothing selected/);
+  await click(links().find(button => button.textContent === "Mark here")!);
+  assert.equal(q('[data-motion-mark="selected"]'), null, "an earlier mark inserted renumbers the marks, so none is the chosen one");
+  assert.match(selectedItem(q), /Cart/);
 });
 
 it("edits gait, ease and hold with a single-key camera through retiming and Keep (#1044, #1046)", async () => {
@@ -307,14 +313,17 @@ it("edits gait, ease and hold with a single-key camera through retiming and Keep
     shot.staging!.performances = [{ sheetId: "maren-kest", keys: [{ t: 0, x: 0, z: 0 }, { t: 1, x: 5, z: 0 }] }];
     shot.staging!.keys = [shot.staging!.keys[0]!];
   });
-  assert.match(q('.fy-swstage__mover').textContent ?? "", /walk.*too fast/);
+  assert.match(stageItem(q, "Maren Kest").textContent ?? "", /walk.*too fast/);
+  // The figure's form shows one mark's fields at a time: the mark pressed on the timeline.
+  await click(q('[aria-label="Maren Kest mark 1 at 0.00 seconds"]'));
   const select = q('[aria-label="Maren Kest 0s gait"]');
   const propsKey = Object.keys(select).find(key => key.startsWith("__reactProps$"))!;
   const props = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[propsKey]!;
   await act(async () => props.onChange({ target: { value: "run" } }));
-  assert.match(q('.fy-swstage__mover').textContent ?? "", /run/);
-  assert.doesNotMatch(q('.fy-swstage__mover').textContent ?? "", /too fast/);
-  for (const [label, value] of [["0s easeOut", "0.25"], ["1s easeIn", "0.5"], ["0s hold", "0.25"]]) {
+  assert.match(stageItem(q, "Maren Kest").textContent ?? "", /run/);
+  assert.doesNotMatch(stageItem(q, "Maren Kest").textContent ?? "", /too fast/);
+  for (const [mark, label, value] of [["1 at 0.00", "0s easeOut", "0.25"], ["2 at 1.00", "1s easeIn", "0.5"], ["1 at 0.00", "0s hold", "0.25"]]) {
+    await click(q(`[aria-label="Maren Kest mark ${mark} seconds"]`));
     const input = q(`[aria-label="Maren Kest ${label}"]`);
     const key = Object.keys(input).find(key => key.startsWith("__reactProps$"))!;
     const handlers = (input as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[key]!;
@@ -341,6 +350,7 @@ it("puts a chosen camera move in the draft and Keeps it without changing timed a
   const { q, sent, shot, render } = await mount(movingShot);
   const action = structuredClone(shot.staging!.performances);
   const objects = structuredClone(shot.staging!.objectMotions);
+  await click(stageItem(q, "camera"));
   const select = q('[aria-label="Camera move"]');
   const propsKey = Object.keys(select).find(key => key.startsWith("__reactProps$"))!;
   const props = (select as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[propsKey]!;
@@ -356,4 +366,184 @@ it("puts a chosen camera move in the draft and Keeps it without changing timed a
   assert.deepEqual(command.staging?.objectMotions, objects);
   await render(true);
   assert.equal((q('[aria-label="Camera move"]') as HTMLSelectElement).disabled, true);
+});
+
+// ---- The panel as an inspector (design turn 144) ------------------------------------------------
+
+it("lists what is on the stage with its state, and shows one form for the selection (turn 144)", async () => {
+  const { q } = await mount((shot) => { movingShot(shot); shot.framing = { lens: "35mm" }; });
+  const items = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__item")].map((item) => item.textContent);
+  assert.deepEqual(items(), ["camerastatic · 3 keys", "Maren Kestwalk · stands", "Cartbox"], "camera, every figure, every set, each with its state");
+  const eyebrows = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__eyebrow > span:first-child")].map((span) => span.textContent);
+  assert.deepEqual(eyebrows(), ["Stage", "Shot"], "nothing selected: the shot's form");
+  assert.ok(q('[aria-label="Camera rig"]'), "the rig is chosen on the shot's form");
+  assert.equal(q('[aria-label="Camera move"]'), null);
+
+  await click(stageItem(q, "camera"));
+  assert.deepEqual(eyebrows(), ["Stage", "Camera"]);
+  assert.match(selectedItem(q), /camera/);
+  for (const label of ["Camera move", "Camera height", "Camera back", "Camera aim target", "Camera roll", "Camera lens", "Ease in", "Ease out"]) assert.ok(q(`[aria-label="${label}"]`), label);
+  assert.equal(q('[aria-label="Camera height"]').nextElementSibling?.textContent, "m", "a number carries its unit");
+  assert.equal(q('[aria-label="Camera lens"]').getAttribute("placeholder"), "35", "an unset lens reads the shot's, muted");
+
+  await click(stageItem(q, "Maren Kest"));
+  assert.deepEqual(eyebrows(), ["Stage", "Figure"]);
+  assert.ok(q('[aria-label="Maren Kest pose"]'));
+  assert.equal([...q('[data-testid="workspace-stage"]').querySelectorAll(".fy-swstage__markrow")].length, 2, "the figure's marks, one line each");
+
+  await click(stageItem(q, "Cart"));
+  assert.deepEqual(eyebrows(), ["Stage", "Set"]);
+  for (const label of ["Set 1 name", "Cart shape", "Cart solid", "Set 1 x", "Set 1 elevation", "Set 1 z", "Set 1 width", "Set 1 height", "Set 1 depth", "Cart pitch", "Cart turn", "Cart roll", "Set 1 group"]) assert.ok(q(`[aria-label="${label}"]`), label);
+  assert.equal([...q('[data-testid="workspace-stage"]').querySelectorAll(".fy-swstage__markrow")].length, 3, "the group's motion marks");
+
+  await click(stageItem(q, "Cart"));
+  assert.deepEqual(eyebrows(), ["Stage", "Shot"], "pressing the selected line again clears the selection");
+  assert.ok([...q('[data-testid="workspace-stage"]').querySelectorAll("button")].some((button) => button.textContent === "Render with this"), "the ways on stay under every form");
+});
+
+it("every row starts its control at the label column's edge: one grammar, no browser input (turn 144)", async () => {
+  const { q } = await mount(movingShot);
+  await click(stageItem(q, "Cart"));
+  const rows = [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__row")];
+  assert.ok(rows.length >= 8);
+  for (const row of rows) {
+    assert.equal(row.firstElementChild?.className, "fy-swstage__rowlabel", "the label column comes first on every row");
+    assert.equal(row.querySelector("input:not([class]):not(.fy-swstage__triad input):not(.fy-swstage__stepper input):not(.fy-swstage__check input)"), null, "no bare input");
+  }
+  const kinds = new Set(rows.map((row) => row.children[1]?.className.replace(/ .*/, "")));
+  for (const kind of ["fy-swstage__field", "fy-swstage__select", "fy-swstage__check", "fy-swstage__triad", "fy-swstage__value", "fy-swstage__link"]) assert.ok(kinds.has(kind), kind);
+});
+
+it("a set's form writes its place, size, rotation and group, and Add set selects the new set (turn 144)", async () => {
+  const { q, sent, shot, scene } = await mount(movingShot);
+  await click(stageItem(q, "Cart"));
+  const commit = async (label: string, value: string) => {
+    const input = q(`[aria-label="${label}"]`) as HTMLInputElement;
+    input.value = value;
+    const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[key]!;
+    await act(async () => props.onBlur({ currentTarget: input }));
+  };
+  await commit("Set 1 elevation", "0.5");
+  await commit("Cart turn", "90");
+  await commit("Set 1 group", "Wagon Train");
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind !== "edit-stage") return;
+  const set = command.staging?.sets?.[0];
+  assert.equal(set?.y, 0.5);
+  assert.deepEqual(set?.rotation, [0, 90, 0]);
+  assert.equal(set?.group, "wagon-train", "a group is a slug");
+  assert.equal(command.staging?.objectMotions?.[0]?.group, "wagon-train", "the group's motion track follows its last set's new name");
+  assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...shot.staging!, ...command.staging! }), 4), [], "what was Kept passes the write boundary");
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  assert.match(selectedItem(q), /set 2/, "the new set is the thing to name next");
+  assert.ok(q('[aria-label="Set 2 name"]'));
+});
+
+/** A field's value, committed the way a person leaves the box: onBlur, since linkedom fires no focusout of its own. */
+async function leaveField(input: HTMLInputElement, value: string) {
+  input.value = value;
+  const key = Object.keys(input).find((candidate) => candidate.startsWith("__reactProps$"))!;
+  const props = (input as unknown as Record<string, { onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[key]!;
+  await act(async () => props.onBlur({ currentTarget: input }));
+}
+
+it("a group's references follow it: cleared, its track and the camera's anchor go; removing the selected set clears the selection", async () => {
+  const { q, sent, shot, scene } = await mount((candidate) => {
+    movingShot(candidate);
+    candidate.staging!.keys[1]!.anchor = "cart";
+    candidate.staging!.cast![0]!.parent = "cart";
+  });
+  await click(stageItem(q, "Cart"));
+  await leaveField(q('[aria-label="Set 1 group"]') as HTMLInputElement, "");
+  await click([...q('[data-testid="stage-moved"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Keep")!);
+  const command = sent.at(-1)!;
+  assert.equal(command.kind, "edit-stage");
+  if (command.kind !== "edit-stage") return;
+  assert.equal(command.staging?.sets?.[0]?.group, undefined);
+  assert.deepEqual(command.staging?.objectMotions, [], "a track cannot name a group nothing carries");
+  assert.equal(command.staging?.keys[1]?.anchor, undefined, "the camera's anchor on the group goes with it");
+  assert.equal(command.staging?.cast?.[0]?.parent, undefined, "so does the figure's parent");
+  assert.deepEqual(stageProblems(resolvedShotStaging(scene, { ...shot.staging!, ...command.staging! }), 4), []);
+
+  const links = () => [...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>(".fy-swstage__link")];
+  await click(links().find((link) => link.textContent === "Remove set")!);
+  assert.equal(q('.fy-swstage__item[data-selected="true"]'), null, "the removed set is no longer the selection");
+  assert.ok(q('[aria-label="Camera rig"]'), "with nothing selected the shot's form is back, not a stale set's or none");
+  assert.equal(stageItem(q, "Cart"), undefined);
+});
+
+it("Escape in a field is the field's: it drops what was typed without committing, and stops there; other keys pass", async () => {
+  const { q, shot } = await mount(movingShot);
+  const reached: string[] = [];
+  const listen = (event: Event) => reached.push((event as KeyboardEvent).key);
+  dom.document.addEventListener("keydown", listen);
+  try {
+    const intensity = q('[aria-label="Rig intensity"]') as HTMLInputElement;
+    const propsKey = Object.keys(intensity).find((candidate) => candidate.startsWith("__reactProps$"))!;
+    const props = (intensity as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[propsKey]!;
+    await act(async () => props.onChange({ target: { value: "999" } }));
+    assert.equal(intensity.value, "999", "typing out of range shows but does not land");
+    assert.equal(q('[data-testid="stage-moved"]'), null);
+    await key(intensity, "ArrowUp");
+    await key(intensity, "Escape");
+    // The Escape's blur has no focusout in linkedom; the one a browser fires must not commit either.
+    await act(async () => props.onBlur({ currentTarget: intensity }));
+    assert.equal(intensity.value, "1.00", "Escape reverts to the value that stands");
+    assert.equal(q('[data-testid="stage-moved"]'), null, "and nothing was clamped into the draft on the way out");
+    assert.deepEqual(reached, ["ArrowUp"], "Escape stopped at the field; the arrow reached the page");
+
+    await click(stageItem(q, "Cart"));
+    const turn = q('[aria-label="Cart turn"]') as HTMLInputElement;
+    turn.value = "45";
+    await key(turn, "Escape");
+    assert.equal(turn.value, "0", "a triad cell reverts the same way");
+    assert.equal(shot.staging?.sets?.[0]?.rotation, undefined);
+    assert.deepEqual(reached, ["ArrowUp"]);
+  } finally {
+    dom.document.removeEventListener("keydown", listen);
+  }
+});
+
+it("a scene with no shots keeps the way out of full screen", async () => {
+  const world = structuredClone(FIXTURE_STATE.world!);
+  const production = world.productions.find(p => p.meta.id === "saltlight")!;
+  const at = production.scenes.findIndex(s => s.id === "sc_04");
+  // A legacy scene shape with no flow and no shots: the Stage has nothing to stage.
+  const scene = { ...production.scenes[at], shots: [] } as unknown as SceneRecord;
+  delete (scene as { flow?: unknown }).flow;
+  production.scenes[at] = scene;
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  let left = 0;
+  await act(async () => root!.render(
+    <SelectionProvider value={{ subject: { kind: "scene" }, select: () => {} }}>
+      <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined} fullscreen={{ leave: () => { left += 1; } }}
+        locked={false} generatorPending={false} refusalVersion={0} onCommand={() => true} onRenderShot={() => {}} />
+    </SelectionProvider>,
+  ));
+  const exit = container.querySelector<HTMLElement>(".fy-swstage--empty .fy-swstage__exit");
+  assert.ok(exit, "no head row to carry it, so the exit stands alone in the empty state");
+  await click(exit!);
+  assert.equal(left, 1);
+});
+
+it("a list line stands for every pick of its thing, and a line that leaves the list takes the selection with it", async () => {
+  // The viewport picks the camera's aim or the end of a walk; the list shows one line for each thing.
+  assert.equal(sameLine({ kind: "aim" }, { kind: "rig" }), true, "the camera line, whichever end of it the viewport holds");
+  assert.equal(sameLine({ kind: "walkend", sheetId: "maren-kest" }, { kind: "cast", sheetId: "maren-kest" }), true, "a figure's line, at either end of its walk");
+  assert.equal(sameLine({ kind: "cast", sheetId: "maren-kest" }, { kind: "cast", sheetId: "bray" }), false);
+  assert.equal(sameLine({ kind: "set", index: 0 }, { kind: "set", index: 1 }), false);
+  assert.equal(sameLine(null, { kind: "rig" }), false);
+
+  const { q } = await mount(movingShot);
+  await click([...q('[data-testid="workspace-stage"]').querySelectorAll<HTMLElement>("button")].find((button) => button.textContent === "Add set")!);
+  assert.match(selectedItem(q), /set 2/);
+  await click(q('[aria-label="Discard"]'));
+  assert.equal(stageItem(q, "set 2"), undefined, "the discarded draft takes its set");
+  assert.equal(q('.fy-swstage__item[data-selected="true"]'), null, "and the selection that pointed at it");
+  assert.ok(q('[aria-label="Camera rig"]'), "the shot's form, not an empty panel");
 });

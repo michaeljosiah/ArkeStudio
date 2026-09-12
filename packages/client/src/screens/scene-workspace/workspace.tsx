@@ -469,9 +469,12 @@ export function SceneWorkspace({
                 <i aria-hidden="true" />
                 <b>{view === "flow" ? "Flow" : "Stage"}</b>
               </div>
-              <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
-                <Minimize2 size={14} /><span>Esc</span>
-              </button>
+              {/* The Stage carries its own way out on its head row (turn 144); the Flow keeps the corner pill of 135h. */}
+              {view === "stage" ? null : (
+                <button type="button" className="fy-sw__fullexit" title="Leave full screen" aria-label="Leave full screen" onClick={() => setFull(false)}>
+                  <Minimize2 size={14} /><span>Esc</span>
+                </button>
+              )}
             </>
           ) : null}
           <header className="fy-sw__head">
@@ -722,6 +725,7 @@ export function SceneWorkspace({
             />
           ) : view === "stage" ? (
             <SceneStage
+              fullscreen={fullscreen ? { leave: () => setFull(false) } : null}
               scene={workingScene}
               production={production}
               world={world}
