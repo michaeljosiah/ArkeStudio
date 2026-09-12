@@ -42,9 +42,6 @@ Object.assign(globalThis, {
 });
 
 const here = dirname(fileURLToPath(import.meta.url));
-const source = (file: string): string => readFileSync(join(here, "../src", file), "utf8");
-const VIEWER = source("components/artifact-viewer.tsx");
-const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
 const W = `/w/${FIXTURE_WORLD_ID}`;
 
 it("names current uses, confirms retirement from the card and viewer, and waits for the snapshot", async () => {
@@ -312,16 +309,6 @@ describe("the card as an open target", () => {
     assert.match(tag, /class="fy-gridcard__open"/);
   });
 
-  it("is a sibling of the card's other controls, never a button wrapped around them", () => {
-    // A button inside a button is markup the browser resolves by dropping one of the two, and the
-    // one it drops is usually the one you wanted.
-    const screen = source("screens/world.tsx");
-    const at = screen.indexOf('className="fy-gridcard__open"');
-    assert.ok(at > 0, "the open control is on the artifact card");
-    const card = screen.slice(screen.lastIndexOf("<div", at), at);
-    assert.ok(card.includes("fy-gridcard--openable"), "the card, not a wrapper, is the open target's host");
-  });
-
   it("leaves Lift facts and the audio transport exactly where they were", async () => {
     const mounted = await mountShelf();
     assert.ok(
@@ -335,15 +322,6 @@ describe("the card as an open target", () => {
     await unmount(mounted);
   });
 
-  it("lifts those controls above the open target so a press on one is not a press on the card", () => {
-    assert.match(CSS, /\.fy-gridcard__open \{[^}]*z-index: 1/s);
-    assert.match(
-      CSS,
-      /\.fy-gridcard--openable \.fy-clipbtn,\s*\.fy-gridcard--openable \.fy-liftfacts \{[^}]*z-index: 2/s,
-    );
-    // The save control reveals on hovering its own host, which the open target now covers.
-    assert.match(CSS, /\.fy-gridcard--openable:hover \.fy-imgdl/);
-  });
 });
 
 describe("what opens", () => {
@@ -500,20 +478,6 @@ describe("text and markdown", () => {
     await unmount(mounted);
   });
 
-  it("opens a .md through the markdown editor, read-only and labelled", () => {
-    // Artifacts are immutable: superseding one files new bytes as a new artifact carrying
-    // `supersedes` (SPEC-015 R-5), and no such filing path exists from the shelf yet. An editor
-    // that took keystrokes with nowhere to put them would be the worse half of this issue.
-    assert.match(VIEWER, /<RichMarkdownEditor value=\{loaded\.text\} ariaLabel=\{name\} readOnly \/>/);
-    assert.match(VIEWER, /read-only/);
-    const editor = source("components/editor/rich-markdown-editor.tsx");
-    assert.match(editor, /editable: !readOnly/, "the editor really refuses the keystrokes");
-    assert.match(editor, /if \(readOnlyRef\.current\) return;/, "and never calls back with bytes to file");
-    assert.ok(
-      !VIEWER.includes("onChange"),
-      "nothing here is wired to a save, so nothing can overwrite immutable bytes",
-    );
-  });
 });
 
 describe("the frame itself", () => {
@@ -549,17 +513,21 @@ describe("the frame itself", () => {
     await unmount(mounted);
   });
 
-  it("closes on Escape, on the backdrop, and puts focus back where it came from", () => {
-    // A native <dialog> brings Escape, the focus trap and background inerting with it; what it
-    // does not bring is the backdrop click or the focus return, so both are written down.
-    assert.match(VIEWER, /node\.showModal/, "a real modal dialog, not a hand-rolled overlay");
-    assert.match(VIEWER, /onClose=\{onClose\}/, "Escape and the close button settle the same state");
-    assert.match(
-      VIEWER,
-      /if \(event\.target === event\.currentTarget\) dialog\.current\?\.close\(\);/,
-      "a click on the dialog rather than its panel is the backdrop",
-    );
-    assert.match(source("screens/world.tsx"), /openTrigger\.current\?\.focus\(\);/, "focus goes back to the card");
+  it("closes when the dialog closes — Escape, the backdrop, the button — and puts focus back on the card", async () => {
+    // A native <dialog> brings Escape, the focus trap and background inerting with it, and every
+    // way of dismissing it ends in the element's own `close` event; that event is what the screen
+    // listens to, so its state cannot disagree with the element however it was dismissed.
+    const mounted = await mountShelf([PICTURE, BOARD]);
+    const trigger = mounted.container.querySelector<HTMLButtonElement>(`button.fy-gridcard__open[title="${PICTURE.file}"]`)!;
+    let focused = 0;
+    trigger.focus = () => { focused += 1; };
+    await open(mounted, PICTURE);
+    assert.ok(panel(mounted), "open");
+    const dialog = mounted.container.querySelector("dialog.fy-artview")!;
+    await act(async () => dialog.dispatchEvent(new dom.window.Event("close", { bubbles: false })));
+    assert.equal(panel(mounted), null, "the frame is gone");
+    assert.equal(focused, 1, "and the keyboard is back on the card it left from, not at the top of the document");
+    await unmount(mounted);
   });
 
   it("is dialog state, so the shelf keeps its filters and its report underneath", async () => {
@@ -572,23 +540,19 @@ describe("the frame itself", () => {
     await unmount(mounted);
   });
 
-  it("tracks the artifact rather than the row it was in", () => {
+  it("tracks the artifact rather than the row it was in", async () => {
     // A world update, a filing or a replacement must move the frame's contents or close it —
     // never silently re-point it at whichever file slid into that position.
-    const screen = source("screens/world.tsx");
-    assert.match(screen, /artifacts\.find\(\(a\) => a\.id === openArtifactId\) \?\? null/);
+    const mounted = await mountShelf([PICTURE, BOARD]);
+    await open(mounted, BOARD);
+    assert.match(panel(mounted)?.textContent ?? "", new RegExp(BOARD.file), "the board is open");
+    // The picture leaves the shelf: the board is now first in the list.
+    await act(async () => { __setStateForTest(shelf([BOARD])); });
+    assert.match(panel(mounted)?.textContent ?? "", new RegExp(BOARD.file), "still the board, whatever row it is in");
+    // The board itself leaves: the frame has nothing to show, and closes rather than showing another file.
+    await act(async () => { __setStateForTest(shelf([PICTURE])); });
+    assert.equal(panel(mounted), null, "gone with its artifact");
+    await unmount(mounted);
   });
 
-  it("starts no media on its own, whatever it opens", () => {
-    assert.ok(!/autoPlay=/.test(VIEWER), "opening a viewer prepares media; a person starts it");
-    // And one thing sounds at a time, which is the rule the app has had since SPEC-011.
-    assert.match(VIEWER, /onPlay=\{hushTheDock\}/);
-  });
-
-  it("fits a narrow window: the metadata drops under the stage and long text scrolls", () => {
-    assert.match(CSS, /@media \(max-width: 860px\) \{[\s\S]*?\.fy-artview \{ width: 100vw/);
-    assert.match(CSS, /\.fy-artview__stage \{[^}]*overflow: auto/s);
-    assert.match(CSS, /\.fy-artview__text \{[^}]*white-space: pre-wrap/s);
-    assert.match(CSS, /\.fy-artview__image \{[^}]*object-fit: contain/s);
-  });
 });

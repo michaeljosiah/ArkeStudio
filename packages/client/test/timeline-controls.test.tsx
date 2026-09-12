@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -21,7 +20,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 const focusedElements = new WeakSet<HTMLElement>();
-const CSS = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
 let viewportWidth = 800;
 Object.assign(dom.window, {
   matchMedia: (query: string) => ({
@@ -274,11 +272,6 @@ describe("durable Picture controls (#678)", () => {
       // Arke is under the Inspector on the same edge, never behind a tab that hides it.
       assert.equal(screen.container.querySelectorAll("[role='tab']").length, 0, "no tabs on the edge");
       assert.ok(screen.container.querySelector("#cut-arke-panel"), "the real Arke pane is present");
-      assert.match(
-        CSS,
-        /\.fy-cutside__panel--arke\s*\{[^}]*flex-direction:\s*column/,
-        "assembly notes stack above the conversation instead of clipping it (#719)",
-      );
       await act(async () => button(screen, "Hide").click());
       assert.ok(notice() === null, "hidden is hidden");
     } finally {

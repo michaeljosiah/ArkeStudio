@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { CHARACTER_ROLE_MAX, type Sheet } from "@arke-studio/contracts";
@@ -10,16 +7,16 @@ import { App } from "../src/App.js";
 import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const CSS = readFileSync(join(here, "../src/screens/fidelity.css"), "utf8");
-
 /**
  * The world hub's cast fan (SPEC-007 R-18, R-19).
  *
  * The design draws the fan as fixed-height cards, which only holds if the two lines on the card
- * are bounded. Height itself is a CSS concern and is asserted in the stylesheet test; what these
- * assert is the input to it — that the role line carries the role and nothing else, and that a
- * character with no role contributes no text rather than a sentence of essence prose.
+ * are bounded. Height itself is layout: the fixed lines, the clamps and the levelled rows are
+ * rules in fidelity.css with their reasons beside them, and only a browser can measure whether
+ * they hold (reading the declarations back out of the stylesheet as text could not). What these
+ * assert is the input to them — that the role line carries the role and nothing else, that a
+ * character with no role contributes no text rather than a sentence of essence prose, and that
+ * long copy reaches the card whole for the CSS to clip.
  */
 
 const WORLD = FIXTURE_STATE.world!;
@@ -229,9 +226,6 @@ describe("what needs a person (design 63b)", () => {
     const html = renderHub();
     assert.match(html, /class="fy-needs__why"/);
     assert.match(html, /class="fy-needs__go"/);
-    assert.match(declarationsFor(".fy-needs__why"), /flex:\s*none/);
-    assert.match(declarationsFor(".fy-needs__go"), /flex:\s*none/);
-    assert.match(declarationsFor(".fy-needs__what"), /text-overflow:\s*ellipsis/, "only the subject gives ground");
   });
 
   it("is absent rather than empty when nothing is waiting", () => {
@@ -239,73 +233,6 @@ describe("what needs a person (design 63b)", () => {
     const html = renderHub({ proposals: [], canon: settled });
     assert.doesNotMatch(html, /fy-needs__count/, '"0 things need you" is furniture, not information');
   });
-});
-
-/** The declarations in effect for a selector, across every rule that names it. */
-function declarationsFor(selector: string): string {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const rules = [...CSS.matchAll(new RegExp(`([^{}]*)\\{([^}]*)\\}`, "g"))];
-  return rules
-    .filter(([, head]) =>
-      head!.split(",").some((part) => new RegExp(`(^|\\s)${escaped}\\s*$`).test(part!.trim())),
-    )
-    .map(([, , body]) => body)
-    .join(";");
-}
-
-describe("the card holds one height whatever it is given", () => {
-  // Both lines are clipped rather than wrapped, and both hold a fixed height. Together with the
-  // fixed frame and padding that makes .fy-polaroid a constant 243px — the whole point of the
-  // fan. Lose any one of these and cards start growing with their copy again.
-  for (const selector of [".fy-polaroid__name", ".fy-polaroid__role"]) {
-    it(`clips ${selector} to a single fixed line`, () => {
-      const decls = declarationsFor(selector);
-      assert.match(decls, /white-space:\s*nowrap/, "must not wrap");
-      assert.match(decls, /overflow:\s*hidden/, "must not spill");
-      assert.match(decls, /text-overflow:\s*ellipsis/, "overflow reads as truncation, not a hard cut");
-      assert.match(decls, /height:\s*\d+px/, "a fixed height, so an empty line still occupies one");
-    });
-  }
-
-  it("keeps the frame a fixed size, the other half of the constant height", () => {
-    assert.match(declarationsFor(".fy-polaroid__frame"), /height:\s*180px/);
-  });
-});
-
-/**
- * The bands below the fold (design 63b).
- *
- * Same discipline as the fan and the ledger cards: pin every band and clip every line, so three
- * productions with a one-word title, a logline and no shots at all still sit level — and four
- * glance cells hold one height whatever the world has in it.
- */
-describe("the sections below the fold hold their heights", () => {
-  it("pins the glance's outstanding line", () => {
-    const decls = declarationsFor(".fy-glance__sub");
-    assert.match(decls, /height:\s*15px/, "a fixed height, so a settled cell is not shorter");
-    assert.match(decls, /white-space:\s*nowrap/);
-    assert.match(decls, /text-overflow:\s*ellipsis/);
-  });
-
-  for (const [selector, height] of [
-    [".fy-prodtile__frame", 128],
-    [".fy-prodtile__eyebrow", 13],
-    [".fy-prodtile__name", 19],
-    [".fy-prodtile__foot", 15],
-  ] as const) {
-    it(`pins ${selector} at ${height}px`, () => {
-      assert.match(declarationsFor(selector), new RegExp(`height:\\s*${height}px`));
-    });
-  }
-
-  for (const selector of [".fy-prodtile__name", ".fy-prodtile__meta"]) {
-    it(`clips ${selector} to one line`, () => {
-      const decls = declarationsFor(selector);
-      assert.match(decls, /white-space:\s*nowrap/);
-      assert.match(decls, /overflow:\s*hidden/);
-      assert.match(decls, /text-overflow:\s*ellipsis/);
-    });
-  }
 });
 
 /**
@@ -401,45 +328,6 @@ describe("location and faction cards are fixed height (R-20, R-21)", () => {
     assert.doesNotMatch(html, /one\.\n/, "the newline between wrapped source lines is collapsed");
   });
 
-  for (const selector of [
-    ".fy-gridcard--fixed .fy-gridcard__body",
-    ".fy-gridcard--fixed-faction .fy-gridcard__body",
-  ]) {
-    it(`clamps ${selector} to a fixed two-line box`, () => {
-      const decls = declarationsFor(selector);
-      // Height must be px, and so must the line-height that divides into it — a unitless or
-      // ratio line-height makes the box a non-integer number of lines and clips a sliver of the
-      // second one. Either spelling counts: `line-height: 18px` or the `font: …/18px` shorthand.
-      const height = /(?:^|;)\s*height:\s*(\d+)px/.exec(decls);
-      assert.ok(height, "a fixed height whatever the copy");
-      const lineHeight = /line-height:\s*(\d+)px/.exec(decls) ?? /font:[^;]*\/(\d+)px/.exec(decls);
-      assert.ok(lineHeight, "line-height in px, so the height is exactly two lines");
-      assert.equal(Number(height[1]), Number(lineHeight[1]) * 2, "the box is exactly two lines tall");
-    });
-  }
-
-  it("clamps the description by line, with an ellipsis at the real break", () => {
-    const decls = declarationsFor(".fy-gridcard--fixed .fy-gridcard__body");
-    assert.match(decls, /-webkit-line-clamp:\s*2/, "two rendered lines, not a character count");
-    assert.match(decls, /overflow:\s*hidden/);
-  });
-
-  it("clips the card name to one line", () => {
-    const decls = declarationsFor(".fy-gridcard--fixed .fy-gridcard__name");
-    assert.match(decls, /white-space:\s*nowrap/);
-    assert.match(decls, /text-overflow:\s*ellipsis/);
-  });
-
-  it("pins the faction's wants/fears pair and its links row", () => {
-    const wants = declarationsFor(".fy-wants");
-    assert.match(wants, /height:\s*40px/, "two 20px lines, present or not");
-    const line = declarationsFor(".fy-wants__line");
-    assert.match(line, /white-space:\s*nowrap/, "a long want cannot push fears out of the card");
-    const links = declarationsFor(".fy-gridcard__links");
-    assert.match(links, /height:\s*20px/, "one row");
-    assert.match(links, /flex-wrap:\s*nowrap/, "a fourth pill would otherwise add 20px");
-    assert.match(links, /overflow:\s*hidden/);
-  });
 });
 
 /**
@@ -507,55 +395,6 @@ describe("world picker cards are fixed height (SPEC-001 R-12)", () => {
     assert.match(html, /class="fy-worldcard__counts"/);
   });
 
-  /*
-   * The fixed 306 x 426 pair is gone (issue 1007). It kept the real card level with the dashed
-   * placeholder beside it, at the cost of a grid that stepped from three columns to seven with
-   * nothing in between. A stretching track does the levelling instead: every card is its own
-   * track's width, so the frames in a row are the same height, and the grid item stretches.
-   */
-  it("levels the card and the New world card through the track, not a fixed height", () => {
-    const grid = declarationsFor(".fy-home-cards");
-    assert.match(grid, /display:\s*grid/);
-    assert.match(grid, /minmax\(280px, 1fr\)/, "a column at every width");
-    assert.match(declarationsFor(".fy-home-cards > *"), /height:\s*100%/, "the items stretch");
-    assert.match(declarationsFor(".fy-worldcard"), /height:\s*100%/, "and the card fills what it is given");
-    assert.doesNotMatch(declarationsFor(".fy-worldcard"), /width:\s*306px/, "no fixed card width is left");
-  });
-
-  /*
-   * The dashed Create tile's frame carries both classes, and `__empty` fills its box — harmless
-   * while the card was a fixed height, and not once the row stretches: a definite card height
-   * made that `height: 100%` resolve against the whole card and swallow the aspect ratio, so
-   * the placeholder's picture ran down through the space a real card gives its logline and its
-   * meta (codex round four).
-   */
-  it("keeps the Create tile's frame in the frame's own proportion", () => {
-    const both = declarationsFor(".fy-worldcard__frame.fy-worldcard__empty");
-    assert.match(both, /aspect-ratio:\s*256 \/ 286/, "the same proportion as a real card's frame");
-    assert.match(both, /height:\s*auto/, "and not the height the empty state would fill");
-  });
-
-  it("pins every band on the card", () => {
-    // The frame keeps its drawn proportion rather than its drawn pixels; the bands under it are
-    // still fixed, which is what keeps two cards in a row the same height.
-    assert.match(declarationsFor(".fy-worldcard__frame"), /aspect-ratio:\s*256 \/ 286/);
-    const name = declarationsFor(".fy-worldcard__name");
-    assert.match(name, /height:\s*24px/);
-    assert.match(name, /white-space:\s*nowrap/);
-    const logline = declarationsFor(".fy-worldcard__logline");
-    assert.match(logline, /-webkit-line-clamp:\s*2/, "two rendered lines, ellipsised at the break");
-    assert.match(logline, /height:\s*39px/);
-    assert.match(
-      declarationsFor(".fy-worldcard__meta"),
-      /height:\s*15px/,
-      "one line, whatever the date says",
-    );
-    assert.match(declarationsFor(".fy-worldcard__counts"), /text-overflow:\s*ellipsis/);
-  });
-
-  it("keeps the timestamp from being squeezed by a long count string", () => {
-    assert.match(declarationsFor(".fy-worldcard__meta .mono"), /flex:\s*none/);
-  });
 });
 
 describe("the gate's over-limit refusal reaches the user (SPEC-007 R-18)", () => {

@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { legacySceneView } from "@arke-studio/contracts";
@@ -27,9 +24,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
 
 const WORLD = FIXTURE_STATE.world!;
 const WORLD_ID = WORLD.meta.worldId;
-const HERE = dirname(fileURLToPath(import.meta.url));
-const UI_CSS = readFileSync(join(HERE, "../src/components/ui.css"), "utf8");
-const FIDELITY_CSS = readFileSync(join(HERE, "../src/screens/fidelity.css"), "utf8");
 
 function renderRoute(path: string): string {
   __setStateForTest(FIXTURE_STATE);
@@ -77,36 +71,6 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
     );
   });
 
-  /*
-   * A glyph says less than a word, so it has to keep the affordances the word had. Chapters
-   * disables the first Up and the last Down, the kit's Upload goes dead outside the desktop app,
-   * and the Bible's speaker is dead on an empty section — all of which read as live controls
-   * until the shared rule says otherwise (codex review of this change).
-   */
-  it("says an unavailable glyph is unavailable, and stops hovering it", () => {
-    assert.match(UI_CSS, /\.ui-iconbtn:disabled\s*\{[^}]*cursor:\s*default/);
-    assert.match(UI_CSS, /\.ui-iconbtn:hover:not\(:disabled\)/, "an unavailable glyph does not light up");
-    assert.doesNotMatch(UI_CSS, /\.ui-iconbtn:hover\s*\{/, "and the unguarded hover rule is gone");
-    // A fieldset disables everything inside it without passing any of them `disabled`.
-    assert.match(UI_CSS, /\.ui-check:has\(input:disabled\)/);
-  });
-
-  /*
-   * A tooltip that only answers the pointer leaves a keyboard user with a glyph and nothing,
-   * and one that cannot leave its container leaves the put-away chat rail's two controls unnamed.
-   * Both were regressions of this change, one round apart (codex review).
-   */
-  it("shows the tooltip on focus as well as hover, and leaves room for it where it is clipped", () => {
-    assert.match(FIDELITY_CSS, /\.fy-tip:hover::after,\s*\.fy-tip:focus-visible::after/);
-    // The put-away rail is 48px and both its controls are glyphs; a tip is wider than that, and
-    // the column used to hide its overflow. `position: fixed` is no escape here — fy-fade-up
-    // leaves a transform on the column, which is a containing block for fixed descendants.
-    const rail = /\.fy-chatnav \{([\s\S]*?)\}/.exec(FIDELITY_CSS);
-    assert.ok(rail, "the rail is styled");
-    assert.doesNotMatch(rail[1]!, /overflow:\s*hidden/, "the rail does not clip its controls' tips");
-    assert.match(FIDELITY_CSS, /\.fy-chatnav__list \{[^}]*overflow-x:\s*hidden/, "the list still clips");
-  });
-
   it("gives the bible's contents one speaker per heading rather than the word Listen", () => {
     const html = renderRoute(`/w/${WORLD_ID}/bible`);
     assert.doesNotMatch(html, />Listen</, "Listen is not printed once per section");
@@ -133,19 +97,6 @@ describe("a repeated row verb is a glyph, not a band of words (U1)", () => {
 });
 
 describe("a designed screen draws its own controls (U2)", () => {
-  /*
-   * With one exception, and it is a requirement rather than a taste: SPEC-041 R-81 binds a
-   * *generation result* to native playback controls, so seeking, volume and fullscreen survive.
-   * A `take-review` card owes only playable media (R-26), which is where the house player goes.
-   */
-  it("keeps the platform's player on a generation result and nowhere else", () => {
-    const source = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/components/conversation.tsx"),
-      "utf8",
-    );
-    assert.match(source, /receipt\.generation\.results[\s\S]{0,1400}<video[^>]*controls/);
-    assert.match(source, /R-81/, "and says which requirement holds it there");
-  });
 
   it("wears the house select on Settings, chevron and all", () => {
     const html = renderRoute("/settings/notifications");

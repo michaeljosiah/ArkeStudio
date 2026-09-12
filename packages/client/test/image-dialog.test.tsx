@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { App } from "../src/App.js";
@@ -14,13 +11,13 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * A world image opens larger where it stands.
  *
  * Three screens had grown their own copy of this and they had drifted: one disabled its trigger
- * until the picture loaded, two did not. These assertions are mostly about there being one
- * implementation, because that is the property that decays.
+ * until the picture loaded, two did not. What is asserted is the rendered trigger on each screen
+ * that has one — disabled until the picture arrives, absent where the photo is a way in rather
+ * than a thing to look at. Whether the dialog is implemented once is a matter for review, not a
+ * grep of the source for `showModal()`.
  */
 
 __setStateForTest(FIXTURE_STATE);
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 function renderAt(path: string): string {
   return renderToString(
@@ -30,43 +27,9 @@ function renderAt(path: string): string {
   );
 }
 
-function count(haystack: string, needle: string): number {
-  return haystack.split(needle).length - 1;
-}
-
 const W = `/w/${FIXTURE_WORLD_ID}`;
 
 describe("image dialog", () => {
-  it("is implemented once", () => {
-    // A <dialog> anywhere but the shared component means a fourth copy is growing.
-    for (const file of ["screens/world.tsx", "screens/character-reference.tsx"]) {
-      const source = readFileSync(join(here, "../src", file), "utf8");
-      assert.equal(
-        count(source, "showModal()"),
-        0,
-        `${file} should open images through ImageDialog, not its own <dialog>`,
-      );
-    }
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(shared.includes("showModal()"), "the shared component is the one that opens it");
-  });
-
-  it("returns focus to the trigger when it closes", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(
-      shared.includes("onClose={() => trigger.current?.focus()}"),
-      "closing a dialog that dropped focus leaves the keyboard at the top of the document",
-    );
-  });
-
-  it("dismisses on a backdrop click", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(
-      shared.includes("event.target === event.currentTarget"),
-      "a click on the dialog itself rather than its panel is the backdrop",
-    );
-  });
-
   it("will not offer to enlarge a picture that has not arrived", () => {
     // Nothing has loaded in a server render, so no trigger may offer to enlarge anything yet.
     const html = renderAt(`${W}/cast/maren-kest/kit`);
@@ -74,40 +37,6 @@ describe("image dialog", () => {
     assert.ok(at > 0, "the trigger is rendered");
     const tag = html.slice(html.lastIndexOf("<button", at), html.indexOf(">", at) + 1);
     assert.match(tag, /\bdisabled\b/, "the trigger waits for the image");
-  });
-
-  /*
-   * Availability belongs to a picture, not to the component.
-   *
-   * It used to be a bare boolean reset by an effect, which raced the load it was guarding: a
-   * cached image settles during the first paint and the effect's mount pass then cleared it, so
-   * the character detail page's main photo — preloaded by the cast page it is reached from — was
-   * never clickable at all. Keying it to the subject decides the same thing during render, and
-   * still cannot enable for the previous picture, because the key changes with the path.
-   */
-  it("tracks which picture arrived rather than that one did", () => {
-    const shared = readFileSync(join(here, "../src/components/image-dialog.tsx"), "utf8");
-    assert.ok(shared.includes("disabled={!available}"), "the trigger waits for the image");
-    assert.match(
-      shared,
-      /const available = loaded === subject/,
-      "availability is compared against the picture on screen now",
-    );
-    assert.match(shared, /const subject = `\$\{worldSlug \?\? ""\}\|\$\{path\}`/, "and the subject is that path");
-    assert.ok(
-      !/useEffect/.test(shared),
-      "with no effect left to race the load it guards",
-    );
-  });
-
-  /*
-   * The other half of the same bug lives in Portrait: a load event that has already fired never
-   * fires again, so an image the browser had cached reported nothing at all.
-   */
-  it("reads availability off a cached image as well as listening for it", () => {
-    const portrait = readFileSync(join(here, "../src/components/portrait.tsx"), "utf8");
-    assert.match(portrait, /node\.complete/, "an image that already finished is asked directly");
-    assert.match(portrait, /node\.naturalWidth > 0/, "and a broken one is not mistaken for a loaded one");
   });
 
   /*

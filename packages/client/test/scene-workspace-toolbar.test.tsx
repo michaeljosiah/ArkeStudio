@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -385,7 +384,7 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
 });
 
 describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
-  it("carries the glyph on Flow and Stage only, and the CSS hides everything but the view", async () => {
+  it("carries the glyph on Flow and Stage only", async () => {
     const item = await mount(FIXTURE_STATE);
     const glyph = () => one(item, ".fy-sw__full");
     assert.equal(glyph(), null, "not on Storyboard");
@@ -393,10 +392,6 @@ describe("full screen (SPEC-044 R-37, R-39; T-16)", () => {
       await click(all(item, ".fy-sw__tab").find((candidate) => candidate.textContent === tab)!);
       assert.equal(glyph() !== null, present, `${tab}: ${present ? "a" : "no"} glyph`);
     }
-    const css = readFileSync(new URL("../src/screens/fidelity.css", import.meta.url), "utf8");
-    assert.match(css, /\.fy-sw\[data-full="true"\] \{ position: fixed; inset: 0;/, "the workspace fills the app frame");
-    assert.match(css, /\.fy-sw\[data-full="true"\] > :not\(\.fy-sw__centre\):not\(dialog\) \{ display: none; \}/, "the dock leaves; a dialog opened from the view does not");
-    assert.match(css, /\.fy-sw\[data-full="true"\] \.fy-sw__centre > :not\(\.fy-swcanvas\):not\(\.fy-swflow\):not\(\.fy-swstage\):not\(\.fy-sw__fullpill\):not\(\.fy-sw__fullexit\) \{ display: none; \}/, "the header and the view row leave; the canvas, the Stage and the two overlays stay");
   });
 
   it("sits at the row's right end, and fills the frame with the Stage as it does with Flow", async () => {

@@ -76,6 +76,7 @@
 }
 .is-desktop .fy-titlebar__side--right { margin-right: 138px; }
 .fy-titlebar__side { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; }
+/* The ellipsised left context reserves the wordmark's half-width before it can overlap it. */
 .fy-titlebar__side:first-child { padding-right: 48px; }
 .fy-titlebar__side--right { justify-content: flex-end; }
 /*
@@ -6136,6 +6137,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-cutside__close { margin: auto 0 auto auto; }
 .fy-cutside__panel { flex: 1; min-height: 0; overflow-y: auto; }
 .fy-cutside__panel--inspect { flex: 0 1 auto; max-height: 50%; }
+/* A column, so the assembly notes stack above the conversation instead of clipping it (issue 719). */
 .fy-cutside__panel--arke { flex: 1 1 0; display: flex; flex-direction: column; overflow: hidden; border-top: 1px solid var(--border); }
 .fy-cutinspect { padding: 16px 15px; }
 .fy-cutinspect__eyebrow { font: 500 8.5px var(--font-mono); letter-spacing: .1em; color: var(--neutral-400); }

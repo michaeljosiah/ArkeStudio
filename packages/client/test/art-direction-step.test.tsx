@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToString } from "react-dom/server";
@@ -717,17 +714,12 @@ describe("location views ask in the dialog (design 66)", () => {
 
   it("lets the camera line be empty, because the brief is composed without it", () => {
     // The one surface where the prompt adds to a brief rather than being it. Refusing an empty
-    // box here would demand a sentence nobody needs to write.
-    const shared = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/components/generation-dialog.tsx"),
-      "utf8",
-    );
-    assert.match(shared, /!promptOptional && prompt\.trim\(\)\.length === 0/, "the block is opt-out, not removed");
-    const locations = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "../src/screens/location-reference.tsx"),
-      "utf8",
-    );
-    assert.match(locations, /promptOptional/, "and location views are the surface that opts out");
+    // box here would demand a sentence nobody needs to write, so the dialog is told the line is
+    // optional and says so; that an optional line does not disable the submit is the dialog's
+    // own test (generation-dialog.test.tsx).
+    const html = locationHtml();
+    const dialog = html.slice(html.indexOf('<dialog class="fy-gendialog'));
+    assert.ok(dialog.includes("Optional. The place, its look and the angle&#x27;s name are sent whether or not you write here."));
   });
 
 });

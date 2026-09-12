@@ -1,7 +1,4 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
@@ -19,7 +16,6 @@ import { FIXTURE_STATE } from "./fixture-state.js";
  * surface, never as a route back to Providers (R-4).
  */
 
-const HERE = dirname(fileURLToPath(import.meta.url));
 
 const NANO: ManifestModel = {
   id: "nano-banana-2",
@@ -224,14 +220,17 @@ describe("AI models holds the switch (SPEC-042 R-4, R-8, R-12, R-13)", () => {
     assert.match(sectionFor(models(), "Higgsfield"), /class="fy-by__fix"[^>]*>Sign in</);
   });
 
-  it("renders the remedy in place, never as a route to Providers (R-4)", async () => {
+  it("renders the remedy in place, never as a route to Providers (R-4)", () => {
     // The previous split died of exactly this: Cloud AI shipped an `Open Providers` button
-    // because the switch it filtered by lived on another tab. Asserted on the source, because
-    // a navigation is a thing the render cannot show and a reviewer would have to spot.
-    const source = await readFile(join(HERE, "..", "src", "screens", "settings-models.tsx"), "utf8");
-    assert.doesNotMatch(source, /navigate\(["'`]\/settings\/providers/);
-    assert.match(source, /ProviderKeyLine/, "the key row is Providers' own component, drawn here");
-    assert.match(source, /ProviderToolLine/, "and so is the sign-in row");
+    // because the switch it filtered by lived on another tab. The remedy here is a disclosure that
+    // opens the key line on this page; nothing on the page is a way to the other one.
+    __setStateForTest(stateWith({}));
+    const html = models();
+    const openai = sectionFor(html, "OpenAI");
+    assert.match(openai, /class="fy-by__fix" aria-expanded="false"/, "the remedy opens in place");
+    // The pane, not the page: the settings rail beside it lists Providers as a tab, as it should.
+    const pane = html.slice(html.indexOf('data-screen="settings-models"'));
+    assert.doesNotMatch(pane, /Open Providers|href="\/settings\/providers"/, "and nothing in the pane leaves it for Providers");
   });
 
   it("does not offer models the key cannot reach, capability by capability", () => {

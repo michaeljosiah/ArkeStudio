@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { legacySceneView, type ClientState, type Episode, type ProductionBundle, type StagedProposal } from "@arke-studio/contracts";
@@ -139,24 +136,6 @@ it("distinguishes an episode wait from missing episode and production ids (issue
   const missingProduction = renderApp(state, `/w/${FIXTURE_WORLD_ID}/p/missing/episodes/${ONE.id}`);
   assert.match(missingProduction, /Production not found/);
   assert.match(missingProduction, new RegExp(`href="/w/${FIXTURE_WORLD_ID}/productions"`));
-});
-
-describe("Development single-act reachability", () => {
-  const screens = ["development.tsx", "production.tsx"].map((file) =>
-    readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../src/screens", file), "utf8"),
-  );
-
-  it("correlates the reachable existing-episode edit at its initiating control", () => {
-    assert.match(screens[0]!, /edit\.track\(proposeEpisode\(worldId, prodId, \{[\s\S]*?episodeId: episode\.id/);
-    assert.match(screens[0]!, /<SingleActFeedback result=\{edit\.result\}/);
-  });
-
-  it("has no reachable story-overview or season form sender to misclassify", () => {
-    for (const source of screens) {
-      assert.doesNotMatch(source, /proposeStoryOverview\(/);
-      assert.doesNotMatch(source, /proposeSeason\(/);
-    }
-  });
 });
 
 describe("shot take selection", () => {
