@@ -150,6 +150,15 @@ export function checkPropName(
   return { ok: true, slug };
 }
 
+/**
+ * The other half of the same rule, for the side that mints rather than refuses: a sheet's id is
+ * chosen by `uniqueSlug` past every slug already taken, and the props' slugs are taken too — a
+ * sheet named Ledger after a prop named Ledger becomes `ledger-2`, not the prop's twin.
+ */
+export function propSlugs(props: readonly Pick<Prop, "name">[]): string[] {
+  return props.map((prop) => propSlug(prop.name)).filter((slug) => slug !== "");
+}
+
 /** One prop as a shot dispatches it: turn 105's five fields, plus the names a screen shows. */
 export interface ShotPropResolution {
   propId: string;

@@ -1097,12 +1097,13 @@ export async function scanWorld(dir: string, opts: { supports?: number } = {}): 
   // or a sheet holds, but a world written before that gate — or by hand — can still carry the
   // collision, and every reader would take it as it finds it (`resolvePropStates` cites both).
   // Both records stay loaded, since either may be cited by a shot's own control; the later one
-  // is reported the way a duplicate scene id is, naming what holds the word, so a person can
-  // rename it.
+  // is reported as a conflict — not as a file that could not be read, which it was not — naming
+  // what holds the word, so a person can rename it.
   for (const [index, prop] of props.entries()) {
     const check = checkPropName(prop.name, props.slice(0, index), sheets);
     if (check.ok) continue;
     problems.push({
+      kind: "conflict",
       path: toPortable(`references/${prop.id}/prop.json`),
       message:
         check.reason === "empty"

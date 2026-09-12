@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { newId, type Prop } from "@arke-studio/contracts";
 import { acceptPropStateReference, createProp } from "../../src/references/props.js";
 import { WorldStore } from "../../src/world/store.js";
+import { ProposalManager } from "../../src/gate/proposals.js";
+import { createSheetFromSentence } from "../../src/sheets/authoring.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -84,5 +86,27 @@ describe("prop-state references", () => {
     assert.equal(ledger?.name, "Ledger");
     assert.ok((await stat(join(dir, "references", ledger!.id, "prop.json"))).isFile());
     assert.equal(await createProp(store, "ledger"), null, "and the word is taken from then on");
+    // Two equivalent requests in flight at once: the check is the commit's precondition, inside
+    // the serialised write, so the second sees the first land and returns nothing.
+    const [one, two] = await Promise.all([createProp(store, "Lantern"), createProp(store, "Lantern")]);
+    assert.equal([one, two].filter((prop) => prop !== null).length, 1, "one Lantern, not two");
+    assert.equal(store.getBundle().props.filter((prop) => prop.name === "Lantern").length, 1);
+    for (const problem of store.getBundle().problems.filter((entry) => entry.path.endsWith("prop.json"))) {
+      assert.equal(problem.kind, "conflict", "a loaded record in conflict is not a file that could not be read");
+    }
+  });
+
+  it("a sheet minted after a prop of the same name steps past the prop's slug (issue 1116)", async () => {
+    const dir = await makeTempWorld();
+    const store = await WorldStore.open(dir, { clock: () => "2026-09-12T14:00:00.000Z" });
+    closeOnCleanup(() => store.close());
+    const gate = new ProposalManager(store);
+    assert.equal((await createProp(store, "Ledger"))?.name, "Ledger");
+    const draft = await createSheetFromSentence(store, gate, {
+      sheetType: "location",
+      name: "Ledger",
+      sentence: "The counting room where the ledger is kept.",
+    });
+    assert.equal(draft.slug, "ledger-2", "the prop holds @ledger; the sheet is cited by its own word");
   });
 });

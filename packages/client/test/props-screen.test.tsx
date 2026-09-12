@@ -95,6 +95,37 @@ describe("the Props screen keeps one mention to one thing (issue 1116)", () => {
     assert.equal(create.disabled, false);
     await act(async () => create.click());
     assert.deepEqual(sent, [{ kind: "create-prop", worldId: FIXTURE_WORLD_ID, name: "Ledger" }]);
-    assert.equal(input.value, "", "the box clears for the next name");
+    assert.equal(input.value, "Ledger", "the box keeps the name until the prop arrives — the coordinator's refusal is silent");
+    // Another window took the word first: the refreshed snapshot holds a sheet, no prop arrives,
+    // the name stays and the line says why.
+    const taken = structuredClone(state) as ClientState;
+    taken.world!.sheets = [...taken.world!.sheets, { ...taken.world!.sheets[0]!, id: "ledger", name: "Ledger" }];
+    await act(async () => { __setStateForTest(taken); });
+    assert.equal(input.value, "Ledger");
+    assert.equal(note(), "@ledger is Ledger");
+    assert.equal(create.disabled, true);
+    // The prop arrives: the box clears for the next name.
+    const arrived = structuredClone(state) as ClientState;
+    arrived.world!.props = [...arrived.world!.props, { id: "prop_01J8P0000000000000000000P2", name: "Ledger", states: [] }];
+    await act(async () => { __setStateForTest(arrived); });
+    assert.equal(input.value, "");
+    assert.equal(note(), null);
+  });
+
+  it("a record in conflict is loaded, and said so — not filed with the files that could not be read", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.problems = [
+      { path: "canon/broken.md", message: "front matter: unexpected token" },
+      { kind: "conflict", path: "references/prop_x/prop.json", message: 'prop "Tea-cup" answers to @tea-cup, as does "Tea cup" (references/prop_y/prop.json) — rename one; a mention cites one thing' },
+    ];
+    const mounted = await mountState(state);
+    const callouts = [...mounted.container.querySelectorAll(".fy-worldconditions > *")].map((el) => el.textContent ?? "");
+    const text = callouts.join("\n");
+    assert.match(text, /1 file\(s\) could not be read/);
+    assert.match(text, /1 record\(s\) say the same word/);
+    const unreadable = callouts.find((entry) => entry.includes("could not be read"))!;
+    assert.ok(unreadable.includes("canon/broken.md") && !unreadable.includes("prop.json"), "the conflict is not among the skipped files");
+    const conflict = callouts.find((entry) => entry.includes("say the same word"))!;
+    assert.ok(conflict.includes("references/prop_x/prop.json") && conflict.includes("Loaded, and in use until renamed"));
   });
 });

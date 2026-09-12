@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { checkPropName, orderedShots, propSlug, parseMentions, type Prop, type PropState, type Take, type WorldBundle } from "@arke-studio/contracts";
 import { Portrait } from "../components/portrait.js";
@@ -45,6 +45,18 @@ export function PropsScreen() {
   // of every other prop's and every sheet's id, and the coordinator refuses the same collision
   // silently — so the word that holds it is said here, beside the box, before anything is sent.
   const check = name.trim() === "" ? null : checkPropName(name, props, world?.sheets ?? []);
+  // The box clears when the prop arrives, not when the button is pressed: a snapshot can be
+  // behind another window, and the coordinator's refusal is silent, so a name cleared on the
+  // press would be lost with nothing said. Kept, it meets the refreshed snapshot and the line
+  // above says which word took it.
+  const awaiting = useRef<string | null>(null);
+  useEffect(() => {
+    const slug = awaiting.current;
+    if (slug !== null && props.some((prop) => propSlug(prop.name) === slug)) {
+      awaiting.current = null;
+      setName("");
+    }
+  }, [props]);
   return (
     <div data-screen="props">
       <SheetKindNav active="prop" />
@@ -75,8 +87,9 @@ export function PropsScreen() {
               variant="primary"
               disabled={check === null || !check.ok || !worldId}
               onClick={() => {
-                if (worldId) createProp(worldId, name.trim());
-                setName("");
+                if (!worldId || check === null || !check.ok) return;
+                awaiting.current = check.slug;
+                createProp(worldId, name.trim());
               }}
             >
               Create prop
