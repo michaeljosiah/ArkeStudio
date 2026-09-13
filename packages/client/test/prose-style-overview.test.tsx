@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientState, ProseStyle } from "@arke-studio/contracts";
-import { StoryScreen } from "../src/screens/production.js";
+import { StoryScreen } from "../src/screens/production-story.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";

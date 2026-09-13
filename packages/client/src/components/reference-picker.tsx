@@ -20,7 +20,7 @@ import { Button, cx } from "./ui.js";
 import { generatedOriginLabel } from "../lib/format.js";
 import { Portrait } from "./portrait.js";
 import { Search, Upload } from "./icons.js";
-import { Wave } from "../screens/production.js";
+import { Wave } from "./wave.js";
 
 /**
  * One reference picker for every surface that asks for one (issue 305 §4, design 69).

@@ -11,7 +11,8 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen, LANE_GUTTER_PX, followPlayhead, rulerTicks } from "../src/screens/production.js";
+import { CutScreen } from "../src/screens/cut.js";
+import { LANE_GUTTER_PX, followPlayhead, rulerTicks } from "../src/screens/editor-transport.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**

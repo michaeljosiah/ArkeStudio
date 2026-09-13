@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { parseHTML } from "linkedom";
 import { ELEVENLABS_VOICE_MODEL, orderedShots, type ClientMessage, type ClientState } from "@arke-studio/contracts";
-import { VoiceLineDialogScreen } from "../src/screens/production.js";
+import { VoiceLineDialogScreen } from "../src/screens/production-generate.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest, requestVoiceLine } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";

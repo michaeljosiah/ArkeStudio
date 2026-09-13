@@ -28,7 +28,7 @@ import {
   useArtifactNotices,
   useImportReport,
 } from "../lib/store.js";
-import { Wave } from "./production.js";
+import { Wave } from "../components/wave.js";
 
 /**
  * A production's artifacts (design 134, SPEC-020 R-13).
