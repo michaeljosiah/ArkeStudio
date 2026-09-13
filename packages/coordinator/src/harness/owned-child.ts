@@ -9,10 +9,13 @@ interface OwnedChildDeps extends SupervisorDeps {
   kill?: (pid: number) => Promise<void>;
   leash?: typeof leashChildToParent;
   snapshotMs?: number;
+  snapshotTimeoutMs?: number;
+  listDescendants?: (rootPid: number, signal?: AbortSignal) => Promise<DescendantInfo[]>;
 }
 interface TrackedChild {
   descendants: Map<number, DescendantInfo>;
   snapshot: Promise<void>;
+  snapshotAbort?: AbortController;
   timer?: ReturnType<typeof setTimeout>;
   stopping?: Promise<void>;
 }
@@ -36,9 +39,20 @@ export function ownedChildHooks(
   const live = (child: ChildProcessWithoutNullStreams) => child.exitCode === null && child.signalCode === null;
   const snapshot = async (child: ChildProcessWithoutNullStreams, state: TrackedChild) => {
     if (platform !== "win32" || state.stopping || !child.pid || !live(child)) return;
+    const abort = new AbortController();
+    state.snapshotAbort = abort;
+    const timer = setTimeout(() => abort.abort(), deps.snapshotTimeoutMs ?? 10_000);
+    let rejectCancelled!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      rejectCancelled = () => reject(new Error("Descendant inspection was cancelled."));
+      abort.signal.addEventListener("abort", rejectCancelled, { once: true });
+    });
     try {
-      const found = await (deps.listDescendants ?? listDescendants)(child.pid);
+      const found = await Promise.race([(deps.listDescendants ?? listDescendants)(child.pid, abort.signal), cancelled]);
       for (const descendant of found) {
+        // A late result from a non-cancellable injected probe cannot repopulate a ledger
+        // after cleanup. Already-started record writes finish before their release below.
+        if (abort.signal.aborted || state.stopping || !live(child)) break;
         if (state.descendants.has(descendant.pid)) continue;
         state.descendants.set(descendant.pid, descendant);
         await deps.ledger?.record({
@@ -46,7 +60,12 @@ export function ownedChildHooks(
           parentPid: child.pid, recordedAt: descendant.startedAt ?? Date.now(),
         }).catch(() => trace("harness.ledger-record-failed"));
       }
-    } catch { trace("harness.descendant-snapshot-failed"); }
+    } catch { if (!state.stopping) trace("harness.descendant-snapshot-failed"); }
+    finally {
+      clearTimeout(timer);
+      abort.signal.removeEventListener("abort", rejectCancelled);
+      if (state.snapshotAbort === abort) state.snapshotAbort = undefined;
+    }
   };
   const schedule = (child: ChildProcessWithoutNullStreams, state: TrackedChild) => {
     if (platform !== "win32" || state.stopping || !live(child)) return;
@@ -61,29 +80,42 @@ export function ownedChildHooks(
     if (state.stopping) return state.stopping;
     if (state.timer) clearTimeout(state.timer);
     const pid = child.pid;
-    state.stopping = (async () => {
-      await state.snapshot;
+    state.stopping = Promise.resolve().then(async () => {
+      state.snapshotAbort?.abort();
       if (platform !== "win32" && !deps.kill) {
         // Rpc spawns a detached process group on POSIX, so a helper remains reachable after
         // the app-server exits. Killing only its already-dead leader would strand the helper.
         try { process.kill(-pid, "SIGKILL"); } catch { if (live(child)) await kill(pid); }
-      } else if (live(child)) await kill(pid);
+      } else if (live(child)) {
+        await kill(pid).catch(() => trace("harness.child-tree-kill-failed"));
+        // taskkill can time out or be refused. The ChildProcess still holds our own process
+        // handle, so force that child down while keeping unresolved helpers in the ledger.
+        if (live(child)) { try { child.kill("SIGKILL"); } catch { trace("harness.child-kill-failed"); } }
+      }
+      await state.snapshot;
       const tracked = [...state.descendants.values()];
       if (tracked.length) {
         try {
           const processes = await (deps.probe ?? platformProbe)(tracked.map(row => row.pid));
+          const attempted: number[] = [];
           for (const row of tracked) {
             const current = processes.get(row.pid);
             if (!current) { await release(row.pid); continue; }
             if (current.image !== row.image || current.startedAt === null || row.startedAt === null ||
               Math.abs(current.startedAt - row.startedAt) > 5000) continue;
             await kill(row.pid);
-            await release(row.pid);
+            attempted.push(row.pid);
+          }
+          if (attempted.length) {
+            const remaining = await (deps.probe ?? platformProbe)(attempted);
+            for (const descendantPid of attempted) {
+              if (!remaining.has(descendantPid)) await release(descendantPid);
+            }
           }
         } catch { trace("harness.descendant-reap-failed"); }
       }
       if (!live(child)) await release(pid);
-    })();
+    });
     return state.stopping;
   };
   return {

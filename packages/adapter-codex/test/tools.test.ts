@@ -81,7 +81,9 @@ test("outside paths, sibling prefix collisions, symlinks, nested search links an
 test("Windows extended paths retain the same containment boundary", { skip: process.platform !== "win32" }, async t => {
   const f = await fixture(); t.after(() => rm(f.base, { recursive: true, force: true }));
   await writeFile(join(f.root, "inside.txt"), "inside");
-  const read = await f.run("read", { path: toNamespacedPath(join(f.root, "inside.txt")) });
+  // Codex receives the canonical session cwd. Windows CI's temp directory can instead use
+  // an 8.3 alias, which is intentionally not another spelling admitted by the lexical gate.
+  const read = await f.run("read", { path: toNamespacedPath(join(f.session.root, "inside.txt")) });
   assert.deepEqual(read.result.contentItems, [{ type: "inputText", text: "inside" }]);
   await assert.rejects(f.run("read", { path: toNamespacedPath(join(f.base, "secret.txt")) }), /confinement/);
 });

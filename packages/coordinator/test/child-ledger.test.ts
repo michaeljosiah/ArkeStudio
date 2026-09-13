@@ -4,11 +4,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tempDir } from "./tmp.js";
-import { until } from "./wait.js";
+import { until, untilAsync } from "./wait.js";
 import {
   ChildLedger,
   ownerStamp,
   platformProbe,
+  runCollect,
   type ChildRecord,
   type ProcessInfo,
 } from "../src/child-ledger.js";
@@ -39,6 +40,29 @@ function processGone(pid: number): boolean {
 }
 
 const nodeImage = basename(process.execPath).toLowerCase();
+
+describe("bounded process inspection", () => {
+  it("terminates a stalled helper when cancelled", async () => {
+    const pidFile = join(await tempDir("arke-inspection-"), "pid");
+    const abort = new AbortController();
+    const inspection = runCollect(process.execPath, ["-e",
+      "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)", pidFile,
+    ], { signal: abort.signal, timeoutMs: 30_000 });
+    const rejected = assert.rejects(inspection, /cancelled/);
+    let pid = 0;
+    try {
+      await untilAsync(async () => { pid = Number(await readFile(pidFile, "utf8")); return pid > 0; }, "inspection helper started");
+      abort.abort();
+      await rejected;
+      await until(() => processGone(pid), "cancelled inspection helper exited");
+    } finally { abort.abort(); }
+  });
+
+  it("enforces a deadline and handles spawn errors without leaving its timer active", async () => {
+    await assert.rejects(runCollect(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 20 }), /timed out/);
+    await assert.rejects(runCollect(join(await tempDir("arke-inspection-absent-"), "absent.exe"), []), /ENOENT/);
+  });
+});
 
 async function tempLedgerPath(): Promise<string> {
   const dir = await tempDir("arke-ledger-");
@@ -73,6 +97,18 @@ describe("ChildLedger", () => {
     // Releasing an unknown pid is a no-op, not an error.
     await ledger.release(9999);
     assert.deepEqual((await readChildren(path)).map((c) => c.pid), [2222]);
+  });
+
+  it("preserves ownership when a kill command rejects", async () => {
+    const path = await tempLedgerPath();
+    const owned = record(2222, { ownerPid: 1111, recordedAt: 1000 });
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[owned.pid, { pid: owned.pid, image: owned.image, startedAt: 1000 }]]),
+      kill: async () => { throw new Error("Process inspection timed out."); },
+    });
+    await ledger.record(owned);
+    await assert.rejects(ledger.reapStale(), /timed out/);
+    assert.deepEqual(await readChildren(path), [owned]);
   });
 
   it("re-recording a pid replaces the old record", async () => {

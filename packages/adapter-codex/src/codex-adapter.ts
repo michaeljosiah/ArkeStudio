@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
-  agentPromptFor, confinementFor, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
+  agentPromptFor, confinementFor, findHarnessModel, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
   type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
 } from "@arke-studio/contracts";
@@ -194,7 +194,7 @@ export class CodexAdapter implements HarnessAdapter {
     const override = prepared.agents?.[member.name];
     const requested = prepared.model ?? override?.model;
     const catalog = await this.discoverModels(input.signal); input.signal?.throwIfAborted();
-    const selected = requested === undefined ? catalog.find(model => model.isDefault) : catalog.find(model => `${model.provider}/${model.id}` === requested || model.aliases?.some(alias => `${model.provider}/${alias}` === requested));
+    const selected = requested === undefined ? catalog.find(model => model.isDefault) : findHarnessModel(requested, catalog);
     if (requested !== undefined && !selected) throw new Error("The selected model is unavailable through Codex. Refresh the model list and choose an available model.");
     if (!selected) throw new Error("Codex did not report a default model. Choose a model before starting this agent.");
     if (member.name === "stage-designer" && selected.inputModalities && !selected.inputModalities.includes("image")) throw new Error("This Codex model cannot inspect Stage images.");

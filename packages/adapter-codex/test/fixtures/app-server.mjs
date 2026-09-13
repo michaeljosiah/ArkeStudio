@@ -20,7 +20,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   else if (method === 'config/read') result(id, { config: { model_provider: 'openai', mcp_servers: { 'unsafe.name': { command: 'sentinel-secret' } } } });
   else if (method === 'model/list') {
     if (params.cursor) result(id, { data: [{ id: 'spark', model: 'text-only', displayName: 'Text Only', inputModalities: ['text'], isDefault: false }], nextCursor: null });
-    else result(id, { data: [{ id: 'catalog-alias', model: 'image-model', displayName: 'Image Model', inputModalities: ['text', 'image'], isDefault: true }], nextCursor: 'page2' });
+    else result(id, { data: [{ id: scenario === 'alias-collision' ? 'text-only' : 'catalog-alias', model: 'image-model', displayName: 'Image Model', inputModalities: ['text', 'image'], isDefault: true }], nextCursor: 'page2' });
   } else if (method === 'thread/start') {
     const thread = { id: `thread-${++sequence}`, model: params.model }; threads.set(thread.id, thread);
     const respond = () => result(id, { thread, model: scenario === 'substitute' ? 'wrong-model' : params.model, modelProvider: params.modelProvider, instructionSources: scenario === 'instructions' ? ['private-instructions'] : [] });

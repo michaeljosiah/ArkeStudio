@@ -113,22 +113,42 @@ function powershellPath(): string {
   return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 
-function runCollect(
+/** Bounded process inspection; aborting also terminates the owned inspection helper. */
+export function runCollect(
   command: string,
   args: string[],
-  opts: { okCodes?: number[] } = {},
+  opts: { okCodes?: number[]; signal?: AbortSignal; timeoutMs?: number } = {},
 ): Promise<string> {
   const okCodes = opts.okCodes ?? [0];
   return new Promise((resolve, reject) => {
+    opts.signal?.throwIfAborted();
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let out = "";
     let err = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      opts.signal?.removeEventListener("abort", abort);
+      if (error) reject(error);
+      else resolve(out);
+    };
+    const stop = (error: Error) => {
+      // Inspection helpers never own application work. A timed out PowerShell must not
+      // remain alive after the caller gives up waiting for its CIM query.
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      finish(error);
+    };
+    const abort = () => stop(new Error("Process inspection was cancelled."));
+    const timer = setTimeout(() => stop(new Error("Process inspection timed out.")), opts.timeoutMs ?? 10_000);
+    opts.signal?.addEventListener("abort", abort, { once: true });
     child.stdout?.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr?.on("data", (c: Buffer) => (err += c.toString()));
-    child.once("error", (e) => reject(e));
+    child.once("error", (e) => finish(e));
     child.once("exit", (code) => {
-      if (code !== null && okCodes.includes(code)) resolve(out);
-      else reject(new Error(`${command} exited ${code}${err ? `: ${err.trim().split("\n", 1)[0]}` : ""}`));
+      if (code !== null && okCodes.includes(code)) finish();
+      else finish(new Error(`${command} exited ${code}${err ? `: ${err.trim().split("\n", 1)[0]}` : ""}`));
     });
   });
 }
@@ -149,7 +169,7 @@ export interface DescendantInfo extends ProcessInfo {
  * the wrapper between them has died. Windows-only — elsewhere there is no shell shim and no
  * wrapper, so the answer is always empty. Throws when the process table cannot be read.
  */
-export async function listDescendants(rootPid: number): Promise<DescendantInfo[]> {
+export async function listDescendants(rootPid: number, signal?: AbortSignal): Promise<DescendantInfo[]> {
   if (process.platform !== "win32") return [];
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return [];
   // One query for the whole table; ParentProcessId is not filterable transitively in CIM,
@@ -165,6 +185,7 @@ export async function listDescendants(rootPid: number): Promise<DescendantInfo[]
   const stdout = await runCollect(
     powershellPath(),
     ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")],
+    { signal },
   );
   const rows = JSON.parse(stdout.trim() === "" ? "[]" : stdout) as { p: number; pp: number; n: string; s: number | null }[];
   const byParent = new Map<number, typeof rows>();
@@ -192,7 +213,7 @@ export async function listDescendants(rootPid: number): Promise<DescendantInfo[]
 /** Force-kill the whole tree under `pid` — grandchildren orphan on Windows otherwise. */
 export async function killTree(pid: number): Promise<void> {
   if (process.platform === "win32") {
-    await runCollect("taskkill", ["/pid", String(pid), "/T", "/F"], { okCodes: [0, 128, 255, 1] }).catch(() => "");
+    await runCollect("taskkill", ["/pid", String(pid), "/T", "/F"], { okCodes: [0, 128, 255, 1] });
   } else {
     try {
       process.kill(pid, "SIGKILL");

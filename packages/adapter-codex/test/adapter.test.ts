@@ -56,6 +56,15 @@ test("Stage rejects known text-only models and an explicit unavailable override 
   await f.adapter.createSession({ cwd: f.root, agent: "world-builder", purpose: "ask", preparationId: "chat" });
 });
 
+test("a canonical model identity wins over another catalog row's colliding alias", async t => {
+  const f = await fixture("alias-collision"); t.after(f.cleanup);
+  f.adapter.prepareSession({ preparationId: "canonical-chat", model: "openai/text-only" });
+  await f.adapter.createSession({ cwd: f.root, agent: "world-builder", purpose: "ask", preparationId: "canonical-chat" });
+  assert.equal((await f.requests()).find(request => request.method === "thread/start")?.params.model, "text-only");
+  f.adapter.prepareSession({ preparationId: "canonical-stage", model: "openai/text-only" });
+  await assert.rejects(f.adapter.createSession({ cwd: f.root, agent: "stage-designer", purpose: "authoring", preparationId: "canonical-stage" }), /cannot inspect/);
+});
+
 test("real tool reply contains image bytes, with a read receipt only after successful delivery", async t => {
   const f = await fixture("image"); t.after(f.cleanup);
   await writeFile(join(f.root, "frame.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAZklEQVR42u3QQREAAAQAMEm89T/9yOHssQKLzprPQoAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECBAgQIAAAQIECLhvAVR6kdJApJA8AAAAAElFTkSuQmCC", "base64"));
