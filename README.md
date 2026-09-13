@@ -124,12 +124,13 @@ rather than left silent.
 
 <br>
 
-<img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and what a finished job actually cost." width="100%">
+<img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and a finished job's receipt." width="100%">
 
 **Nothing runs unwatched.** Every dispatch and every voice line lands in one panel — what
 needs your answer, what's running right now with a cancel one click away, and what a
 failure actually said before you retry it. Spend is tracked against a threshold you set,
-and a finished job's receipt says exactly what it cost, not an estimate.
+and every receipt keeps its estimate's own tilde — nothing is claimed as measured until a
+provider actually reports what it charged.
 
 </div>
 
