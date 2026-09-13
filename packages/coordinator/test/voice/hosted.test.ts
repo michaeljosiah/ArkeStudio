@@ -231,6 +231,28 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
     });
   });
+
+  it("two reads of the same unsaved voice at once make one slot, not two (codex on PR 1156)", async () => {
+    await withClonedVoice(async ({ store, voice }) => {
+      const clip = await clipFor(store, voice());
+      assert.ok(clip);
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
+      // A listing slow enough that both flows would be past it before either saved, unserialised.
+      const { slots, saves, account } = fakeSlots();
+      const find = slots.find;
+      slots.find = async (provider, key, name) => { await new Promise((resolve) => setTimeout(resolve, 40)); return find(provider, key, name); };
+      const deps = { getKey: async () => "k", slots, now: CLOCK };
+      const [first, second] = await Promise.all([
+        prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), clip, deps),
+        prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), clip, deps),
+      ]);
+      assert.equal(first.remoteVoiceId, "voc_1");
+      assert.equal(second.remoteVoiceId, "voc_1", "the second flow read the slot the first recorded");
+      assert.equal(saves.length, 1);
+      assert.equal(account.size, 1, "one slot on the account");
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
+    });
+  });
 });
 
 const VOXTRAL: ManifestModel = {

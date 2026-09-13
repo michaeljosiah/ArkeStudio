@@ -90,6 +90,27 @@ export interface PrepareHostedClipDeps {
 }
 
 /**
+ * One slot flow at a time per vendor and voice. Two jobs for the same not-yet-saved voice can
+ * start together — two missing blocks of one voiced page, on a lane whose concurrency is two —
+ * and both would pass the listing before either had saved, making two slots and recording one
+ * (codex on PR 1156). The listing-then-save is serialised in this process, and the second
+ * flow re-reads the entry the first one wrote.
+ */
+const slotFlows = new Map<string, Promise<unknown>>();
+
+async function serialised<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const previous = slotFlows.get(key) ?? Promise.resolve();
+  const run = previous.then(work, work);
+  const settled = run.then(() => undefined, () => undefined);
+  slotFlows.set(key, settled);
+  try {
+    return await run;
+  } finally {
+    if (slotFlows.get(key) === settled) slotFlows.delete(key);
+  }
+}
+
+/**
  * The clip is about to leave for a hosted reader: check that the person allowed it, and give
  * the reader what it reads from — the bytes, or the slot that holds them.
  *
@@ -122,21 +143,27 @@ export async function prepareHostedClip(
   const label = hostedReaderDestination(provider)?.label ?? provider;
   const key = await deps.getKey(provider);
   if (key === null) throw new Error(`${label} has no key in Settings — add one on Providers, then read again.`);
-  if (deps.slots === undefined) throw new Error(`${label} voice slots are not configured in this build.`);
+  const slots = deps.slots;
+  if (slots === undefined) throw new Error(`${label} voice slots are not configured in this build.`);
   const hash = clipHashOf(clip);
-  const held = voice.remote?.[provider];
-  if (held?.voiceId !== undefined && held.clipHash === hash && (await deps.slots.has(provider, key, held.voiceId))) {
-    return { ...clip, remoteVoiceId: held.voiceId };
-  }
-  const name = hostedSlotName(voice, hash);
-  // A listing that fails throws through here and the read fails with the reason: it is not
-  // read as "no slot", because a save after an unanswered listing is the duplicate charge the
-  // listing exists to prevent. Only a listing that answered "none" is followed by a save.
-  const found = await deps.slots.find(provider, key, name);
-  const voiceId = found ?? (await deps.slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType })).voiceId;
-  await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now() });
-  if (held?.voiceId !== undefined && held.voiceId !== voiceId) {
-    await deps.slots.remove(provider, key, held.voiceId).catch(() => undefined);
-  }
-  return { ...clip, remoteVoiceId: voiceId };
+  return serialised(`${provider}:${voice.id}`, async () => {
+    // The entry as it is now, not as it was when this read began: a flow that waited its turn
+    // reads the slot the flow before it recorded.
+    const current = store.getBundle().clonedVoices.find((entry) => entry.id === voice.id) ?? voice;
+    const held = current.remote?.[provider];
+    if (held?.voiceId !== undefined && held.clipHash === hash && (await slots.has(provider, key, held.voiceId))) {
+      return { ...clip, remoteVoiceId: held.voiceId };
+    }
+    const name = hostedSlotName(current, hash);
+    // A listing that fails throws through here and the read fails with the reason: it is not
+    // read as "no slot", because a save after an unanswered listing is the duplicate charge the
+    // listing exists to prevent. Only a listing that answered "none" is followed by a save.
+    const found = await slots.find(provider, key, name);
+    const voiceId = found ?? (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType })).voiceId;
+    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now() });
+    if (held?.voiceId !== undefined && held.voiceId !== voiceId) {
+      await slots.remove(provider, key, held.voiceId).catch(() => undefined);
+    }
+    return { ...clip, remoteVoiceId: voiceId };
+  });
 }
