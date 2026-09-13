@@ -277,6 +277,9 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     assert.equal(await client.findVoice("k", "Harbour glass · 0123456789ab"), "voc_exact");
     assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voices?voice_type=personal&search=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
     assert.equal(await new BreezeBlueClient(async () => json(200, { voices: [] })).findVoice("k", "x"), null);
+    // A listing that fails is not "none": the caller saves only after an answered listing.
+    await assert.rejects(new BreezeBlueClient(async () => json(429, { ok: false, code: "RATE_LIMITED", detail: "Rate limit exceeded." })).findVoice("k", "x"), ProviderBusyError);
+    await assert.rejects(new BreezeBlueClient(async () => json(500, { ok: false, code: "INTERNAL_ERROR", detail: "x" })).findVoice("k", "x"));
     const held = recording((url) => url.endsWith("/v1/voices/voc_1") ? json(200, { voice_id: "voc_1", name: "x" }) : json(404, { ok: false, code: "RESOURCE_NOT_FOUND", detail: "Resource not found." }));
     assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_1"), true);
     assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_gone"), false, "deleted in the console");

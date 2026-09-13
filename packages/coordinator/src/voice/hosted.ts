@@ -77,7 +77,7 @@ export function hostedSlotName(voice: Pick<ClonedVoice, "name">, clipHash: strin
 export interface HostedVoiceSlots {
   save(provider: string, key: string, input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string }): Promise<{ voiceId: string }>;
   remove(provider: string, key: string, voiceId: string): Promise<void>;
-  /** The id of the account's voice saved under exactly this name, or null. */
+  /** The id of the account's voice saved under exactly this name, or null; a listing that fails throws. */
   find(provider: string, key: string, name: string): Promise<string | null>;
   /** Whether the account still holds this voice — gone, or another account's, reads false. */
   has(provider: string, key: string, voiceId: string): Promise<boolean>;
@@ -129,6 +129,9 @@ export async function prepareHostedClip(
     return { ...clip, remoteVoiceId: held.voiceId };
   }
   const name = hostedSlotName(voice, hash);
+  // A listing that fails throws through here and the read fails with the reason: it is not
+  // read as "no slot", because a save after an unanswered listing is the duplicate charge the
+  // listing exists to prevent. Only a listing that answered "none" is followed by a save.
   const found = await deps.slots.find(provider, key, name);
   const voiceId = found ?? (await deps.slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType })).voiceId;
   await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now() });

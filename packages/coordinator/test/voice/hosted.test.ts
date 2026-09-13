@@ -209,6 +209,17 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       assert.equal(saves.length, 3, "nothing was saved for a slot the account already held");
       assert.deepEqual(removes.at(-1), { provider: "breezeblue", key: "k", voiceId: "voc_3" });
 
+      // A listing that fails is not "none": the read fails with the reason and nothing is saved,
+      // because a save after an unanswered listing is the duplicate charge the listing prevents.
+      const unanswered = fakeSlots();
+      unanswered.slots.find = async () => { throw new Error("breezeblue: Rate limit exceeded. — retry after 3s (HTTP 429)"); };
+      await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(144, 4));
+      const unlisted = await clipFor(store, voice());
+      assert.ok(unlisted);
+      await assert.rejects(prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), unlisted, { ...deps, slots: unanswered.slots }), /Rate limit exceeded/);
+      assert.equal(unanswered.saves.length, 0);
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_orphan", "the record is untouched");
+
       // A removal the vendor refuses is not this read's failure: the new slot is recorded and used.
       const failing = fakeSlots(true);
       await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(160, 3));

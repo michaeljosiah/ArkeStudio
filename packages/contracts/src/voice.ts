@@ -244,13 +244,19 @@ export function isHostedVoiceReader(provider: string, model?: string): boolean {
   return row !== undefined && (model === undefined || model === row);
 }
 
-/** Cloned voice narration is intentionally unsupported until long-form queue chunking exists. */
+/**
+ * Cloned voice narration is intentionally unsupported until long-form queue chunking exists —
+ * through any reader: a hosted reader's library candidate says so with `readsClone`, and the
+ * narrator path queues without a voice reference, so a clone it accepted would reach the vendor
+ * as a preset id it has never heard of (codex on PR 1153).
+ */
 export function supportsVoiceUse(
-  candidate: { provider: string; model?: string },
+  candidate: { provider: string; model?: string; readsClone?: string },
   use: "preview" | "line" | "bench" | "narration",
 ): boolean {
-  return use !== "narration" ||
-    candidate.provider !== CLONED_VOICE_PROVIDER ||
+  if (use !== "narration") return true;
+  if (candidate.readsClone !== undefined) return false;
+  return candidate.provider !== CLONED_VOICE_PROVIDER ||
     (candidate.model !== undefined && candidate.model !== CLONED_VOICE_MODEL);
 }
 

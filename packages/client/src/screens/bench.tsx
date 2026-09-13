@@ -9,6 +9,7 @@ import {
   deriveCapabilityAvailability,
   dispatchDuration,
   durationLimitsFor,
+  billableCharacters,
   estimateMicroUsd,
   formatMicroUsd,
   frameTaskModes,
@@ -820,8 +821,9 @@ function BenchWorkspace({
       return each * draft.params.count;
     }
     if (draft.params.kind === "voice") {
-      // Exact, not a ceiling: speech bills per character and the characters are already typed.
-      return estimateMicroUsd(candidate, { characters: draft.brief.length }) * draft.params.count;
+      // Exact, not a ceiling: speech bills per character and the characters are already typed —
+      // counted as the row bills them, a delivery's tag included (SPEC-046 R-8).
+      return estimateMicroUsd(candidate, { characters: billableCharacters(candidate, draft.brief, draft.params.delivery) }) * draft.params.count;
     }
     if (draft.params.kind === "music") {
       // A ceiling, and the only honest kind of number here: the route calls its length an upper

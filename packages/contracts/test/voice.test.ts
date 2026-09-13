@@ -18,6 +18,7 @@ import {
   newClonedVoice,
   parseVoiceLibrary,
   rankVoices,
+  supportsVoiceUse,
   voiceSourceFor,
 } from "../src/voice.js";
 import { ClientMessageSchema } from "../src/frames.js";
@@ -527,6 +528,14 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     assert.ok(isHostedVoiceReader("mistral") && isHostedVoiceReader("breezeblue", "breeze-tts-2"));
     assert.equal(isHostedVoiceReader("elevenlabs"), false);
     assert.equal(isHostedVoiceReader("mistral", "some-other-model"), false);
+  });
+
+  it("a library voice through a hosted reader is not a narrator, any more than through the recipe", () => {
+    const [mistral] = cloudReaderCandidates([harbour], { provider: "mistral", model: "voxtral-mini-tts" });
+    assert.equal(supportsVoiceUse(mistral!, "narration"), false);
+    assert.equal(supportsVoiceUse(mistral!, "line"), true);
+    assert.equal(supportsVoiceUse({ provider: "mistral", model: "voxtral-mini-tts", voiceId: "gb_jane_neutral" } as never, "narration"), true, "a preset narrates");
+    assert.equal(supportsVoiceUse({ provider: "comfyui", model: "comfyui-cloned-voice" }, "narration"), false);
   });
 
   it("a legacy assignment through a hosted reader migrates to the reader's row", () => {

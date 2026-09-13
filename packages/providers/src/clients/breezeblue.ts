@@ -215,17 +215,15 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   /**
    * The account's own voice saved under exactly this name (R-13): the library names a slot with
    * the clip's hash, so a save whose answer never landed is found here rather than made again.
-   * `search` matches names by prefix and substring too, so the match is checked exactly.
+   * `search` matches names by prefix and substring too, so the match is checked exactly. A
+   * listing that fails is thrown, never read as "none": an unanswered listing after an
+   * uncertain save is exactly when a second save would charge twice (codex on PR 1153).
    */
   async findVoice(key: string, name: string): Promise<string | null> {
-    const { status, body } = await jsonRequest(
-      this.fetchImpl, this.id,
-      `${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`,
-      { headers: this.headers(key) },
-    );
-    if (status >= 400) return null;
-    const voices = (body as { voices?: Array<Record<string, unknown>> } | null)?.voices ?? [];
-    const match = voices.find((v) => v["name"] === name && typeof v["voice_id"] === "string");
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key) });
+    if (res.status >= 400) throw await this.failure(res);
+    const body = (await res.json().catch(() => null)) as { voices?: Array<Record<string, unknown>> } | null;
+    const match = (body?.voices ?? []).find((v) => v["name"] === name && typeof v["voice_id"] === "string");
     return match ? (match["voice_id"] as string) : null;
   }
 

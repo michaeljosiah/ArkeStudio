@@ -286,7 +286,7 @@ export interface VoiceSlotClient extends ProviderClient {
     input: { name: string; clip: Uint8Array; contentType: "audio/wav" | "audio/mpeg"; language?: string },
   ): Promise<{ voiceId: string }>;
   deleteVoice(key: string, voiceId: string): Promise<void>;
-  /** The id of the account's own voice saved under exactly this name, or null when it holds none. */
+  /** The id of the account's own voice saved under exactly this name, or null when the listing answered and holds none; a listing that fails throws. */
   findVoice(key: string, name: string): Promise<string | null>;
   /** Whether the account still holds the voice: gone, or another account's, is false — never a throw. */
   hasVoice(key: string, voiceId: string): Promise<boolean>;
