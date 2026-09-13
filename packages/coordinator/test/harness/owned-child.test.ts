@@ -91,7 +91,7 @@ describe("owned stdio child lifecycle", () => {
     const child = fakeChild(); const killed: number[] = [];
     const hooks = fakeOwnedChildHooks("codex", "/bin/codex.exe", {
       platform: "win32", ledger: new ChildLedger(path), listDescendants: async () => [helper],
-      probe: async () => new Map([[helper.pid, { ...helper, startedAt: 20_000 }]]),
+      probe: async () => new Map([[helper.pid, { ...helper, startedAt: helper.startedAt! + 1 }]]),
       leash: async () => ({ ok: true }),
       kill: async pid => { killed.push(pid); exit(child, 0); },
     });
@@ -177,5 +177,115 @@ describe("owned stdio child lifecycle", () => {
     await new Promise(resolve => setImmediate(resolve));
     assert.deepEqual(killed, [child.pid]);
     assert.deepEqual(await readLedger(path), []);
+  });
+
+  it("bounds its final scan and cannot record a late result after disposal", async () => {
+    const path = join(await tempDir("owned-codex-final-timeout-"), "children.json");
+    const child = fakeChild();
+    const root = { pid: child.pid!, image: "codex.exe", startedAt: 500 };
+    let finishScan!: (rows: DescendantInfo[]) => void;
+    let finalSignal: AbortSignal | undefined;
+    let scans = 0;
+    const hooks = fakeOwnedChildHooks("codex", "/bin/codex.exe", {
+      platform: "win32", ledger: new ChildLedger(path), snapshotTimeoutMs: 20,
+      listDescendants: async (_pid, signal, query) => {
+        if (++scans === 1) { query?.onRoot?.(root); return []; }
+        assert.deepEqual(query?.root, root);
+        assert.ok(query?.rootExitedAt);
+        finalSignal = signal;
+        return new Promise(resolve => { finishScan = resolve; });
+      },
+      leash: async () => ({ ok: false }), kill: async () => { assert.fail("no known child can authorize a kill"); },
+    });
+    await hooks.onSpawn(child);
+    exit(child, 1);
+    await hooks.killProcess(child);
+    assert.equal(scans, 2);
+    assert.equal(finalSignal?.aborted, true);
+    finishScan([helper]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(await readLedger(path), []);
+  });
+
+  it("waits for a delayed direct-kill exit before finding an unrecorded helper", async () => {
+    const path = join(await tempDir("owned-codex-delayed-exit-"), "children.json");
+    const child = fakeChild(); const killed: number[] = [];
+    const processes = new Map<number, ProcessInfo>([[helper.pid, helper]]);
+    let scans = 0;
+    Object.assign(child, { kill: () => { setImmediate(() => exit(child, 0)); return true; } });
+    const hooks = fakeOwnedChildHooks("codex", "/bin/codex.exe", {
+      platform: "win32", ledger: new ChildLedger(path),
+      listDescendants: async (_pid, _signal, query) => {
+        if (++scans === 1) { query?.onRoot?.({ pid: child.pid!, image: "codex.exe", startedAt: 500 }); return []; }
+        assert.ok(query?.rootExitedAt, "the actual exit event bounds final lineage");
+        return [helper];
+      },
+      probe: async () => processes, leash: async () => ({ ok: false }),
+      kill: async pid => { killed.push(pid); if (pid === child.pid) throw new Error("taskkill failed"); processes.delete(pid); },
+    });
+    await hooks.onSpawn(child);
+    await hooks.killProcess(child);
+    assert.equal(scans, 2);
+    assert.deepEqual(killed, [child.pid, helper.pid]);
+    assert.deepEqual(await readLedger(path), []);
+  });
+
+  it("performs one final scan when exit arrives after its bounded handle wait", async () => {
+    const path = join(await tempDir("owned-codex-after-exit-wait-"), "children.json");
+    const child = fakeChild(); const killed: number[] = [];
+    const processes = new Map<number, ProcessInfo>([[helper.pid, helper]]);
+    let scans = 0;
+    Object.assign(child, { kill: () => true });
+    const hooks = fakeOwnedChildHooks("codex", "/bin/codex.exe", {
+      platform: "win32", ledger: new ChildLedger(path), exitTimeoutMs: 5,
+      listDescendants: async (_pid, _signal, query) => {
+        if (++scans === 1) { query?.onRoot?.({ pid: child.pid!, image: "codex.exe", startedAt: 500 }); return []; }
+        return [helper];
+      },
+      probe: async () => processes, leash: async () => ({ ok: false }),
+      kill: async pid => { killed.push(pid); if (pid === child.pid) throw new Error("taskkill failed"); processes.delete(pid); },
+    });
+    const before = fakeExitBackstops.size;
+    await hooks.onSpawn(child);
+    await hooks.killProcess(child);
+    assert.equal(scans, 1);
+    assert.equal(fakeExitBackstops.size, before + 1, "the live root retains its exit backstop");
+    exit(child, 0);
+    await untilAsync(async () => scans === 2 && (await readLedger(path)).length === 0, "late exit final cleanup completes");
+    assert.equal(fakeExitBackstops.size, before);
+    assert.deepEqual(killed, [child.pid, helper.pid]);
+    await hooks.killProcess(child);
+    assert.equal(scans, 2);
+  });
+
+  it("finishes a deferred final scan when root exit arrives during descendant reaping", async () => {
+    const path = join(await tempDir("owned-codex-exit-during-reap-"), "children.json");
+    const child = fakeChild(); const killed: number[] = [];
+    const earlier = { ...helper, pid: helper.pid + 1 };
+    const processes = new Map<number, ProcessInfo>([[earlier.pid, earlier], [helper.pid, helper]]);
+    let scans = 0; let probing = false; let probes = 0;
+    let finishProbe!: (value: Map<number, ProcessInfo>) => void;
+    Object.assign(child, { kill: () => true });
+    const hooks = fakeOwnedChildHooks("codex", "/bin/codex.exe", {
+      platform: "win32", ledger: new ChildLedger(path), exitTimeoutMs: 5,
+      listDescendants: async (_pid, _signal, query) => {
+        if (++scans === 1) { query?.onRoot?.({ pid: child.pid!, image: "codex.exe", startedAt: 500 }); return [earlier]; }
+        return [helper];
+      },
+      probe: async () => {
+        if (++probes === 1) { probing = true; return new Promise(resolve => { finishProbe = resolve; }); }
+        return processes;
+      },
+      leash: async () => ({ ok: false }),
+      kill: async pid => { killed.push(pid); if (pid === child.pid) throw new Error("taskkill failed"); processes.delete(pid); },
+    });
+    await hooks.onSpawn(child);
+    const stopping = hooks.killProcess(child);
+    await untilAsync(async () => probing, "initial stop has passed the handle deadline and is reaping");
+    assert.equal(scans, 1);
+    exit(child, 0); finishProbe(processes);
+    await stopping;
+    await untilAsync(async () => scans === 2 && (await readLedger(path)).length === 0, "the observed exit gets its final scan");
+    assert.deepEqual(killed, [child.pid, earlier.pid, helper.pid]);
   });
 });

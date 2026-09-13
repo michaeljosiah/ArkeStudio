@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, readlink } from "node:fs/promises";
+import { basename } from "node:path";
 import { atomicWriteFile } from "./world/atomic.js";
 
 /**
@@ -20,8 +21,12 @@ import { atomicWriteFile } from "./world/atomic.js";
 export interface ChildRecord {
   /** The supervised child's pid. */
   pid: number;
-  /** Child image name (exe basename, lowercased) — the identity guard before any kill. */
+  /** Child image name; executable-kind Linux identities preserve filename case. */
   image: string;
+  /** New Linux stdio children use the full /proc executable name, not truncated ps comm. */
+  imageKind?: "executable";
+  /** Only application-owned, detached Linux stdio roots set this. */
+  processGroupLeader?: true;
   /** Supervisor id ("opencode", "voxa") for reporting. */
   id: string;
   ownerPid: number;
@@ -40,6 +45,9 @@ export interface ProcessInfo {
   pid: number;
   /** Image/command name as the OS reports it, lowercased. */
   image: string;
+  /** Linux's full executed basename; absent when the OS cannot establish it. */
+  executableImage?: string;
+  processGroup?: number;
   /** Start time (epoch ms), or null when the OS would not say. */
   startedAt: number | null;
 }
@@ -108,14 +116,28 @@ async function probeWin32(pids: number[]): Promise<Map<number, ProcessInfo>> {
 async function probePosix(pids: number[]): Promise<Map<number, ProcessInfo>> {
   const now = Date.now();
   // ps exits non-zero when any pid is absent; absence is an answer here, not a failure.
-  const stdout = await runCollect("ps", ["-o", "pid=,etimes=,comm=", "-p", pids.join(",")], { okCodes: [0, 1] });
+  const linux = process.platform === "linux";
+  const stdout = await runCollect("ps", ["-o", linux ? "pid=,etimes=,pgid=,comm=" : "pid=,etimes=,comm=", "-p", pids.join(",")], { okCodes: [0, 1] });
   const map = new Map<number, ProcessInfo>();
   for (const line of stdout.split("\n")) {
-    const m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(line);
+    const m = (linux ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/ : /^\s*(\d+)\s+(\d+)\s+(.+)$/).exec(line);
     if (!m) continue;
-    const comm = m[3]!.trim();
+    const comm = m[linux ? 4 : 3]!.trim();
     const base = comm.slice(comm.lastIndexOf("/") + 1).toLowerCase();
-    map.set(Number(m[1]), { pid: Number(m[1]), image: base, startedAt: now - Number(m[2]) * 1000 });
+    const pid = Number(m[1]);
+    let executableImage: string | undefined;
+    if (process.platform === "linux") {
+      // comm is limited to 15 bytes and procps also escapes broken Unicode. /proc/exe
+      // retains the full identity; unreadable identity is unknown, never a prefix match.
+      try {
+        const target = await readlink(`/proc/${pid}/exe`);
+        // Linux decorates unlinked executables with this ambiguous suffix. Preserve the
+        // record rather than stripping a possibly literal filename or declaring a stranger.
+        if (!target.endsWith(" (deleted)")) executableImage = basename(target);
+      }
+      catch { /* Legacy comm callers remain usable; executable records must be retained. */ }
+    }
+    map.set(pid, { pid, image: base, startedAt: now - Number(m[2]) * 1000, ...(linux ? { processGroup: Number(m[3]) } : {}), ...(executableImage ? { executableImage } : {}) });
   }
   return map;
 }
@@ -177,13 +199,20 @@ export interface DescendantInfo extends ProcessInfo {
   parentPid: number;
 }
 
+export interface DescendantQuery {
+  /** Exact identity captured while the owned root was still alive. */
+  root?: ProcessInfo;
+  rootExitedAt?: number;
+  onRoot?: (root: ProcessInfo) => void;
+}
+
 /**
  * Live descendants of `rootPid`, transitively. taskkill /T can only walk a tree whose root
  * is still alive; this snapshot is what lets a stop or sweep reach the grandchildren after
  * the wrapper between them has died. Windows-only — elsewhere there is no shell shim and no
  * wrapper, so the answer is always empty. Throws when the process table cannot be read.
  */
-export async function listDescendants(rootPid: number, signal?: AbortSignal): Promise<DescendantInfo[]> {
+export async function listDescendants(rootPid: number, signal?: AbortSignal, query: DescendantQuery = {}): Promise<DescendantInfo[]> {
   if (process.platform !== "win32") return [];
   if (!Number.isSafeInteger(rootPid) || rootPid <= 0) return [];
   // One query for the whole table; ParentProcessId is not filterable transitively in CIM,
@@ -202,6 +231,13 @@ export async function listDescendants(rootPid: number, signal?: AbortSignal): Pr
     { signal },
   );
   const rows = JSON.parse(stdout.trim() === "" ? "[]" : stdout) as { p: number; pp: number; n: string; s: number | null }[];
+  const observed = rows.find(row => row.p === rootPid);
+  const currentRoot = observed ? { pid: observed.p, image: observed.n.toLowerCase(), startedAt: observed.s } : undefined;
+  const root = query.root ?? currentRoot;
+  if (query.root && (query.root.pid !== rootPid || query.root.startedAt === null)) return [];
+  if (query.root && currentRoot && (currentRoot.image !== query.root.image || currentRoot.startedAt !== query.root.startedAt)) return [];
+  signal?.throwIfAborted();
+  if (currentRoot) query.onRoot?.(currentRoot);
   const byParent = new Map<number, typeof rows>();
   for (const row of rows) {
     const siblings = byParent.get(row.pp);
@@ -210,15 +246,20 @@ export async function listDescendants(rootPid: number, signal?: AbortSignal): Pr
   }
   const found: DescendantInfo[] = [];
   const visited = new Set<number>([rootPid]);
-  const queue = [rootPid];
+  // Legacy supervisor callers may query a dead root without a captured identity. Owned
+  // stdio cleanup always supplies its exact root; preserve the older caller contract.
+  const queue = [{ pid: rootPid, startedAt: root?.startedAt ?? null }];
   // Recycled pids can make the parent graph cyclic; the visited set keeps the walk finite.
   while (queue.length > 0) {
-    const pid = queue.shift()!;
+    const { pid, startedAt } = queue.shift()!;
     for (const row of byParent.get(pid) ?? []) {
       if (visited.has(row.p)) continue;
+      // ParentProcessId survives parent exit and PID reuse. Creation order establishes
+      // which lifetime a link can belong to; an unknown timestamp cannot authorize a kill.
+      if (row.s === null || (startedAt !== null && row.s < startedAt) || (pid === rootPid && query.rootExitedAt !== undefined && row.s > query.rootExitedAt)) continue;
       visited.add(row.p);
       found.push({ pid: row.p, parentPid: row.pp, image: row.n.toLowerCase(), startedAt: row.s ?? null });
-      queue.push(row.p);
+      queue.push({ pid: row.p, startedAt: row.s });
     }
   }
   return found;
@@ -245,6 +286,7 @@ export interface ChildLedgerDeps {
 export class ChildLedger {
   private readonly probe: ProcessProbe;
   private readonly kill: (pid: number) => Promise<void>;
+  private readonly killGroup: (pid: number) => Promise<void>;
   /** All file access is funnelled through one chain — two supervisors share one ledger. */
   private tail: Promise<unknown> = Promise.resolve();
 
@@ -254,6 +296,10 @@ export class ChildLedger {
   ) {
     this.probe = deps.probe ?? platformProbe;
     this.kill = deps.kill ?? killTree;
+    this.killGroup = deps.kill ?? (async pid => {
+      try { process.kill(-pid, "SIGKILL"); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    });
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -331,13 +377,20 @@ export class ChildLedger {
           continue;
         }
         const child = probed.get(rec.pid);
+        if (child && rec.imageKind === "executable" && (child.executableImage === undefined || child.startedAt === null)) {
+          keep.push(rec);
+          continue;
+        }
+        const image = rec.imageKind === "executable" ? child?.executableImage : child?.image;
         const isOurs =
           child !== undefined &&
-          child.image === rec.image.toLowerCase() &&
+          image === (rec.imageKind === "executable" ? rec.image : rec.image.toLowerCase()) &&
           (child.startedAt === null ||
             Math.abs(child.startedAt - rec.recordedAt) <= CHILD_START_TOLERANCE_MS);
         if (isOurs) {
-          try { await this.kill(rec.pid); }
+          const group = process.platform === "linux" && rec.imageKind === "executable" && rec.processGroupLeader === true;
+          if (group && child.processGroup !== rec.pid) { keep.push(rec); continue; }
+          try { await (group ? this.killGroup : this.kill)(rec.pid); }
           catch {
             // A bounded taskkill timeout or spawn failure is a failed cleanup, not a
             // failed application startup. Keep this identity for a later sweep and

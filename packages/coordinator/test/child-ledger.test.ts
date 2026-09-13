@@ -281,7 +281,52 @@ describe("ChildLedger", () => {
       assert.equal(found.image, nodeImage);
       assert.ok(found.startedAt !== null, "native child identity must include creation time");
       assert.ok(Math.abs(found.startedAt - spawnedAt) < 15_000);
+      const root = (await platformProbe([process.pid])).get(process.pid)!;
+      assert.deepEqual(await listDescendants(process.pid, undefined, { root: { ...root, startedAt: root.startedAt! + 1 } }), [],
+        "a different root lifetime cannot authorize its process tree");
+      const beforeBirth = await listDescendants(process.pid, undefined, { root, rootExitedAt: found.startedAt - 1 });
+      assert.equal(beforeBirth.some(row => row.pid === child.pid), false, "a child created after root exit belongs to a different lifetime");
     } finally { child.kill("SIGKILL"); }
+  });
+
+  it("retains an executable identity when unreadable and refuses a same-prefix stranger", async () => {
+    const path = await tempLedgerPath();
+    const child = record(1234, { ownerPid: 999_999, image: "codex-app-server", imageKind: "executable", recordedAt: 1000 });
+    let executableImage: string | undefined;
+    let startedAt: number | null = 1000;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[child.pid, { pid: child.pid, image: "codex-app-serve", startedAt, executableImage }]]),
+      kill: async () => { assert.fail("unknown or different full executable identity must never authorize a kill"); },
+    });
+    await ledger.record(child);
+    assert.equal((await ledger.reapStale()).kept, 1);
+    executableImage = child.image; startedAt = null;
+    assert.equal((await ledger.reapStale()).kept, 1, "a full name without a creation time is still unverified");
+    startedAt = 1000;
+    executableImage = "Codex-app-server";
+    assert.equal((await ledger.reapStale()).cleared, 1, "Linux executable case is part of its identity");
+    await ledger.record(child);
+    executableImage = "codex-app-server-other";
+    assert.equal((await ledger.reapStale()).cleared, 1);
+    assert.deepEqual(await readChildren(path), []);
+  });
+
+  it("requires the verified Linux executable to lead its recorded process group", { skip: process.platform !== "linux" }, async () => {
+    const path = await tempLedgerPath(); const killed: number[] = [];
+    const child = record(1234, { ownerPid: 999_999, image: "codex-app-server", imageKind: "executable", processGroupLeader: true, recordedAt: 1000 });
+    let processGroup: number | undefined;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[child.pid, { pid: child.pid, image: "codex-app-serve", executableImage: child.image, startedAt: 1000, processGroup }]]),
+      kill: async pid => { killed.push(pid); },
+    });
+    await ledger.record(child);
+    assert.equal((await ledger.reapStale()).kept, 1);
+    processGroup = 5678;
+    assert.equal((await ledger.reapStale()).kept, 1);
+    assert.deepEqual(killed, []);
+    processGroup = child.pid;
+    assert.equal((await ledger.reapStale()).reaped.length, 1);
+    assert.deepEqual(killed, [child.pid], "the injected kill seam keeps its recorded-pid argument");
   });
 
   it("survives a corrupt ledger file", async () => {

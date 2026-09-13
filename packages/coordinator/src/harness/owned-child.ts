@@ -1,6 +1,6 @@
 import { spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { basename } from "node:path";
-import { killTree, listDescendants, ownerStamp, platformProbe, windowsProcessPreamble, type DescendantInfo } from "../child-ledger.js";
+import { killTree, listDescendants, ownerStamp, platformProbe, windowsProcessPreamble, type DescendantInfo, type ProcessInfo } from "../child-ledger.js";
 import { leashChildToParent } from "../job-leash.js";
 import type { SupervisorDeps } from "../supervisor.js";
 
@@ -10,11 +10,17 @@ interface OwnedChildDeps extends SupervisorDeps {
   leash?: typeof leashChildToParent;
   snapshotMs?: number;
   snapshotTimeoutMs?: number;
-  listDescendants?: (rootPid: number, signal?: AbortSignal) => Promise<DescendantInfo[]>;
+  exitTimeoutMs?: number;
+  listDescendants?: typeof listDescendants;
   /** Test hosts with synthetic pids must not arm real process-exit kills. */
   registerExitBackstop?: (callback: () => void) => () => void;
 }
 interface TrackedChild {
+  spawnedAt: number;
+  root?: ProcessInfo;
+  exitedAt?: number;
+  exited: Promise<void>;
+  exitCleanupAttempted?: boolean;
   descendants: Map<number, DescendantInfo>;
   snapshot: Promise<void>;
   snapshotAbort?: AbortController;
@@ -56,7 +62,7 @@ function registerOwnedExitBackstop(
       "  foreach ($candidate in $rows) { if ($candidate.ProcessId -eq [int]$entry.pid) { $row = $candidate; break } }",
       "  if ($null -eq $row -or $null -eq $row.CreationDate) { continue }",
       "  $started = ([System.DateTimeOffset]$row.CreationDate).ToUnixTimeMilliseconds()",
-      "  if ($row.Name.ToLowerInvariant() -ceq [string]$entry.image -and [Math]::Abs($started - [double]$entry.startedAt) -le 5000) {",
+      "  if ($row.Name.ToLowerInvariant() -ceq [string]$entry.image -and $started -eq [double]$entry.startedAt) {",
       "    Microsoft.PowerShell.Management\\Stop-Process -Id ([int]$entry.pid) -Force -ErrorAction SilentlyContinue",
       "  }",
       "}",
@@ -87,8 +93,8 @@ export function ownedChildHooks(
   const trace = (at: string) => onTrace?.({ at, harness: id });
   const release = async (pid: number) => { await deps.ledger?.release(pid).catch(() => trace("harness.ledger-release-failed")); };
   const live = (child: ChildProcessWithoutNullStreams) => child.exitCode === null && child.signalCode === null;
-  const snapshot = async (child: ChildProcessWithoutNullStreams, state: TrackedChild) => {
-    if (platform !== "win32" || state.stopping || !child.pid || !live(child)) return;
+  const snapshot = async (child: ChildProcessWithoutNullStreams, state: TrackedChild, final = false) => {
+    if (platform !== "win32" || !child.pid || (final ? !state.root || state.exitedAt === undefined : state.stopping || !live(child))) return;
     const abort = new AbortController();
     state.snapshotAbort = abort;
     const timer = setTimeout(() => abort.abort(), deps.snapshotTimeoutMs ?? 10_000);
@@ -98,11 +104,18 @@ export function ownedChildHooks(
       abort.signal.addEventListener("abort", rejectCancelled, { once: true });
     });
     try {
-      const found = await Promise.race([(deps.listDescendants ?? listDescendants)(child.pid, abort.signal), cancelled]);
+      const found = await Promise.race([(deps.listDescendants ?? listDescendants)(child.pid, abort.signal, {
+        ...(state.root ? { root: state.root } : {}),
+        ...(final ? { rootExitedAt: state.exitedAt } : {}),
+        onRoot: root => {
+          if (!abort.signal.aborted && !state.stopping && live(child) && root.startedAt !== null &&
+            root.startedAt <= state.spawnedAt && root.image === basename(command).toLowerCase()) state.root = root;
+        },
+      }), cancelled]);
       for (const descendant of found) {
         // A late result from a non-cancellable injected probe cannot repopulate a ledger
         // after cleanup. Already-started record writes finish before their release below.
-        if (abort.signal.aborted || state.stopping || !live(child)) break;
+        if (abort.signal.aborted || (!final && (state.stopping || !live(child)))) break;
         if (state.descendants.has(descendant.pid)) continue;
         state.descendants.set(descendant.pid, descendant);
         await deps.ledger?.record({
@@ -110,7 +123,7 @@ export function ownedChildHooks(
           parentPid: child.pid, recordedAt: descendant.startedAt ?? Date.now(),
         }).catch(() => trace("harness.ledger-record-failed"));
       }
-    } catch { if (!state.stopping) trace("harness.descendant-snapshot-failed"); }
+    } catch { if (final || !state.stopping) trace("harness.descendant-snapshot-failed"); }
     finally {
       clearTimeout(timer);
       abort.signal.removeEventListener("abort", rejectCancelled);
@@ -146,6 +159,19 @@ export function ownedChildHooks(
         if (live(child)) { try { child.kill("SIGKILL"); } catch { trace("harness.child-kill-failed"); } }
       }
       await state.snapshot;
+      if (platform === "win32" && live(child)) {
+        // Direct ChildProcess.kill returns before its exit event. Keep final discovery
+        // inside this disposal promise until the root's lifetime has a known end.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try { await Promise.race([state.exited, new Promise<void>(resolve => {
+          timer = setTimeout(resolve, deps.exitTimeoutMs ?? 5000);
+        })]); }
+        finally { if (timer) clearTimeout(timer); }
+      }
+      // The kernel can outlive an exited app-server's last periodic snapshot. This one
+      // final scan belongs to disposal and is drained before any release or completion.
+      if (state.exitedAt !== undefined) state.exitCleanupAttempted = true;
+      await snapshot(child, state, true);
       const tracked = [...state.descendants.values()];
       if (tracked.length) {
         try {
@@ -155,7 +181,7 @@ export function ownedChildHooks(
             const current = processes.get(row.pid);
             if (!current) { await release(row.pid); continue; }
             if (current.image !== row.image || current.startedAt === null || row.startedAt === null ||
-              Math.abs(current.startedAt - row.startedAt) > 5000) continue;
+              current.startedAt !== row.startedAt) continue;
             await kill(row.pid);
             attempted.push(row.pid);
           }
@@ -167,23 +193,38 @@ export function ownedChildHooks(
           }
         } catch { trace("harness.descendant-reap-failed"); }
       }
-      if (!live(child)) await release(pid);
-      state.removeExitBackstop?.();
+      if (!live(child) && (platform !== "win32" || state.exitCleanupAttempted)) {
+        await release(pid);
+        state.removeExitBackstop?.();
+      }
     });
     return state.stopping;
   };
   return {
     onSpawn: async (child) => {
       if (!child.pid) return;
-      const state: TrackedChild = { descendants: new Map(), snapshot: Promise.resolve() };
+      let resolveExited!: () => void;
+      const state: TrackedChild = { spawnedAt: Date.now(), exited: new Promise(resolve => { resolveExited = resolve; }), descendants: new Map(), snapshot: Promise.resolve() };
       children.set(child, state);
       // Register before the first await. process.exit() bypasses normal host shutdown even
       // while ledger ownership or the Windows Job Object is still being established.
       state.removeExitBackstop = registerOwnedExitBackstop(child, state, platform, deps.registerExitBackstop);
       child.once("exit", () => {
-        void killProcess(child).then(() => release(child.pid!), () => trace("harness.child-cleanup-failed"));
+        state.exitedAt = Date.now();
+        resolveExited();
+        void (async () => {
+          await killProcess(child);
+          // An exit beyond the bounded handle wait can arrive while the earlier stop is
+          // reaping, or after it finished. The one exit callback owns exactly one followup;
+          // an attempted final scan (including timeout) never starts a retry loop.
+          if (platform === "win32" && !state.exitCleanupAttempted) {
+            state.stopping = undefined;
+            await killProcess(child);
+          }
+          await release(child.pid!);
+        })().catch(() => trace("harness.child-cleanup-failed"));
       });
-      await deps.ledger?.record({ pid: child.pid, image: basename(command).toLowerCase(), id, ...ownerStamp(), recordedAt: Date.now() })
+      await deps.ledger?.record({ pid: child.pid, image: platform === "linux" ? basename(command) : basename(command).toLowerCase(), ...(platform === "linux" ? { imageKind: "executable" as const, processGroupLeader: true as const } : {}), id, ...ownerStamp(), recordedAt: Date.now() })
         .catch(() => trace("harness.ledger-record-failed"));
       if (platform === "win32" && live(child)) {
         const leashed = await (deps.leash ?? leashChildToParent)(child.pid).catch(() => ({ ok: false }));

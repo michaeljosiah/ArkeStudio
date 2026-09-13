@@ -77,6 +77,12 @@ and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
 canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
 Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
 
+Host lifecycle checks include coordinator `test/harness/owned-child-linux.test.ts` and
+`test/harness/owned-child-windows.test.ts`. They use real native processes on their respective
+platforms: the Linux cases sweep a long-named executable and its helpers after an uncatchable owner exit;
+the Windows case creates a helper between snapshots, after a failed leash, and checks cleanup
+after its parent exits. Both platforms are needed to verify these ownership boundaries.
+
 The Codex real-binary protocol test is opt-in:
 
 ```powershell
