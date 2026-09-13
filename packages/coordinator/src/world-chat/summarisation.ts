@@ -12,6 +12,7 @@ import { createPreparedSession, type SessionInput } from "../harness/session-fil
 import { toExtendedLength } from "../world/paths.js";
 import { boundSummary, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
+import { foldWorldChatInputs } from "./input-fold.js";
 
 export interface ConversationSummaryRequest {
   readonly previousSummary?: string;
@@ -66,10 +67,18 @@ async function refreshConversationSummaryOnce(
     if (envelope.seq > through && envelope.event.type === "turn.completed") throughSeq = envelope.seq;
   }
   const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
+  const inputs = foldWorldChatInputs(events);
+  if (inputs.problems.length) return false;
   let turnCount = 0;
   for (const envelope of events) {
     if (envelope.seq <= through || envelope.seq > throughSeq) continue;
-    if (envelope.event.type === "turn.started") messages.push(envelope.event.message);
+    if (envelope.event.type === "turn.started" ||
+      (envelope.event.type === "input.promoted" && inputs.acceptedSequences.has(envelope.seq))) messages.push(envelope.event.message);
+    if (envelope.event.type === "input.included" && inputs.acceptedSequences.has(envelope.seq)) {
+      const messageId = envelope.event.messageId;
+      const input = inputs.queue.inputs.find(row => row.input.messageId === messageId)?.input;
+      if (input) messages.push({ id: messageId, role: "user", text: input.request.text });
+    }
     if (envelope.event.type === "turn.completed") {
       messages.push(envelope.event.message);
       turnCount++;

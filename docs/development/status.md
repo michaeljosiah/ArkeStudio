@@ -4,6 +4,7 @@ Checked against source on 5 September 2026. This register clarifies areas that h
 
 | Area | Status | Evidence and limit |
 |---|---|---|
+| Steering and next-message queue (#1138) | Persistence foundation, 13 September 2026 | [Input journal/replay and native protocol evidence](conversation-inputs.md) are implemented. Composer/transport admission, the dispatch scheduler, complete runner/approval integration and verified native steering remain outstanding. No adapter advertises native steering. |
 | Episodes | Partial | Client [App.tsx](../../packages/client/src/App.tsx) routes episode detail/chat screens; [episode-create.test.ts](../../packages/coordinator/test/productions/episode-create.test.ts) covers episode creation. This does not establish a complete season-production or audience-publishing workflow. See [SPEC-012](../specifications/012.productions-scenes-shots-boards.md). |
 | Local voice protocol | Implemented client | [voice/src/index.ts](../../packages/voice/src/index.ts) contains sidecar schemas and client behavior. Runtime readiness and supported operations still depend on setup and available engines; this is not a claim that every planned voice feature is delivered. See [SPEC-011](../specifications/011.voice.md). |
 | World ownership | Bounded desktop checks accepted | [ADR-002](../decisions/002-ownership-is-a-revision.md) accepts local disk identity checks and ownership-loss handling; hosted leases and atomic fencing remain proposed. Local checks do not establish cross-machine concurrent ownership. |

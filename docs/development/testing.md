@@ -92,6 +92,12 @@ its recovery assertions must pass without dismissing external-edit warnings.
 
 ## CI
 
+Additional conversation input persistence (#1138) has focused journal, recovery and compatibility
+coverage in coordinator `test/world-chat/input-journal.test.ts`, alongside the existing store,
+recovery and summarisation suites. The opt-in OpenCode native inbox measurement and its current
+limits are documented in [conversation input persistence](conversation-inputs.md). It makes no
+model call and does not qualify an adapter for native steering.
+
 [ci.yml](../../.github/workflows/ci.yml) runs on Windows and Linux with four shards per platform. Shard 1 runs lint, typecheck and build. [ci-test.mjs](../../scripts/ci-test.mjs) partitions coordinator tests and runs other workspaces on shard 2. To inspect a shard locally, run `node scripts/ci-test.mjs 1/4` from the root; this is only that test shard, not the complete CI gate.
 
 The runner uses a silence guard as well as a workflow timeout. Diagnose leaked resources before treating a silent run as merely slow. Local Windows success cannot establish Linux path/case correctness. Packaging/release workflows perform additional delivery work beyond CI's build.

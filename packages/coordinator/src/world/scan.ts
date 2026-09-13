@@ -115,7 +115,8 @@ import { parseSceneRecord, SceneFlowRefused } from "../productions/scene-record.
 // Eighteen adds artifact retirement to strict sidecars (issue 957).
 // Twenty adds the last/key/overview images to the strict Stage playblast pin (issue 1043).
 // Twenty-one adds gait/object speed ceilings; twenty-two adds performance ease/hold (#1044, #1046).
-export const SUPPORTED_SCHEMA_VERSION = 22;
+// Twenty-three fences durable additional-input identity and queue/promotion semantics (SPEC-045).
+export const SUPPORTED_SCHEMA_VERSION = 23;
 
 export class WorldOpenError extends Error {
   constructor(

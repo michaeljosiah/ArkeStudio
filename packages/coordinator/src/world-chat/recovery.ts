@@ -5,6 +5,7 @@ import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
 import { conversationsDir, WorldChatStore } from "./store.js";
 import { preserveConversationActionTombstones } from "../arke-actions/tombstones.js";
+import { recoverWorldChatInputs } from "./input-recovery.js";
 
 /**
  * What startup has to put right before anything new can happen (#70 phase 1, §7.2).
@@ -60,12 +61,13 @@ async function repairInterruptedRun(dir: string, now: () => string): Promise<boo
   const meta = await store.readMeta();
   if (!meta) return false;
 
+  const inputsRepaired = await recoverWorldChatInputs(store, now);
   const { events } = await store.read();
   const folded = foldConversation(meta.id, meta.createdAt, events);
-  if (!folded.needsInterruptedRunRepair) return false;
+  if (!folded.needsInterruptedRunRepair) return inputsRepaired;
 
   const run = folded.view.activeRun;
-  if (!run) return false;
+  if (!run) return inputsRepaired;
 
   // The fold has already set the status; persisting the same run record is what makes it true
   // for the next reader, and what stops a second pass finding anything to repair.

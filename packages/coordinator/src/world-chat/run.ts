@@ -397,7 +397,8 @@ export class WorldChatRunner {
     // first carried them.
     const constraints = [...events]
       .reverse()
-      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints : undefined))
+      .map(({ event }) => (event.type === "turn.constraints" ? event.constraints :
+        event.type === "input.promoted" ? { turnId: event.turnId, ...event.constraints } : undefined))
       .find((held) => held?.turnId === turnId);
     return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, previousModel, constraints?.replyOnly === true);
   }

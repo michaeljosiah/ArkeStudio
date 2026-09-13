@@ -660,6 +660,9 @@ async function wrapUpOnce(dir: string, input: WrapUpInput): Promise<WrapUpResult
   }
 
   const view = foldConversation(meta.id, meta.createdAt, events).view;
+  if (view.deletionBlock === "pending-inputs") {
+    throw new WrapUpError("in-flight", "Messages are still waiting for delivery. Resolve them before wrapping up.");
+  }
   const bundle = input.store.getBundle();
   const { carried, mediaIdeas, notCarried } = evaluateReadiness(view.candidates, bundle);
 

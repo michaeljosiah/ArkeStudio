@@ -154,9 +154,16 @@ async function electronMain() {
   await js(`location.hash = '/w/${config.worldId}/p/the-last-crossing/narrative'`);
   await until("document.querySelector('[data-screen=production-narrative] textarea')?.value === 'What does it cost to return?'");
   await js(`location.hash = '/w/${config.worldId}/p/the-last-crossing/scenes/sc_arrival'`);
-  await until("document.body.innerText.includes('The boat returns at dusk.')");
-  await window.webContents.reload();
-  await until("document.body.innerText.includes('The boat returns at dusk.')");
+  // The current scene header keeps its synopsis in a collapsed details disclosure. Exercise
+  // that control before checking the retained content, both before and after a real reload.
+  const inspectScene = async () => {
+    await until("document.querySelector('summary[aria-label=\"Scene details\"]') !== null");
+    await js("document.querySelector('summary[aria-label=\"Scene details\"]').click()");
+    await until("document.body.innerText.includes('The boat returns at dusk.')");
+  };
+  await inspectScene();
+  await new Promise(resolve => { window.webContents.once("did-finish-load", resolve); window.webContents.reload(); });
+  await inspectScene();
   await shot("setup-created-scene");
   clearTimeout(timer);
   app.exit(0);

@@ -228,6 +228,15 @@ describe("world chat store", () => {
     assert.equal(problems[0]!.kind, "interior-corruption");
   });
 
+  it("refuses duplicate receipts after a foreign edit just as it refuses fresh appends", async () => {
+    const s = await store();
+    const event = message("original direction");
+    await s.append(event, { at: AT, requestId: "same-submission" });
+    const text = await readFile(s.eventsPath, "utf8");
+    await writeFile(s.eventsPath, text.replace("original direction", "changed direction!"));
+    await assert.rejects(s.append(event, { at: AT, requestId: "same-submission" }), ConversationIntegrityError);
+  });
+
   it("refuses to append when something else has written to the log", async () => {
     const s = await store();
     await s.append(message("ours"), { at: AT });

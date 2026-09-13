@@ -18,7 +18,9 @@ import type {
   WorldChatStatus,
   WorldChatSummary,
 } from "@arke-studio/contracts";
+import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
+import { foldWorldChatInputs } from "./input-fold.js";
 
 /**
  * The event log, folded into the workspace a screen renders (#70 §7.2).
@@ -130,6 +132,9 @@ export function foldConversation(
   const proposalIds = new Set<string>();
   const resolvedProposals = new Set<string>();
   let seq = 0;
+  const inputFold = foldWorldChatInputs(events);
+  const inputQueue = inputFold.queue;
+  problems.push(...inputFold.problems);
 
   /** A snapshot may only move a proposition forward one revision at a time. */
   function applyCandidate(next: WorldChangeCandidate, atSeq: number): void {
@@ -206,6 +211,19 @@ export function foldConversation(
     updatedAt = envelope.at;
     const e = envelope.event;
     switch (e.type) {
+      case "input.promoted":
+        if (inputFold.acceptedSequences.has(envelope.seq)) {
+          addMessage(e.message, envelope.seq);
+          runs.set(e.run.id, e.run);
+        }
+        break;
+      case "input.included": {
+        if (!inputFold.acceptedSequences.has(envelope.seq)) break;
+        const input = inputQueue.inputs.find(row => row.input.messageId === e.messageId)?.input;
+        if (input) addMessage({ id: input.messageId, turnId: e.attempt.turnId, role: "user",
+          text: input.request.text, attachmentIds: input.request.attachmentIds, createdAt: input.createdAt }, envelope.seq);
+        break;
+      }
       case "production-setup.updated":
         productionSetup = e.state;
         break;
@@ -611,6 +629,7 @@ export function foldConversation(
       }),
     ),
     hasMore: shown.length < windowed.length,
+    ...(inputQueue.revision > 0 ? { inputQueue: projectWorldChatInputQueue(inputQueue) } : {}),
     candidates: [...candidates.values()],
     actions: actionCards,
     mediaHandoffs,
@@ -628,7 +647,9 @@ export function foldConversation(
     // Computed here because this is the only place all three inputs exist at once, and because
     // one answer is the point: the row that offers Delete and the command that refuses it must
     // not be able to disagree.
-    deletionBlock: needsInterruptedRunRepair
+    deletionBlock: unresolvedWorldChatInputs(inputQueue).length > 0 || inputQueue.pauseReason === "integrity"
+      ? "pending-inputs"
+      : needsInterruptedRunRepair
       ? "active-run"
       : wrapUpInFlight || saveInFlight
         ? "wrap-up-in-flight"
