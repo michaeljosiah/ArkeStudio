@@ -89,6 +89,16 @@ jobs:
         if: matrix.shard == 1
         run: npm run build
 
+      # Check the native pipe before the many adapter sessions that depend on it. A helper
+      # startup failure should report once, without spending its timeout on every session.
+      - name: Windows file helper
+        if: matrix.os == 'windows-latest' && matrix.shard == 2
+        run: node --import tsx --test --test-timeout=45000 --test-name-pattern="Unicode paths and large binary reads|in-place Windows reparse" packages/adapter-codex/test/confined-files.test.ts
+
+      - name: Windows owned-process cleanup
+        if: matrix.os == 'windows-latest' && matrix.shard == 3
+        run: node --import tsx --test --test-timeout=60000 packages/coordinator/test/harness/owned-child.test.ts
+
       # Shard 2 also runs every workspace other than the coordinator — 50s of tests all told,
       # smaller than the cost of splitting them further, and put beside a shard that is not
       # already carrying lint, types and build.

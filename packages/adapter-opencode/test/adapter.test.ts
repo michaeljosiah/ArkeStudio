@@ -423,9 +423,54 @@ describe("listing what the harness can run", () => {
     stub.apiModels = [
       { id: "big-pickle", providerID: "opencode", name: "Big Pickle" },
       { id: "ling-3.0-flash-free", providerID: "opencode", status: "deprecated" },
+      { id: "disabled", providerID: "opencode", disabled: true },
+      { id: "unavailable", providerID: "opencode", enabled: false },
+      { id: "missing-provider" },
     ];
     const models = await adapter.listModels();
     assert.deepEqual(models.map((m) => m.id), ["big-pickle"], "deprecated models are not offered");
+  });
+
+  it("keeps an empty configured-provider result empty instead of offering unrelated models", async () => {
+    stub.configProviders = { providers: [] };
+    stub.apiModels = [{ id: "unrelated-paid-model", providerID: "opencode" }];
+    const before = stub.requests.length;
+    assert.deepEqual(await adapter.listModels(), []);
+    assert.deepEqual(stub.requests.slice(before).map((request) => request.path), ["/config/providers"]);
+  });
+
+  it("surfaces credential and service failures without substituting the gateway catalog", async () => {
+    stub.configProviders = { providers: [] };
+    stub.apiModels = [{ id: "unrelated-paid-model", providerID: "opencode" }];
+    try {
+      for (const status of [401, 403, 500]) {
+        stub.configProvidersStatus = status;
+        const before = stub.requests.length;
+        await assert.rejects(adapter.listModels(), new RegExp(String(status)));
+        assert.deepEqual(stub.requests.slice(before).map((request) => request.path), ["/config/providers"]);
+      }
+    } finally {
+      stub.configProvidersStatus = 200;
+    }
+  });
+
+  it("carries measured v1 modalities and input limits while dropping disabled rows", async () => {
+    stub.configProviders = { providers: [{ id: "custom-provider", models: {
+      "team/model:tag": { name: "Custom", capabilities: { input: { text: true, image: false } }, limit: { input: 32_000, context: 64_000 } },
+      "sparse-text": { capabilities: { input: { text: true } } },
+      "sparse-image": { capabilities: { input: { image: true } } },
+      "sparse-false": { capabilities: { input: { image: false } } },
+      "unknown-capabilities": { limit: { context: 16_000 } },
+      "disabled": { disabled: true },
+      "deprecated": { status: "deprecated" },
+    } }] };
+    assert.deepEqual(await adapter.listModels(), [
+      { id: "team/model:tag", provider: "custom-provider", displayName: "Custom", inputModalities: ["text"], inputTokenLimit: 32_000 },
+      { id: "sparse-text", provider: "custom-provider", inputModalities: ["text"] },
+      { id: "sparse-image", provider: "custom-provider", inputModalities: ["image"] },
+      { id: "sparse-false", provider: "custom-provider", inputModalities: [] },
+      { id: "unknown-capabilities", provider: "custom-provider", inputTokenLimit: 16_000 },
+    ]);
   });
 });
 

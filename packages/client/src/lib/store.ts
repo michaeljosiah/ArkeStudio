@@ -2533,7 +2533,7 @@ export function setAgentConfig(agent: string, patch: { model?: string | null; br
   send({ kind: "set-agent-config", agent, ...patch });
 }
 
-/** Ask the harness what it can run. Nothing happens if it is not up — the list stays empty. */
+/** Refresh the running harness's catalog; discovery progress and failures arrive in app state. */
 export function listHarnessModels(): void {
   send({ kind: "list-harness-models" });
 }
@@ -2596,6 +2596,14 @@ export function chooseClaudeExecutable(): void {
 /** Forget the chosen path and go back to whatever PATH offers. */
 export function clearClaudeExecutable(): void {
   send({ kind: "clear-claude-executable" });
+}
+
+export function chooseCodexExecutable(): void {
+  send({ kind: "choose-codex-executable" });
+}
+
+export function clearCodexExecutable(): void {
+  send({ kind: "clear-codex-executable" });
 }
 
 export function chooseVoxaExecutable(): void {

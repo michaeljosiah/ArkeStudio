@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import WebSocket from "ws";
 import { FrameSchema, type Frame, type HarnessAvailability, type HarnessStatus } from "@arke-studio/contracts";
-import { Coordinator } from "../../src/coordinator.js";
+import { Coordinator, type CoordinatorOptions } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
@@ -101,7 +101,15 @@ async function withCoordinator(
   detected: HarnessAvailability,
   body: (client: TestClient, root: string) => Promise<void>,
   reuseRoot?: string,
-  opts: { pick?: () => Promise<string | null>; sawPath?: (p: string | null) => void } = {},
+  opts: {
+    pick?: () => Promise<string | null>;
+    pickCodex?: () => Promise<string | null>;
+    sawPath?: (p: string | null) => void;
+    sawCodexPath?: (p: string | null) => void;
+    harnessEngineOverride?: CoordinatorOptions["harnessEngineOverride"];
+    harnessLaunchEngine?: CoordinatorOptions["harnessLaunchEngine"];
+    harnessInfo?: CoordinatorOptions["harnessInfo"];
+  } = {},
 ): Promise<string> {
   const root = reuseRoot ?? (await makeTempRoot()).root;
   const provider = new FsWorldProvider(root, { clock: () => "2026-08-19T12:00:00.000Z" });
@@ -112,11 +120,16 @@ async function withCoordinator(
     changeLogPath: join(root, "logs", "changes.jsonl"),
     appVersion: "test",
     appRoot: root,
-    detectHarnesses: async (configuredPath) => {
+    ...(opts.harnessEngineOverride ? { harnessEngineOverride: opts.harnessEngineOverride } : {}),
+    ...(opts.harnessLaunchEngine ? { harnessLaunchEngine: opts.harnessLaunchEngine } : {}),
+    ...(opts.harnessInfo ? { harnessInfo: opts.harnessInfo } : {}),
+    detectHarnesses: async (configuredPath, codexPath) => {
       opts.sawPath?.(configuredPath);
+      opts.sawCodexPath?.(codexPath);
       return [detected];
     },
     ...(opts.pick ? { chooseClaudeExecutable: opts.pick } : {}),
+    ...(opts.pickCodex ? { chooseCodexExecutable: opts.pickCodex } : {}),
   });
   const { port, token } = await coordinator.start(0);
   const client = new TestClient(port);
@@ -175,7 +188,7 @@ describe("choosing a harness", () => {
     });
   });
 
-  it("falls back to OpenCode when a chosen harness disappears, without erasing the choice", async () => {
+  it("retains the configured engine when its executable disappears", async () => {
     // Uninstalling Claude Code should not silently cost the user their setting: reinstalling ought
     // to restore what they picked, not present them with a decision they already made.
     const root = await withCoordinator(CLAUDE_PRESENT, async (client) => {
@@ -191,12 +204,36 @@ describe("choosing a harness", () => {
       async (client, sameRoot) => {
         client.send({ kind: "detect-harnesses" });
         await client.until((f) => f.kind === "event" && f.event.type === "harness.status", "the fresh list");
-        assert.equal(lastStatus(client.frames)?.engine, "opencode", "reported as what is actually running");
+        assert.equal(lastStatus(client.frames)?.engine, "claude", "the preference is distinct from the running lane");
+        assert.equal(lastStatus(client.frames)?.launchEngine, "claude", "the missing startup engine is still identified without process metadata");
         assert.equal(await storedEngine(sameRoot), "claude", "but the choice is still on disk");
       },
       root,
     );
   });
+
+  for (const launch of [
+    { name: "saved engine", expected: "claude", options: {} },
+    { name: "environment override", expected: "codex", options: { harnessEngineOverride: "codex" as const } },
+    { name: "host launch choice without metadata", expected: "codex", options: { harnessLaunchEngine: "codex" as const } },
+    { name: "host metadata", expected: "opencode", options: {
+      harnessEngineOverride: "codex" as const,
+      harnessLaunchEngine: "codex" as const,
+      harnessInfo: { generation: "v2" as const, source: "bundled" as const, version: "2.0.0", beta: false },
+    } },
+  ]) {
+    it(`captures the ${launch.name} before the first status and keeps it when preferences change`, async () => {
+      const root = (await makeTempRoot()).root;
+      await writeFile(join(root, "settings.json"), JSON.stringify({ harness: { engine: "claude" } }), "utf8");
+      await withCoordinator(CLAUDE_ABSENT, async client => {
+        // No discovery request first: the initial published status already follows a new preference.
+        client.send({ kind: "set-harness-engine", engine: "opencode" });
+        await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status", "the changed preference");
+        assert.equal(lastStatus(client.frames)?.engine, "opencode");
+        assert.equal(lastStatus(client.frames)?.launchEngine, launch.expected);
+      }, root, launch.options);
+    });
+  }
 
 
   it("keeps a chosen executable and hands it to discovery", async () => {
@@ -266,5 +303,40 @@ describe("choosing a harness", () => {
       undefined,
       { pick: async () => CHOSEN },
     );
+  });
+
+  it("persists Codex selection and its independent executable path, then clears only that path", async () => {
+    const chosen = String.raw`C:\tools\codex.exe`;
+    const seen: Array<string | null> = [];
+    const codex: HarnessAvailability = { ...CLAUDE_PRESENT, id: "codex", label: "Codex", version: "0.154.0" };
+    await withCoordinator(codex, async (client, root) => {
+      client.send({ kind: "choose-claude-executable" });
+      await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status" && frame.event.harness.claudePath === CHOSEN, "Claude path");
+      client.send({ kind: "choose-codex-executable" });
+      await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status" && frame.event.harness.codexPath === chosen, "Codex path");
+      assert.ok(seen.includes(chosen), "Codex discovery receives the configured Codex path");
+      client.send({ kind: "set-harness-engine", engine: "codex" });
+      await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status" && frame.event.harness.engine === "codex", "Codex engine");
+      assert.equal(await storedEngine(root), "codex");
+      client.send({ kind: "clear-codex-executable" });
+      await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status" && frame.event.harness.engine === "codex" && frame.event.harness.codexPath === null, "cleared Codex path");
+      const saved = JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { harness: { codexPath: string | null; claudePath: string | null } };
+      assert.equal(saved.harness.codexPath, null);
+      assert.equal(saved.harness.claudePath, CHOSEN, "Codex path controls cannot erase Claude's independent configuration");
+    }, undefined, { pick: async () => CHOSEN, pickCodex: async () => chosen, sawCodexPath: path => seen.push(path) });
+  });
+
+  it("refuses an incompatible Codex version without replacing the saved engine", async () => {
+    const blocked: HarnessAvailability = {
+      ...CLAUDE_ABSENT, id: "codex", label: "Codex", version: "0.144.0",
+      blocked: "Codex 0.154.0 or later is required.",
+    };
+    await withCoordinator(blocked, async (client, root) => {
+      client.send({ kind: "set-harness-engine", engine: "codex" });
+      await client.until(frame => frame.kind === "event" && frame.event.type === "harness.status", "Codex refusal");
+      assert.equal(lastStatus(client.frames)?.engine, "opencode");
+      assert.equal(lastStatus(client.frames)?.harnesses.find(harness => harness.id === "codex")?.blocked, blocked.blocked);
+      assert.equal(await storedEngine(root), undefined);
+    });
   });
 });

@@ -384,7 +384,7 @@ describe("settings file durability", () => {
     assert.deepEqual(recovered.voxa, { executablePath: null, extraArgs: [] });
     assert.deepEqual(recovered.comfyui, { enginePath: null, engineUrl: null, modelsDir: null });
     assert.equal(recovered.narrator, null);
-    assert.deepEqual(recovered.harness, { engine: "opencode", claudePath: null });
+    assert.deepEqual(recovered.harness, { engine: "opencode", claudePath: null, codexPath: null });
     assert.deepEqual(recovered.presets, []);
 
     await settings.setAppearanceTheme("dark");

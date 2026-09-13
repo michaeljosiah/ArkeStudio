@@ -4,7 +4,6 @@ import { useNavigate, type NavigateFunction } from "react-router";
 import type {
   ConversationActionCard,
   FrameRunState,
-  ManifestModel,
   StagedProposal,
   WorldChatContext,
   WorldChatPoint,
@@ -12,7 +11,7 @@ import type {
   WorldChatSubject,
   WorldChatWorkspace,
 } from "@arke-studio/contracts";
-import { modelEligible, proposalDecisionOf, providerModelId, PROVIDERS } from "@arke-studio/contracts";
+import { findHarnessModel, proposalDecisionOf } from "@arke-studio/contracts";
 import { Composer } from "./composer.js";
 import {
   cancelWorldChat,
@@ -37,7 +36,8 @@ import {
   promoteWorldChatAttachment,
   wrapUpWorldChat,
 } from "../lib/store.js";
-import { eligibilityInputs, productionModel } from "./dispatch-bar.js";
+import { productionModel } from "./dispatch-bar.js";
+import { HarnessModelOptions, HarnessModelStatus, harnessModelUnavailableReason } from "./harness-models.js";
 import { Working } from "./working.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { Button, IconButton, cx } from "./ui.js";
@@ -707,29 +707,16 @@ export function conversationTitle(text: string): string {
 export function languageChoiceReason(
   state: ReturnType<typeof useStore>["state"],
   modelId: string | undefined,
-  model?: ManifestModel,
 ): string | undefined {
   if (modelId === undefined) return undefined;
-  if (model === undefined) return `This production still names ${modelId}, which is no longer available.`;
-  if ((state?.app.models.disabled ?? []).includes(model.id)) {
-    return `${model.displayName} is turned off in AI models and has not been replaced.`;
-  }
-  if (PROVIDERS[model.provider].local && !modelEligible(model, eligibilityInputs(state))) {
-    return `${model.displayName} is unavailable and has not been replaced.`;
-  }
-  if (state?.app.harnessInfo?.generation === "claude" && model.provider !== "anthropic") {
-    return `${model.displayName} is not available through Claude Code.`;
-  }
-  const harnessModels = state?.app.harnessModels ?? [];
-  if (
-    harnessModels.length > 0 &&
-    !harnessModels.some(
-      (candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model),
-    )
-  ) {
-    return `${model.displayName} is not available through the current harness.`;
-  }
-  return undefined;
+  if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
+  if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
+  if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
+  const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
+  if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
+  if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
+  const reason = harnessModelUnavailableReason(state, model);
+  return reason ? `${model.displayName ?? model.id} is ${reason}.` : undefined;
 }
 
 /**
@@ -898,15 +885,14 @@ export function ProductionConversation({
     mediaRequest.current = null;
   }, [contextKey]);
   useEffect(() => {
-    if (state?.app.health.harness.status === "healthy" && state.app.harnessInfo?.generation !== "claude") {
+    if (state?.app.health.harness.status === "healthy") {
       listHarnessModels();
     }
   }, [state?.app.health.harness.status, state?.app.harnessInfo?.generation]);
   const rememberedLanguageModel = productionModel(state, productionId, "llm");
-  const effectiveLanguageModelId = languageModelId ?? rememberedLanguageModel;
-  const languageModels = state?.app.manifest?.models.filter((model) => model.capability === "llm") ?? [];
-  const languageModel = languageModels.find((model) => model.id === effectiveLanguageModelId);
-  const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId, languageModel);
+  const agentLanguageModel = state?.app.agents.find((agent) => agent.name === "world-builder")?.model;
+  const effectiveLanguageModelId = languageModelId ?? agentLanguageModel ?? rememberedLanguageModel;
+  const languageUnavailableReason = languageChoiceReason(state, effectiveLanguageModelId);
   const thread = useMemo(() => {
     const wanted = JSON.parse(contextKey) as WorldChatContext;
     const rows = (state?.world?.conversations ?? []).filter((c) => sameContext(c.entryContext, wanted));
@@ -987,13 +973,13 @@ export function ProductionConversation({
     }
     handedOver.current = true;
     if (conversationId) {
-      sendWorldChat(worldId, conversationId, openWith, [], undefined, effectiveLanguageModelId);
+      sendWorldChat(worldId, conversationId, openWith, [], undefined, languageModelId);
       return;
     }
     setOpening({
       text: openWith,
       was: workspace?.conversationId ?? null,
-      ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+      ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
     });
     createWorldChat(worldId, conversationTitle(openWith), crypto.randomUUID(), context);
     // context is derived from route params and rebuilt each render; the latch above is what
@@ -1018,14 +1004,17 @@ export function ProductionConversation({
         text,
         was: workspace?.conversationId ?? null,
         ...(subject !== undefined ? { subject } : {}),
-        ...(effectiveLanguageModelId !== undefined ? { modelId: effectiveLanguageModelId } : {}),
+        ...(languageModelId !== undefined ? { modelId: languageModelId } : {}),
         ...(replyOnly ? { replyOnly: true } : {}),
       });
       setLanguageModelId(undefined);
       createWorldChat(worldId, conversationTitle(text), crypto.randomUUID(), context);
       return;
     }
-    sendWorldChat(worldId, conversationId, text, [], subject, effectiveLanguageModelId, replyOnly);
+    // Only the turn's explicit choice travels as an override. The coordinator resolves the
+    // captured agent preference before the production default; sending the displayed fallback
+    // here would promote that default above the agent and run a different model.
+    sendWorldChat(worldId, conversationId, text, [], subject, languageModelId, replyOnly);
     setLanguageModelId(undefined);
   };
   const submit = () => {
@@ -1070,34 +1059,32 @@ export function ProductionConversation({
   };
   const sceneDock = dock?.conversationFirst === true && context.kind === "scene";
   const languageControl = productionId ? (
-    <div className="fy-arke__model" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+    <>
+    <div className="fy-arke__model" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, marginBottom: 8 }}>
       <select
         className="fy-set__pill"
+        style={{ maxWidth: "100%" }}
         aria-label="Language model"
         value={effectiveLanguageModelId ?? ""}
         onChange={(event) => setLanguageModelId(event.target.value || undefined)}
       >
-        {rememberedLanguageModel === undefined && <option value="">Default</option>}
-        {effectiveLanguageModelId !== undefined && languageModel === undefined && (
-          <option value={effectiveLanguageModelId}>{effectiveLanguageModelId} · unavailable</option>
-        )}
-        {languageModels.map((model) => (
-          <option key={`${model.provider}/${model.id}`} value={model.id}>
-            {model.displayName}
-          </option>
-        ))}
+        <option value="">{agentLanguageModel || rememberedLanguageModel ? "Use saved choice" : "Ask the harness"}</option>
+        <HarnessModelOptions state={state} selected={effectiveLanguageModelId} />
       </select>
       <span className="fy-mono fy-arke__modelscope">
         {languageModelId !== undefined
           ? "THIS TURN"
-          : rememberedLanguageModel !== undefined
-            ? "THIS PRODUCTION"
-            : "DEFAULT"}
+          : agentLanguageModel !== undefined
+            ? "CHAT AGENT"
+            : rememberedLanguageModel !== undefined
+              ? "THIS PRODUCTION"
+              : "DEFAULT"}
       </span>
       {languageModelId !== undefined && languageModelId !== rememberedLanguageModel && worldId && (
         <button
           type="button"
           className="fy-set__link"
+          disabled={languageUnavailableReason !== undefined}
           onClick={() => {
             setProductionModel(worldId, productionId, "llm", languageModelId);
             setLanguageModelId(undefined);
@@ -1106,7 +1093,21 @@ export function ProductionConversation({
           Remember for this production
         </button>
       )}
+      {rememberedLanguageModel !== undefined && worldId && (
+        <button
+          type="button"
+          className="fy-set__link"
+          onClick={() => {
+            setProductionModel(worldId, productionId, "llm", null);
+            setLanguageModelId(undefined);
+          }}
+        >
+          Clear production default
+        </button>
+      )}
     </div>
+    <HarnessModelStatus state={state} />
+    </>
   ) : null;
   const transcript = (
     <ConversationTranscript

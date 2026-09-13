@@ -195,7 +195,9 @@ describe("drawing the picture", () => {
     const asked: number[] = [];
     const hanging: TakePosterMaker = { write: (_input, _output, options) => { asked.push(options?.timeoutMs ?? -1); return new Promise(() => undefined); } };
     const started = Date.now();
-    assert.equal(await backfillArtifactPosters(store, hanging, { budgetMs: 50 }), 0);
+    // Keep filesystem setup from spending this tiny scheduling budget before the maker is
+    // reached under load. The backstop still uses a real timer, measured by Date.now below.
+    assert.equal(await backfillArtifactPosters(store, hanging, { budgetMs: 50, now: () => started }), 0);
     assert.ok(Date.now() - started < 5_000, "returned at the backstop, not the maker's timeout");
     assert.equal(asked.length, 1);
     assert.ok(asked[0]! > 0 && asked[0]! <= 50, `the maker was given the remaining budget, not its own limit (${asked[0]})`);

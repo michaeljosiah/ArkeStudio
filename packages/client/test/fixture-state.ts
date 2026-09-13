@@ -135,6 +135,7 @@ const state: ClientState = {
     drift: [],
     agents: [],
     harnessModels: [],
+    harnessModelStatus: { status: "idle" },
     harnessInfo: null,
     queues: [{ provider: "fal", paused: false, held: 0 }],
     setup: null,

@@ -13,7 +13,7 @@ npm run build
 npm test
 ```
 
-Lint checks source text, holds the client to its source policies (`scripts/check-client-policy.mjs`: the token files match the design-system baseline byte for byte, no colour is hard-coded outside them, a light-ramp surface says what it becomes in dark, and no credential material is handled client-side), rejects duplicate `specId` declarations under `docs/specifications/`, and runs oxlint over packages/apps; it does not lint all maintenance scripts. The `specId` check passes silently where the specifications are absent, which is the normal case in CI and in a clone without the private document set — it verifies identity only on machines that actually hold the specs to break. Run `node scripts/check-spec-ids.mjs` to check specification identity alone, including new files before staging them. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
+Lint checks source text, holds the client to its source policies (`scripts/check-client-policy.mjs`: the token files match the design-system baseline byte for byte, no colour is hard-coded outside them, a light-ramp surface says what it becomes in dark, and no credential material is handled client-side), rejects duplicate `specId` declarations in the private document set when it is present (`scripts/check-spec-ids.mjs`), and runs oxlint over packages/apps; it does not lint all maintenance scripts. The `specId` check passes silently where the specifications are absent, which is the normal case in CI and in a clone without the private document set — it verifies identity only on machines that actually hold the specs to break. Run `node scripts/check-spec-ids.mjs` to check specification identity alone, including new files before staging them. Do not run `npm run format`: existing house formatting and Prettier disagree. `tsx` executes tests without typechecking, so typecheck after the last source or test edit.
 
 For one workspace, run these from the repository root:
 
@@ -37,6 +37,12 @@ node --import tsx --test test/gate/proposals.test.ts test/world/commit.test.ts
 A test holds onto behaviour: it renders a component or a route and reads the DOM, or it calls the module and reads the result. It does not read a source file as text and assert on it with a regex — such a test can fail only when someone edits the file, never when the program does the wrong thing, and it fails on every rename (the coarse-pointer selector list in the old `tokens.test.ts` cost a CI round for naming classes that had left with their markup). Rules about the text of the source belong in the lint step beside the other source checks; layout that only a browser can measure belongs to a headless-browser check, not to a unit suite. In render tests, hold onto roles, `aria-label`s, `data-` attributes and counts before copy, and derive fixture facts from the fixture rather than spelling them out.
 
 Client tests use workspace-relative paths and must run with `packages/client` as cwd. Workspace npm scripts set that cwd for you. Check worktree-local package resolution before trusting cross-package results; see [worktree rules](../../CLAUDE.md#worktrees).
+
+Windows CI shard 2 first checks the Codex file helper's private pipe and independent junction-mutation fixture with the Unicode/binary transfer and reparse regressions. This bounded preflight reports a native startup failure before the dependent adapter sessions each spend their own startup timeout; the full file-access suite still runs in the normal test gate.
+
+Windows shard 3 likewise runs `test/harness/owned-child.test.ts` first to verify native process inspection and abrupt-exit cleanup before the full coordinator shard. These preflights retain the ordinary test assertions and remain part of the later full suites.
+
+Coordinator `test/harness/stage-model-journey.test.ts` carries a live Stage model override through image-read receipts, canonical provenance, Keep, reopen and cancellation. It uses scripted model responses and PNG fixtures with the real coordinator and world persistence; renderer output and generation quality are separate checks.
 
 ## Fixtures and cleanup
 
@@ -62,6 +68,40 @@ Host Node loads `better-sqlite3`; desktop uses the Electron native build through
 Local Krea 2 image generation has an opt-in GPU check and offline custom-node installer tests;
 see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
 success alone does not establish usable image quality.
+
+## Writing engines and model control
+
+Run the adapter package suites plus coordinator `test/harness/`, `test/v2-launch.test.ts`,
+and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
+`test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
+canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
+Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
+
+Host lifecycle checks include coordinator `test/harness/owned-child-linux.test.ts` and
+`test/harness/owned-child-windows.test.ts`. They use real native processes on their respective
+platforms: the Linux cases sweep a long-named executable and its helpers after an uncatchable owner exit;
+the Windows case creates a helper between snapshots, after a failed leash, and checks cleanup
+after its parent exits. Both platforms are needed to verify these ownership boundaries.
+
+The Codex real-binary protocol test is opt-in:
+
+```powershell
+$env:ARKE_CODEX_SMOKE_COMMAND = "C:\path\to\codex.exe"
+$env:ARKE_CODEX_SMOKE_CATALOG = "C:\path\to\model-catalog.json"
+npm test --workspace @arke-studio/adapter-codex
+```
+
+The catalog file contains the app-server's model metadata (`{ "models": [...] }`), without
+credentials. The test creates an isolated profile and a scripted localhost Responses provider;
+no paid generation request is sent. It verifies actual model-visible tools and direct image
+delivery for the catalog's model profiles. Ordinary CI uses the deterministic protocol fixtures.
+For host changes also run `npm run smoke:main --workspace @arke-studio/desktop`.
+After building, `node --import tsx apps/desktop/scripts/smoke-harness-models.mjs` checks
+the real sandboxed file-page controls, saved agent/production models, reload and pending engine
+selection against a real coordinator with scripted discovery. It makes no generation call and
+retains screenshots in its printed disposable directory for visual inspection.
+Set `ARKE_SMOKE_CATALOG_DELAY_MS=1500` to also exercise model selection and saving while
+catalog refreshes temporarily disable those controls.
 
 ## Desktop appearance
 

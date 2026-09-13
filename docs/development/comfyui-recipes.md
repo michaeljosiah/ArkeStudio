@@ -1,7 +1,7 @@
 # Adding or changing a ComfyUI recipe
 
 Follow this order for a shipped recipe. The [code map](code-map.md) locates the owners;
-[SPEC-021 §2.3](../specifications/021.local-image-and-video-generation.md) defines the recipe contract. Existing
+SPEC-021 §2.3 defines the recipe contract. Existing
 examples are [Krea 2](krea2.md) and [H3 reference video](h3-reference-video.md). A graph that
 submits successfully is not yet a verified recipe.
 

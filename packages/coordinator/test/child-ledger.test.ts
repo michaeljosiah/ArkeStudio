@@ -4,11 +4,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tempDir } from "./tmp.js";
-import { until } from "./wait.js";
+import { until, untilAsync } from "./wait.js";
 import {
   ChildLedger,
+  listDescendants,
   ownerStamp,
   platformProbe,
+  runCollect,
   type ChildRecord,
   type ProcessInfo,
 } from "../src/child-ledger.js";
@@ -39,6 +41,29 @@ function processGone(pid: number): boolean {
 }
 
 const nodeImage = basename(process.execPath).toLowerCase();
+
+describe("bounded process inspection", () => {
+  it("terminates a stalled helper when cancelled", async () => {
+    const pidFile = join(await tempDir("arke-inspection-"), "pid");
+    const abort = new AbortController();
+    const inspection = runCollect(process.execPath, ["-e",
+      "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); setInterval(() => {}, 1000)", pidFile,
+    ], { signal: abort.signal, timeoutMs: 30_000 });
+    const rejected = assert.rejects(inspection, /cancelled/);
+    let pid = 0;
+    try {
+      await untilAsync(async () => { pid = Number(await readFile(pidFile, "utf8")); return pid > 0; }, "inspection helper started");
+      abort.abort();
+      await rejected;
+      await until(() => processGone(pid), "cancelled inspection helper exited");
+    } finally { abort.abort(); }
+  });
+
+  it("enforces a deadline and handles spawn errors without leaving its timer active", async () => {
+    await assert.rejects(runCollect(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { timeoutMs: 20 }), /timed out/);
+    await assert.rejects(runCollect(join(await tempDir("arke-inspection-absent-"), "absent.exe"), []), /ENOENT/);
+  });
+});
 
 async function tempLedgerPath(): Promise<string> {
   const dir = await tempDir("arke-ledger-");
@@ -73,6 +98,45 @@ describe("ChildLedger", () => {
     // Releasing an unknown pid is a no-op, not an error.
     await ledger.release(9999);
     assert.deepEqual((await readChildren(path)).map((c) => c.pid), [2222]);
+  });
+
+  it("preserves ownership and allows startup to continue when a kill command rejects", async () => {
+    const path = await tempLedgerPath();
+    const owned = record(2222, { ownerPid: 1111, recordedAt: 1000 });
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[owned.pid, { pid: owned.pid, image: owned.image, startedAt: 1000 }]]),
+      kill: async () => { throw new Error("Process inspection timed out."); },
+    });
+    await ledger.record(owned);
+    const report = await ledger.reapStale();
+    assert.deepEqual(report.reaped, []);
+    assert.equal(report.kept, 1);
+    assert.equal(report.cleared, 0);
+    assert.match(report.skipped!, /Could not stop 1 recorded child process/);
+    assert.deepEqual(await readChildren(path), [owned]);
+  });
+
+  it("continues the sweep after a failed kill and retries only retained orphan records", async () => {
+    const path = await tempLedgerPath();
+    const first = record(2222, { ownerPid: 1111, recordedAt: 1000 });
+    const second = record(3333, { ownerPid: 1111, recordedAt: 1000 });
+    const gone = record(4444, { ownerPid: 1111, recordedAt: 1000 });
+    const killed: number[] = []; let refuse = true;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([first, second].map(row => [row.pid, { pid: row.pid, image: row.image, startedAt: 1000 }])),
+      kill: async pid => { killed.push(pid); if (pid === first.pid && refuse) throw new Error("taskkill could not start"); },
+    });
+    for (const row of [first, second, gone]) await ledger.record(row);
+    const report = await ledger.reapStale();
+    assert.deepEqual(killed, [first.pid, second.pid]);
+    assert.deepEqual(report.reaped, [second]);
+    assert.equal(report.kept, 1); assert.equal(report.cleared, 1);
+    assert.match(report.skipped!, /ownership retained/);
+    assert.deepEqual(await readChildren(path), [first]);
+    refuse = false;
+    assert.deepEqual(await ledger.reapStale(), { reaped: [first], kept: 0, cleared: 0 });
+    assert.deepEqual(killed, [first.pid, second.pid, first.pid]);
+    assert.deepEqual(await readChildren(path), []);
   });
 
   it("re-recording a pid replaces the old record", async () => {
@@ -205,6 +269,64 @@ describe("ChildLedger", () => {
         `start ${me.startedAt} vs expected ${expected}`,
       );
     }
+  });
+
+  it("listDescendants reports an owned child's image, creation time and parent", { skip: process.platform !== "win32" }, async () => {
+    const spawnedAt = Date.now();
+    const child = spawnIdle();
+    try {
+      const found = (await listDescendants(process.pid)).find(row => row.pid === child.pid);
+      assert.ok(found, "the native process table must include the spawned child");
+      assert.equal(found.parentPid, process.pid);
+      assert.equal(found.image, nodeImage);
+      assert.ok(found.startedAt !== null, "native child identity must include creation time");
+      assert.ok(Math.abs(found.startedAt - spawnedAt) < 15_000);
+      const root = (await platformProbe([process.pid])).get(process.pid)!;
+      assert.deepEqual(await listDescendants(process.pid, undefined, { root: { ...root, startedAt: root.startedAt! + 1 } }), [],
+        "a different root lifetime cannot authorize its process tree");
+      const beforeBirth = await listDescendants(process.pid, undefined, { root, rootExitedAt: found.startedAt - 1 });
+      assert.equal(beforeBirth.some(row => row.pid === child.pid), false, "a child created after root exit belongs to a different lifetime");
+    } finally { child.kill("SIGKILL"); }
+  });
+
+  it("retains an executable identity when unreadable and refuses a same-prefix stranger", async () => {
+    const path = await tempLedgerPath();
+    const child = record(1234, { ownerPid: 999_999, image: "codex-app-server", imageKind: "executable", recordedAt: 1000 });
+    let executableImage: string | undefined;
+    let startedAt: number | null = 1000;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[child.pid, { pid: child.pid, image: "codex-app-serve", startedAt, executableImage }]]),
+      kill: async () => { assert.fail("unknown or different full executable identity must never authorize a kill"); },
+    });
+    await ledger.record(child);
+    assert.equal((await ledger.reapStale()).kept, 1);
+    executableImage = child.image; startedAt = null;
+    assert.equal((await ledger.reapStale()).kept, 1, "a full name without a creation time is still unverified");
+    startedAt = 1000;
+    executableImage = "Codex-app-server";
+    assert.equal((await ledger.reapStale()).cleared, 1, "Linux executable case is part of its identity");
+    await ledger.record(child);
+    executableImage = "codex-app-server-other";
+    assert.equal((await ledger.reapStale()).cleared, 1);
+    assert.deepEqual(await readChildren(path), []);
+  });
+
+  it("requires the verified Linux executable to lead its recorded process group", { skip: process.platform !== "linux" }, async () => {
+    const path = await tempLedgerPath(); const killed: number[] = [];
+    const child = record(1234, { ownerPid: 999_999, image: "codex-app-server", imageKind: "executable", processGroupLeader: true, recordedAt: 1000 });
+    let processGroup: number | undefined;
+    const ledger = new ChildLedger(path, {
+      probe: async () => new Map([[child.pid, { pid: child.pid, image: "codex-app-serve", executableImage: child.image, startedAt: 1000, processGroup }]]),
+      kill: async pid => { killed.push(pid); },
+    });
+    await ledger.record(child);
+    assert.equal((await ledger.reapStale()).kept, 1);
+    processGroup = 5678;
+    assert.equal((await ledger.reapStale()).kept, 1);
+    assert.deepEqual(killed, []);
+    processGroup = child.pid;
+    assert.equal((await ledger.reapStale()).reaped.length, 1);
+    assert.deepEqual(killed, [child.pid], "the injected kill seam keeps its recorded-pid argument");
   });
 
   it("survives a corrupt ledger file", async () => {

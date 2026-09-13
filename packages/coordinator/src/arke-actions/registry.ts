@@ -296,6 +296,8 @@ const CLIENT_COMMAND_METADATA = {
   "set-harness-engine": globalOnly(GLOBAL_OPERATION),
   "choose-claude-executable": globalOnly(GLOBAL_OPERATION),
   "clear-claude-executable": globalOnly(GLOBAL_OPERATION),
+  "choose-codex-executable": globalOnly(GLOBAL_OPERATION),
+  "clear-codex-executable": globalOnly(GLOBAL_OPERATION),
   "choose-voxa-executable": globalOnly(GLOBAL_OPERATION),
   "clear-voxa-executable": globalOnly(GLOBAL_OPERATION),
   "use-bundled-voxa": globalOnly(GLOBAL_OPERATION),
