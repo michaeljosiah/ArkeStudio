@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { open, readFile } from "node:fs/promises";
+import { appendFile, open, readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 import {
   newId, WorldChatInputRequestSchema, WORLD_CHAT_INPUT_SCHEMA_VERSION, WORLD_CHAT_INPUT_BOUNDS,
@@ -505,6 +505,32 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.equal((await state.journal.read()).pauseReason, "failed");
   });
 
+  it("allows new input after restoring a conversation whose earlier inputs were all settled", async () => {
+    for (const status of ["included", "promoted", "removed"] as const) {
+      const { journal, world, id, primary, messageId, attempt, revision } = await active();
+      if (status === "included") {
+        await journal.offer(messageId, revision, attempt, "offer");
+        await journal.settle({ messageId, attempt, status: "included", boundary: "model-input-2", operationId: "include" });
+      }
+      await journal.log.append({ type: "run.finished", run: { ...primary, status: "completed", endedAt: AT } }, { at: AT });
+      if (status === "removed") await journal.remove(messageId, revision, "remove");
+      if (status === "promoted") {
+        const next = await preparedRun(journal);
+        await journal.promote(messageId, revision, next, ROUTING, "promote");
+        await journal.log.append({ type: "run.finished", run: { ...next, status: "completed", endedAt: AT } }, { at: AT });
+      }
+      assert.equal((await journal.read()).inputs[0]?.status, status);
+      const service = new WorldChatService(world.dir, () => AT);
+      await service.archive(id);
+      await service.unarchive(id);
+      const added = await journal.record(request("A new direction after restoring"), CAPTURE);
+      assert.equal(added.queue.pauseReason, null, `${status} history needs no Continue`);
+      const started = await journal.promote(added.queue.inputs.at(-1)!.input.messageId, added.queue.revision,
+        await preparedRun(journal), ROUTING, "after-restore");
+      assert.equal(started.event.type, "input.promoted");
+    }
+  });
+
   it("invalidates an old Continue even if the queue was already paused when archived", async () => {
     const { journal, world, id } = await setup();
     await journal.record(request(), CAPTURE);
@@ -514,6 +540,45 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     await service.unarchive(id);
     await assert.rejects(journal.continue(stopped.queue.revision, ROUTING, "delayed-continue"), /changed/);
     assert.equal((await journal.read()).pauseReason, "stopped");
+  });
+
+  it("repairs a partial append on the first explicit retry, including when read repairs it first", async () => {
+    for (const readFirst of [false, true]) {
+      const { journal } = await setup();
+      const input = request();
+      const probe = await open(journal.log.eventsPath, "r");
+      const handles = Object.getPrototypeOf(probe) as { appendFile: (data: string) => Promise<void> };
+      await probe.close();
+      const real = handles.appendFile;
+      handles.appendFile = async function (this: unknown, data: string) {
+        await real.call(this, data.slice(0, 30));
+        throw new Error("device write stopped part-way");
+      };
+      try {
+        await assert.rejects(journal.record(input, CAPTURE), /device write stopped/);
+      } finally { handles.appendFile = real; }
+      assert.equal((await readFile(journal.log.eventsPath, "utf8")).endsWith("\n"), false);
+      if (readFirst) assert.equal((await journal.read()).inputs.length, 0);
+      const retried = await journal.record(input, CAPTURE);
+      assert.equal(retried.deduplicated, false);
+      assert.equal(retried.queue.inputs.length, 1);
+      assert.equal(retried.queue.inputs[0]?.input.request.submissionId, input.submissionId);
+      assert.equal((await journal.record(input, CAPTURE)).deduplicated, true);
+      const { events, problems } = await new WorldChatStore(journal.log.dir).read();
+      assert.deepEqual(problems, []);
+      assert.deepEqual(events.map(one => one.seq), [1, 2]);
+    }
+  });
+
+  it("still refuses input when the repaired tail contains interior corruption", async () => {
+    const { journal, other } = await setup();
+    await appendFile(journal.log.eventsPath, '{not a complete event}\n{"partial', "utf8");
+    const reopened = other();
+    await assert.rejects(reopened.record(request(), CAPTURE), /input history needs repair/);
+    await assert.rejects(reopened.read(), /input history needs repair/);
+    const { events, problems } = await reopened.log.read();
+    assert.equal(events.length, 1);
+    assert.equal(problems[0]?.kind, "interior-corruption");
   });
 
   it("does not acknowledge a readable event until a retry successfully flushes it", async () => {

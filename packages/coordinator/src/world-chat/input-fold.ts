@@ -74,7 +74,7 @@ export function foldWorldChatInputs(events: readonly WorldChatEventEnvelope[]) {
         queue = { ...queue, revision: queue.revision + 1, pauseReason: queue.pauseReason ?? (event.run.status === "cancelled" ? "stopped" :
           event.run.status === "timeout" ? "timeout" : event.run.status === "budget-exceeded" ? "budget-exceeded" : "failed") };
       }
-    } else if (event.type === "conversation.archived" && queue.inputs.length > 0 && queue.pauseReason !== "integrity") {
+    } else if (event.type === "conversation.archived" && unresolvedWorldChatInputs(queue).length > 0 && queue.pauseReason !== "integrity") {
       // Even an already paused queue moves revision: a delayed Continue from before archiving
       // must not wake it after someone restores the conversation.
       queue = { ...queue, revision: queue.revision + 1, pauseReason: queue.pauseReason ?? "archived" };

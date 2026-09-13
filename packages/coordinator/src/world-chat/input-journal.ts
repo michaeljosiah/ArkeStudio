@@ -51,7 +51,8 @@ export class WorldChatInputJournal {
   async read(): Promise<WorldChatInputQueue> {
     const { events, problems } = await this.log.read();
     const folded = foldWorldChatInputs(events);
-    if (problems.length || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
+    // A torn-tail report means read() already repaired and flushed it; only remaining damage blocks use.
+    if (problems.some(one => one.kind !== "torn-tail") || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
     return folded.queue;
   }
 
@@ -178,7 +179,7 @@ export class WorldChatInputJournal {
           throw new WorldChatInputError("unavailable", "This conversation is being deleted.");
         }
         const folded = foldWorldChatInputs(events);
-        if (problems.length || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
+        if (problems.some(one => one.kind !== "torn-tail") || folded.problems.length) throw new WorldChatInputError("integrity", "This conversation's input history needs repair.");
         const original = events.find(envelope => envelope.requestId === requestId);
         if (original) {
           if (!isInputEvent(original.event) || original.event.commandDigest !== commandDigest) {
