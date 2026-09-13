@@ -403,7 +403,7 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     await journal.offer(messageId, state.revision, attempt, "offer");
     await journal.settle({ messageId, attempt, status: "accepted", operationId: "accept" });
     const firstAnswerId = newId("msg");
-    await journal.log.append({ type: "turn.completed", run: { ...state.primary, status: "completed", endedAt: AT },
+    const firstCompletion = await journal.log.append({ type: "turn.completed", run: { ...state.primary, status: "completed", endedAt: AT },
       message: { id: firstAnswerId, turnId: state.primary.turnId, role: "studio", text: "Reply using the correction", attachmentIds: [], createdAt: AT },
       receipts: [], candidates: [], groups: [], tombstones: [] }, { at: AT });
     const later = run(), laterUserId = newId("msg"), laterAnswerId = newId("msg");
@@ -413,9 +413,21 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
       message: { id: laterAnswerId, turnId: later.turnId, role: "studio", text: "The later reply", attachmentIds: [], createdAt: AT },
       receipts: [], candidates: [], groups: [], tombstones: [] }, { at: AT });
     await journal.settle({ messageId, attempt, status: "included", boundary: "confirmed-later", operationId: "reconcile" });
+    const events = (await journal.log.read()).events;
+    const expected = [firstUserId, messageId, firstAnswerId, laterUserId, laterAnswerId];
+    const full = foldConversation(id, AT, events).view;
+    assert.deepEqual(full.messages.map(one => one.id), expected);
+    const latest = foldConversation(id, AT, events, { messageLimit: 3 }).view;
+    assert.deepEqual(latest.messages.map(one => one.id), [firstAnswerId, laterUserId, laterAnswerId]);
+    assert.equal(latest.hasMore, true);
+    const older = foldConversation(id, AT, events, { messageLimit: 3, before: firstCompletion.envelope.seq }).view;
+    assert.deepEqual(older.messages.map(one => one.id), [firstUserId, messageId]);
+    assert.equal(older.hasMore, false);
+    await writeCheckpoint(journal.log.dir, full);
+    assert.deepEqual((await readCheckpoint(journal.log.dir, full.seq)).checkpoint?.view.messages.map(one => one.id), expected);
     assert.equal(await refreshConversationSummary(journal.log, async input => {
       assert.equal(input.previousSummary, undefined);
-      assert.deepEqual(input.messages.map(one => one.id), [firstUserId, messageId, firstAnswerId, laterUserId, laterAnswerId]);
+      assert.deepEqual(input.messages.map(one => one.id), expected);
       assert.equal(input.messages[1]?.replyMessageId, firstAnswerId);
       assert.equal(input.messages[1]?.text, "Keep her motivation");
       return "Both replies with the correction attributed to the first";

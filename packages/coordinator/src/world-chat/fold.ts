@@ -116,7 +116,7 @@ export function foldConversation(
   const benchOutcomes = new Map<string, WorldChatLoaded["benchOutcomes"][string]>();
   /** Durable anchors only; the client joins each one to the live frame-run fold. */
   const frameRunOutcomes = new Map<string, WorldChatLoaded["frameRunOutcomes"][string]>();
-  /** The log sequence each message arrived at, so paging can use a real cursor. */
+  /** Durable transcript positions; confirmed input uses its offer's sequence, even after late reconciliation. */
   const messageSeq = new Map<string, number>();
   const messageIds = new Set<string>();
   const candidates = new Map<string, WorldChangeCandidate>();
@@ -135,6 +135,10 @@ export function foldConversation(
   const inputFold = foldWorldChatInputs(events);
   const inputQueue = inputFold.queue;
   problems.push(...inputFold.problems);
+  // A valid offer belongs to a live native run: its sequence is after that run started and
+  // before it finished. It therefore stays a stable paging position when inclusion is learned later.
+  const inputOfferSeq = new Map(events.flatMap(({ event, seq }) =>
+    event.type === "input.offer-started" && inputFold.acceptedSequences.has(seq) ? [[event.messageId, seq] as const] : []));
 
   /** A snapshot may only move a proposition forward one revision at a time. */
   function applyCandidate(next: WorldChangeCandidate, atSeq: number): void {
@@ -221,7 +225,7 @@ export function foldConversation(
         if (!inputFold.acceptedSequences.has(envelope.seq)) break;
         const input = inputQueue.inputs.find(row => row.input.messageId === e.messageId)?.input;
         if (input) addMessage({ id: input.messageId, turnId: e.attempt.turnId, role: "user",
-          text: input.request.text, attachmentIds: input.request.attachmentIds, createdAt: input.createdAt }, envelope.seq);
+          text: input.request.text, attachmentIds: input.request.attachmentIds, createdAt: input.createdAt }, inputOfferSeq.get(e.messageId)!);
         break;
       }
       case "production-setup.updated":
@@ -567,8 +571,10 @@ export function foldConversation(
     }
   }
 
-  // `before` is a log sequence, not a position: messages are append-only, so a sequence stays
-  // meaningful even as the conversation grows underneath a client that is paging back.
+  // Reconciliation can insert a confirmed correction into an earlier turn. Sort and page by
+  // its original offer position, so a late receipt cannot strand it after a newer exchange or
+  // exclude it from the page immediately before its target reply.
+  messages.sort((a, b) => messageSeq.get(a.id)! - messageSeq.get(b.id)!);
   const windowed =
     options.before === undefined
       ? messages

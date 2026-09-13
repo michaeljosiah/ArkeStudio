@@ -30,6 +30,8 @@ Queued, accepted and uncertain inputs are excluded from transcript evidence. Con
 
 Unresolved inputs block conversation deletion and wrap-up. Both lifecycle intents commit against the sequence read during preflight, and input admission refuses a durable deletion intent or an unfinished wrap-up intent. This closes both sides of the race before a receipt, proposal staging or directory removal can occur.
 
+The transcript places confirmed direction at its original native-offer sequence, which is within the targeted run. Late reconciliation therefore appears before that run's reply, and paging before the reply still includes its corrections. Checkpoints retain that same ordering.
+
 The journal has no dispatch loop and holds no lock across a native call. Wiring normal sends, completion, Stop, readiness/ownership changes and automatic advancement through one scheduler remains necessary before exposing the feature. Final run/input provenance and approval fencing, repair/retry integration, transport receipts and shared composer behavior also remain on #1138. Passing the journal tests does not satisfy the end-to-end native-engine requirement.
 
 ## Native protocol evidence
