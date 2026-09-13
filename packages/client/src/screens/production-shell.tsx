@@ -69,7 +69,7 @@ import {
 } from "../lib/store.js";
 import { takeMediaPath, type TakeEpisodeOption, episodeLabel, filterTakeEpisodes } from "./production-generate.js";
 import { useNewScene, useNewChapter, NewSceneContext, useSharedNewScene, NewChapterContext, ChapterPlan, ChapterOutlineRow } from "./production-story.js";
-import { exportViewFor } from "./production.js";
+import { exportViewFor } from "./editor-export.js";
 
 /** The first accepted picture in an episode, derived from its authored scene order. */
 export function episodeThumbnailPath(
