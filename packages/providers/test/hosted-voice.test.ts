@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billableCharacters, BREEZE_DELIVERY, estimateMicroUsd } from "@arke-studio/contracts";
+import { billableCharacters, BREEZE_DELIVERY, estimateMicroUsd, modelPriceCopy } from "@arke-studio/contracts";
 import { BreezeBlueClient, BREEZE_CATALOGUE_PAGES, BREEZE_MODEL, BREEZE_TEXT_CAP } from "../src/clients/breezeblue.js";
-import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "../src/clients/mistral.js";
+import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS, VOXTRAL_TEXT_CAP } from "../src/clients/mistral.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
 import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike, type ProviderCallCapture, type ProviderTransportScope, type VoiceSlotClient } from "../src/types.js";
@@ -92,6 +92,18 @@ describe("Mistral · Voxtral TTS as a hosted reader (SPEC-046 §2.3)", () => {
       (err: unknown) => err instanceof ProviderBusyError && err.submissionRejected === true);
     await assert.rejects(new MistralClient(async () => json(200, { audio_data: b64(Uint8Array.from([1, 2, 3])) })).submit("k", line), /not a WAV file/);
     await assert.rejects(new MistralClient(async () => json(200, {})).submit("k", line), /no audio_data/);
+  });
+
+  it("refuses a line over our own cap before the wire, naming the overrun (R-9)", async () => {
+    let called = false;
+    const client = new MistralClient(async () => { called = true; return json(200, { audio_data: b64(WAV) }); });
+    await assert.rejects(
+      client.submit("k", { model: VOXTRAL_MODEL, capability: "voice-tts", params: { text: "x".repeat(VOXTRAL_TEXT_CAP + 5), voiceId: "en_paul_neutral" } }),
+      (err: unknown) => err instanceof ProviderRequestRejectedError && /5 characters over Voxtral's 2000/.test(err.message),
+    );
+    assert.equal(called, false);
+    await client.submit("k", { model: VOXTRAL_MODEL, capability: "voice-tts", params: { text: "x".repeat(VOXTRAL_TEXT_CAP), voiceId: "en_paul_neutral" } });
+    assert.equal(called, true);
   });
 
   it("refuses a read with neither a preset nor a clip before touching the wire", async () => {
@@ -280,6 +292,9 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     // A listing that fails is not "none": the caller saves only after an answered listing.
     await assert.rejects(new BreezeBlueClient(async () => json(429, { ok: false, code: "RATE_LIMITED", detail: "Rate limit exceeded." })).findVoice("k", "x"), ProviderBusyError);
     await assert.rejects(new BreezeBlueClient(async () => json(500, { ok: false, code: "INTERNAL_ERROR", detail: "x" })).findVoice("k", "x"));
+    // Nor is a 2xx that is not a list.
+    await assert.rejects(new BreezeBlueClient(async () => json(200, { ok: true })).findVoice("k", "x"), /not a list/);
+    await assert.rejects(new BreezeBlueClient(async () => new Response("<html>", { status: 200 })).findVoice("k", "x"), /not a list/);
     const held = recording((url) => url.endsWith("/v1/voices/voc_1") ? json(200, { voice_id: "voc_1", name: "x" }) : json(404, { ok: false, code: "RESOURCE_NOT_FOUND", detail: "Resource not found." }));
     assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_1"), true);
     assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_gone"), false, "deleted in the console");
@@ -376,8 +391,9 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     assert.equal(row.providerModelId, "voxtral-mini-tts-2603");
     assert.deepEqual(row.limits.deliveries, ["measured"]);
     assert.equal(row.limits.audioFormat, "wav");
-    assert.equal(row.limits.maxPromptChars, 2000);
+    assert.equal(row.limits.maxPromptChars, VOXTRAL_TEXT_CAP, "the row and the client agree on the cap");
     assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 16 });
+    assert.equal(modelPriceCopy(row), "$16.00 / M characters");
     assert.equal(row.cadence?.speed, null);
     assert.equal(row.cadence?.pause, "unsupported");
   });
@@ -386,6 +402,7 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === BREEZE_MODEL)!;
     assert.equal(row.providerModelId, undefined);
     assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" });
+    assert.equal(modelPriceCopy(row), "$40.00 / M characters, CJK ×2", "the catalogue says what the estimate counts");
     // The unit is what the estimate multiplies: a CJK line costs twice its length (R-8).
     assert.equal(billableCharacters(row, "Bell Watch."), 11);
     assert.equal(billableCharacters(row, "鐘の見張り"), 10);

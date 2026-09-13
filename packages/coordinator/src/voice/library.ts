@@ -458,7 +458,7 @@ export async function recordVoiceReader(
   store: WorldStore,
   voiceId: string,
   provider: string,
-  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[] },
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
 ): Promise<void> {
   // Read, patch and commit as one: two overlapping records — a confirmation for one reader while
   // another's slot flow lands — would both read the file before either committed, and the second
@@ -481,7 +481,7 @@ async function recordVoiceReaderNow(
   store: WorldStore,
   voiceId: string,
   provider: string,
-  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[] },
+  patch: { confirmedAt?: string; voiceId?: string; clipHash?: string; savedAt?: string; stale?: string[]; pending?: string[] },
 ): Promise<void> {
   const existingRaw = await readLibraryRaw(store);
   if (existingRaw === null) throw new Error("the voice library is missing");
@@ -491,8 +491,8 @@ async function recordVoiceReaderNow(
   const remote = (typeof entry["remote"] === "object" && entry["remote"] !== null ? entry["remote"] : {}) as Record<string, Record<string, unknown>>;
   const current = typeof remote[provider] === "object" && remote[provider] !== null ? remote[provider] : {};
   const next: Record<string, unknown> = { ...current, ...patch };
-  // An emptied stale list is no list: the key comes off rather than sitting as `[]` forever.
-  if (Array.isArray(next["stale"]) && next["stale"].length === 0) delete next["stale"];
+  // An emptied list is no list: the key comes off rather than sitting as `[]` forever.
+  for (const list of ["stale", "pending"]) if (Array.isArray(next[list]) && next[list].length === 0) delete next[list];
   entry["remote"] = { ...remote, [provider]: next };
   await store.commit({
     kind: "voice-reader",

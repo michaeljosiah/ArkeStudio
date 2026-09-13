@@ -160,23 +160,41 @@ export async function prepareHostedClip(
     // reads the slot the flow before it recorded.
     const current = store.getBundle().clonedVoices.find((entry) => entry.id === voice.id) ?? voice;
     const held = current.remote?.[provider];
-    const stale = held?.stale ?? [];
+    const name = hostedSlotName(current, hash);
+    // A save whose answer never came back — aborted, or the process died — may still have made
+    // a slot: its hash-named title was recorded as `pending` before the call, so it is looked up
+    // here and either adopted (it is this clip's) or removed (an older clip's), and nothing on
+    // the account is left without a handle in the library (codex on PR 1153).
+    const pending = (held?.pending ?? []).filter((title) => title !== name);
+    const orphans: string[] = [];
+    for (const title of pending) {
+      const id = await slots.find(provider, key, title, signal);
+      if (id !== null && id !== held?.voiceId) orphans.push(id);
+    }
+    const stale = [...(held?.stale ?? []), ...orphans.filter((id) => !(held?.stale ?? []).includes(id))];
     const remaining = await removeStale(slots, provider, key, stale, signal);
     if (held?.voiceId !== undefined && held.clipHash === hash && (await slots.has(provider, key, held.voiceId, signal))) {
-      if (remaining.length !== stale.length) await recordVoiceReader(store, voice.id, provider, { stale: remaining });
+      if (remaining.length !== (held.stale ?? []).length || pending.length !== (held.pending ?? []).length) {
+        await recordVoiceReader(store, voice.id, provider, { stale: remaining, pending: [] });
+      }
       return { ...clip, remoteVoiceId: held.voiceId };
     }
-    const name = hostedSlotName(current, hash);
     // A listing that fails throws through here and the read fails with the reason: it is not
     // read as "no slot", because a save after an unanswered listing is the duplicate charge the
     // listing exists to prevent. Only a listing that answered "none" is followed by a save.
     const found = await slots.find(provider, key, name, signal);
     signal?.throwIfAborted();
-    const voiceId = found ?? (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType }, signal)).voiceId;
+    let voiceId = found;
+    if (voiceId === null) {
+      // The intent goes on the entry before the call leaves: whatever happens to the answer,
+      // the title the slot would carry is remembered and reconciled on the next read.
+      await recordVoiceReader(store, voice.id, provider, { pending: [name], stale: remaining });
+      voiceId = (await slots.save(provider, key, { name, clip: clip.data, contentType: clip.contentType }, signal)).voiceId;
+    }
     const replaced = held?.voiceId !== undefined && held.voiceId !== voiceId ? [held.voiceId] : [];
     // Recorded before the old slot is removed, with the old id kept as stale until it is: a
     // cancellation or a crash between the two loses no handle.
-    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now(), stale: [...remaining, ...replaced] });
+    await recordVoiceReader(store, voice.id, provider, { voiceId, clipHash: hash, savedAt: deps.now(), stale: [...remaining, ...replaced], pending: [] });
     const left = await removeStale(slots, provider, key, [...remaining, ...replaced], signal);
     if (left.length !== remaining.length + replaced.length) await recordVoiceReader(store, voice.id, provider, { stale: left });
     return { ...clip, remoteVoiceId: voiceId };

@@ -216,6 +216,8 @@ export const ClonedVoiceSchema = z
             savedAt: z.string().min(1).optional(),
             /** Replaced copies the vendor has not yet confirmed removed: tried again at the next read (R-15). */
             stale: z.array(z.string().min(1)).optional(),
+            /** Titles of saves whose answer never came back: looked up and reconciled at the next read. */
+            pending: z.array(z.string().min(1)).optional(),
           })
           .passthrough(),
       )

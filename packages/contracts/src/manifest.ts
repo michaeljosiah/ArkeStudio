@@ -1109,8 +1109,17 @@ export function modelPriceCopy(model: ManifestModel): string {
       return formatMicroUsd(pricing.microUsdPerImage);
     case "perMegapixel":
       return `${formatMicroUsd(pricing.microUsdPerMegapixel)} / megapixel`;
-    case "perCharacter":
-      return `${formatMicroUsd(pricing.microUsdPerCharacter)} / character`;
+    case "perCharacter": {
+      // Per million, as every vendor quotes it — a per-character rate is sub-cent and rendered
+      // "$0.00" — and in the unit the vendor bills, so the catalogue does not contradict the
+      // estimate (SPEC-046 R-8; codex on PR 1156).
+      const perMillion = formatMicroUsd(pricing.microUsdPerCharacter * 1_000_000);
+      return pricing.unit === "utf8-byte"
+        ? `${perMillion} / M bytes`
+        : pricing.unit === "cjk-double"
+          ? `${perMillion} / M characters, CJK ×2`
+          : `${perMillion} / M characters`;
+    }
     case "perToken":
       return `${formatMicroUsd(pricing.microUsdPerMillionInput)} / ${formatMicroUsd(
         pricing.microUsdPerMillionOutput,

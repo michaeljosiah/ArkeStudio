@@ -16,6 +16,12 @@ import {
 /** The manifest row's stable id, and the version Mistral serves behind it (SPEC-046 R-6). */
 export const VOXTRAL_MODEL = HOSTED_VOICE_READERS["mistral"]!;
 export const VOXTRAL_PROVIDER_MODEL = "voxtral-mini-tts-2603";
+/**
+ * Our cap on one read's text (SPEC-046 R-9): Mistral publishes none and says "under 300 words".
+ * The row declares it for the bench's pre-enqueue check; it is enforced here too because a
+ * narrator's prose block is queued whole without that check (codex on PR 1153).
+ */
+export const VOXTRAL_TEXT_CAP = 2000;
 
 /**
  * Mistral's hosted presets are four speakers in fixed emotions — Paul (US), Oliver and Jane
@@ -112,6 +118,9 @@ export class MistralClient implements ProviderClient, VoiceCatalogueClient {
     if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("mistral: unsupported synthesis capability");
     const text = String(request.params["text"] ?? "");
     if (text.trim() === "") throw new ProviderRequestRejectedError("mistral: there is no text to read");
+    if (text.length > VOXTRAL_TEXT_CAP) {
+      throw new ProviderRequestRejectedError(`mistral: the line is ${text.length - VOXTRAL_TEXT_CAP} characters over Voxtral's ${VOXTRAL_TEXT_CAP} — read it in parts`);
+    }
     const voiceId = typeof request.params["voiceId"] === "string" ? request.params["voiceId"] : "";
     const reference = request.voiceReference;
     // A cloned voice rides as its clip; a preset rides as its id. One or the other — a preset id

@@ -222,8 +222,11 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
   async findVoice(key: string, name: string, signal?: AbortSignal): Promise<string | null> {
     const res = await this.fetchImpl(`${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status >= 400) throw await this.failure(res);
-    const body = (await res.json().catch(() => null)) as { voices?: Array<Record<string, unknown>> } | null;
-    const match = (body?.voices ?? []).find((v) => v["name"] === name && typeof v["voice_id"] === "string");
+    const body = (await res.json().catch(() => null)) as { voices?: unknown } | null;
+    // A 2xx that is not a list has not answered either: `null` means the account listed and
+    // holds none, and a save follows only that.
+    if (!Array.isArray(body?.voices)) throw new Error("breezeblue: the voice listing was not a list");
+    const match = (body.voices as Array<Record<string, unknown>>).find((v) => v["name"] === name && typeof v["voice_id"] === "string");
     return match ? (match["voice_id"] as string) : null;
   }
 

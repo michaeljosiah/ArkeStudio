@@ -295,6 +295,44 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
     });
   });
 
+  it("a save whose answer never came back leaves its title on the entry, and the next read adopts or removes what it made (codex on PR 1153)", async () => {
+    await withClonedVoice(async ({ store, dir, voice }) => {
+      const first = await clipFor(store, voice());
+      assert.ok(first);
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
+      // The vendor makes the slot and the answer is lost: the call rejects after the account has it.
+      const vendor = fakeSlots();
+      const save = vendor.slots.save;
+      vendor.slots.save = async (provider, key, input, signal) => { await save(provider, key, input, signal); throw new Error("fetch failed: socket hang up"); };
+      const deps = { getKey: async () => "k", slots: vendor.slots, now: CLOCK };
+      await assert.rejects(prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps), /socket hang up/);
+      const title = hostedSlotName(voice(), clipHashOf(first));
+      assert.deepEqual(voice().remote?.["breezeblue"]?.pending, [title], "the intent was recorded before the call left");
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, undefined);
+      assert.equal(vendor.account.size, 1, "and the account holds the slot nobody recorded");
+
+      // The same clip read again: the slot is found under its title and adopted — no second save.
+      vendor.slots.save = save;
+      const adopted = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
+      assert.equal(adopted.remoteVoiceId, "voc_1");
+      assert.equal(vendor.saves.length, 1);
+      assert.equal(voice().remote?.["breezeblue"]?.pending, undefined, "the intent is resolved");
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
+
+      // A different clip next time, with an unanswered save left behind by an older one: the
+      // orphan is looked up by its title and removed, not left counting against the plan.
+      await recordVoiceReader(store, "harbour-glass", "breezeblue", { pending: [title] });
+      await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(96, 1));
+      const second = await clipFor(store, voice());
+      assert.ok(second);
+      const remade = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), second, deps);
+      assert.equal(remade.remoteVoiceId, "voc_2");
+      assert.ok(vendor.removes.some((r) => r.voiceId === "voc_1"), "the older slot went with the replacement");
+      assert.equal(voice().remote?.["breezeblue"]?.pending, undefined);
+      assert.equal(vendor.account.size, 1);
+    });
+  });
+
   it("two reads of the same unsaved voice at once make one slot, not two (codex on PR 1156)", async () => {
     await withClonedVoice(async ({ store, voice }) => {
       const clip = await clipFor(store, voice());
