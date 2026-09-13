@@ -22,7 +22,7 @@ interface Voice {
   gainAt: number;
   /** When this voice left its window, for the release below; null while it is inside one. */
   releasedAt: number | null;
-  /** When `play()` was last asked for, so a rejected one is retried and not retried every frame. */
+  /** When `play()` was last asked for, in frame-clock milliseconds; see {@link PLAY_RETRY_MS}. */
   playedAt: number;
 }
 
@@ -53,8 +53,15 @@ const RAMP_SEC = 0.008;
 /** Five time constants: near enough to silence that pausing the element there is inaudible. */
 const RELEASE_SEC = RAMP_SEC * 5;
 
-/** A rejected `play()` is retried, but not on every frame — `playback-engine.ts`'s interval. */
-const PLAY_RETRY_SEC = 0.5;
+/**
+ * A rejected `play()` — or a context autoplay left suspended — is asked again on this interval.
+ *
+ * Wall milliseconds, from the frame clock, and deliberately not `AudioContext.currentTime`: that
+ * clock does not advance while the context is suspended, which is precisely the state a blocked
+ * autoplay leaves it in. A retry paced by it would never come due in the one case it exists for.
+ * `playback-engine.ts` uses the same 500ms on the video path.
+ */
+const PLAY_RETRY_MS = 500;
 
 /** Film seconds to source seconds for an item: the mapping a retained voice is playing under. */
 function sourceOffset(item: Pick<RenderAudioItem, "startSec" | "sourceInSec">): number {
@@ -186,9 +193,22 @@ export function usePlanAudio(opts: {
     }
     void ctx.resume().catch(() => {});
     let frame = 0;
-    const tick = () => {
+    let resumedAt = 0;
+    const tick = (nowMs: number) => {
       const plan = planRef.current;
       const at = timeRef.current;
+      /*
+       * A context autoplay left suspended is asked again too.
+       *
+       * `resume()` above is one request, and it is refused when the page has not been gestured at
+       * yet. Every element can then be playing perfectly while the graph they feed produces
+       * nothing, and retrying `play()` alone would never recover it — the elements are not the
+       * thing that is stopped.
+       */
+      if (ctx.state === "suspended" && nowMs - resumedAt > PLAY_RETRY_MS) {
+        resumedAt = nowMs;
+        void ctx.resume().catch(() => {});
+      }
       for (const voice of graph.values()) {
         const { item, element } = voice;
         const inside = plan !== null && at >= item.startSec && at < item.endSec;
@@ -211,7 +231,7 @@ export function usePlanAudio(opts: {
         if (!voice.started) {
           if (Math.abs(element.currentTime - target) > ACTIVATION_TOLERANCE_SEC) element.currentTime = target;
           voice.started = true;
-          voice.playedAt = ctx.currentTime;
+          voice.playedAt = nowMs;
           void element.play().catch(() => {});
           continue;
         }
@@ -225,8 +245,8 @@ export function usePlanAudio(opts: {
          * loop survives a render, a single rejection would leave that clip silent for the rest of
          * the session. The video path has always retried on an interval, and this is that.
          */
-        if (element.paused && ctx.currentTime - voice.playedAt > PLAY_RETRY_SEC) {
-          voice.playedAt = ctx.currentTime;
+        if (element.paused && nowMs - voice.playedAt > PLAY_RETRY_MS) {
+          voice.playedAt = nowMs;
           void element.play().catch(() => {});
         }
       }

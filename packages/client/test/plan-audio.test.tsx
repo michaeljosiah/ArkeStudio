@@ -78,6 +78,11 @@ const context = (): FakeAudioContext => contexts[contexts.length - 1]!;
 
 class FakeAudioContext {
   currentTime = 0;
+  /** A page that has not been gestured at yet leaves the context here, and `resume()` is refused. */
+  state: "running" | "suspended" = "running";
+  /** Set by a case that wants `resume()` refused, as a blocked autoplay refuses it. */
+  refuseResume = false;
+  resumes = 0;
   constructor() {
     contexts.push(this);
   }
@@ -92,6 +97,9 @@ class FakeAudioContext {
     return { ...node(), gain: param() };
   }
   resume(): Promise<void> {
+    this.resumes += 1;
+    if (this.refuseResume) return Promise.reject(new Error("NotAllowedError"));
+    this.state = "running";
     return Promise.resolve();
   }
   close(): Promise<void> {
@@ -111,19 +119,25 @@ Object.assign(globalThis, {
 });
 
 /** rAF under the test's control: the hook's loop runs when a case says to. */
-let frames: Array<() => void> = [];
 Object.assign(globalThis, {
-  requestAnimationFrame: (cb: () => void) => {
+  requestAnimationFrame: (cb: (ms: number) => void) => {
     frames.push(cb);
     return frames.length;
   },
   cancelAnimationFrame: () => {},
 });
-const runFrame = () => {
+/**
+ * One tick at a wall-clock millisecond, not the loop: each callback re-arms itself.
+ *
+ * The timestamp is the point. The loop paces its retries on the frame clock precisely because
+ * `AudioContext.currentTime` stands still while the context is suspended, so a test that advanced
+ * the context clock instead would prove the opposite of what it looks like it proves.
+ */
+let frames: Array<(ms: number) => void> = [];
+const runFrame = (ms: number) => {
   const pending = frames;
   frames = [];
-  // One tick, not the loop: each callback re-arms itself.
-  for (const cb of pending.slice(-1)) cb();
+  for (const cb of pending.slice(-1)) cb(ms);
 };
 
 const { usePlanAudio } = await import("../src/lib/plan-audio.js");
@@ -172,7 +186,7 @@ describe("the monitor mix survives a re-render", () => {
       root.render(<Harness plan={bedPlan()} playing at={4} />);
     });
     await act(async () => {
-      runFrame();
+      runFrame(0);
     });
     const bed = made[0]!;
     assert.equal(bed.currentTime, 4, "four seconds into the film is four seconds into the file");
@@ -189,7 +203,7 @@ describe("the monitor mix survives a re-render", () => {
       root!.render(<Harness plan={moved} playing at={4} />);
     });
     await act(async () => {
-      runFrame();
+      runFrame(0);
     });
 
     assert.equal(made.length, 1, "the element was kept");
@@ -207,19 +221,56 @@ describe("the monitor mix survives a re-render", () => {
     // The first request is refused, as a transient autoplay interruption refuses it.
     await act(async () => {
       made[0]!.refuse = true;
-      runFrame();
+      runFrame(0);
     });
     assert.equal(bed().plays, 1);
     assert.equal(bed().paused, true, "the element never started");
 
     // The interruption passes. Nothing about the plan changed, so nothing else will retry.
     bed().refuse = false;
-    context().currentTime = 1;
     await act(async () => {
-      runFrame();
+      runFrame(600);
     });
     assert.equal(bed().plays, 2, "the loop asked again");
     assert.equal(bed().paused, false, "and the clip is playing");
+  });
+
+  /**
+   * A refused context is asked again as well.
+   *
+   * Every element can be playing perfectly while the graph they feed produces nothing, so
+   * retrying `play()` alone recovers nothing — the elements are not what is stopped. The clock
+   * this is paced by matters as much: `AudioContext.currentTime` stands still while the context
+   * is suspended, so a retry measured against it would never come due in the one case it is for.
+   */
+  it("asks a suspended context to resume again, on a clock that runs while it is suspended", async () => {
+    const container = dom.document.createElement("div");
+    let root: Root;
+    await act(async () => {
+      root = createRoot(container as unknown as HTMLElement);
+      root.render(<Harness plan={bedPlan()} playing at={1} />);
+    });
+    // The page has not been gestured at: the first resume is refused and the context stays put.
+    context().refuseResume = true;
+    context().state = "suspended";
+    await act(async () => {
+      runFrame(0);
+    });
+    const refusedAt = context().resumes;
+
+    // The context's own clock has not moved, because a suspended context's clock does not.
+    assert.equal(context().currentTime, 0);
+    await act(async () => {
+      runFrame(600);
+    });
+    assert.ok(context().resumes > refusedAt, "the loop asked the context again");
+
+    // The gesture lands; the next retry takes.
+    context().refuseResume = false;
+    await act(async () => {
+      runFrame(1200);
+    });
+    assert.equal(context().state, "running", "the context recovered without the transport being toggled");
   });
 
   it("keeps the same element when the clip it plays is moved along the lane", async () => {
@@ -230,7 +281,7 @@ describe("the monitor mix survives a re-render", () => {
       root.render(<Harness plan={bedPlan()} playing at={1} />);
     });
     await act(async () => {
-      runFrame();
+      runFrame(0);
     });
     assert.equal(made.length, 1);
 
@@ -242,7 +293,7 @@ describe("the monitor mix survives a re-render", () => {
       root!.render(<Harness plan={moved} playing at={1} />);
     });
     await act(async () => {
-      runFrame();
+      runFrame(0);
     });
 
     assert.equal(made.length, 1, `the move fetched the file again (${made.length} elements for one clip)`);
@@ -257,7 +308,7 @@ describe("the monitor mix survives a re-render", () => {
       root.render(<Harness plan={bedPlan()} playing at={1} />);
     });
     await act(async () => {
-      runFrame();
+      runFrame(0);
     });
     const bed = made[0];
     assert.ok(bed, "one voice for the one placed file");
@@ -269,7 +320,7 @@ describe("the monitor mix survives a re-render", () => {
         root!.render(<Harness plan={bedPlan()} playing at={at} />);
       });
       await act(async () => {
-        runFrame();
+        runFrame(0);
       });
     }
 

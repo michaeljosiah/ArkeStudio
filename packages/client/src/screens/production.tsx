@@ -8027,7 +8027,18 @@ export function CutScreen() {
             className="fy-timeline__canvas"
             onClick={(event) => {
               const target = event.target as HTMLElement;
-              if (target.closest(".fy-cutseg, .fy-ovclip, .fy-typedclip, .fy-clipmenu, .fy-trackbtns")) return;
+              /*
+               * Moving the transport is not deselecting (Codex review).
+               *
+               * `preventDefault` on the press stops the compatibility mouse events but not the
+               * click, so a press on the ruler or the playhead still arrives here — and cleared
+               * the selection. That breaks the one flow the Split button's own tooltip describes:
+               * select a clip, bring the playhead inside it, split. The clip was deselected by
+               * the act of bringing the playhead there, and Split was disabled by the time it
+               * was reached. Pressing empty lane still clears, because that is the gesture this
+               * handler is for; the two surfaces that exist to move the clock are not it.
+               */
+              if (target.closest(".fy-cutseg, .fy-ovclip, .fy-typedclip, .fy-clipmenu, .fy-trackbtns, .fy-playhead, .fy-scrub")) return;
               setSelected(null);
             }}
           >

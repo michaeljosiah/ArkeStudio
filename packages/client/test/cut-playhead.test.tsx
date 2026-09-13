@@ -143,6 +143,56 @@ describe("the playhead is draggable", () => {
     }
   });
 
+  /**
+   * Moving the transport is not deselecting (Codex review).
+   *
+   * `preventDefault` on the press stops the compatibility mouse events but not the click, so a
+   * press on the playhead or the ruler still reaches the canvas's deselect handler. It cleared
+   * the selection — breaking the one flow the Split button's own tooltip describes: select a
+   * clip, bring the playhead inside it, split.
+   */
+  it("keeps the selected clip while the transport is moved", async () => {
+    const screen = await mountCut();
+    try {
+      const eyebrow = () => screen.container.querySelector(".fy-cutinspect__eyebrow")?.textContent;
+      const clip = screen.container.querySelector<HTMLButtonElement>("[data-clip='cl_sh-12']");
+      assert.ok(clip);
+      await act(async () => clip.click());
+      assert.equal(eyebrow(), "PICTURE CLIP", "the clip is selected");
+
+      const tracks = screen.container.querySelector<HTMLElement>(".fy-tracks")!;
+      measure(tracks);
+      const grab = screen.container.querySelector<HTMLElement>(".fy-playhead__grab")!;
+      await act(async () => {
+        grab.dispatchEvent(pointer("pointerdown", GUTTER));
+        grab.dispatchEvent(pointer("pointermove", GUTTER + LANE / 4));
+        grab.dispatchEvent(pointer("pointerup", GUTTER + LANE / 4));
+        // The click the press could not prevent, which is what reaches the canvas.
+        grab.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+      assert.equal(eyebrow(), "PICTURE CLIP", "dragging the playhead did not deselect the clip");
+
+      const ruler = screen.container.querySelector<HTMLElement>(".fy-timeline__ruler")!;
+      measure(ruler);
+      await act(async () => {
+        ruler.dispatchEvent(pointer("pointerdown", GUTTER + LANE / 2));
+        ruler.dispatchEvent(pointer("pointerup", GUTTER + LANE / 2));
+        ruler.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+      assert.equal(eyebrow(), "PICTURE CLIP", "scrubbing the ruler did not deselect it either");
+
+      // Empty lane still clears, because that is the gesture the canvas handler is for.
+      await act(async () => {
+        tracks.dispatchEvent(pointer("pointerdown", GUTTER + LANE * 0.8));
+        tracks.dispatchEvent(pointer("pointerup", GUTTER + LANE * 0.8));
+        tracks.dispatchEvent(new Event("click", { bubbles: true }));
+      });
+      assert.equal(eyebrow(), "CUT", "pressing empty lane still clears the selection");
+    } finally {
+      await act(async () => screen.root.unmount());
+    }
+  });
+
   it("stands aside for the tools that want the lane under it", async () => {
     const screen = await mountCut();
     try {
