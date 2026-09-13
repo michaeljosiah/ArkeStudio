@@ -69,7 +69,8 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
 
   async validateKey(key: string): Promise<CapabilityProbe[]> {
     const probe = await tryProbe(() =>
-      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/account/balance`, { headers: this.headers(key) }),
+      // `/v1/balance`, as the OpenAPI block says — not the docs navigation's `account/balance`, which 404s.
+      jsonRequest(this.fetchImpl, this.id, `${this.baseUrl}/v1/balance`, { headers: this.headers(key) }),
     );
     if (!probe.ok) {
       const reason = probe.auth ? "BreezeBlue rejected this key" : `BreezeBlue could not be reached: ${probe.message}`;
@@ -171,8 +172,11 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
 
   /**
    * The public catalogue as picker candidates (SPEC-046 R-32): the voice's language, accent,
-   * gender, age band and tags become attributes `rankVoices` can match. Saved voices — the
-   * account's own clones — are left out here; the library addresses those by its own ids.
+   * gender, age band, tones and category become attributes `rankVoices` can match. The live
+   * catalogue holds ~6,900 public voices (read 2026-09-13) in pages of 100 ordered by Breeze's
+   * own trend rank, so one page is what the picker gets — a bounded, ranked slice, not the
+   * whole shelf. Saved voices — the account's own clones — are `visibility: private` and left
+   * out; the library addresses those by its own ids.
    */
   async listVoicesCatalog(key: string): Promise<
     Array<{ provider: string; model: string; voiceId: string; label: string; attributes: string[]; local: boolean; canClone: boolean }>
@@ -183,13 +187,14 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     if (status >= 400) return [];
     const voices = (body as { voices?: Array<Record<string, unknown>> } | null)?.voices ?? [];
     return voices
-      .filter((v) => typeof v["voice_id"] === "string" && typeof v["name"] === "string" && (v["origin"] === undefined || v["origin"] === "public"))
+      .filter((v) => typeof v["voice_id"] === "string" && typeof v["name"] === "string" && (v["visibility"] === undefined || v["visibility"] === "public"))
       .map((v) => ({
         provider: "breezeblue",
         model: BREEZE_MODEL,
         voiceId: v["voice_id"] as string,
         label: v["name"] as string,
-        attributes: [v["language_code"], v["accent"], v["gender"], v["age"], ...(Array.isArray(v["tags"]) ? v["tags"] : [])]
+        attributes: [v["language_code"], v["accent"], v["gender"], v["age"], v["primary_category_code"],
+          ...(Array.isArray(v["tone"]) ? v["tone"] : []), ...(Array.isArray(v["tags"]) ? v["tags"] : [])]
           .filter((s): s is string => typeof s === "string" && s.length > 0)
           .map((s) => s.toLowerCase()),
         local: false,

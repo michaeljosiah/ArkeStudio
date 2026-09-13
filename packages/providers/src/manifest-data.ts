@@ -239,8 +239,10 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // and this estimate counts characters, so a Chinese, Japanese or Korean line is under-estimated
       // by up to half (R-8). `text` is 1,000 characters by default per the TtsRequest schema (an
       // approved account may send up to 2,000). No providerModelId: Breeze picks `breeze-tts-2` for
-      // en/zh and `breeze-tts-2-multilingual` for the other 49 languages from the language code, at
-      // one price (§2.4). Direction is the richest in the catalogue — a tag in the text, a sentence
+      // en/zh and the multilingual model — `breeze-tts-2-preview` on the live `/v1/models` of
+      // 2026-09-13, `-multilingual` in the docs — from the language code, at one price (§2.4).
+      // Measured 2026-09-13 (issue 1143): exactly 0.1 credit a character, and a delivery's tag is
+      // billed as characters too; the Free plan's pool is three generations, the fourth gets a 429. Direction is the richest in the catalogue — a tag in the text, a sentence
       // beside it, a guidance scale, speed 0.5–2.0 — declared here in Breeze's parenthesised tag
       // syntax; the sentences and the guidance value are unprobed and issue 1143 tunes them (R-22).
       // Emphasis stays unsupported until the probe shows what capitalisation does (R-20).

@@ -112,8 +112,9 @@ describe("Mistral · Voxtral TTS as a hosted reader (SPEC-046 §2.3)", () => {
 
 describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () => {
   it("validates by reading the balance: authenticates-and-can-pay, in credits (R-2)", async () => {
-    const funded = new BreezeBlueClient(async () => json(200, { balance: 1200, topups: [] }));
-    assert.ok((await funded.validateKey("k")).every((p) => p.available));
+    const r = recording(() => json(200, { balance: 1400, balance_millicredits: 1400000, scale: 1000, topups: [], charges: [] }));
+    assert.ok((await new BreezeBlueClient(r.fetchImpl).validateKey("k")).every((p) => p.available));
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/balance");
     const empty = new BreezeBlueClient(async () => json(200, { balance: 0 }));
     const probes = await empty.validateKey("k");
     assert.equal(probes[0]?.available, false);
@@ -189,13 +190,15 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
   });
 
   it("lists the public catalogue with its metadata as attributes and leaves saved voices out (R-32)", async () => {
-    const client = new BreezeBlueClient(async () => json(200, { voices: [
-      { voice_id: "voc_a", name: "Ada", origin: "public", language_code: "en", accent: "british", gender: "female", tags: ["Narration"] },
-      { voice_id: "voc_b", name: "Mine", origin: "clone", language_code: "en" },
-    ], has_more: false, total: 2, page: 1, page_size: 100 }));
-    const voices = await client.listVoicesCatalog("k");
+    const r = recording(() => json(200, { voices: [
+      { voice_id: "voc_a", name: "Ada", origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
+        gender: "female", age: "middle_aged", tone: ["calm", "warm"], primary_category_code: "narration", tags: ["Narration"] },
+      { voice_id: "voc_b", name: "Mine", origin: "cloned", voice_type: "custom", visibility: "private", language_code: "en" },
+    ], has_more: true, total: 6898, page: 1, page_size: 100 }));
+    const voices = await new BreezeBlueClient(r.fetchImpl).listVoicesCatalog("k");
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voices?page_size=100");
     assert.deepEqual(voices, [{ provider: "breezeblue", model: BREEZE_MODEL, voiceId: "voc_a", label: "Ada",
-      attributes: ["en", "british", "female", "narration"], local: false, canClone: false }]);
+      attributes: ["en", "british", "female", "middle_aged", "narration", "calm", "warm", "narration"], local: false, canClone: false }]);
   });
 });
 
