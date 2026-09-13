@@ -94,6 +94,7 @@ export type WorldChatInputPromotion = z.infer<typeof WorldChatInputPromotionSche
 export const WorldChatInputStateSchema = z.object({
   input: WorldChatInputRecordSchema,
   sequence: z.number().int().min(1),
+  settledSequence: z.number().int().min(1).optional(),
   status: z.enum(["queued", "offering", "accepted", "included", "uncertain", "promoted", "removed"]),
   /** Retained after non-delivery: an offered input can never be represented as never sent. */
   attempt: WorldChatInputAttemptSchema.optional(),
@@ -116,7 +117,7 @@ export type WorldChatInputQueue = z.infer<typeof WorldChatInputQueueSchema>;
 export const WorldChatInputQueueViewSchema = z.object({
   revision: z.number().int().min(0),
   pauseReason: WorldChatInputPauseReasonSchema.nullable(),
-  inputs: z.array(WorldChatInputStateSchema.omit({ attempt: true, boundary: true }).extend({
+  inputs: z.array(WorldChatInputStateSchema.omit({ attempt: true, boundary: true, settledSequence: true }).extend({
     removable: z.boolean(),
   })),
 }).strict();
@@ -124,9 +125,11 @@ export type WorldChatInputQueueView = z.infer<typeof WorldChatInputQueueViewSche
 
 export function projectWorldChatInputQueue(queue: WorldChatInputQueue): WorldChatInputQueueView {
   const pending = new Set(unresolvedWorldChatInputs(queue));
-  const recent = new Set(queue.inputs.filter(row => !pending.has(row)).slice(-WORLD_CHAT_INPUT_BOUNDS.settled));
+  const recent = new Set(queue.inputs.filter(row => !pending.has(row))
+    .sort((a, b) => (b.settledSequence ?? b.sequence) - (a.settledSequence ?? a.sequence))
+    .slice(0, WORLD_CHAT_INPUT_BOUNDS.settled));
   return { revision: queue.revision, pauseReason: queue.pauseReason,
-    inputs: queue.inputs.filter(row => pending.has(row) || recent.has(row)).map(({ attempt, boundary: _boundary, ...row }) => ({
+    inputs: queue.inputs.filter(row => pending.has(row) || recent.has(row)).map(({ attempt, boundary: _boundary, settledSequence: _settled, ...row }) => ({
       ...row, removable: row.status === "queued" && attempt === undefined,
     })),
   };
@@ -215,19 +218,19 @@ export function advanceWorldChatInputQueue(
       }
       changed = { ...row, status: event.type === "input.included" ? "included" :
         event.type === "input.not-delivered" ? "queued" : event.type === "input.accepted" ? "accepted" : "uncertain",
-        ...(event.type === "input.included" ? { boundary: event.boundary, turnId: event.attempt.turnId, runId: event.attempt.runId } : {}),
+        ...(event.type === "input.included" ? { boundary: event.boundary, turnId: event.attempt.turnId, runId: event.attempt.runId, settledSequence: sequence } : {}),
       };
       if (event.type === "input.delivery-unknown") next.pauseReason = "delivery-unknown";
       break;
     case "input.removed":
       if (row.status !== "queued" || row.attempt) return refuse("Only a never-offered queued input can be removed.");
-      changed = { ...row, status: "removed" };
+      changed = { ...row, status: "removed", settledSequence: sequence };
       break;
     case "input.promoted":
       if (queue.pauseReason || pending[0] !== row || row.status !== "queued") {
         return refuse("Only the oldest queued input may start the next turn while the queue is running.");
       }
-      changed = { ...row, status: "promoted", turnId: event.turnId, runId: event.runId };
+      changed = { ...row, status: "promoted", turnId: event.turnId, runId: event.runId, settledSequence: sequence };
       break;
   }
   return { queue: { ...next, inputs: queue.inputs.map(one => one === row ? changed : one) } };

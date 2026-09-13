@@ -14,9 +14,14 @@ import { boundSummary, shouldSummarise } from "./context.js";
 import type { WorldChatStore } from "./store.js";
 import { foldWorldChatInputs } from "./input-fold.js";
 
+type SummaryMessage = Pick<WorldChatMessage, "id" | "role" | "text"> & {
+  /** Keeps late reconciliation tied to a reply already represented by the previous summary. */
+  replyMessageId?: WorldChatMessage["id"];
+};
+
 export interface ConversationSummaryRequest {
   readonly previousSummary?: string;
-  readonly messages: readonly Pick<WorldChatMessage, "id" | "role" | "text">[];
+  readonly messages: readonly SummaryMessage[];
 }
 
 export type ConversationSummariser = (input: ConversationSummaryRequest) => Promise<string | null>;
@@ -66,29 +71,37 @@ async function refreshConversationSummaryOnce(
   for (const envelope of events) {
     if (envelope.seq > through && envelope.event.type === "turn.completed") throughSeq = envelope.seq;
   }
-  const messages: Array<Pick<WorldChatMessage, "id" | "role" | "text">> = [];
+  const messages: SummaryMessage[] = [];
   const inputs = foldWorldChatInputs(events);
   if (inputs.problems.length) return false;
   const completed = new Map(events.flatMap(({ event, seq }) => event.type === "turn.completed" ? [[event.run.id, seq] as const] : []));
   const summarisedIds = new Set(events.flatMap(({ event }) => event.type === "summary.updated" ? event.sourceMessageIds : []));
   let lateInclusion = false;
   let includedThroughSeq = 0;
-  let turnCount = 0;
+  const corrections = new Map<string, SummaryMessage[]>();
   for (const envelope of events) {
-    const inWindow = envelope.seq > through && envelope.seq <= throughSeq;
-    if (inWindow && (envelope.event.type === "turn.started" ||
-      (envelope.event.type === "input.promoted" && inputs.acceptedSequences.has(envelope.seq)))) messages.push(envelope.event.message);
     if (envelope.event.type === "input.included" && inputs.acceptedSequences.has(envelope.seq) &&
       completed.has(envelope.event.attempt.runId) && !summarisedIds.has(envelope.event.messageId)) {
       const messageId = envelope.event.messageId;
       const input = inputs.queue.inputs.find(row => row.input.messageId === messageId)?.input;
-      if (input) messages.push({ id: messageId, role: "user", text: input.request.text });
+      const runId = envelope.event.attempt.runId;
+      if (input) corrections.set(runId, [...(corrections.get(runId) ?? []), { id: messageId, role: "user", text: input.request.text }]);
       includedThroughSeq = Math.max(includedThroughSeq, envelope.seq);
-      lateInclusion ||= envelope.seq > completed.get(envelope.event.attempt.runId)!;
+      lateInclusion ||= envelope.seq > completed.get(runId)!;
     }
-    if (inWindow && envelope.event.type === "turn.completed") {
-      messages.push(envelope.event.message);
-      turnCount++;
+  }
+  let turnCount = 0;
+  for (const { event, seq } of events) {
+    const inWindow = seq > through && seq <= throughSeq;
+    if (inWindow && (event.type === "turn.started" ||
+      (event.type === "input.promoted" && inputs.acceptedSequences.has(seq)))) messages.push(event.message);
+    if (event.type === "turn.completed") {
+      // Journal arrival records when inclusion became known. Summary order must instead put
+      // that direction before the reply that used it, even if later turns have since finished.
+      for (const correction of corrections.get(event.run.id) ?? []) {
+        messages.push({ ...correction, replyMessageId: event.message.id });
+      }
+      if (inWindow) { messages.push(event.message); turnCount++; }
     }
   }
   const recentTurnsLength = messages.reduce((sum, message) => sum + message.text.length, 0);
@@ -146,7 +159,8 @@ export function makeConversationSummariser(
       ? `Existing summary:\n${input.previousSummary}\n\n`
       : "";
     const transcript = input.messages
-      .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]: ${message.text}`)
+      .map((message) => `${message.role === "user" ? "User" : "Studio"} [${message.id}]${message.replyMessageId
+        ? ` (direction included in Studio reply [${message.replyMessageId}])` : ""}: ${message.text}`)
       .join("\n\n");
     const prompt = `${prior}New conversation messages to incorporate:\n${transcript}`;
     let deadline: ReturnType<typeof setTimeout> | undefined;

@@ -297,6 +297,28 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     await assert.rejects(journal.remove(messageId, queue.revision, "remove-offered"), /never-offered/);
   });
 
+  it("retains an older input that settles after newer inputs were removed", async () => {
+    const { journal, id } = await setup();
+    const first = await journal.record(request("Oldest input, latest delivery"), CAPTURE);
+    const firstId = first.queue.inputs[0]!.input.messageId;
+    let firstRemovalId: string | undefined;
+    for (let index = 0; index < WORLD_CHAT_INPUT_BOUNDS.settled; index++) {
+      const queued = await journal.record(request(`Removed later input ${index}`), CAPTURE);
+      const messageId = queued.queue.inputs.at(-1)!.input.messageId;
+      firstRemovalId ??= messageId;
+      await journal.remove(messageId, queued.queue.revision, `remove-later-${index}`);
+    }
+    const promoted = await journal.promote(firstId, (await journal.read()).revision, await preparedRun(journal), ROUTING, "oldest-settles-last");
+    assert.equal(promoted.queue.inputs[0]?.settledSequence, promoted.sequence);
+    const view = foldConversation(id, AT, (await journal.log.read()).events).view;
+    assert.equal(view.inputQueue?.inputs.length, WORLD_CHAT_INPUT_BOUNDS.settled);
+    assert.equal(view.inputQueue?.inputs.find(row => row.input.messageId === firstId)?.status, "promoted");
+    assert.equal(view.inputQueue?.inputs.some(row => row.input.messageId === firstRemovalId), false);
+    await writeCheckpoint(journal.log.dir, view);
+    const saved = await readCheckpoint(journal.log.dir, view.seq);
+    assert.equal(saved.checkpoint?.view.inputQueue?.inputs.find(row => row.input.messageId === firstId)?.status, "promoted");
+  });
+
   it("prevents a later current-reply input from overtaking a next-reply input", async () => {
     const state = await active();
     await state.journal.remove(state.messageId, state.revision, "remove-first");
@@ -358,6 +380,7 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
     assert.equal(await refreshConversationSummary(journal.log, async input => {
       assert.equal(input.previousSummary, "First summary");
       assert.deepEqual(input.messages.map(one => one.id), [messageId]);
+      assert.equal(input.messages[0]?.replyMessageId, complete.envelope.event.type === "turn.completed" ? complete.envelope.event.message.id : null);
       return "Summary with the confirmed correction";
     }), true);
     const reconciled = (await journal.log.read()).events.at(-1)!.event;
@@ -371,6 +394,33 @@ describe("durable additional conversation inputs (SPEC-045)", () => {
       assert.deepEqual(input.messages.map(one => one.id), [laterMessage.id, answerId]);
       return "Both turns and the correction";
     }), true);
+  });
+
+  it("orders late reconciliation before its own reply even after another turn completes", async () => {
+    const state = await active();
+    const { journal, id, messageId, attempt } = state;
+    const firstUserId = foldConversation(id, AT, (await journal.log.read()).events).view.messages[0]!.id;
+    await journal.offer(messageId, state.revision, attempt, "offer");
+    await journal.settle({ messageId, attempt, status: "accepted", operationId: "accept" });
+    const firstAnswerId = newId("msg");
+    await journal.log.append({ type: "turn.completed", run: { ...state.primary, status: "completed", endedAt: AT },
+      message: { id: firstAnswerId, turnId: state.primary.turnId, role: "studio", text: "Reply using the correction", attachmentIds: [], createdAt: AT },
+      receipts: [], candidates: [], groups: [], tombstones: [] }, { at: AT });
+    const later = run(), laterUserId = newId("msg"), laterAnswerId = newId("msg");
+    await journal.log.append({ type: "turn.started", run: later,
+      message: { id: laterUserId, turnId: later.turnId, role: "user", text: "An unrelated next turn", attachmentIds: [], createdAt: AT } }, { at: AT });
+    await journal.log.append({ type: "turn.completed", run: { ...later, status: "completed", endedAt: AT },
+      message: { id: laterAnswerId, turnId: later.turnId, role: "studio", text: "The later reply", attachmentIds: [], createdAt: AT },
+      receipts: [], candidates: [], groups: [], tombstones: [] }, { at: AT });
+    await journal.settle({ messageId, attempt, status: "included", boundary: "confirmed-later", operationId: "reconcile" });
+    assert.equal(await refreshConversationSummary(journal.log, async input => {
+      assert.equal(input.previousSummary, undefined);
+      assert.deepEqual(input.messages.map(one => one.id), [firstUserId, messageId, firstAnswerId, laterUserId, laterAnswerId]);
+      assert.equal(input.messages[1]?.replyMessageId, firstAnswerId);
+      assert.equal(input.messages[1]?.text, "Keep her motivation");
+      return "Both replies with the correction attributed to the first";
+    }), true);
+    assert.equal(await refreshConversationSummary(journal.log, async () => { throw new Error("already included"); }), false);
   });
 
   it("refuses new admission during wrap-up and permits it again after a failed wrap-up", async () => {
