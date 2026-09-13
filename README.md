@@ -103,8 +103,8 @@ one frame out of four.
 
 **The Stage blocks the shot before you spend on it.** Cast and set are placed once per
 scene; the camera is keyed per shot — height, distance, lens, easing — and previewed as a
-playblast. Describe a change in a sentence and Arke rebuilds the blocking, or move the
-keys yourself.
+playblast. Describe a change in a sentence and Arke rebuilds the camera around it — the
+blocking stays put unless you ask it to revise that too — or move the keys yourself.
 
 <br>
 
@@ -118,18 +118,19 @@ it, so a regenerate is never a gamble on losing what you had.
 
 <img src=".github/assets/readme-cut.png" alt="The cut: a multi-lane timeline with picture, dialogue, ambience and music, one shot still uncovered, Arke reporting what it assembled." width="100%">
 
-**The cut assembles itself from what you've accepted.** Picture, dialogue, ambience and
-music on their own lanes, subtitles conformed automatically, gaps called out by name
-rather than left silent.
+**The cut assembles itself from what you've accepted.** One pass places every shot's
+picture in script order, conforms the subtitles, and lays an ambience bed under the
+scene; dialogue and music are lanes in the same timeline, worked in the same way. Gaps
+are called out by name rather than left silent.
 
 <br>
 
 <img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and a finished job's receipt." width="100%">
 
 **Nothing runs unwatched.** Every dispatch and every voice line lands in one panel — what
-needs your answer, what's running right now with a cancel one click away, and what a
-failure actually said before you retry it. Spend is tracked against a threshold you set,
-and every receipt keeps its estimate's own tilde — nothing is claimed as measured until a
+needs your answer, what's running right now with Cancel on every job still stoppable, and
+what a failure actually said before you retry it. Spend is tracked against a threshold you
+set, and every receipt keeps its estimate's own tilde — nothing is claimed as measured until a
 provider actually reports what it charged.
 
 </div>
@@ -171,8 +172,9 @@ it has, and offers to open a thread. It never invents behind your back.
 
 **Choose how and where intelligence runs.** Use local models, bring your own provider accounts,
 or choose managed access. Costs remain visible in real currency before anything is spent, tracked
-against a threshold you set, and every running job can be cancelled from the same panel that
-watches it. The managed route is a convenience, never the only easy path.
+against a threshold you set, and a running job can be cancelled — right up until its result is
+already in — from the same panel that watches it. The managed route is a convenience, never the
+only easy path.
 
 ## How this is built
 
