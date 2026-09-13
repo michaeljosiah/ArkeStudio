@@ -177,6 +177,8 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(billableCharacters(row, "Bell Watch."), 11);
     assert.equal(billableCharacters(row, "鐘の見張り"), 15);
     assert.equal(estimateMicroUsd(row, { characters: billableCharacters(row, "naïve") }), 90);
+    // The delivery's phrase is text Fish bills: a directed line is priced with it (codex on PR 1156).
+    assert.equal(billableCharacters(row, "Wait here.", "breaking"), `[${FISH_DELIVERY.breaking.tag}] Wait here.`.length);
     assert.equal(row.limits.audioFormat, "wav");
     assert.equal(row.limits.maxPromptChars, 2000);
     assert.deepEqual(row.limits.deliveries, ["measured", "whispered", "breaking", "cold", "warm", "urgent"]);
