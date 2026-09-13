@@ -150,7 +150,7 @@ Shared audio contracts live in `packages/contracts/src/audio.ts`; local preparat
 transcript comparison and clearance live in coordinator `src/audio/`. Reuse them for #255/#111;
 do not introduce performance persistence as a prerequisite for a character sample. Desktop audio
 and video QC share the bounded process runner. Consumer UI and automatic route transport are
-separate work. Read [the integration/recovery notes](docs/architecture/character-audio-foundation.md)
+separate work. Read the integration/recovery notes (`architecture/character-audio-foundation.md` in the private set)
 before adding a consumer, particularly frozen candidates, current rights and conservative cleanup.
 
 ## Harness dependencies (issue #828)
@@ -166,8 +166,8 @@ dependencies. See SPEC-005 §1.1; do not remove these dependencies based on the 
 World ownership (issue #827): preserve the disk identity checks in WorldStore/Committer and the
 three-failure heartbeat cutoff. Ownership loss disables writes until reopen; do not retry under
 the old claim or remove a successor's lock. These checks are not an atomic fence. See
-[ADR-002's desktop decision](docs/decisions/002-ownership-is-a-revision.md#desktop-decision--issue-827-2026-09-05)
-and SPEC-002 §2.9 for the retained stale-reclaim policy and local-filesystem support limits.
+ADR-002's desktop decision (issue 827, 2026-09-05) and SPEC-002 §2.9 for the retained
+stale-reclaim policy and local-filesystem support limits.
 
 ## Journal flush boundaries (issue #826)
 

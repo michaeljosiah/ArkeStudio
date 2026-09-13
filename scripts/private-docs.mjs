@@ -16,8 +16,10 @@
 //   node scripts/private-docs.mjs --check  exits non-zero if this checkout carries the set at
 //                                          the old linked paths, as a junction, a hard link or a
 //                                          real copy, in a checkout where git does not track them
+//                                          — and says what each one holds that the set does not,
+//                                          because a stray can be the only copy of an amendment
 import { execFileSync } from "node:child_process";
-import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -88,14 +90,52 @@ function main() {
     const dirty = git(root, "status", "--short");
     console.log(`Private document set: ${root}`);
     console.log(head === null ? "  not a git repository — it should be; see CLAUDE.md" : `  HEAD ${head}`);
-    if (dirty) console.log(`  uncommitted edits:\n${dirty.split("\n").map((line) => `    ${line}`).join("\n")}`);
+    // A status that could not be read is not a clean one. The whole point of running this after
+    // a session is to learn whether an amendment is still uncommitted, and "clean" printed over a
+    // failed command would answer the opposite of what was asked.
+    if (dirty === null) {
+      if (head !== null) {
+        console.error("  could not read the repository's status — check it by hand before trusting anything here");
+        process.exit(1);
+      }
+    } else if (dirty) console.log(`  uncommitted edits:\n${dirty.split("\n").map((line) => `    ${line}`).join("\n")}`);
     else if (head !== null) console.log("  clean");
   }
 
   const strays = LINKED_PATHS.filter((path) => !tracked(path) && describe(path) !== null);
   for (const path of strays) console.error(`  ${path} is ${describe(path)} in this checkout, and git does not track it here.`);
   if (strays.length > 0) {
-    console.error("Nothing links the private set into a checkout any more; remove these, do not commit them.");
+    // A stray may be the one copy of an amendment: a session that was still writing through a
+    // junction when the links went writes into these paths now, and the ignore rules hide it from
+    // git. So before anyone is told to remove anything, say what each stray holds that the private
+    // set does not — a link holds nothing, a copy identical to the set holds nothing, and a copy
+    // that differs is work to carry across first.
+    console.error("Nothing links the private set into a checkout any more.");
+    for (const path of strays) console.error(`  ${path}: ${strayVerdict(path, root)}`);
     if (check) process.exit(1);
   }
+}
+
+/** What removing a stray would lose, so the remedy never discards an amendment. */
+function strayVerdict(path, root) {
+  const full = join(repoRoot, path);
+  if (lstatSync(full).isSymbolicLink()) return "a link — removing it drops nothing; `cmd /c rmdir` it";
+  const files = statSync(full).isDirectory()
+    ? readdirSync(full, { recursive: true }).map(String).filter((f) => statSync(join(full, f)).isFile())
+    : [""];
+  if (!existsSync(root)) return `a copy holding ${files.length} file(s), and the private set is not here to compare against — keep it until it is`;
+  const differing = files.filter((f) => {
+    const mine = join(full, f);
+    const theirs = join(root, relativeInPrivateSet(path), f);
+    // Line endings are noise here (the set is LF, a Windows editor writes CRLF); words are not.
+    const text = (file) => readFileSync(file, "utf8").replace(/\r\n/g, "\n");
+    return !existsSync(theirs) || text(mine) !== text(theirs);
+  });
+  if (differing.length === 0) return "identical to the private set — nothing to carry across; remove it";
+  return `${differing.length} file(s) differ from the private set (${differing.slice(0, 3).map((f) => f || path).join(", ")}${differing.length > 3 ? ", …" : ""}) — carry those edits into ${root} and commit there BEFORE removing it`;
+}
+
+/** Where a linked checkout path lives inside the private set. */
+function relativeInPrivateSet(path) {
+  return path === "docs/architecture/character-audio-foundation.md" ? "architecture/character-audio-foundation.md" : path.replace(/^docs\//, "");
 }
