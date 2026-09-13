@@ -182,17 +182,14 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
   /**
    * The account's own model saved under exactly this title (R-13): the library titles a model
    * with the clip's hash, so a save whose answer never landed is found here rather than made
-   * again. `title` filters by text match, so the title is checked exactly.
+   * again. `title` filters by text match, so the title is checked exactly. A listing that
+   * fails is thrown, never read as "none": that is the one moment a second save would charge twice.
    */
   async findVoice(key: string, name: string): Promise<string | null> {
-    const { status, body } = await jsonRequest(
-      this.fetchImpl, this.id,
-      `${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`,
-      { headers: this.headers(key) },
-    );
-    if (status >= 400) return null;
-    const items = (body as { items?: Array<Record<string, unknown>> } | null)?.items ?? [];
-    const match = items.find((v) => v["title"] === name && typeof v["_id"] === "string");
+    const res = await this.fetchImpl(`${this.baseUrl}/model?self=true&title=${encodeURIComponent(name)}&page_size=100`, { headers: this.headers(key) });
+    if (res.status >= 400) throw await this.failure(res);
+    const body = (await res.json().catch(() => null)) as { items?: Array<Record<string, unknown>> } | null;
+    const match = (body?.items ?? []).find((v) => v["title"] === name && typeof v["_id"] === "string");
     return match ? (match["_id"] as string) : null;
   }
 

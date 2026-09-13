@@ -127,6 +127,7 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(await new FishAudioClient(r.fetchImpl).findVoice("k", "Harbour glass · 0123456789ab"), "m_exact");
     assert.equal(r.calls[0]?.url, "https://api.fish.audio/model?self=true&title=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
     assert.equal(await new FishAudioClient(async () => json(200, { items: [] })).findVoice("k", "x"), null);
+    await assert.rejects(new FishAudioClient(async () => json(429, { status: 429, message: "Rate limit exceeded" })).findVoice("k", "x"), ProviderBusyError, "a failed listing is not none");
     const held = recording((url) => url.endsWith("/model/m_1") ? json(200, { _id: "m_1", state: "trained" }) : json(404, { status: 404, message: "Model not found" }));
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_1"), true);
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_gone"), false);
