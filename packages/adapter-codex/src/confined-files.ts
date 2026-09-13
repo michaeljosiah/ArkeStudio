@@ -54,7 +54,7 @@ export class WindowsFiles {
   private failure: Error | null = null;
   private buffer = "";
   private closed = false;
-  private startupStage: "launch" | "bootstrap" | "transport" | "source" | "parsed" | "entered" | "native" = "launch";
+  private startupStage: "launch" | "bootstrap" | "transport" | "source" | "parsed" | "entered" | "assembly" | "emitting" | "native" | "utility" = "launch";
   private stderrCategory: "none" | "syntax" | "security" | "encoding" | "runtime" | "other" = "none";
   private stderrTail = "";
   private readySeen = false;
@@ -86,7 +86,7 @@ export class WindowsFiles {
         const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
         try {
           const message = JSON.parse(line) as Record<string, unknown>;
-          if (message.startup === "bootstrap" || message.startup === "transport" || message.startup === "source" || message.startup === "parsed" || message.startup === "entered" || message.startup === "native") {
+          if (message.startup === "bootstrap" || message.startup === "transport" || message.startup === "source" || message.startup === "parsed" || message.startup === "entered" || message.startup === "assembly" || message.startup === "emitting" || message.startup === "native" || message.startup === "utility") {
             this.startupStage = message.startup; continue;
           }
           if (message.startupError === true) {

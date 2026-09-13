@@ -41,7 +41,7 @@ test("Windows helper preserves JSON prefetched with source and UTF-8 across pipe
   assert.equal(await ended, 0);
   assert.equal(timedOut, false);
   assert.equal(malformed, false);
-  assert.deepEqual(frames.filter(frame => frame.startup).map(frame => frame.startup), ["bootstrap", "transport", "source", "parsed", "entered", "native"]);
+  assert.deepEqual(frames.filter(frame => frame.startup).map(frame => frame.startup), ["bootstrap", "transport", "source", "parsed", "entered", "assembly", "emitting", "native", "utility"]);
   assert.equal(frames.some(frame => frame.ready === true), true);
   assert.equal(frames.some(frame => frame.error || frame.startupError), false);
   const results = frames.filter(frame => frame.result).map(frame => frame.result as Record<string, unknown>);

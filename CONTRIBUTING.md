@@ -80,10 +80,12 @@ Start with [the developer index](docs/development/README.md) for code navigation
 ### Writing engines and models
 
 Settings chooses the writing engine for the next launch. OpenCode ships with the desktop;
-Claude Code and Codex use your own installation and login. Codex requires 0.154.0 or newer
-with its companion code-mode host in the same installation. If PATH discovery misses it,
-choose the executable in Settings. An unavailable selected engine remains unavailable until
-you repair it or choose another; it does not silently switch engines.
+Claude Code and Codex use your own installation and login. Codex requires the native executable
+from version 0.154.0 or newer, with the matching `codex-code-mode-host` beside it (both names
+end in `.exe` on Windows). If PATH discovery misses it, choose that native executable in
+Settings; shell scripts and npm shims are not supported as executable selections.
+An unavailable selected engine remains unavailable until you repair it or choose another;
+it does not silently switch engines.
 Codex's confined file tools support local Windows volumes and Linux with `/proc/self/fd`
 available. Windows uses its built-in PowerShell for the private file-access helper.
 

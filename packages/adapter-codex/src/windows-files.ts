@@ -43,7 +43,9 @@ $pins = @{}
 $k = $null
 try {
   $ProgressPreference = 'SilentlyContinue'
-  $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName('ArkeFiles')), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+  $PSModuleAutoLoadingPreference = 'None'
+  $asm = [AppDomain]::CurrentDomain.DefineDynamicAssembly([Reflection.AssemblyName]::new('ArkeFiles'), [Reflection.Emit.AssemblyBuilderAccess]::Run)
+  $writer.WriteLine('{"startup":"assembly"}')
   $type = $asm.DefineDynamicModule('ArkeFilesModule', $false).DefineType('ArkeFiles', 'Public, Class')
   $ctor = [Runtime.InteropServices.DllImportAttribute].GetConstructor([string])
   $fields = [Reflection.FieldInfo[]]@([Runtime.InteropServices.DllImportAttribute].GetField('SetLastError'), [Runtime.InteropServices.DllImportAttribute].GetField('CharSet'))
@@ -58,10 +60,15 @@ try {
   )) {
     $m = $type.DefineMethod($sig[0], 'Public, Static, PinvokeImpl', $sig[1], $sig[2])
     $dll = if ($sig[0].StartsWith('Nt')) { 'ntdll.dll' } else { 'kernel32.dll' }
-    $m.SetCustomAttribute((New-Object Reflection.Emit.CustomAttributeBuilder($ctor, @($dll), $fields, @($true, [Runtime.InteropServices.CharSet]::Unicode))))
+    $m.SetCustomAttribute([Reflection.Emit.CustomAttributeBuilder]::new($ctor, @($dll), $fields, @($true, [Runtime.InteropServices.CharSet]::Unicode)))
   }
+  $writer.WriteLine('{"startup":"emitting"}')
   $k = $type.CreateType()
   $writer.WriteLine('{"startup":"native"}')
+  # Load only the OS-shipped JSON cmdlets by their trusted manifest path. Implicit
+  # command discovery can traverse unrelated machine/user modules on a fresh host.
+  Microsoft.PowerShell.Core\Import-Module -Name ([IO.Path]::Combine($PSHOME, 'Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1')) -ErrorAction Stop
+  $writer.WriteLine('{"startup":"utility"}')
   function Fail { throw 'Denied by Arke Studio confinement.' }
   function Info([IntPtr]$handle) {
     $p = [Runtime.InteropServices.Marshal]::AllocHGlobal(52)
@@ -144,13 +151,13 @@ try {
   $writer.WriteLine('{"ready":true}')
   while ($null -ne ($line = $reader.ReadLine())) {
     try {
-      $r = ConvertFrom-Json -InputObject $line
+      $r = Microsoft.PowerShell.Utility\ConvertFrom-Json -InputObject $line
       if ($r.op -eq 'close') { break }
       $path = [string]$r.path
       if ($r.op -eq 'pin') { $result = Pin $path ([bool]$r.create) }
       elseif ($r.op -eq 'list') {
         $null = Pin $path $false
-        $rows = New-Object 'Collections.Generic.List[object]'
+        $rows = [Collections.Generic.List[object]]::new()
         $buffer = [Runtime.InteropServices.Marshal]::AllocHGlobal(65536)
         $ios = [Runtime.InteropServices.Marshal]::AllocHGlobal(2 * [IntPtr]::Size)
         try {
@@ -180,13 +187,13 @@ try {
       elseif ($r.op -eq 'read') {
         $null = Pin ([IO.Path]::GetDirectoryName($path)) $false
         $h = FileHandle $path
-        $safe = New-Object Microsoft.Win32.SafeHandles.SafeFileHandle($h, $true)
-        $stream = New-Object IO.FileStream($safe, [IO.FileAccess]::Read)
+        $safe = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($h, $true)
+        $stream = [IO.FileStream]::new($safe, [IO.FileAccess]::Read)
         try {
           if ($stream.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
-          $memory = New-Object IO.MemoryStream
+          $memory = [IO.MemoryStream]::new()
           try {
-            $buffer = New-Object byte[] 65536
+            $buffer = [byte[]]::new(65536)
             while (($n = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, [int]$r.limit + 1 - [int]$memory.Length))) -gt 0) {
               $memory.Write($buffer, 0, $n)
               if ($memory.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
@@ -208,8 +215,8 @@ try {
           if ($data.Length -gt 16777216) { throw 'The proposed file exceeds 16 MB.' }
           $h = OpenRelative $pins[$parent].handle ([IO.Path]::GetFileName($temporary)) 0x40110000 0 2 0x00200060 $false
           if ($h -eq [IntPtr](-1)) { Fail }
-          $safe = New-Object Microsoft.Win32.SafeHandles.SafeFileHandle($h, $true)
-          $stream = New-Object IO.FileStream($safe, [IO.FileAccess]::Write)
+          $safe = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($h, $true)
+          $stream = [IO.FileStream]::new($safe, [IO.FileAccess]::Write)
           try {
             $stream.Write($data, 0, $data.Length); $stream.Flush()
             CheckLeaf $path
@@ -243,10 +250,10 @@ try {
         } finally { if ($h -ne [IntPtr]::Zero -and -not $safe) { [void]$k::CloseHandle($h) } }
       }
       else { Fail }
-      $writer.WriteLine((@{ result = $result } | ConvertTo-Json -Depth 6 -Compress))
+      $writer.WriteLine((@{ result = $result } | Microsoft.PowerShell.Utility\ConvertTo-Json -Depth 6 -Compress))
     } catch {
       $message = if ($_.Exception.Message -match 'session read limit|proposed file exceeds|local Windows volume|directory handle limit') { $_.Exception.Message } else { 'Denied by Arke Studio confinement.' }
-      $writer.WriteLine((@{ error = $message } | ConvertTo-Json -Compress))
+      $writer.WriteLine((@{ error = $message } | Microsoft.PowerShell.Utility\ConvertTo-Json -Compress))
     }
   }
 } catch {
