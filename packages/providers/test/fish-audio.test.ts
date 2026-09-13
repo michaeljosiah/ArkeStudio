@@ -89,6 +89,9 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     await assert.rejects(at(503, "high load"), (err: unknown) => err instanceof Error && !(err instanceof ProviderBusyError) && !(err instanceof ProviderRequestRejectedError));
     await assert.rejects(new FishAudioClient(async () => new Response(Uint8Array.from([1, 2, 3]), { status: 200 })).submit("k", line({ text: "x", voiceId: "m" })), /not a WAV file/);
     await assert.rejects(new FishAudioClient(async () => new Response(WAV, { status: 200 })).submit("k", line({ text: "x".repeat(FISH_TEXT_CAP + 1), voiceId: "m" })), /1 characters over/);
+    // The delivery phrase counts: a line exactly at the cap goes over once `[whispering] ` is in front of it.
+    await assert.rejects(new FishAudioClient(async () => new Response(WAV, { status: 200 })).submit("k", line({ text: "x".repeat(FISH_TEXT_CAP), voiceId: "m", delivery: "whispered" })),
+      (err: unknown) => err instanceof ProviderRequestRejectedError && /over the 2000 .* once the delivery phrase is counted/.test(err.message));
   });
 
   it("saves a clip as a private voice model in one multipart call, transcribed by the service, and reads the id back (§2.9)", async () => {
@@ -105,7 +108,10 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
     assert.equal(form.get("texts"), null, "no transcript: the library holds none, and Fish transcribes for itself");
     const file = form.get("voices");
     assert.ok(file instanceof Blob && file.size === WAV.length && file.type === "audio/wav");
-    await assert.rejects(new FishAudioClient(async () => json(201, { _id: "m", state: "failed" })).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" }), ProviderRequestRejectedError);
+    // A model that failed to train is removed before the refusal, so no later lookup adopts it.
+    const failed = recording((url, init) => init?.method === "DELETE" ? new Response(null, { status: 200 }) : json(201, { _id: "m_failed", state: "failed" }));
+    await assert.rejects(new FishAudioClient(failed.fetchImpl).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" }), ProviderRequestRejectedError);
+    assert.deepEqual(failed.calls.map((c) => `${c.init?.method ?? "GET"} ${c.url.replace("https://api.fish.audio", "")}`), ["POST /model", "DELETE /model/m_failed"]);
     await assert.rejects(new FishAudioClient(async () => json(201, {})).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" }), /no id/);
     await assert.rejects(new FishAudioClient(async () => json(402, { status: 402, message: "Insufficient credits" })).saveVoice("k", { name: "x", clip: WAV, contentType: "audio/wav" }), /cannot pay/);
   });
@@ -122,16 +128,18 @@ describe("Fish Audio · S2.1-Pro as a hosted reader (SPEC-046 §2.9)", () => {
 
   it("finds the account's own model by its exact hash-named title, and reads whether a model is still held (R-13)", async () => {
     const r = recording(() => json(200, { items: [
-      { _id: "m_near", title: "Harbour glass · 0123456789ab (old)", type: "tts" },
-      { _id: "m_exact", title: "Harbour glass · 0123456789ab", type: "tts" },
+      { _id: "m_near", title: "Harbour glass · 0123456789ab (old)", type: "tts", state: "trained" },
+      { _id: "m_dead", title: "Harbour glass · 0123456789ab", type: "tts", state: "failed" },
+      { _id: "m_exact", title: "Harbour glass · 0123456789ab", type: "tts", state: "trained" },
     ], has_more: false }));
-    assert.equal(await new FishAudioClient(r.fetchImpl).findVoice("k", "Harbour glass · 0123456789ab"), "m_exact");
+    assert.equal(await new FishAudioClient(r.fetchImpl).findVoice("k", "Harbour glass · 0123456789ab"), "m_exact", "a failed model under the title is not the slot");
     assert.equal(r.calls[0]?.url, "https://api.fish.audio/model?self=true&title=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
     assert.equal(await new FishAudioClient(async () => json(200, { items: [] })).findVoice("k", "x"), null);
     await assert.rejects(new FishAudioClient(async () => json(429, { status: 429, message: "Rate limit exceeded" })).findVoice("k", "x"), ProviderBusyError, "a failed listing is not none");
     await assert.rejects(new FishAudioClient(async () => json(200, { total: 0 })).findVoice("k", "x"), /not a list/, "nor is a 2xx that is not a list");
-    const held = recording((url) => url.endsWith("/model/m_1") ? json(200, { _id: "m_1", state: "trained" }) : json(404, { status: 404, message: "Model not found" }));
+    const held = recording((url) => url.endsWith("/model/m_1") ? json(200, { _id: "m_1", state: "trained" }) : url.endsWith("/model/m_dead") ? json(200, { _id: "m_dead", state: "failed" }) : json(404, { status: 404, message: "Model not found" }));
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_1"), true);
+    assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_dead"), false, "held but failed is not a model to read from");
     assert.equal(await new FishAudioClient(held.fetchImpl).hasVoice("k", "m_gone"), false);
     assert.equal(await new FishAudioClient(async () => json(403, { status: 403, message: "Forbidden" })).hasVoice("k", "m_theirs"), false, "another account's model is not held");
     await assert.rejects(new FishAudioClient(async () => json(500, { status: 500, message: "x" })).hasVoice("k", "m_1"));

@@ -91,9 +91,6 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     if (request.capability !== "voice-tts") throw new ProviderRequestRejectedError("fishaudio: unsupported synthesis capability");
     const text = String(request.params["text"] ?? "");
     if (text.trim() === "") throw new ProviderRequestRejectedError("fishaudio: there is no text to read");
-    if (text.length > FISH_TEXT_CAP) {
-      throw new ProviderRequestRejectedError(`fishaudio: the line is ${text.length - FISH_TEXT_CAP} characters over the ${FISH_TEXT_CAP} this reader takes — read it in parts`);
-    }
     // A cloned voice reads from the model the host ensured (R-13); a library preset by its own id.
     const voiceId = request.voiceReference !== undefined
       ? (request.voiceReference.remoteVoiceId ?? "")
@@ -108,6 +105,12 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const delivery = DeliverySchema.safeParse(request.params["delivery"]);
     // The phrase goes in front of the line, where Fish's own guidance puts a sentence-level cue.
     const directed = delivery.success ? `[${fishDirection(delivery.data).tag}] ${text}` : text;
+    // The phrase counts against the cap: what leaves is what is measured, as the estimate does.
+    if (directed.length > FISH_TEXT_CAP) {
+      throw new ProviderRequestRejectedError(
+        `fishaudio: the line is ${directed.length - FISH_TEXT_CAP} characters over the ${FISH_TEXT_CAP} this reader takes${directed !== text ? " once the delivery phrase is counted" : ""} — read it in parts`,
+      );
+    }
     const settings = isNumberRecord(request.params["voiceSettings"]) ? request.params["voiceSettings"] : {};
     const speed = typeof settings["speed"] === "number" ? Math.min(2, Math.max(0.5, settings["speed"])) : undefined;
     const remoteId = `fishaudio-${++this.counter}-${Date.now()}`;
@@ -172,7 +175,12 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const body = (await res.json().catch(() => null)) as { _id?: unknown; state?: unknown } | null;
     const voiceId = body?._id;
     if (typeof voiceId !== "string" || voiceId === "") throw new Error("fishaudio: creating the voice model returned no id");
-    if (body?.state === "failed") throw new ProviderRequestRejectedError("fishaudio: the service could not make a voice model from this recording");
+    if (body?.state === "failed") {
+      // A failed model still holds the recording and a place on the account: removed before
+      // the refusal, best-effort, so it is not adopted by a later lookup nor left counting.
+      await this.deleteVoice(key, voiceId, signal).catch(() => undefined);
+      throw new ProviderRequestRejectedError("fishaudio: the service could not make a voice model from this recording");
+    }
     return { voiceId };
   }
 
@@ -195,9 +203,10 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     if (res.status >= 400) throw await this.failure(res);
     const body = (await res.json().catch(() => null)) as { items?: unknown } | null;
     // A 2xx that is not a list has not answered either: `null` means the account listed and
-    // holds none, and a save follows only that.
+    // holds none, and a save follows only that. A model whose training failed is not a slot
+    // to adopt: it reads as none here and the failed-save cleanup removes it (codex on PR 1156).
     if (!Array.isArray(body?.items)) throw new Error("fishaudio: the model listing was not a list");
-    const match = (body.items as Array<Record<string, unknown>>).find((v) => v["title"] === name && typeof v["_id"] === "string");
+    const match = (body.items as Array<Record<string, unknown>>).find((v) => v["title"] === name && typeof v["_id"] === "string" && usable(v["state"]));
     return match ? (match["_id"] as string) : null;
   }
 
@@ -207,7 +216,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
     const res = await this.fetchImpl(`${this.baseUrl}/model/${encodeURIComponent(voiceId)}`, { headers: this.headers(key), ...(signal ? { signal } : {}) });
     if (res.status === 404 || res.status === 403) return false;
     if (res.status >= 400) throw await this.failure(res);
-    return true;
+    // Held, and usable: a model whose training failed is not one to read from.
+    const body = (await res.json().catch(() => null)) as { state?: unknown } | null;
+    return usable(body?.state);
   }
 
   async poll(_key: string, _remoteId: string): Promise<PollResult> {
@@ -260,6 +271,9 @@ export class FishAudioClient implements ProviderClient, VoiceCatalogueClient, Vo
       }));
   }
 }
+
+/** A model's `state` moves created → trained (or failed); only a failed one is unusable. */
+const usable = (state: unknown) => state !== "failed";
 
 const firstWords = (text: string) => {
   const words = text.trim().split(/\s+/);
