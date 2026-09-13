@@ -5388,6 +5388,50 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
 }
 
 /**
+ * What a press on the track stack lands on, when it lands on something that owns the press.
+ *
+ * Clips are buttons, and so are the grips inside them and a lane's Mute and Solo, so one
+ * `closest` covers most of it. The three that are not: a legacy overlay clip is a `div`, the
+ * pinned label gutter is not lane at all (a press there means no second of the film), and the
+ * new-lane strip is a drop target. The playhead's own band answers as a slider.
+ */
+const LANE_PRESS_OWNERS =
+  "button, input, select, textarea, a, [role='slider'], .fy-ovclip, .fy-clipmenu, .fy-track__label, .fy-track--new";
+
+/**
+ * How near an edge the playhead may run before the canvas pages after it.
+ *
+ * A margin and not the edge itself: a playhead parked exactly on the boundary would page again
+ * on the next frame, and a person watching wants to see what is about to happen as well as what
+ * just did.
+ */
+const FOLLOW_MARGIN_PX = 56;
+
+/**
+ * Keep the running playhead on screen.
+ *
+ * Only where there is somewhere to scroll. At 1x the whole film is already in view and the
+ * canvas has no business moving; `scrollWidth > clientWidth` is the zoom question asked of the
+ * element rather than of the state, so a narrow window at 1x is covered by the same test.
+ *
+ * A page, not a glide. Pinning the playhead mid-canvas slides the whole timeline under somebody
+ * trying to read a clip, which is worse than an occasional jump — and a jump is what every
+ * editor that offers both defaults to.
+ */
+export function followPlayhead(
+  // Structural, and not `HTMLElement`: these four numbers are the whole of what the decision
+  // reads, and saying so is what lets the decision be tested without a layout engine.
+  line: { offsetLeft: number },
+  canvas: { scrollWidth: number; clientWidth: number; scrollLeft: number },
+): void {
+  if (canvas.scrollWidth <= canvas.clientWidth) return;
+  const at = line.offsetLeft;
+  const margin = Math.min(FOLLOW_MARGIN_PX, canvas.clientWidth / 4);
+  if (at >= canvas.scrollLeft + margin && at <= canvas.scrollLeft + canvas.clientWidth - margin) return;
+  canvas.scrollLeft = Math.max(0, at - margin);
+}
+
+/**
  * The playhead, and the thing a hand actually grabs.
  *
  * It was a one-pixel line under `pointer-events: none`, so the only way to move the transport was
@@ -5398,7 +5442,35 @@ function CutScrubber({ totalSec, frameRate, transport }: { totalSec: number; fra
  * is, so a clip anywhere else on the lane is untouched by it.
  */
 function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec: number; frameRate: FrameRate; transport: Transport; tool: EditorTool }) {
-  const { time } = transport;
+  const { time, timeRef, playing } = transport;
+  const line = useRef<HTMLDivElement>(null);
+  /*
+   * While it runs, the line is drawn on the frame clock and the canvas pages after it.
+   *
+   * `time` reaches React four times a second, which is right for the readout and wrong for the
+   * playhead: a line advancing in quarter-second strides reads as a stutter against picture that
+   * does not stutter. The position is written to the element from `timeRef` instead — the same
+   * split the preview already uses to switch its source — and React's `time` stays what the
+   * readout and the slider announce, because sixty ARIA updates a second help nobody.
+   *
+   * Nothing is restored on the way out. The element is React's again the moment the transport
+   * stops, and `useTransport` flushes the true stop position before that paint.
+   */
+  useEffect(() => {
+    const element = line.current;
+    // The same guard `useTransport` keeps: a window without the frame clock leaves the playhead
+    // on React's throttled value rather than throwing on the first frame.
+    if (element === null || !playing || totalSec <= 0 || typeof requestAnimationFrame !== "function") return;
+    const canvas = element.closest<HTMLElement>(".fy-timeline__canvas");
+    let frame = 0;
+    const loop = () => {
+      element.style.left = lanePosition(timeRef.current / totalSec);
+      if (canvas !== null) followPlayhead(element, canvas);
+      frame = requestAnimationFrame(loop);
+    };
+    frame = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, totalSec, timeRef]);
   const onPointerDown = seekDrag({
     totalSec,
     transport,
@@ -5408,7 +5480,7 @@ function CutPlayhead({ totalSec, frameRate, transport, tool }: { totalSec: numbe
     seekOnPress: false,
   });
   return (
-    <div className="fy-playhead" style={{ left: lanePosition(time / totalSec) }}>
+    <div ref={line} className="fy-playhead" style={{ left: lanePosition(time / totalSec) }}>
       <span
         // Blade cuts where it is pressed and Hand scrolls from under it; both want the lane the
         // band is sitting on, and neither is asking to move the transport. The band stands aside
@@ -7353,6 +7425,8 @@ export function CutScreen() {
   const snapFrames = snap && shownTimeline ? (except: TimelineClipId) => snapCandidates(shownTimeline.tracks, playheadFrame, except) : null;
   /** The viewer follows an edge in hand (issue 1036): one seek per frame the edge crosses. */
   const scrubTo = (frame: number) => transport.seek(frame / frameRate);
+  /** A press on empty lane, measured across the track stack the same way the ruler measures itself. */
+  const seekFromLane = seekDrag({ totalSec, transport, laneOf: (element) => element, seekOnPress: true });
   const canUndo = !commandsDisabled && timelineRevision !== null && timelineUndo > 0;
   const canRedo = !commandsDisabled && timelineRevision !== null && timelineRedo > 0;
   void inFlight?.since;
@@ -7954,7 +8028,28 @@ export function CutScreen() {
               frameRate={frameRate}
               transport={transport}
             />
-            <div className="fy-tracks">
+            {/*
+              * Pressing the lanes moves the playhead.
+              *
+              * Every other editor puts the transport where you press, and this one offered only
+              * the 24px ruler and the line itself — so reaching a moment meant aiming at a strip
+              * above the work rather than at the work. The press is read here and not on each
+              * lane because the lanes are seven components and the answer is the same on all of
+              * them: whatever owns the press keeps it, and the gap between clips is timeline,
+              * which is a time.
+              */}
+            <div
+              className="fy-tracks"
+              onPointerDown={(event) => {
+                if (event.button !== 0 || tool !== "select") return;
+                if ((event.target as HTMLElement).closest(LANE_PRESS_OWNERS) !== null) return;
+                // The canvas already clears the selection on a click in empty space; doing it
+                // here too keeps the two agreeing when the press becomes a drag and no click
+                // follows it.
+                setSelected(null);
+                seekFromLane(event);
+              }}
+            >
               {totalSec > 0 && <CutPlayhead totalSec={totalSec} frameRate={frameRate} transport={transport} tool={tool} />}
               {editableTimeline && production && subtitleTracksOf(editableTimeline).length > 0 ? (
                 subtitleTracksOf(editableTimeline).map((track) => (

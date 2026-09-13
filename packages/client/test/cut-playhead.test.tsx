@@ -11,7 +11,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen, rulerTicks } from "../src/screens/production.js";
+import { CutScreen, followPlayhead, rulerTicks } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -197,6 +197,107 @@ describe("the playhead is draggable", () => {
     } finally {
       await act(async () => screen.root.unmount());
     }
+  });
+});
+
+describe("pressing the lanes moves the playhead", () => {
+  it("seeks to where an empty lane was pressed", async () => {
+    const screen = await mountCut();
+    try {
+      const tracks = screen.container.querySelector<HTMLElement>(".fy-tracks");
+      assert.ok(tracks);
+      measure(tracks);
+      const at = () => Number(screen.container.querySelector(".fy-playhead__grab")!.getAttribute("aria-valuenow"));
+      const total = Number(screen.container.querySelector(".fy-playhead__grab")!.getAttribute("aria-valuemax"));
+      assert.equal(at(), 0);
+
+      await act(async () => {
+        tracks.dispatchEvent(pointer("pointerdown", GUTTER + LANE * 0.75));
+        tracks.dispatchEvent(pointer("pointerup", GUTTER + LANE * 0.75));
+      });
+      assert.equal(at(), Math.round(total * 0.75), "three quarters across is three quarters in");
+    } finally {
+      await act(async () => screen.root.unmount());
+    }
+  });
+
+  it("leaves the press alone when something on the lane owns it", async () => {
+    const screen = await mountCut();
+    try {
+      const tracks = screen.container.querySelector<HTMLElement>(".fy-tracks");
+      assert.ok(tracks);
+      measure(tracks);
+      const at = () => screen.container.querySelector(".fy-playhead__grab")!.getAttribute("aria-valuenow");
+
+      // A clip is a button and keeps its own press: this is a move gesture, not a seek.
+      const clip = screen.container.querySelector<HTMLElement>("[data-clip='cl_sh-12']");
+      assert.ok(clip, "the seeded cut has a clip to press");
+      await act(async () => {
+        clip.dispatchEvent(pointer("pointerdown", GUTTER + LANE * 0.6));
+        clip.dispatchEvent(pointer("pointerup", GUTTER + LANE * 0.6));
+      });
+      assert.equal(at(), "0", "pressing a clip did not move the transport");
+
+      // So does the pinned label gutter, which names no second of the film.
+      const label = screen.container.querySelector<HTMLElement>(".fy-track__label");
+      assert.ok(label);
+      await act(async () => {
+        label.dispatchEvent(pointer("pointerdown", 20));
+        label.dispatchEvent(pointer("pointerup", 20));
+      });
+      assert.equal(at(), "0", "pressing the gutter did not move the transport");
+    } finally {
+      await act(async () => screen.root.unmount());
+    }
+  });
+});
+
+/**
+ * The running playhead stays on screen.
+ *
+ * Four numbers decide it, so the decision is tested as those four numbers. At 1x the whole film
+ * is in view and the canvas must not move at all — a timeline that scrolls under a hand nobody
+ * moved is worse than one that does nothing.
+ */
+describe("the canvas pages after the playhead", () => {
+  const canvas = (scrollLeft: number, clientWidth = 800, scrollWidth = 3200) => ({ scrollLeft, clientWidth, scrollWidth });
+
+  it("does not scroll a canvas with nothing to scroll", () => {
+    const view = canvas(0, 800, 800);
+    followPlayhead({ offsetLeft: 700 }, view);
+    assert.equal(view.scrollLeft, 0);
+  });
+
+  it("does not scroll while the playhead is comfortably inside the view", () => {
+    const view = canvas(400);
+    followPlayhead({ offsetLeft: 800 }, view);
+    assert.equal(view.scrollLeft, 400);
+  });
+
+  it("pages forward once the playhead reaches the trailing margin", () => {
+    const view = canvas(400);
+    // The view covers 400–1200; the margin is 56, so 1150 is inside it.
+    followPlayhead({ offsetLeft: 1150 }, view);
+    assert.equal(view.scrollLeft, 1150 - 56, "the playhead lands a margin in from the left edge");
+  });
+
+  it("pages back when the playhead is behind the view, as a seek can leave it", () => {
+    const view = canvas(2000);
+    followPlayhead({ offsetLeft: 300 }, view);
+    assert.equal(view.scrollLeft, 300 - 56);
+  });
+
+  it("clamps at the top of the film rather than scrolling negative", () => {
+    const view = canvas(600);
+    followPlayhead({ offsetLeft: 10 }, view);
+    assert.equal(view.scrollLeft, 0);
+  });
+
+  it("shrinks the margin on a canvas too narrow to afford it", () => {
+    // A 120px viewport cannot give 56px at each end and still show anything between them.
+    const view = canvas(0, 120, 3200);
+    followPlayhead({ offsetLeft: 200 }, view);
+    assert.equal(view.scrollLeft, 200 - 30);
   });
 });
 
