@@ -124,11 +124,12 @@ rather than left silent.
 
 <br>
 
-<img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with live cost and countdown, a spend alert, and what happened today." width="100%">
+<img src=".github/assets/readme-activity.png" alt="The Activity panel: two items needing a decision, three jobs running with a cancel button, a spend alert, and what a finished job actually cost." width="100%">
 
-**Nothing runs unwatched.** Every dispatch, every voice line, every spend alert lands in
-one panel — what needs your answer, what's running right now with its cost attached, and
-what a failure actually said before you retry it.
+**Nothing runs unwatched.** Every dispatch and every voice line lands in one panel — what
+needs your answer, what's running right now with a cancel one click away, and what a
+failure actually said before you retry it. Spend is tracked against a threshold you set,
+and a finished job's receipt says exactly what it cost, not an estimate.
 
 </div>
 
@@ -168,9 +169,9 @@ a citation per claim. Asked something it cannot support, it says so, cites the c
 it has, and offers to open a thread. It never invents behind your back.
 
 **Choose how and where intelligence runs.** Use local models, bring your own provider accounts,
-or choose managed access. Costs remain visible in real currency before anything is spent, and
-every running job can be cancelled from the same panel that shows what it costs. The managed
-route is a convenience, never the only easy path.
+or choose managed access. Costs remain visible in real currency before anything is spent, tracked
+against a threshold you set, and every running job can be cancelled from the same panel that
+watches it. The managed route is a convenience, never the only easy path.
 
 ## How this is built
 
