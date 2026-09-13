@@ -11474,6 +11474,7 @@ export class Coordinator {
             shotId: msg.shotId,
             sheet,
             text: shot.audio.line,
+            ...(msg.delivery !== undefined ? { delivery: msg.delivery as Delivery } : {}),
             deliveryParams,
             deliveryNotice,
             model,

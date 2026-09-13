@@ -391,6 +391,29 @@ const KOKORO_DELIVERY: Partial<Record<Delivery, Record<string, number>>> = {
   urgent: { speed: 1.15 },
 };
 
+/**
+ * Breeze takes direction three ways — a tag in the text, a sentence beside it, and a guidance
+ * scale (SPEC-046 R-20, R-22). The number travels as a voice setting like any other provider's;
+ * the tag and the sentence are the client's to place, read back through `breezeDirection`. A tag
+ * where Breeze documents one for the delivery, a sentence where it does not. The guidance value
+ * is the vendor's own example and every entry here is unprobed: issue 1143's listen tunes them,
+ * and nothing else should.
+ */
+export const BREEZE_DELIVERY: Record<Delivery, { settings: { guidance_scale: number }; tag?: string; instruction?: string }> = {
+  measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly, at a steady pace." },
+  whispered: { settings: { guidance_scale: 4 }, tag: "whispers" },
+  breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking; the words come through tears." },
+  cold: { settings: { guidance_scale: 4 }, instruction: "Say it coldly — flat, distant, without warmth." },
+  warm: { settings: { guidance_scale: 4 }, instruction: "Say it warmly and gently, close and kind." },
+  urgent: { settings: { guidance_scale: 4 }, instruction: "Say it urgently, fast and pressing, as if there is no time." },
+};
+
+/** The parts of a Breeze delivery that are words, not numbers: the tag in the text, the sentence beside it. */
+export function breezeDirection(delivery: Delivery): { tag?: string; instruction?: string } {
+  const { tag, instruction } = BREEZE_DELIVERY[delivery];
+  return { ...(tag !== undefined ? { tag } : {}), ...(instruction !== undefined ? { instruction } : {}) };
+}
+
 export type DeliveryMapping =
   | { ok: true; params: Record<string, number> }
   | { ok: false; reason: string };
@@ -409,6 +432,16 @@ export function deliveryParams(provider: string, delivery: Delivery): DeliveryMa
       reason: `Kokoro cannot express "${delivery}" — local presets shape pace only; the read will be neutral`,
     };
   }
+  // Voxtral takes no direction at all — no tags, no settings, no speed. The reference clip is
+  // the read (SPEC-046 R-19), so the one honest delivery is the one the recording already has.
+  if (provider === "mistral") {
+    if (delivery === "measured") return { ok: true, params: {} };
+    return {
+      ok: false,
+      reason: `Voxtral reads a line the way the recording was spoken — "${delivery}" would need a recording spoken that way, not a setting`,
+    };
+  }
+  if (provider === "breezeblue") return { ok: true, params: BREEZE_DELIVERY[delivery].settings };
   return { ok: false, reason: `${provider} has no declared delivery mapping — the read will use provider defaults` };
 }
 

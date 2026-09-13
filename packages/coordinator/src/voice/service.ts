@@ -12,6 +12,7 @@ import {
   isGraphScene,
   splitBible,
   type ClonedVoice,
+  type Delivery,
   type DomainEvent,
   type ManifestModel,
   type ModelManifest,
@@ -729,6 +730,8 @@ export function voiceLineRequest(input: {
   shotId: string;
   sheet: Sheet;
   text: string;
+  /** The delivery's name, for a reader that takes direction as words as well as numbers (SPEC-046 R-22). */
+  delivery?: Delivery;
   deliveryParams: Record<string, number> | null;
   deliveryNotice: string | null;
   model: ManifestModel;
@@ -752,6 +755,7 @@ export function voiceLineRequest(input: {
       voiceId: voice.voiceId,
       text: input.text,
       audioFormat: voiceFormatForModel(input.model),
+      ...(input.delivery !== undefined ? { delivery: input.delivery } : {}),
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },

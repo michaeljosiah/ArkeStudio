@@ -36,10 +36,12 @@ export {
   type RecipeParamValues,
 } from "./comfyui/recipes.js";
 export { redactComfyUiBody } from "./comfyui/redact.js";
+export { BreezeBlueClient, BREEZE_MODEL } from "./clients/breezeblue.js";
 export { ElevenLabsClient } from "./clients/elevenlabs.js";
 export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";
 export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
+export { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "./clients/mistral.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { WhisperCppClient, type WhisperTranscribe } from "./clients/whispercpp.js";

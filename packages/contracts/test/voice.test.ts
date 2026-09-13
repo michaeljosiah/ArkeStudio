@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BREEZE_DELIVERY,
+  breezeDirection,
   clonedVoiceCandidates,
   DEFAULT_NARRATOR,
+  DELIVERIES,
+  deliveryParams,
   extractVoiceAttributes,
   mintVoiceId,
   narratorFor,
@@ -463,5 +467,24 @@ describe("the stage-voice-clip frame", () => {
         .success,
       false,
     );
+  });
+});
+
+describe("the hosted readers' deliveries (SPEC-046 R-19, R-22)", () => {
+  it("Voxtral honours only the read the recording already has, and says why for the rest", () => {
+    assert.deepEqual(deliveryParams("mistral", "measured"), { ok: true, params: {} });
+    const refused = deliveryParams("mistral", "whispered");
+    assert.equal(refused.ok, false);
+    assert.match(!refused.ok ? refused.reason : "", /the way the recording was spoken/);
+  });
+  it("Breeze maps every delivery to a guidance scale, with a tag or a sentence read back by name", () => {
+    for (const delivery of DELIVERIES) {
+      const mapped = deliveryParams("breezeblue", delivery);
+      assert.ok(mapped.ok && mapped.params.guidance_scale === BREEZE_DELIVERY[delivery].settings.guidance_scale);
+      const words = breezeDirection(delivery);
+      assert.ok(words.tag !== undefined || words.instruction !== undefined, `${delivery} has neither a tag nor a sentence`);
+    }
+    assert.deepEqual(breezeDirection("whispered"), { tag: "whispers" });
+    assert.equal(breezeDirection("cold").tag, undefined);
   });
 });

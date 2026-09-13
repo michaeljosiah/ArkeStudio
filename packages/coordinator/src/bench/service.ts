@@ -1102,8 +1102,9 @@ export function planBenchDispatch(
           audioFormat: voiceFormatForModel(model),
           ...(params.voiceId !== undefined ? { voiceId: params.voiceId } : {}),
           // The delivery is sent in the provider's own vocabulary, or not at all — a row that
-          // cannot express one says so rather than having a neighbour's settings guessed at.
-          ...(voiceSettings !== null ? { voiceSettings } : {}),
+          // cannot express one says so rather than having a neighbour's settings guessed at. Its
+          // name rides too, for a reader whose vocabulary is words (SPEC-046 R-22).
+          ...(voiceSettings !== null ? { voiceSettings, delivery: params.delivery } : {}),
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },

@@ -41,3 +41,30 @@ it("cadence seeding never transfers text offsets to different wording", () => {
   assert.deepEqual(different.cues, []); assert.equal(different.delivery, "urgent");
   assert.equal(different.sourceTextHash, hash("Go."));
 });
+
+it("a paren row writes Breeze's tags and lifts the delivery's sentence out of the text (SPEC-046 R-21)", () => {
+  const breeze: Pick<ManifestModel, "id" | "provider" | "cadence"> = { id: "breeze-tts-2", provider: "breezeblue", cadence: {
+    deliveries: ["measured", "whispered", "breaking"], speed: { min: 0.7, max: 1.2 }, pause: "best-effort-audio-tag", emphasis: "unsupported",
+    breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren", deliveryMappings: {
+      measured: { settings: { guidance_scale: 4 }, instruction: "Read it evenly." },
+      whispered: { settings: { guidance_scale: 4 }, tag: "whispers" },
+      breaking: { settings: { guidance_scale: 4 }, tag: "sobs", instruction: "The voice is breaking." } } } };
+  const text = "Wait here.";
+  const cues: CadencePlan["cues"] = [{ kind: "pause", at: 4, length: "long" }, { kind: "breath", at: text.length, action: "inhale" }];
+  const whispered = mapCadence(text, hash(text), { ...plan(text, cues), delivery: "whispered" }, breeze);
+  assert.equal(whispered.providerText, "(whispers) Wait (pause)  here. (inhales) ");
+  assert.equal(whispered.instructions, undefined);
+  assert.equal(whispered.controls[0]?.status, "best-effort");
+  const breaking = mapCadence(text, hash(text), { ...plan(text), delivery: "breaking" }, breeze);
+  assert.equal(breaking.providerText, "(sobs) Wait here.");
+  assert.equal(breaking.instructions, "The voice is breaking.");
+  assert.equal(breaking.controls[0]?.method, "instruction and declared settings");
+  const measured = mapCadence(text, hash(text), plan(text), breeze);
+  assert.equal(measured.providerText, "Wait here.");
+  assert.equal(measured.instructions, "Read it evenly.");
+  assert.deepEqual(measured.voiceSettings, { guidance_scale: 4, speed: 1 });
+  // A bracket row is untouched by the syntax field's existence: the ElevenLabs rendering stands.
+  const bracket = mapCadence(text, hash(text), plan(text, cues), model);
+  assert.equal(bracket.providerText, "Wait [long pause]  here. [inhales deeply] ");
+  assert.equal(bracket.instructions, undefined);
+});
