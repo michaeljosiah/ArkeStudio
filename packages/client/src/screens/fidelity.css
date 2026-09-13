@@ -2048,19 +2048,36 @@ select.fy-sheetselect { padding-right: 24px; }
 .fy-timeline__toolbar strong { color: var(--foreground); font-weight: 600; letter-spacing: .08em; }
 .fy-timeline__canvas { overflow-x: auto; overflow-y: hidden; }
 .fy-timeline__canvas > * { min-width: 520px; }
-.fy-timeline__ruler { display: flex; align-items: baseline; gap: 10px; margin: 0; padding: 6px 9px 5px 97px; }
+/* Positioned, not flowed: each label sits at the second it names, as the design draws them. */
+.fy-timeline__ruler { position: relative; margin: 0; padding: 6px 9px 5px 0; }
+.fy-timeline__tick { position: absolute; top: 5px; padding-left: 4px; border-left: 1px solid var(--line-soft); line-height: 1; pointer-events: none; }
 /* The ruler is the seek surface: its width is the whole cut, so a fraction across is a fraction in. */
 .fy-scrub { cursor: pointer; touch-action: none; user-select: none; }
 .fy-scrub:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
 .fy-tracks { position: relative; }
 .fy-playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--destructive); pointer-events: none; z-index: 5; }
-.fy-playhead::before { content: ""; position: absolute; top: -3px; left: -3px; width: 7px; height: 7px; border-radius: 99px; background: var(--destructive); }
+.fy-playhead::before { content: ""; position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 99px; background: var(--destructive); }
+/*
+ * The line is the target, not only the mark. One pixel cannot be grabbed, so an invisible band
+ * rides with it — the whole height, wide enough for a hand, with the head at the top inside it.
+ * It is the only part of the playhead that takes a pointer and it is only ever where the playhead
+ * is, so nothing else on the lane loses a press to it.
+ */
+.fy-playhead__grab { position: absolute; top: 0; bottom: 0; left: -6px; width: 13px; pointer-events: auto; cursor: ew-resize; touch-action: none; }
+.fy-playhead__grab:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; border-radius: 3px; }
+/* Blade and Hand want the lane the band covers; it stands aside and keeps only its keyboard seat. */
+.fy-playhead__grab--idle { pointer-events: none; }
 .fy-track { display: flex; align-items: stretch; gap: 0; border-top: 1px solid var(--line-soft); }
 .fy-track + .fy-track { margin-top: 0; }
 .fy-track__label {
   position: sticky;
   left: 0;
-  z-index: 3;
+  /*
+   * Above the playhead, which is 5. The gutter is pinned and the playhead scrolls with the lanes,
+   * so a zoomed-in canvas scrolled past the playhead drew it across the pinned labels — and now
+   * that the line carries a grab band, it would take the presses meant for Mute and Solo too.
+   */
+  z-index: 6;
   width: 88px;
   box-sizing: border-box;
   flex: none;
@@ -6127,6 +6144,7 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-cutmain > .fy-timeline > .fy-timeline__canvas { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .fy-timeline__zoomwrap { min-width: 100%; }
 .fy-timeline__ruler { height: 24px; box-sizing: border-box; }
+.fy-timeline__tick .fy-mono { font-size: 9px; color: var(--muted-foreground); }
 
 
 .fy-cutside { min-width: 0; min-height: 0; border-left: 1px solid var(--border); background: var(--background); display: flex; flex-direction: column; }

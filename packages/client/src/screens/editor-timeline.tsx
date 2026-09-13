@@ -114,7 +114,7 @@ function describeClip(view: PictureClipView, frameRate: FrameRate): string {
  * asks for as many frames as fit, so the number is measured rather than derived from a
  * percentage nobody has turned into pixels yet.
  */
-function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): number {
+export function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const element = ref.current;
