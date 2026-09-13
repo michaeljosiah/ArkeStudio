@@ -13,6 +13,7 @@ import {
   briefForProvider,
   dispatchDuration,
   durationLimitsFor,
+  billableCharacters,
   estimateMicroUsd,
   imageOutputFor,
   keyframeAddable,
@@ -1108,7 +1109,7 @@ export function planBenchDispatch(
           // No container control: the concrete model declares its format and every downstream
           // layer consumes that same value.
         },
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: composer.brief.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, composer.brief) }),
         landing: { dir: sessionMediaDir(session.id, takeId) },
         ...(voiceSource.kind === "cloned" ? { voiceReference: true } : {}),
       });

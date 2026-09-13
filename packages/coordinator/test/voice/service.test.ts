@@ -442,6 +442,27 @@ describe("a hosted reader offers the library's voices as its own candidates (SPE
     assert.deepEqual(voices.map((v) => v.provider), ["comfyui", "mistral"]);
     assert.deepEqual((await service([]).catalogue([harbour])).map((v) => v.provider), ["comfyui"]);
   });
+
+  it("a keyed reader whose key the vendor rejected still lists its voice, marked with the reason (codex on PR 1153)", async () => {
+    // A rejected key is stored and reported invalid; the candidate stays visible so an existing
+    // assignment does, and carries the probe's reason so nothing is queued to fail at dispatch.
+    const marked = new VoiceService({
+      sidecar: null,
+      localPresets: [],
+      cloudSources: [],
+      hostedReaders: [{ provider: "mistral", model: "voxtral-mini-tts" }, { provider: "breezeblue", model: "breeze-tts-2" }],
+      readerAvailability: (provider) => (provider === "mistral" ? { unavailableReason: "Mistral rejected this key" } : {}),
+      getKey: async () => "key",
+      emit: () => {},
+      clock: CLOCK,
+    });
+    const voices = await marked.catalogue([harbour]);
+    assert.deepEqual(voices.map((v) => [v.provider, v.unavailableReason]), [
+      ["comfyui", undefined],
+      ["mistral", "Mistral rejected this key"],
+      ["breezeblue", undefined],
+    ]);
+  });
 });
 
 describe("candidates and the stated preview cost (R-7, R-10)", () => {

@@ -68,6 +68,16 @@ function sha256(data: Uint8Array): string {
   return `sha256:${createHash("sha256").update(data).digest("hex")}`;
 }
 
+const SLOT_RESPONSE_KEYS = new Set(["generated_voice_id", "voice_id", "_id", "state", "status", "code", "detail", "error", "message"]);
+
+/** What a voice-slot save's answer keeps in the call history: identity and outcome, never the transcript. */
+export function redactSlotResponse(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return body;
+  const kept = Object.fromEntries(Object.entries(body as Record<string, unknown>).filter(([key]) => SLOT_RESPONSE_KEYS.has(key)));
+  const dropped = Object.keys(body as Record<string, unknown>).filter((key) => !SLOT_RESPONSE_KEYS.has(key));
+  return dropped.length > 0 ? { ...kept, redacted: dropped } : kept;
+}
+
 async function requestBody(body: RequestInit["body"]): Promise<unknown> {
   if (body === undefined || body === null) return null;
   if (typeof body === "string") {
@@ -297,8 +307,12 @@ export function captureProviderClient(
   // and history/queue responses can carry it back. What persists is a summary — digest, node
   // count, byte count — because payload history is displayed and copied in Activity, and R-1
   // says no graph reaches a user or a stored file. Other providers pass through untouched.
-  const redact = (direction: "request" | "response", endpoint: string, body: unknown): unknown =>
-    provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body) : body;
+  const redact = (direction: "request" | "response", endpoint: string, body: unknown, operation: ProviderOperation): unknown =>
+    provider === "comfyui" ? redactComfyUiBody(direction, endpoint, body)
+      // A voice-slot save answers with the service's transcript of the recording — words the
+      // person spoke, which the client discards and the call history must not keep (codex on
+      // PR 1153). Only the ids and the state survive into calls.jsonl.
+      : direction === "response" && operation === "save-voice" ? redactSlotResponse(body) : body;
   const observedFetch: FetchLike = async (url, init) => {
     const request = activeFetch.getStore() ?? fetchImpl;
     if (!capture) return request(url, init);
@@ -315,7 +329,7 @@ export function captureProviderClient(
       method: init?.method?.toUpperCase() ?? "GET",
       endpoint,
       headers: headersOf(init?.headers, true),
-      body: redact("request", endpoint, await requestBody(init?.body)),
+      body: redact("request", endpoint, await requestBody(init?.body), current.operation),
     }))().catch(() => null);
     if (id === null) return request(url, init);
     try {
@@ -338,7 +352,7 @@ export function captureProviderClient(
             capture.finish(id, {
               status: response.status,
               headers: headersOf(response.headers),
-              body: redact("response", endpoint, body),
+              body: redact("response", endpoint, body, current.operation),
             }).catch(() => {}),
           ),
         );
@@ -504,7 +518,7 @@ export function captureProviderClient(
             run("list-recent", context, () => client.listRecent!(key, context)),
         }
       : {}),
-  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice">>;
+  } as ProviderClient & Partial<Pick<VoiceCatalogueClient, "listVoicesCatalog">> & Partial<Pick<VoiceSlotClient, "saveVoice" | "deleteVoice" | "findVoice" | "hasVoice">>;
   const catalogue = (client as Partial<VoiceCatalogueClient>).listVoicesCatalog;
   if (catalogue)
     wrapped.listVoicesCatalog = (key) => run("list-voices", undefined, () => catalogue.call(client, key));
@@ -516,5 +530,9 @@ export function captureProviderClient(
     wrapped.saveVoice = (key, input) => run("save-voice", undefined, () => slots.saveVoice!.call(client, key, input));
   if (slots.deleteVoice)
     wrapped.deleteVoice = (key, voiceId) => run("delete-voice", undefined, () => slots.deleteVoice!.call(client, key, voiceId));
+  if (slots.findVoice)
+    wrapped.findVoice = (key, name) => run("lookup-voice", undefined, () => slots.findVoice!.call(client, key, name));
+  if (slots.hasVoice)
+    wrapped.hasVoice = (key, voiceId) => run("lookup-voice", undefined, () => slots.hasVoice!.call(client, key, voiceId));
   return wrapped;
 }

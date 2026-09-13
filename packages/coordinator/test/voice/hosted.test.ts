@@ -8,7 +8,7 @@ import { until } from "../wait.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import { clipFor, cloneVoice, clipHashOf, recordVoiceReader } from "../../src/voice/library.js";
-import { hostedReaderDestination, hostedUploadConfirmed, prepareHostedClip, type HostedVoiceSlots } from "../../src/voice/hosted.js";
+import { hostedReaderDestination, hostedSlotName, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "../../src/voice/hosted.js";
 import { toExtendedLength } from "../../src/world/paths.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -45,22 +45,28 @@ function wav(dataBytes: number, fill = 0): Uint8Array {
   return Uint8Array.from([...header, ...Array.from({ length: dataBytes }, () => fill)]);
 }
 
-/** Vendor-side slots that only remember what they were asked. */
+/** A vendor account: the voices it holds by id and name, and a record of what it was asked. */
 function fakeSlots(failRemove = false) {
   const saves: Array<{ provider: string; key: string; name: string; bytes: number; contentType: string }> = [];
   const removes: Array<{ provider: string; key: string; voiceId: string }> = [];
+  const account = new Map<string, string>();
   let counter = 0;
   const slots: HostedVoiceSlots = {
     save: async (provider, key, input) => {
       saves.push({ provider, key, name: input.name, bytes: input.clip.length, contentType: input.contentType });
-      return { voiceId: `voc_${++counter}` };
+      const voiceId = `voc_${++counter}`;
+      account.set(voiceId, input.name);
+      return { voiceId };
     },
     remove: async (provider, key, voiceId) => {
       removes.push({ provider, key, voiceId });
       if (failRemove) throw new Error("breezeblue: synthesis failed — HTTP 500");
+      account.delete(voiceId);
     },
+    find: async (_provider, _key, name) => [...account.entries()].find(([, held]) => held === name)?.[0] ?? null,
+    has: async (_provider, _key, voiceId) => account.has(voiceId),
   };
-  return { slots, saves, removes };
+  return { slots, saves, removes, account };
 }
 
 describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)", () => {
@@ -156,12 +162,15 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       await recordVoiceReader(store, "harbour-glass", "breezeblue", { confirmedAt: CLOCK() });
       await assert.rejects(prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, { getKey: async () => null, now: CLOCK }), /no key in Settings/);
       await assert.rejects(prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, { getKey: async () => "k", now: CLOCK }), /not configured in this build/);
-      const { slots, saves, removes } = fakeSlots();
+      const { slots, saves, removes, account } = fakeSlots();
       const deps = { getKey: async () => "k", slots, now: CLOCK };
 
       const made = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
       assert.equal(made.remoteVoiceId, "voc_1");
-      assert.deepEqual(saves, [{ provider: "breezeblue", key: "k", name: "Harbour glass", bytes: first.data.length, contentType: "audio/wav" }]);
+      // The slot is named with the clip's hash: the name is the key the account can be listed for.
+      const firstName = hostedSlotName(voice(), clipHashOf(first));
+      assert.match(firstName, /^Harbour glass · [0-9a-f]{12}$/);
+      assert.deepEqual(saves, [{ provider: "breezeblue", key: "k", name: firstName, bytes: first.data.length, contentType: "audio/wav" }]);
       assert.deepEqual(voice().remote?.["breezeblue"], { confirmedAt: CLOCK(), voiceId: "voc_1", clipHash: clipHashOf(first), savedAt: CLOCK() });
 
       const again = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), first, deps);
@@ -180,14 +189,34 @@ describe("what the library remembers of each hosted reader (SPEC-046 R-13, R-16)
       assert.deepEqual(removes, [{ provider: "breezeblue", key: "k", voiceId: "voc_1" }]);
       assert.equal(voice().remote?.["breezeblue"]?.clipHash, clipHashOf(second));
 
-      // A removal the vendor refuses is not this read's failure: the new slot is recorded and used.
-      const failing = fakeSlots(true);
+      // The account no longer holds the recorded slot — deleted in the vendor's console, or the
+      // key now belongs to another account: the record is not trusted over the account, and
+      // the slot is made again rather than sent to fail on every read.
+      account.delete("voc_2");
+      const healed = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), second, deps);
+      assert.equal(healed.remoteVoiceId, "voc_3");
+      assert.equal(saves.length, 3);
+      assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_3");
+
+      // The account holds a slot under the hash-named title that the library never recorded — a
+      // save whose answer never landed: it is found and reused, not made and charged again.
       await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(128, 2));
       const third = await clipFor(store, voice());
       assert.ok(third);
-      const kept = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), third, { ...deps, slots: failing.slots });
+      account.set("voc_orphan", hostedSlotName(voice(), clipHashOf(third)));
+      const found = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), third, deps);
+      assert.equal(found.remoteVoiceId, "voc_orphan");
+      assert.equal(saves.length, 3, "nothing was saved for a slot the account already held");
+      assert.deepEqual(removes.at(-1), { provider: "breezeblue", key: "k", voiceId: "voc_3" });
+
+      // A removal the vendor refuses is not this read's failure: the new slot is recorded and used.
+      const failing = fakeSlots(true);
+      await writeFile(toExtendedLength(join(dir, "voices", "harbour-glass.wav")), wav(160, 3));
+      const fourth = await clipFor(store, voice());
+      assert.ok(fourth);
+      const kept = await prepareHostedClip(store, "breezeblue", "breeze-tts-2", voice(), fourth, { ...deps, slots: failing.slots });
       assert.equal(kept.remoteVoiceId, "voc_1", "the failing fake counts from one");
-      assert.deepEqual(failing.removes, [{ provider: "breezeblue", key: "k", voiceId: "voc_2" }]);
+      assert.deepEqual(failing.removes, [{ provider: "breezeblue", key: "k", voiceId: "voc_orphan" }]);
       assert.equal(voice().remote?.["breezeblue"]?.voiceId, "voc_1");
     });
   });
@@ -289,8 +318,9 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       await h.preview("mistral");
       const first = h.asked()[0];
       assert.ok(first && first.type === "voice.upload-confirmation-required");
-      assert.equal(first.destinationLabel, "Mistral", "the vendor, not the recipe's remote engine");
-      assert.equal(first.confirmationToken, "vendor:mistral");
+      assert.equal(first.destinationLabel, "Mistral · Harbour", "the vendor and the voice, not the recipe's remote engine");
+      assert.equal(first.confirmationToken, hostedUploadToken("mistral", "harbour"));
+      assert.equal(first.confirmationToken, "vendor:mistral:harbour", "the token names the voice: an answer for one cannot be replayed for another");
       assert.equal(first.destinationNotice, hostedReaderDestination("mistral")?.notice);
       assert.match(first.destinationNotice ?? "", /sent with each read/);
       assert.equal(h.events.some((event) => event.type === "queue.enqueue-result"), false, "nothing is queued on a question");
@@ -303,7 +333,11 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       assert.equal((await h.library()).remote, undefined);
 
       h.events.length = 0;
+      // A vendor-wide token is not an answer for this voice either.
       await h.preview("mistral", "vendor:mistral");
+      assert.equal(h.asked().length, 1);
+      h.events.length = 0;
+      await h.preview("mistral", "vendor:mistral:harbour");
       assert.equal(h.asked().length, 0);
       assert.match((await h.library()).remote?.["mistral"]?.["confirmedAt"] ?? "", /^20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/, "the answer lands where it is given");
       const accepted = h.events.find((event) => event.type === "queue.enqueue-result");
@@ -321,17 +355,19 @@ describe("a vendor is a destination (SPEC-046 R-16, R-17)", () => {
       await h.preview("breezeblue");
       const second = h.asked()[0];
       assert.ok(second && second.type === "voice.upload-confirmation-required");
-      assert.equal(second.destinationLabel, "BreezeBlue");
-      assert.equal(second.confirmationToken, "vendor:breezeblue");
+      assert.equal(second.destinationLabel, "BreezeBlue · Harbour");
+      assert.equal(second.confirmationToken, "vendor:breezeblue:harbour");
       assert.match(second.destinationNotice ?? "", /saved as a voice on the account/);
+      assert.doesNotMatch(second.destinationNotice ?? "", /removed when the voice is removed/, "no claim the app cannot yet keep");
 
       h.events.length = 0;
-      await h.preview("breezeblue", "vendor:breezeblue");
+      await h.preview("breezeblue", "vendor:breezeblue:harbour");
       assert.equal(h.asked().length, 0);
       await until(() => h.breeze.submitCount === 1, "the confirmed read to reach Breeze");
       const slot = h.breeze.submittedVoiceReference as { remoteVoiceId?: string } | null;
       assert.equal(slot?.remoteVoiceId, "voc_1", "Breeze reads from the slot the library made on the way");
-      assert.deepEqual(h.saves.map((save) => [save.provider, save.key, save.name]), [["breezeblue", "breeze-test-key", "Harbour"]]);
+      assert.deepEqual(h.saves.map((save) => [save.provider, save.key]), [["breezeblue", "breeze-test-key"]]);
+      assert.match(h.saves[0]?.name ?? "", /^Harbour · [0-9a-f]{12}$/);
       const entry = await h.library();
       assert.deepEqual(Object.keys(entry.remote?.["breezeblue"] ?? {}).sort(), ["clipHash", "confirmedAt", "savedAt", "voiceId"]);
       assert.equal(entry.remote?.["breezeblue"]?.["voiceId"], "voc_1");

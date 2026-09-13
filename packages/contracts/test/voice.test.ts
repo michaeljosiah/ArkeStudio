@@ -21,6 +21,7 @@ import {
   voiceSourceFor,
 } from "../src/voice.js";
 import { ClientMessageSchema } from "../src/frames.js";
+import { billableCharacters, ModelManifestSchema } from "../src/manifest.js";
 import { DomainEventSchema } from "../src/events.js";
 import { VoiceAssignmentSchema } from "../src/world.js";
 import { voiceJobIsCandidatePreview, voiceJobReadIdentity } from "../src/job.js";
@@ -546,5 +547,29 @@ describe("one voice, several readers (SPEC-046 D1, R-10, R-13)", () => {
     const [edited] = parseVoiceLibrary({ voices: [{ ...held, remote: "yes" }] });
     assert.equal(edited?.id, "harbour-glass");
     assert.equal(edited?.remote, undefined);
+  });
+});
+
+describe("what a vendor bills as a character (SPEC-046 R-8)", () => {
+  const row = (unit?: "character" | "cjk-double" | "utf8-byte") =>
+    ({ pricing: { kind: "perCharacter" as const, microUsdPerCharacter: 40, ...(unit ? { unit } : {}) } });
+  it("counts characters by default, twice for CJK on a cjk-double row, and bytes on a utf8-byte row", () => {
+    const line = "Bell Watch — 鐘の見張り";
+    assert.equal(billableCharacters(row(), line), line.length);
+    assert.equal(billableCharacters(row("character"), line), line.length);
+    assert.equal(billableCharacters(row("cjk-double"), line), line.length + 5);
+    assert.equal(billableCharacters(row("utf8-byte"), line), new TextEncoder().encode(line).length);
+    assert.equal(billableCharacters(row("utf8-byte"), "naïve"), 6);
+    assert.equal(billableCharacters({ pricing: { kind: "unmetered" } }, line), line.length, "a row without per-character pricing counts characters");
+  });
+  it("the unit is a row field the manifest accepts and nothing else is", () => {
+    const base = { manifestVersion: 1, generated: "2026-09-13", models: [{
+      id: "x", provider: "breezeblue", capability: "voice-tts", displayName: "x",
+      accepts: { referenceImages: 0, startFrame: false, endFrame: false }, limits: {},
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" } }] };
+    assert.ok(ModelManifestSchema.safeParse(base).success);
+    const bad = JSON.parse(JSON.stringify(base)) as typeof base;
+    bad.models[0]!.pricing.unit = "cjk-triple" as never;
+    assert.equal(ModelManifestSchema.safeParse(bad).success, false);
   });
 });

@@ -78,6 +78,7 @@ import {
   productionFrameRate,
   designatedCompilation,
   comfyUiRecoveryDecision,
+  billableCharacters,
   estimateMicroUsd,
   modelEligible,
   modelForCapability,
@@ -353,7 +354,7 @@ import {
   recordVoiceReader,
   wavSeconds,
 } from "./voice/library.js";
-import { hostedReaderDestination, hostedUploadConfirmed, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
+import { hostedReaderDestination, hostedUploadConfirmed, hostedUploadToken, prepareHostedClip, type HostedVoiceSlots } from "./voice/hosted.js";
 import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
@@ -1098,8 +1099,10 @@ export class Coordinator {
    * Two kinds of destination (SPEC-046 R-16). A remote ComfyUI engine is asked per request, as
    * before. A hosted reader — a vendor — is asked once per voice per vendor: the answer is written
    * onto the library entry the moment it is given, here, so a read with three cloned voices asks
-   * three times at most and never twice for the same one. `reader` names the voice and the
-   * provider it is about to be read through; without it only the engine destination applies.
+   * three times at most and never twice for the same one. The token names the voice as well as
+   * the vendor, so the answer for one voice cannot be replayed for the next on the same page
+   * (codex on PR 1153). `reader` names the voice and the provider it is about to be read
+   * through; without it only the engine destination applies.
    */
   private async requireVoiceUploadConfirmation(input: {
     worldId: string;
@@ -1111,7 +1114,8 @@ export class Coordinator {
     const vendor = input.reader ? hostedReaderDestination(input.reader.provider) : null;
     if (input.reader && vendor) {
       if (hostedUploadConfirmed(input.reader.voice, input.reader.provider)) return false;
-      if (input.voiceUploadConfirmedFor === vendor.token) {
+      const token = hostedUploadToken(input.reader.provider, input.reader.voice.id);
+      if (input.voiceUploadConfirmedFor === token) {
         await recordVoiceReader(input.reader.store, input.reader.voice.id, input.reader.provider, { confirmedAt: this.nowIso() });
         return false;
       }
@@ -1121,8 +1125,9 @@ export class Coordinator {
         requestId: input.requestId,
         worldId: input.worldId,
         command: input.command,
-        destinationLabel: vendor.label,
-        confirmationToken: vendor.token,
+        // The vendor and the voice: a page with two cloned voices asks about each by name.
+        destinationLabel: `${vendor.label} · ${input.reader.voice.name}`,
+        confirmationToken: token,
         destinationNotice: vendor.notice,
       });
       return true;
@@ -1393,7 +1398,7 @@ export class Coordinator {
       return;
     }
     const estimate = misses.reduce(
-      (sum, index) => sum + estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      (sum, index) => sum + estimateMicroUsd(model, { characters: billableCharacters(model, blocks[index]!.text) }),
       0,
     );
     const token = createHash("sha256")
@@ -1422,7 +1427,7 @@ export class Coordinator {
         characterCount: blocks[index]!.text.length,
         ...(page ? { part: index, parts: blocks.length } : {}),
       },
-      estimatedMicroUsd: estimateMicroUsd(model, { characters: blocks[index]!.text.length }),
+      estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, blocks[index]!.text) }),
       landing: { dir: ".cache/voice-previews", name: files[index]!.split("/").pop()! },
     }));
     if (input.confirmationToken !== token) {
@@ -1615,7 +1620,7 @@ export class Coordinator {
         )
           return;
       }
-      const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: blocks[index]!.text.length }), 0);
+      const estimate = misses.reduce((sum, index) => sum + estimateMicroUsd(cloud[index]!.model, { characters: billableCharacters(cloud[index]!.model, blocks[index]!.text) }), 0);
       const token = createHash("sha256")
         .update(["voiced", subject.id, String(subject.version), ...misses.map((index) => cloud[index]!.file)].join("\n"))
         .digest("hex");
@@ -1640,7 +1645,7 @@ export class Coordinator {
             part: index,
             parts: blocks.length,
           },
-          estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: blocks[index]!.text.length }),
+          estimatedMicroUsd: estimateMicroUsd(entry.model, { characters: billableCharacters(entry.model, blocks[index]!.text) }),
           landing: { dir: ".cache/voice-previews", name: entry.file.split("/").pop()! },
           // The marker the dispatcher resolves the recording by, and the engine it was allowed
           // to go to (codex on PR 914): without them every uncached cloned line fails.
@@ -2298,6 +2303,17 @@ export class Coordinator {
           localPresets: opts.voice.localPresets,
           cloudSources: opts.voice.cloudSources,
           ...(opts.voice.hostedReaders !== undefined ? { hostedReaders: opts.voice.hostedReaders } : {}),
+          // A hosted reader whose key the vendor has rejected still lists its candidates, marked
+          // with the probe's reason: an assignment stays visible, and nothing is queued to fail
+          // at dispatch (codex on PR 1153). Untested is not invalid.
+          readerAvailability: (provider) => {
+            const status = this.providerService.list().find((entry) => entry.id === provider);
+            if (status === undefined) return {};
+            if (status.fault !== null) return { unavailableReason: status.fault };
+            if (status.validation !== "invalid") return {};
+            const probe = status.probes.find((entry) => entry.capability === "voice-tts");
+            return { unavailableReason: probe?.reason ?? `${provider} rejected the key — check it on Providers` };
+          },
           getKey: async (provider) =>
             this.credentials ? this.credentials.get(provider as ProviderId) : null,
           emit: (event) => this.emit(event),

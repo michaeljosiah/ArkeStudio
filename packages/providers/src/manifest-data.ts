@@ -235,9 +235,9 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       // top-ups ($1 = 2,500 credits, 10 billable units a credit), $36/$32/$28 on the paid plans. The
       // row carries the FREE-plan rate so an estimate never sits below what the person could be
       // charged; a paid plan's bill then reads under the estimate, which SPEC-008 R-13 reports as
-      // drift rather than hides (SPEC-046 R-7). Breeze counts a CJK character as two billable units
-      // and this estimate counts characters, so a Chinese, Japanese or Korean line is under-estimated
-      // by up to half (R-8). `text` is 1,000 characters by default per the TtsRequest schema (an
+      // drift rather than hides (SPEC-046 R-7). Breeze counts a CJK character as two billable units,
+      // and `unit: "cjk-double"` makes the estimate count them the same way (R-8; codex on PR 1153
+      // found the half-estimate). `text` is 1,000 characters by default per the TtsRequest schema (an
       // approved account may send up to 2,000). No providerModelId: Breeze picks `breeze-tts-2` for
       // en/zh and the multilingual model — `breeze-tts-2-preview` on the live `/v1/models` of
       // 2026-09-13, `-multilingual` in the docs — from the language code, at one price (§2.4).
@@ -249,7 +249,7 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
       id: "breeze-tts-2", provider: "breezeblue", capability: "voice-tts", displayName: "Breeze TTS 2",
       accepts: { referenceImages: 0, startFrame: false, endFrame: false },
       limits: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], audioFormat: "wav", maxPromptChars: 1000 },
-      pricing: { kind: "perCharacter", microUsdPerCharacter: 40 },
+      pricing: { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" },
       cadence: { deliveries: ["measured", "whispered", "breaking", "cold", "warm", "urgent"], speed: { min: 0.7, max: 1.2 },
         pause: "best-effort-audio-tag", emphasis: "unsupported", breath: "best-effort-audio-tag", outputTimestamps: "none", tagSyntax: "paren",
         // The one table (contracts `BREEZE_DELIVERY`): the bench path reads its numbers and words

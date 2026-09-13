@@ -35,7 +35,19 @@ export const PricingSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("perMegapixel"), microUsdPerMegapixel: z.number().int().min(0) }).strict(),
-  z.object({ kind: z.literal("perCharacter"), microUsdPerCharacter: z.number().int().min(0) }).strict(),
+  z
+    .object({
+      kind: z.literal("perCharacter"),
+      microUsdPerCharacter: z.number().int().min(0),
+      /**
+       * What the vendor counts as one character (SPEC-046 R-8). Absent means a character is a
+       * character. `cjk-double`: a Chinese, Japanese or Korean character bills as two (Breeze).
+       * `utf8-byte`: the bill is per UTF-8 byte, so an accented letter is two and a CJK character
+       * three (Fish Audio). `billableCharacters` turns text into the count the rate multiplies.
+       */
+      unit: z.enum(["character", "cjk-double", "utf8-byte"]).optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("perToken"),
@@ -486,6 +498,21 @@ export interface EstimateInput {
  * fractional intermediate (megapixels, token millionths) rounds once, up, at its own edge —
  * an estimate that errs low teaches the user not to trust it.
  */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu;
+
+/**
+ * The characters a vendor will bill for this text, by the row's unit — what `estimateMicroUsd`
+ * wants in `characters`, never `text.length` alone for a row that counts differently (SPEC-046
+ * R-8; codex on PR 1153 found the CJK half-estimate). A row with no unit, or no per-character
+ * pricing, counts characters.
+ */
+export function billableCharacters(model: Pick<ManifestModel, "pricing">, text: string): number {
+  const unit = model.pricing.kind === "perCharacter" ? model.pricing.unit : undefined;
+  if (unit === "utf8-byte") return new TextEncoder().encode(text).length;
+  if (unit === "cjk-double") return text.length + (text.match(CJK)?.length ?? 0);
+  return text.length;
+}
+
 export function estimateMicroUsd(model: ManifestModel, input: EstimateInput): number {
   const p = model.pricing;
   // Fractional quantities (seconds, megapixels) become integer milli-units before they meet a

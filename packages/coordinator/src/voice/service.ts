@@ -6,6 +6,7 @@ import {
   cloudReaderCandidates,
   normalizeSpeechText,
   KOKORO_VOICE_MODEL,
+  billableCharacters,
   estimateMicroUsd,
   extractVoiceAttributes,
   previewLineFor,
@@ -73,6 +74,8 @@ export interface VoiceServiceDeps {
    * recipe's. Unkeyed, it offers nothing, like an unkeyed cloud catalogue.
    */
   hostedReaders?: Array<{ provider: string; model: string }>;
+  /** Why a keyed reader cannot read now — a rejected key, a fault — carried onto its candidates. */
+  readerAvailability?: (provider: string) => { unavailableReason?: string };
   getKey: (provider: string) => Promise<string | null>;
   emit: (event: DomainEvent) => void;
   clock?: () => string;
@@ -491,7 +494,7 @@ export class VoiceService {
     const out: VoiceCandidate[] = [];
     for (const reader of this.deps.hostedReaders ?? []) {
       if ((await this.deps.getKey(reader.provider)) === null) continue;
-      out.push(...cloudReaderCandidates(clonedVoices, reader));
+      out.push(...cloudReaderCandidates(clonedVoices, reader, this.deps.readerAvailability?.(reader.provider) ?? {}));
     }
     return out;
   }
@@ -528,7 +531,7 @@ export class VoiceService {
             entry.capability === "voice-tts",
         );
         return model
-          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: line.text.length })]]
+          ? [[voiceTargetKey(candidate), estimateMicroUsd(model, { characters: billableCharacters(model, line.text) })]]
           : [];
       }),
     );
@@ -696,7 +699,7 @@ export class VoiceService {
         ...(voiceUploadConfirmedFor !== undefined ? { voiceUploadConfirmedFor } : {}),
         // Unmetered rows estimate at zero, so a local preview states no price where a cloud one
         // states an exact figure (turn 70). No branch needed — the manifest already says which.
-        estimatedMicroUsd: estimateMicroUsd(model, { characters: normalized.length }),
+        estimatedMicroUsd: estimateMicroUsd(model, { characters: billableCharacters(model, normalized) }),
         // Landed under its cache key, so reopening the picker replays without a call (R-10).
         landing: { dir: PREVIEW_CACHE_DIR, name },
       },
@@ -776,7 +779,7 @@ export function voiceLineRequest(input: {
       ...(input.deliveryParams !== null ? { voiceSettings: input.deliveryParams } : {}),
       ...(input.deliveryNotice !== null ? { deliveryNotice: input.deliveryNotice } : {}),
     },
-    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: input.text.length }),
+    estimatedMicroUsd: estimateMicroUsd(input.model, { characters: billableCharacters(input.model, input.text) }),
     landing: { dir: `productions/${input.productionId}/audio` },
     ...(input.voiceReference === true ? { voiceReference: true } : {}),
     ...(input.voiceUploadConfirmedFor !== undefined

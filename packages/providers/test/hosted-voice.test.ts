@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BREEZE_DELIVERY } from "@arke-studio/contracts";
+import { billableCharacters, BREEZE_DELIVERY, estimateMicroUsd } from "@arke-studio/contracts";
 import { BreezeBlueClient, BREEZE_CATALOGUE_PAGES, BREEZE_MODEL, BREEZE_TEXT_CAP } from "../src/clients/breezeblue.js";
 import { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "../src/clients/mistral.js";
 import { SHIPPED_MANIFEST } from "../src/manifest-data.js";
 import { createProviderClients, PROVIDER_DECLARATIONS } from "../src/registry.js";
-import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike, type ProviderTransportScope, type VoiceSlotClient } from "../src/types.js";
+import { ProviderAuthError, ProviderBusyError, ProviderRequestRejectedError, type FetchLike, type ProviderCallCapture, type ProviderTransportScope, type VoiceSlotClient } from "../src/types.js";
 
 /**
  * The two hosted readers of the world's cloned voices (SPEC-046 issues 1144/1145), against a
@@ -267,6 +267,25 @@ describe("BreezeBlue · Breeze TTS 2 as a hosted reader (SPEC-046 §2.4)", () =>
     await assert.rejects(new BreezeBlueClient(async () => new Response(null, { status: 204 })).deleteVoice("k", "../voices"), ProviderRequestRejectedError);
   });
 
+  it("finds the account's own voice by its exact hash-named title, and reads whether a slot is still held (R-13)", async () => {
+    // `search` matches prefixes and substrings too: only the exact name is the slot.
+    const r = recording(() => json(200, { voices: [
+      { voice_id: "voc_near", name: "Harbour glass · 0123456789ab (old)", voice_type: "personal" },
+      { voice_id: "voc_exact", name: "Harbour glass · 0123456789ab", voice_type: "personal" },
+    ] }));
+    const client = new BreezeBlueClient(r.fetchImpl);
+    assert.equal(await client.findVoice("k", "Harbour glass · 0123456789ab"), "voc_exact");
+    assert.equal(r.calls[0]?.url, "https://api.breeze.blue/v1/voices?voice_type=personal&search=Harbour%20glass%20%C2%B7%200123456789ab&page_size=100");
+    assert.equal(await new BreezeBlueClient(async () => json(200, { voices: [] })).findVoice("k", "x"), null);
+    const held = recording((url) => url.endsWith("/v1/voices/voc_1") ? json(200, { voice_id: "voc_1", name: "x" }) : json(404, { ok: false, code: "RESOURCE_NOT_FOUND", detail: "Resource not found." }));
+    assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_1"), true);
+    assert.equal(await new BreezeBlueClient(held.fetchImpl).hasVoice("k", "voc_gone"), false, "deleted in the console");
+    // Another account's slot answers 403: not held, not a paused lane.
+    assert.equal(await new BreezeBlueClient(async () => json(403, { ok: false, code: "FORBIDDEN", detail: "Forbidden." })).hasVoice("k", "voc_theirs"), false);
+    await assert.rejects(new BreezeBlueClient(async () => json(500, { ok: false, code: "INTERNAL_ERROR", detail: "x" })).hasVoice("k", "voc_1"));
+    assert.equal(await new BreezeBlueClient(async () => json(200, {})).hasVoice("k", "../"), false);
+  });
+
   it("lists the public catalogue by trend, page after page to a bound, with its metadata as attributes and saved voices left out (R-32)", async () => {
     const page = (n: number, hasMore: boolean) => json(200, { voices: [
       { voice_id: `voc_a${n}`, name: `Ada ${n}`, origin: "designed", voice_type: "default", visibility: "public", language_code: "en", accent: "british",
@@ -298,14 +317,16 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     }
   });
 
-  it("the registry's Breeze client still saves and removes voices through the capture wrapper (R-13, R-15)", async () => {
+  it("the registry's Breeze client still saves, finds, checks and removes voices through the capture wrapper (R-13, R-15)", async () => {
     // The wrapper rebuilds the client from the ProviderClient interface, so a method only the
     // concrete class has is silently absent from what the host holds — a cast hid exactly that.
     const scopes: ProviderTransportScope[] = [];
-    const answer: FetchLike = async (url) =>
+    const answer: FetchLike = async (url, init) =>
       url.endsWith("/clone") ? json(200, { generated_voice_id: "gen_1" })
         : url.endsWith("/save") ? json(200, { voice_id: "voc_wrapped" })
-        : new Response(null, { status: 204 });
+        : init?.method === "DELETE" ? new Response(null, { status: 204 })
+        : url.includes("search=") ? json(200, { voices: [{ voice_id: "voc_wrapped", name: "Harbour · 0123456789ab" }] })
+        : json(200, { voice_id: "voc_wrapped" });
     const clients = createProviderClients({
       fetch: answer,
       transport: { run: (scope, operation) => { scopes.push(scope); return operation(answer); } },
@@ -313,9 +334,38 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
     const breeze = clients.breezeblue as VoiceSlotClient;
     assert.equal(typeof breeze.saveVoice, "function");
     assert.deepEqual(await breeze.saveVoice("k", { name: "Harbour", clip: WAV, contentType: "audio/wav" }), { voiceId: "voc_wrapped" });
+    assert.equal(await breeze.findVoice("k", "Harbour · 0123456789ab"), "voc_wrapped");
+    assert.equal(await breeze.hasVoice("k", "voc_wrapped"), true);
     await breeze.deleteVoice("k", "voc_wrapped");
-    assert.deepEqual(scopes.map((scope) => scope.operation), ["save-voice", "delete-voice"], "and each is a named operation on the host's transport");
+    assert.deepEqual(scopes.map((scope) => scope.operation), ["save-voice", "lookup-voice", "lookup-voice", "delete-voice"], "and each is a named operation on the host's transport");
     assert.equal(typeof (clients.mistral as Partial<VoiceSlotClient>).saveVoice, "undefined", "Mistral keeps no slots and gets no method");
+  });
+
+  it("the call history keeps a slot save's identity and outcome, never the service's transcript of the recording", async () => {
+    const started: Array<{ operation: string }> = [];
+    const finished: Array<{ body: unknown }> = [];
+    const tracked = new Set<Promise<void>>();
+    const capture: ProviderCallCapture = {
+      track: (task) => { tracked.add(task); void task.finally(() => tracked.delete(task)).catch(() => {}); },
+      start: async (input) => { started.push({ operation: input.operation }); return `pc_${"0".repeat(26)}`; },
+      respond: async () => {},
+      finish: async (_id, input) => { finished.push({ body: input.body }); },
+      fail: async () => {},
+    };
+    const transcript = "The register has forty names on it, and at lights-out a forty-first is read.";
+    const clients = createProviderClients({
+      fetch: async (url) =>
+        url.endsWith("/clone") ? json(200, { generated_voice_id: "gen_1", transcript, text: transcript, duration_seconds: 7.1 })
+          : json(200, { voice_id: "voc_saved", name: "Harbour", transcript }),
+      capture,
+    });
+    await (clients.breezeblue as VoiceSlotClient).saveVoice("k", { name: "Harbour", clip: WAV, contentType: "audio/wav" });
+    await Promise.allSettled(tracked);
+    assert.deepEqual(started.map((call) => call.operation), ["save-voice", "save-voice"]);
+    assert.equal(finished.length, 2);
+    assert.deepEqual(finished[0]?.body, { generated_voice_id: "gen_1", redacted: ["transcript", "text", "duration_seconds"] });
+    assert.deepEqual(finished[1]?.body, { voice_id: "voc_saved", redacted: ["name", "transcript"] });
+    assert.ok(!JSON.stringify(finished).includes("forty"), "not a word of the recording reaches calls.jsonl");
   });
 
   it("the Voxtral row is honest: one delivery, WAV, our own cap, sixteen micro-dollars a character", () => {
@@ -332,7 +382,11 @@ describe("the rows and the registry (SPEC-046 R-6..R-8, R-28)", () => {
   it("the Breeze row carries the free-plan rate, the vendor's 1,000-character cap, and the one delivery table", () => {
     const row = SHIPPED_MANIFEST.models.find((m) => m.id === BREEZE_MODEL)!;
     assert.equal(row.providerModelId, undefined);
-    assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 40 });
+    assert.deepEqual(row.pricing, { kind: "perCharacter", microUsdPerCharacter: 40, unit: "cjk-double" });
+    // The unit is what the estimate multiplies: a CJK line costs twice its length (R-8).
+    assert.equal(billableCharacters(row, "Bell Watch."), 11);
+    assert.equal(billableCharacters(row, "鐘の見張り"), 10);
+    assert.equal(estimateMicroUsd(row, { characters: billableCharacters(row, "鐘の見張り") }), 400);
     assert.equal(row.limits.maxPromptChars, 1000);
     assert.equal(row.cadence?.tagSyntax, "paren");
     assert.deepEqual(row.cadence?.deliveryMappings, BREEZE_DELIVERY);

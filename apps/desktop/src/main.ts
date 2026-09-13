@@ -1305,6 +1305,14 @@ async function initialize(): Promise<{ port: number }> {
         if (provider !== "breezeblue") return Promise.resolve();
         return (providerClients.breezeblue as VoiceSlotClient).deleteVoice(key, voiceId);
       },
+      find: (provider, key, name) => {
+        if (provider !== "breezeblue") return Promise.resolve(null);
+        return (providerClients.breezeblue as VoiceSlotClient).findVoice(key, name);
+      },
+      has: (provider, key, voiceId) => {
+        if (provider !== "breezeblue") return Promise.resolve(false);
+        return (providerClients.breezeblue as VoiceSlotClient).hasVoice(key, voiceId);
+      },
     },
     comfyui: {
       service: comfyUiEngine,

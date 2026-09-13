@@ -212,6 +212,32 @@ export class BreezeBlueClient implements ProviderClient, VoiceCatalogueClient {
     if (res.status >= 400) throw await this.failure(res);
   }
 
+  /**
+   * The account's own voice saved under exactly this name (R-13): the library names a slot with
+   * the clip's hash, so a save whose answer never landed is found here rather than made again.
+   * `search` matches names by prefix and substring too, so the match is checked exactly.
+   */
+  async findVoice(key: string, name: string): Promise<string | null> {
+    const { status, body } = await jsonRequest(
+      this.fetchImpl, this.id,
+      `${this.baseUrl}/v1/voices?voice_type=personal&search=${encodeURIComponent(name)}&page_size=100`,
+      { headers: this.headers(key) },
+    );
+    if (status >= 400) return null;
+    const voices = (body as { voices?: Array<Record<string, unknown>> } | null)?.voices ?? [];
+    const match = voices.find((v) => v["name"] === name && typeof v["voice_id"] === "string");
+    return match ? (match["voice_id"] as string) : null;
+  }
+
+  /** Whether the account still holds the voice: a slot deleted in Breeze's console, or one saved under another account's key, reads false. */
+  async hasVoice(key: string, voiceId: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]+$/.test(voiceId)) return false;
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/voices/${encodeURIComponent(voiceId)}`, { headers: { "xi-api-key": key } });
+    if (res.status === 404 || res.status === 403) return false;
+    if (res.status >= 400) throw await this.failure(res);
+    return true;
+  }
+
   async poll(_key: string, _remoteId: string): Promise<PollResult> {
     return { state: "failed", error: "breezeblue: synchronous results must be returned by submit" };
   }

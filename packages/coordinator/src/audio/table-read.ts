@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { deriveRehearsalLines, TableReadPlanSchema, normalizeSpeechText, estimateMicroUsd, legacyVoiceModel, providerModelId,
+import { deriveRehearsalLines, TableReadPlanSchema, normalizeSpeechText, billableCharacters, estimateMicroUsd, legacyVoiceModel, providerModelId,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
 import type { WorldStore } from "../world/store.js";
 import { speechCacheFile, cachedVoiceAudioLooksRight, type SpeechSpec, type VoiceService } from "../voice/service.js";
@@ -60,7 +60,7 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
     if (!status?.configured || status.fault !== null || status.validation !== "valid" || !status.probes.some(p => p.capability === "voice-tts" && p.available)) { item.reason = "Validate this voice provider in Settings before preparation."; continue; }
     if (model.limits.maxPromptChars !== undefined && spec.text.length > model.limits.maxPromptChars) { item.reason = "The line exceeds this model's character limit."; continue; }
     if (model.provider === "kokoro") { item.route = "local"; local.push({ file, spec }); continue; }
-    item.route = "cloud"; item.estimatedMicroUsd = estimateMicroUsd(model, { characters: spec.text.length });
+    item.route = "cloud"; item.estimatedMicroUsd = estimateMicroUsd(model, { characters: billableCharacters(model, spec.text) });
     cloud.push({ worldId: store.worldId, productionId, target: { kind: "table-read-cache", id: line.id }, capability: "voice-tts", provider: model.provider, model: model.id,
       params: { voiceId: voice.voiceId, text: spec.text, tableReadSceneId: sceneId, tableReadInputHash: inputHash, tableReadCacheFile: file, tableReadSpec: spec,
         tableReadVoiceAssignment: voice, tableReadSpeakerSheetId: line.speakerSheetId, tableReadSceneVersion: scene.version }, estimatedMicroUsd: item.estimatedMicroUsd,
