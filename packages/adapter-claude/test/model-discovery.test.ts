@@ -59,6 +59,35 @@ describe("Claude's initialization-only model catalog", () => {
     assert.equal(closed, true);
   });
 
+  it("refreshes the live catalog after changes and failures without reusing stale models", async () => {
+    let revision = 1; let unavailable = false; let opened = 0; let closed = 0;
+    const adapter = new ClaudeAdapter({
+      command: "pinned-claude",
+      discoverModels: input => discoverClaudeModels(input, () => {
+        opened++;
+        return {
+          supportedModels: async () => {
+            if (unavailable) throw new Error("login unavailable");
+            return [{ value: "default", resolvedModel: `claude-revision-${revision}`, displayName: "Current default" }];
+          },
+          close: () => { closed++; },
+        };
+      }),
+    });
+    try {
+      await adapter.init();
+      assert.equal((await adapter.listModels())[0]?.id, "claude-revision-1");
+      revision = 2;
+      assert.equal((await adapter.listModels())[0]?.id, "claude-revision-2");
+      unavailable = true;
+      await assert.rejects(adapter.listModels(), /login unavailable/);
+      unavailable = false; revision = 3;
+      assert.equal((await adapter.listModels())[0]?.id, "claude-revision-3");
+      assert.equal(opened, 4, "each explicit refresh initializes current SDK metadata");
+      assert.equal(closed, 4, "success and failure both release the discovery process");
+    } finally { await adapter.dispose(); }
+  });
+
   it("times out and closes even when the SDK promise ignores cancellation", async () => {
     let closed = false;
     await assert.rejects(discoverClaudeModels({ command: "claude", timeoutMs: 10 }, () => ({

@@ -23,10 +23,24 @@ export interface CodexDiscoveryOptions {
 }
 export interface CodexDiscovery { found: DiscoveredCodex | null; reason: string | null; version: string | null }
 
-const runCommand: CommandRunner = (command, args, timeoutMs) => new Promise(resolve => {
-  execFile(command, args, { windowsHide: true, timeout: timeoutMs, maxBuffer: 64 * 1024 }, (error, stdout) => {
-    resolve({ status: error ? null : 0, stdout: String(stdout) });
+export const runCodexDiscoveryCommand: CommandRunner = (command, args, timeoutMs) => new Promise(resolve => {
+  let settled = false;
+  const finish = (result: CommandResult) => {
+    if (settled) return;
+    settled = true; clearTimeout(timer); resolve(result);
+  };
+  const child = execFile(command, args, { windowsHide: true, maxBuffer: 64 * 1024, killSignal: "SIGKILL" }, (error, stdout) => {
+    finish({ status: error ? null : 0, stdout: String(stdout) });
   });
+  // execFile's timeout waits for exit after SIGTERM, which an executable can ignore.
+  // Our deadline also settles independently of inherited pipes being closed by a child.
+  const timer = setTimeout(() => {
+    if (settled) return;
+    finish({ status: null, stdout: "" });
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy(); child.unref();
+  }, timeoutMs);
+  timer.unref();
 });
 const executable = async (path: string) => {
   try { await access(path, process.platform === "win32" ? constants.F_OK : constants.X_OK); return true; }
@@ -50,7 +64,7 @@ export function codexServerArgs(command: string): string[] {
 export async function discoverCodex(opts: CodexDiscoveryOptions = {}): Promise<CodexDiscovery> {
   const confinementReason = await fileConfinementUnavailable();
   if (confinementReason) return { found: null, reason: confinementReason, version: null };
-  const run = opts.runCommand ?? runCommand;
+  const run = opts.runCommand ?? runCodexDiscoveryCommand;
   const exists = opts.exists ?? executable;
   const candidates: { command: string; source: "configured" | "path" }[] = [];
   if (opts.configuredPath) candidates.push({ command: opts.configuredPath, source: "configured" });

@@ -29,14 +29,17 @@ export function withLocalGpu(adapter: HarnessAdapter, gpu: LocalGpu, settled: ()
     let release: (() => void) | undefined;
     try {
       const model = models.get(input.sessionId);
+      // Claude cannot dispatch to Ollama. Its SDK catalog starts a separate process, so
+      // consulting it here would add discovery latency to every default-model message.
+      const canUseOllama = adapter.id !== "claude";
       // A failed default lookup can still return a catalogue. When none is marked, an
       // available Ollama model may be the actual default; an explicit cloud choice never waits.
       let catalog: ModelInfo[] | undefined;
-      try { catalog = model === undefined ? await adapter.listModels?.() : undefined; }
+      try { catalog = canUseOllama && model === undefined ? await adapter.listModels?.() : undefined; }
       catch { /* Discovery is optional; an unknown catalogue must still allow the turn. */ }
       const hasDefault = catalog?.some((row) => row.isDefault) === true;
-      const local = model !== undefined ? model.startsWith("ollama/") :
-        catalog === undefined || catalog.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault));
+      const local = canUseOllama && (model !== undefined ? model.startsWith("ollama/") :
+        catalog === undefined || catalog.some((row) => row.provider === "ollama" && (row.isDefault || !hasDefault)));
       const signal = AbortSignal.any([turn.abort.signal, closed.signal]);
       if (local) release = await gpu.acquire("Ollama", signal, (reason) => publish({
         type: "tool.activity", sessionId: input.sessionId, tool: "local-inference",
