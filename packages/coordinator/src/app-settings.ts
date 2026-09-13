@@ -242,6 +242,13 @@ export class AppSettingsFile {
     });
   }
 
+  async setCodexPath(codexPath: string | null): Promise<AppSettings> {
+    return this.mutate((current) => {
+      const settings: AppSettings = { ...current, harness: { ...current.harness, codexPath } };
+      return { settings, value: settings };
+    });
+  }
+
   async setAppearanceTheme(theme: ThemePreference): Promise<AppSettings> {
     return this.mutate((current) => {
       const settings: AppSettings = { ...current, appearance: { theme } };

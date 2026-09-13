@@ -450,15 +450,24 @@ describe("v2 adapter against the scripted server (issue 327 §11)", () => {
     try {
       await adapter.init();
       stub.models = [
-        { id: "gpt-5.4-mini", providerID: "openai", name: "GPT-5.4 mini", limit: { context: 400_000, input: 272_000 } },
+        { id: "gpt-5.4-mini", providerID: "openai", name: "GPT-5.4 mini", limit: { context: 400_000, input: 272_000 }, capabilities: { input: ["text", "image"] } },
         { id: "old-model", providerID: "openai", limit: { context: 8_000 } },
+        { id: "disabled", providerID: "openai", disabled: true },
+        { id: "unavailable", providerID: "openai", enabled: false },
+        { id: "deprecated", providerID: "openai", status: "deprecated" },
       ];
       stub.defaultModel = { id: "gpt-5.4-mini", providerID: "openai" };
       const models = await adapter.listModels();
       assert.equal(models.length, 2);
       const def = models.find((m) => m.isDefault);
       assert.equal(def?.id, "gpt-5.4-mini");
+      assert.deepEqual(def?.inputModalities, ["text", "image"]);
+      assert.equal(def?.inputTokenLimit, 272_000);
       assert.equal(adapter.knownInputTokenLimit(), 272_000, "input beats context when the provider states both");
+      stub.models = [];
+      stub.defaultModel = null;
+      assert.deepEqual(await adapter.listModels(), []);
+      assert.equal(adapter.knownInputTokenLimit(), null, "a removed credential must not retain an obsolete model window");
     } finally {
       await adapter.dispose();
     }

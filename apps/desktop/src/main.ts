@@ -14,11 +14,12 @@ import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { freemem } from "node:os";
 import { join, resolve } from "node:path";
-import { describeClaudeAvailability } from "@arke-studio/adapter-claude";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, nativeTheme, Notification, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  describeClaudeAvailability,
+  describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
   ComfyUiEngineService,
@@ -79,6 +80,7 @@ import {
 } from "./voxa-runtime.js";
 import {
   agentForPurpose,
+  effectiveHarnessEngine,
   comfyUiWeightsComponentId,
   ROSTER,
   skillFor,
@@ -605,10 +607,11 @@ async function initialize(): Promise<{ port: number }> {
    */
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
   const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
-  const chosenHarness = storedHarness?.engine ?? "opencode";
+  const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    engine: chosenHarness,
     deps: { ledger: childLedger },
     preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
     v1: {
@@ -624,7 +627,7 @@ async function initialize(): Promise<{ port: number }> {
     claude: {
       // Settings is the way in. ARKE_HARNESS stays as a developer override so a branch can be
       // tried without writing to somebody's real settings file, and it wins where both are set.
-      enabled: process.env["ARKE_HARNESS"] === "claude" || chosenHarness === "claude",
+      enabled: chosenHarness === "claude",
       // The chosen path is used at launch too, or Settings verifies one binary and the
       // lane runs another — the confinement probe would then have proved nothing.
       ...(process.env["ARKE_CLAUDE_CMD"]
@@ -632,6 +635,11 @@ async function initialize(): Promise<{ port: number }> {
         : storedHarness?.claudePath
           ? { configuredPath: storedHarness.claudePath }
           : {}),
+    },
+    codex: {
+      enabled: chosenHarness === "codex",
+      ...(process.env["ARKE_CODEX_CMD"] ?? storedHarness?.codexPath
+        ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? storedHarness!.codexPath! } : {}),
     },
     onTrace: harnessTrace(appRoot),
   });
@@ -947,7 +955,7 @@ async function initialize(): Promise<{ port: number }> {
     { ledger: childLedger },
   );
   voxaSupervisorRef = voxaSupervisor;
-  registerExitBackstop(opencodeSupervisor, voxaSupervisor);
+  registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -1130,6 +1138,8 @@ async function initialize(): Promise<{ port: number }> {
     sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
+    ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
+    ...(process.env["ARKE_HARNESS"] ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
@@ -1174,7 +1184,18 @@ async function initialize(): Promise<{ port: number }> {
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
-    detectHarnesses: async (configuredPath) => [
+    chooseCodexExecutable: async () => {
+      const parent = window;
+      if (!parent) return null;
+      const result = await dialog.showOpenDialog(parent, {
+        title: "Choose the Codex executable",
+        buttonLabel: "Use this Codex",
+        properties: ["openFile"],
+        filters: [{ name: "Codex", extensions: ["exe", "cmd", "bat"] }, { name: "All files", extensions: ["*"] }],
+      });
+      return result.canceled ? null : (result.filePaths[0] ?? null);
+    },
+    detectHarnesses: async (configuredPath, codexPath) => [
       await describeClaudeAvailability(
         // The user's choice first; the developer override still wins where it is set.
         process.env["ARKE_CLAUDE_CMD"]
@@ -1182,6 +1203,10 @@ async function initialize(): Promise<{ port: number }> {
           : configuredPath
             ? { configuredPath }
             : {},
+      ),
+      await describeCodexAvailability(
+        process.env["ARKE_CODEX_CMD"] ?? codexPath
+          ? { configuredPath: process.env["ARKE_CODEX_CMD"] ?? codexPath! } : {},
       ),
     ],
     dispatchClients: providerClients,
@@ -1369,7 +1394,7 @@ async function initialize(): Promise<{ port: number }> {
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
   // and the affected features carry a stated reason (R-6).
-  coordinator.superviseAs("harness", opencodeSupervisor);
+  if (opencodeSupervisor) coordinator.superviseAs("harness", opencodeSupervisor);
   coordinator.superviseAs("voice", voxaSupervisor);
 
   const { port } = await coordinator.start(0);

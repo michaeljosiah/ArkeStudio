@@ -170,6 +170,7 @@ describe("the v2 launch protocol (issue 327 §4)", () => {
     assert.equal(wiring.adapter, null);
     assert.equal(wiring.harnessInfo, undefined);
     assert.deepEqual(wiring.logLines, ["OpenCode: not found — authoring disabled"]);
+    assert.ok(wiring.supervisor);
     await wiring.supervisor.start();
     assert.equal(wiring.supervisor.status, "unconfigured");
   });

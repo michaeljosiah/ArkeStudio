@@ -5,10 +5,9 @@ import type { VendorIntegration } from "./vendor-auth.js";
 /**
  * The harness adapter interface, adopted from Arke (master spec §1.4, §17).
  *
- * Arke Studio drives one harness — OpenCode v2, headless — but targets this interface so the
- * harness is replaceable and so the mock behind SPEC-001 and the live server behind SPEC-005
- * are indistinguishable to the coordinator. Capabilities are probed from the live server's
- * OpenAPI document at init, never hard-coded to a version.
+ * Arke Studio drives the selected OpenCode, Claude Code or Codex harness through this interface.
+ * Each adapter owns its protocol and confinement; the coordinator consumes the same prepared
+ * session and normalized events regardless of which executable runs the work.
  */
 
 /** Capability flags an adapter advertises. Callers check before invoking gated methods. */
@@ -74,13 +73,19 @@ export interface Readiness {
 }
 
 /** One model in the harness backend's live catalog (capability: models). */
-export interface ModelInfo {
-  id: string;
-  provider: string;
-  displayName?: string;
+export const ModelInfoSchema = z.object({
+  id: z.string().min(1),
+  provider: z.string().min(1),
+  displayName: z.string().optional(),
   /** The model this provider would use if nobody chose — shown first, marked as such. */
-  isDefault?: boolean;
-}
+  isDefault: z.boolean().optional(),
+  /** Exact aliases advertised by this harness, never guessed from display names. */
+  aliases: z.array(z.string().min(1)).optional(),
+  /** Absent means unknown; an explicit text-only model cannot inspect a Stage preview. */
+  inputModalities: z.array(z.enum(["text", "image"])).optional(),
+  inputTokenLimit: z.number().int().positive().optional(),
+}).strict();
+export type ModelInfo = z.infer<typeof ModelInfoSchema>;
 
 export const PermissionVerb = z.enum(["once", "always", "reject"]);
 export type PermissionVerb = z.infer<typeof PermissionVerb>;

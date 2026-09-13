@@ -63,6 +63,32 @@ Local Krea 2 image generation has an opt-in GPU check and offline custom-node in
 see the [Krea 2 integration guide](krea2.md). A returned PNG must be inspected visually: provider
 success alone does not establish usable image quality.
 
+## Writing engines and model control
+
+Run the adapter package suites plus coordinator `test/harness/`, `test/v2-launch.test.ts`,
+and client `test/harness-model-controls.test.tsx`, `test/agents.test.tsx`,
+`test/settings-general.test.tsx`, `test/production-setup.test.tsx`. Catalog tests cover
+canonical/legacy references, discovery failure and retry, precedence and Stage image capability.
+Adapter tests exercise captured settings, confined tool access, cancellation and final-turn events.
+
+The Codex real-binary protocol test is opt-in:
+
+```powershell
+$env:ARKE_CODEX_SMOKE_COMMAND = "C:\path\to\codex.exe"
+$env:ARKE_CODEX_SMOKE_CATALOG = "C:\path\to\model-catalog.json"
+npm test --workspace @arke-studio/adapter-codex
+```
+
+The catalog file contains the app-server's model metadata (`{ "models": [...] }`), without
+credentials. The test creates an isolated profile and a scripted localhost Responses provider;
+no paid generation request is sent. It verifies actual model-visible tools and direct image
+delivery for the catalog's model profiles. Ordinary CI uses the deterministic protocol fixtures.
+For host changes also run `npm run smoke:main --workspace @arke-studio/desktop`.
+After building, `node --import tsx apps/desktop/scripts/smoke-harness-models.mjs` checks
+the real sandboxed file-page controls, saved agent/production models, reload and pending engine
+selection against a real coordinator with scripted discovery. It makes no generation call and
+retains screenshots in its printed disposable directory for visual inspection.
+
 ## Desktop appearance
 
 For appearance bootstrap or reload changes, run `node apps/desktop/scripts/smoke-theme.mjs`.

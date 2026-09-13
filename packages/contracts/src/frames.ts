@@ -1221,6 +1221,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   /** Point Arke at a Claude Code the PATH does not carry. The host owns the file dialog. */
   z.object({ kind: z.literal("choose-claude-executable") }).strict(),
   z.object({ kind: z.literal("clear-claude-executable") }).strict(),
+  z.object({ kind: z.literal("choose-codex-executable") }).strict(),
+  z.object({ kind: z.literal("clear-codex-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),

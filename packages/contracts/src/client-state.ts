@@ -7,6 +7,8 @@ import { z } from "zod";
 import { ModelResidencySchema } from "./local-ai.js";
 import { ProductionNarrativeSchema } from "./production-narrative.js";
 import { HarnessStatusSchema } from "./harness.js";
+import { ModelInfoSchema } from "./adapter.js";
+import { HarnessModelStatusSchema } from "./harness-models.js";
 import { ProductionSpineSchema } from "./spine.js";
 import { TakeMediaInfoRecordSchema } from "./media.js";
 import { ProposalIdSchema, TakeIdSchema } from "./ids.js";
@@ -453,18 +455,8 @@ export const ClientStateSchema = z
           )
           .default([]),
         /** What the harness says it can run, when it has been asked. Empty until then. */
-        harnessModels: z
-          .array(
-            z
-              .object({
-                id: z.string(),
-                provider: z.string(),
-                displayName: z.string().optional(),
-                isDefault: z.boolean().optional(),
-              })
-              .strict(),
-          )
-          .default([]),
+        harnessModels: z.array(ModelInfoSchema).default([]),
+        harnessModelStatus: HarnessModelStatusSchema.default({ status: "idle" }),
         /**
          * Which harness is wired, from launch-time discovery (issue 327 §9): name, source,
          * version, and — when a v2 binary was found but failed the build gate — the rejected
@@ -477,7 +469,7 @@ export const ClientStateSchema = z
          */
         harnessInfo: z
           .object({
-            generation: z.enum(["v2", "v1", "claude"]),
+            generation: z.enum(["v2", "v1", "claude", "codex"]),
             source: z.enum(["configured", "path", "bundled"]),
             version: z.string().nullable(),
             beta: z.boolean(),

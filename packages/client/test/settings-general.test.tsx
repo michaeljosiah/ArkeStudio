@@ -115,7 +115,7 @@ function localVideoReady(
 describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => {
   it("opens Harness on the engine in use and honors an explicit selection (#1004)", () => {
     const state = stateWith({ harness: {
-      engine: "claude", claudePath: null,
+      engine: "claude", claudePath: null, codexPath: null, launchOverride: null,
       harnesses: [OPENCODE_AVAILABILITY, { ...OPENCODE_AVAILABILITY, id: "claude", label: "Claude Code", bundled: false }],
     } });
     const selected = (path: string) => parseHTML(render(path, state)).document.querySelector('[role="tab"][aria-selected="true"]')?.textContent;

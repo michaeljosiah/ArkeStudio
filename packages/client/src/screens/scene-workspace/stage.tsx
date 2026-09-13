@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Link as RouterLink } from "react-router";
 import {
   DEFAULT_SHOT_SEC,
   effectiveStageBlocking,
@@ -1028,6 +1029,7 @@ export function SceneStage({
           <option value="blocking">Keep blocking</option><option value="camera">Keep camera</option><option value="none">Revise both</option>
         </select> : null}
         <Button size="sm" className="fy-tip--end" disabled={frozen || moved} hint="Uses the configured language model · up to 3 turns / 5 minutes" onClick={() => construct()}>Build with Arke</Button>
+        <RouterLink className="fy-swstage__link" to="/settings/harness?agent=stage-designer">Stage model</RouterLink>
         {constructing ? <Button size="sm" onClick={() => { const run = construction.current; if (run) send({ kind: "stage-construct-cancel", worldId: world.meta.worldId, requestId: run.id }); }}>Stop</Button> : null}
         {note ? <span role="status">{note}</span> : null}
         {/* The disclosure ends the bar as 144a draws it, and opens once a build has something to

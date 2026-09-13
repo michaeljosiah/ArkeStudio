@@ -3,6 +3,7 @@ import { afterEach, it } from "node:test";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
+import { MemoryRouter } from "react-router";
 import { orderedShots, resolvedShotStaging, stageProblems, STAGE_FRAME_RATE, type ClientMessage, type SceneRecord, type Shot } from "@arke-studio/contracts";
 import { SceneStage } from "../src/screens/scene-workspace/stage.js";
 import { sameLine } from "../src/screens/scene-workspace/stage-inspector.js";
@@ -39,10 +40,10 @@ async function mount(configure?: (shot: Shot) => void) {
   const sent: Extract<ClientMessage, { kind: "scene-command" }>["command"][] = [];
   const render = async (locked = false) => {
     await act(async () => root!.render(
-      <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
+      <MemoryRouter><SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: () => {} }}>
         <SceneStage scene={scene} production={production} world={world} aspect="16:9" sceneFile={undefined}
           locked={locked} generatorPending={false} refusalVersion={0} onCommand={command => { sent.push(command); return true; }} onRenderShot={() => {}} />
-      </SelectionProvider>,
+      </SelectionProvider></MemoryRouter>,
     ));
   };
   await render();
@@ -80,6 +81,14 @@ const tick = async () => {
   frames.clear();
   await act(async () => { for (const callback of pending) callback(0); });
 };
+
+it("links the blockout controls directly to the Stage designer model", async () => {
+  const { q } = await mount();
+  const link = q('.fy-swstage__construction a');
+  assert.equal(link.textContent, "Stage model");
+  assert.equal(link.getAttribute("href"), "/settings/harness?agent=stage-designer");
+  assert.ok(q('.fy-swstage__construction').textContent?.includes("Build with Arke"));
+});
 
 it("scrubs with pointer capture, pauses playback and clamps at the shot boundaries (#1040)", async () => {
   const { q } = await mount();

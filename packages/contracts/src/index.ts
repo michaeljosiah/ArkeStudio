@@ -38,6 +38,7 @@ export * from "./skills.js";
 export * from "./agent-session.js";
 export * from "./confinement.js";
 export * from "./harness.js";
+export * from "./harness-models.js";
 export * from "./ask.js";
 export * from "./sheet-shapes.js";
 export * from "./provider.js";

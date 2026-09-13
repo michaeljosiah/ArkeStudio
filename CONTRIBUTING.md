@@ -77,6 +77,25 @@ local success does not establish correctness on the other platform. For focused 
 native runtime checks and documentation-only validation, see [the testing guide](docs/development/testing.md).
 Start with [the developer index](docs/development/README.md) for code navigation and shared agent guidance.
 
+### Writing engines and models
+
+Settings chooses the writing engine for the next launch. OpenCode ships with the desktop;
+Claude Code and Codex use your own installation and login. Codex requires 0.154.0 or newer
+with its companion code-mode host in the same installation. If PATH discovery misses it,
+choose the executable in Settings. An unavailable selected engine remains unavailable until
+you repair it or choose another; it does not silently switch engines.
+
+For development, `ARKE_HARNESS=opencode|claude|codex` overrides the saved engine as a whole.
+`ARKE_CLAUDE_CMD` and `ARKE_CODEX_CMD` override executable discovery. Settings discloses an
+active engine override; clear it to use the saved preference on restart. The Codex app-server
+uses private stdio and the user's Codex login store; no renderer connection to it is exposed.
+
+The production dock, production setup and Agents read the running engine's live catalog.
+A turn's explicit model wins over the agent override, then the production default, then the
+harness default. Stage requires either its own Stage designer override or a production model
+and refuses known text-only models. A saved unavailable choice remains visible and clearable.
+Media provider API keys do not determine which models a bring-your-own writing engine can use.
+
 ## How changes are shaped
 
 Arke Studio is **specification-first**: behaviour is decided in a capability spec and then built.

@@ -60,6 +60,7 @@ export const HarnessSettingsSchema = z
      * with nothing to do about it. This is the something.
      */
     claudePath: z.string().min(1).nullable().default(null),
+    codexPath: z.string().min(1).nullable().default(null),
   })
   .strict();
 export type HarnessSettings = z.infer<typeof HarnessSettingsSchema>;

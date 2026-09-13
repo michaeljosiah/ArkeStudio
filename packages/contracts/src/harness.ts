@@ -3,10 +3,10 @@ import { z } from "zod";
 /**
  * Which engine runs the authoring work, and what the screen is allowed to offer (SPEC-005 R-1).
  *
- * One harness ships in the installer and one is brought by the user, and the difference is the
+ * One harness ships in the installer and two are brought by the user, and the difference is the
  * whole reason this shape exists. OpenCode is present by construction — it is inside the
- * download, so "is it there?" is not a question worth asking. Claude Code is the user's own
- * installation, which may be absent, too old, or gone since yesterday's update.
+ * download, so "is it there?" is not a question worth asking. Claude Code and Codex are the user's
+ * own installations, which may be absent, too old, or gone since yesterday's update.
  *
  * So availability is DISCOVERED and sent to the screen, rather than assumed. A harness the
  * machine does not have must not be selectable, and the reason has to travel with the answer:
@@ -14,7 +14,7 @@ import { z } from "zod";
  * screen given only a boolean would have to invent the difference or hide it.
  */
 
-export const HarnessEngineSchema = z.enum(["opencode", "claude"]);
+export const HarnessEngineSchema = z.enum(["opencode", "claude", "codex"]);
 export type HarnessEngine = z.infer<typeof HarnessEngineSchema>;
 
 export const HarnessAvailabilitySchema = z
@@ -58,9 +58,18 @@ export const HarnessStatusSchema = z
     harnesses: z.array(HarnessAvailabilitySchema),
     /** The executable chosen for Claude Code, if any — echoed so it can be shown and cleared. */
     claudePath: z.string().nullable(),
+    codexPath: z.string().nullable().default(null),
+    /** A host environment override outranks the saved engine at every launch. */
+    launchOverride: HarnessEngineSchema.nullable().optional(),
   })
   .strict();
 export type HarnessStatus = z.infer<typeof HarnessStatusSchema>;
+
+/** A launch override chooses the whole engine; it must not accidentally enable two lanes. */
+export function effectiveHarnessEngine(stored: HarnessEngine, override?: string): HarnessEngine {
+  const parsed = HarnessEngineSchema.safeParse(override);
+  return parsed.success ? parsed.data : stored;
+}
 
 /**
  * The bundled harness, stated once. It cannot be missing, so nothing detects it — a detector
