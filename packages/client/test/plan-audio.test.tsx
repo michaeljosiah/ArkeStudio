@@ -25,6 +25,8 @@ interface FakeAudio {
   currentTime: number;
   plays: number;
   pauses: number;
+  /** Set by a case that wants `play()` refused, as an autoplay interruption refuses it. */
+  refuse: boolean;
   play(): Promise<void>;
   pause(): void;
   removeAttribute(name: string): void;
@@ -43,8 +45,11 @@ class FakeAudioElement implements FakeAudio {
     this.src = url;
     made.push(this);
   }
+  /** Set by a case that wants `play()` to be refused, as an autoplay interruption refuses it. */
+  refuse = false;
   play(): Promise<void> {
     this.plays += 1;
+    if (this.refuse) return Promise.reject(new Error("NotAllowedError"));
     this.paused = false;
     return Promise.resolve();
   }
@@ -67,8 +72,15 @@ const param = () => ({
   cancelScheduledValues() {},
 });
 const node = () => ({ connect() {}, disconnect() {} });
+/** Every context the hook has built; the last is the one the case under test is using. */
+const contexts: FakeAudioContext[] = [];
+const context = (): FakeAudioContext => contexts[contexts.length - 1]!;
+
 class FakeAudioContext {
   currentTime = 0;
+  constructor() {
+    contexts.push(this);
+  }
   destination = node();
   createDynamicsCompressor() {
     return { ...node(), threshold: param(), knee: param(), ratio: param(), attack: param(), release: param() };
@@ -149,6 +161,65 @@ describe("the monitor mix survives a re-render", () => {
     made.length = 0;
     frames = [];
     timeRef.current = 0;
+    contexts.length = 0;
+  });
+
+  it("re-seeks a retained element to the window it was moved to", async () => {
+    const container = dom.document.createElement("div");
+    let root: Root;
+    await act(async () => {
+      root = createRoot(container as unknown as HTMLElement);
+      root.render(<Harness plan={bedPlan()} playing at={4} />);
+    });
+    await act(async () => {
+      runFrame();
+    });
+    const bed = made[0]!;
+    assert.equal(bed.currentTime, 4, "four seconds into the film is four seconds into the file");
+
+    /*
+     * A third of a second later on the lane, which is smaller than the loop's half-second drift
+     * tolerance — the size of edit that would silently leave the monitor playing the wrong part
+     * of the file if keeping the element also meant keeping its old mapping.
+     */
+    const moved = bedPlan();
+    moved.audio[0]!.startSec = 0.3;
+    moved.audio[0]!.endSec = 12.3;
+    await act(async () => {
+      root!.render(<Harness plan={moved} playing at={4} />);
+    });
+    await act(async () => {
+      runFrame();
+    });
+
+    assert.equal(made.length, 1, "the element was kept");
+    assert.equal(bed.currentTime, 3.7, `the element still reads ${bed.currentTime}s for a window that now starts at 0.3s`);
+  });
+
+  it("asks again after a refused play rather than leaving the clip silent", async () => {
+    const container = dom.document.createElement("div");
+    let root: Root;
+    await act(async () => {
+      root = createRoot(container as unknown as HTMLElement);
+      root.render(<Harness plan={bedPlan()} playing at={1} />);
+    });
+    const bed = () => made[0]!;
+    // The first request is refused, as a transient autoplay interruption refuses it.
+    await act(async () => {
+      made[0]!.refuse = true;
+      runFrame();
+    });
+    assert.equal(bed().plays, 1);
+    assert.equal(bed().paused, true, "the element never started");
+
+    // The interruption passes. Nothing about the plan changed, so nothing else will retry.
+    bed().refuse = false;
+    context().currentTime = 1;
+    await act(async () => {
+      runFrame();
+    });
+    assert.equal(bed().plays, 2, "the loop asked again");
+    assert.equal(bed().paused, false, "and the clip is playing");
   });
 
   it("keeps the same element when the clip it plays is moved along the lane", async () => {

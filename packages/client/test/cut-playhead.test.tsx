@@ -11,7 +11,7 @@ import {
   type ClientState,
 } from "@arke-studio/contracts";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { CutScreen, followPlayhead, rulerTicks } from "../src/screens/production.js";
+import { CutScreen, LANE_GUTTER_PX, followPlayhead, rulerTicks } from "../src/screens/production.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 /**
@@ -276,15 +276,15 @@ describe("the canvas pages after the playhead", () => {
 
   it("pages forward once the playhead reaches the trailing margin", () => {
     const view = canvas(400);
-    // The view covers 400–1200; the margin is 56, so 1150 is inside it.
+    // The view covers 400–1200; the trailing margin is 56, so 1150 is inside it.
     followPlayhead({ offsetLeft: 1150 }, view);
-    assert.equal(view.scrollLeft, 1150 - 56, "the playhead lands a margin in from the left edge");
+    assert.equal(view.scrollLeft, 1150 - (LANE_GUTTER_PX + 56), "the playhead lands a margin clear of the gutter");
   });
 
   it("pages back when the playhead is behind the view, as a seek can leave it", () => {
     const view = canvas(2000);
     followPlayhead({ offsetLeft: 300 }, view);
-    assert.equal(view.scrollLeft, 300 - 56);
+    assert.equal(view.scrollLeft, 300 - (LANE_GUTTER_PX + 56));
   });
 
   it("clamps at the top of the film rather than scrolling negative", () => {
@@ -294,10 +294,33 @@ describe("the canvas pages after the playhead", () => {
   });
 
   it("shrinks the margin on a canvas too narrow to afford it", () => {
-    // A 120px viewport cannot give 56px at each end and still show anything between them.
+    // 120px leaves 32px beside the gutter, which cannot give 56 at each end of it.
     const view = canvas(0, 120, 3200);
     followPlayhead({ offsetLeft: 200 }, view);
-    assert.equal(view.scrollLeft, 200 - 30);
+    assert.equal(view.scrollLeft, 200 - (LANE_GUTTER_PX + 8));
+  });
+
+  /**
+   * The lane labels are sticky and opaque, so the leftmost visible pixel of the timeline is the
+   * gutter's right edge and not the canvas's (Codex review). A page that measured its margin from
+   * the canvas put the playhead underneath the labels and left it there, because the next frame
+   * found the margin satisfied — the feature silently did the opposite of its name.
+   */
+  it("never pages the playhead underneath the sticky gutter", () => {
+    for (const clientWidth of [200, 400, 800, 1600]) {
+      for (const offsetLeft of [0, 90, 200, 1500, 3000, 3199]) {
+        const view = canvas(1200, clientWidth, 3200);
+        followPlayhead({ offsetLeft }, view);
+        const seen = offsetLeft - view.scrollLeft;
+        // At the very top of the film the canvas cannot scroll left any further; everywhere
+        // else the line has to end up past the gutter.
+        if (view.scrollLeft === 0 && offsetLeft < LANE_GUTTER_PX) continue;
+        assert.ok(
+          seen >= LANE_GUTTER_PX,
+          `${offsetLeft}px in a ${clientWidth}px canvas came to rest ${seen}px from the edge, under the ${LANE_GUTTER_PX}px gutter`,
+        );
+      }
+    }
   });
 });
 

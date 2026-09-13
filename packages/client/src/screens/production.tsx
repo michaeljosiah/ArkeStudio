@@ -5255,7 +5255,7 @@ function ClipLanes({
  * measured across the canvas. The ruler, the playhead and `.fy-track__label` have to agree on it
  * or the times printed are not the times drawn, so it is stated once and shared.
  */
-const LANE_GUTTER_PX = 88;
+export const LANE_GUTTER_PX = 88;
 
 /** Where the playhead sits for a fraction of the film, in the one expression all of them use. */
 function lanePosition(fraction: number): string {
@@ -5417,6 +5417,12 @@ const FOLLOW_MARGIN_PX = 56;
  * A page, not a glide. Pinning the playhead mid-canvas slides the whole timeline under somebody
  * trying to read a clip, which is worse than an occasional jump — and a jump is what every
  * editor that offers both defaults to.
+ *
+ * The leading margin clears the gutter, and that is not a detail (Codex review). The lane labels
+ * are sticky and opaque, so on a scrolled canvas the leftmost thing a person can actually see is
+ * the gutter's right edge, not the canvas's. A margin measured from the canvas paged the playhead
+ * to a position underneath the labels — and left it there, because the next frame found the
+ * margin satisfied and the line stayed hidden until it ran off the other end.
  */
 export function followPlayhead(
   // Structural, and not `HTMLElement`: these four numbers are the whole of what the decision
@@ -5426,9 +5432,12 @@ export function followPlayhead(
 ): void {
   if (canvas.scrollWidth <= canvas.clientWidth) return;
   const at = line.offsetLeft;
-  const margin = Math.min(FOLLOW_MARGIN_PX, canvas.clientWidth / 4);
-  if (at >= canvas.scrollLeft + margin && at <= canvas.scrollLeft + canvas.clientWidth - margin) return;
-  canvas.scrollLeft = Math.max(0, at - margin);
+  // What is left once the gutter has taken its share; a margin at each end of the rest.
+  const visible = Math.max(0, canvas.clientWidth - LANE_GUTTER_PX);
+  const margin = Math.min(FOLLOW_MARGIN_PX, visible / 4);
+  const lead = LANE_GUTTER_PX + margin;
+  if (at >= canvas.scrollLeft + lead && at <= canvas.scrollLeft + canvas.clientWidth - margin) return;
+  canvas.scrollLeft = Math.max(0, at - lead);
 }
 
 /**

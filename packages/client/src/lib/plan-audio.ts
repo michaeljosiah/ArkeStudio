@@ -22,6 +22,8 @@ interface Voice {
   gainAt: number;
   /** When this voice left its window, for the release below; null while it is inside one. */
   releasedAt: number | null;
+  /** When `play()` was last asked for, so a rejected one is retried and not retried every frame. */
+  playedAt: number;
 }
 
 /** Linear gain for a dB figure, the same conversion the FFmpeg expression performs. */
@@ -50,6 +52,14 @@ const DRIFT_SEC = 0.5;
 const RAMP_SEC = 0.008;
 /** Five time constants: near enough to silence that pausing the element there is inaudible. */
 const RELEASE_SEC = RAMP_SEC * 5;
+
+/** A rejected `play()` is retried, but not on every frame — `playback-engine.ts`'s interval. */
+const PLAY_RETRY_SEC = 0.5;
+
+/** Film seconds to source seconds for an item: the mapping a retained voice is playing under. */
+function sourceOffset(item: Pick<RenderAudioItem, "startSec" | "sourceInSec">): number {
+  return item.sourceInSec - item.startSec;
+}
 
 export function usePlanAudio(opts: {
   plan: RenderPlan | null;
@@ -118,6 +128,16 @@ export function usePlanAudio(opts: {
     for (const [key, item] of wanted) {
       const existing = graph.get(key);
       if (existing !== undefined) {
+        /*
+         * A retained voice whose window moved is re-seeked, not left to drift.
+         *
+         * Keeping the element across a move is what stops the file being refetched, but the
+         * element is still playing the old mapping from film seconds to source seconds, and the
+         * loop only corrects past half a second. An edit smaller than that — which is most of
+         * them — would leave the monitor quietly playing the wrong part of the file until
+         * playback stopped. Asking for the activation seek again costs one seek and no reload.
+         */
+        if (sourceOffset(existing.item) !== sourceOffset(item)) existing.started = false;
         existing.item = item;
         continue;
       }
@@ -131,7 +151,7 @@ export function usePlanAudio(opts: {
       gain.gain.value = 0;
       source.connect(gain);
       gain.connect(guard);
-      graph.set(key, { element, source, gain, item, started: false, gainAt: 0, releasedAt: null });
+      graph.set(key, { element, source, gain, item, started: false, gainAt: 0, releasedAt: null, playedAt: 0 });
     }
   }, [plan, urlFor]);
 
@@ -190,10 +210,24 @@ export function usePlanAudio(opts: {
         const target = itemSourceSec(item, at);
         if (!voice.started) {
           if (Math.abs(element.currentTime - target) > ACTIVATION_TOLERANCE_SEC) element.currentTime = target;
-          void element.play().catch(() => {});
           voice.started = true;
-        } else if (Math.abs(element.currentTime - target) > DRIFT_SEC) {
-          element.currentTime = target;
+          voice.playedAt = ctx.currentTime;
+          void element.play().catch(() => {});
+          continue;
+        }
+        if (Math.abs(element.currentTime - target) > DRIFT_SEC) element.currentTime = target;
+        /*
+         * A rejected `play()` is asked again.
+         *
+         * `started` says the voice has been told to play, not that it is playing: the promise can
+         * reject on a transient media or autoplay interruption, and the element stays paused. The
+         * churn this loop used to suffer retried it by accident every quarter second; now that the
+         * loop survives a render, a single rejection would leave that clip silent for the rest of
+         * the session. The video path has always retried on an interval, and this is that.
+         */
+        if (element.paused && ctx.currentTime - voice.playedAt > PLAY_RETRY_SEC) {
+          voice.playedAt = ctx.currentTime;
+          void element.play().catch(() => {});
         }
       }
       frame = requestAnimationFrame(tick);
