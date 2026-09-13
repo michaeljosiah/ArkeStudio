@@ -39,10 +39,10 @@ docs/system/
 docs/example/
 
 # The specification set and the design record it rests on. These live in the private
-# document set beside vision and scope (OneDrive: 04_AI_Projects/Arke Worlds/arke-studio-specs);
-# the paths below are junctions into it, so every relative link in CLAUDE.md, AGENTS.md and
-# the specs themselves still resolves locally. The code stays open under AGPL; the design
-# reasoning behind it does not, because that is the part a reader cannot derive from source.
+# document set, a sibling git repository (github.com/michaeljosiah/arke-studio-specs) that
+# nothing links into a checkout. The paths stay ignored so that a stray copy at the old
+# locations can never be committed. The code stays open under AGPL; the design reasoning
+# behind it does not, because that is the part a reader cannot derive from source.
 docs/specification.md
 docs/specifications/
 docs/decisions/

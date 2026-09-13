@@ -15,15 +15,15 @@ Start with the root [AGENTS.md](../../AGENTS.md) and shared [operational rules](
 ## How to interpret the documents
 
 Some of these are **not published with the code** — they are the design record rather than an
-explanation of the built product, and they live in the private document set. On a machine that
-holds it they are junctioned back to the paths below, so links to them resolve; in a clone of this
-repository alone, the paths are simply absent. See
-[CLAUDE.md](../../CLAUDE.md#the-specs-are-not-in-this-repository) for how a checkout is linked.
+explanation of the built product, and they live in the private document set, a sibling git
+repository beside the main checkout. Nothing links it into a checkout: the paths below are where
+they used to be and are simply absent now; the documents are read from that repository and cited
+by id. See [CLAUDE.md](../../CLAUDE.md#the-specs-are-not-in-this-repository).
 
 | Collection | Role |
 |---|---|
-| `docs/specification.md`, `docs/specifications/` | *Private.* Product intent, requirements and capability-specific decisions. Check implementation/status notes before assuming a requirement is delivered. |
-| `docs/decisions/` | *Private.* Decisions spanning capabilities. Accepted, Proposed and Superseded matter; a decision can accept only a bounded part of a design. |
+| `specification.md`, `specifications/` (private repository) | *Private.* Product intent, requirements and capability-specific decisions. Check implementation/status notes before assuming a requirement is delivered. |
+| `decisions/` (private repository) | *Private.* Decisions spanning capabilities. Accepted, Proposed and Superseded matter; a decision can accept only a bounded part of a design. |
 | `docs/architecture/` | Explanations derived from source for a broad audience, including persistence, acceptance and generation. Public — it describes what is built. The one exception is `character-audio-foundation.md`, integration and recovery notes for a half-built subsystem, which is private. |
 | `docs/development/` | Current implementation entry points, test selection and maintenance instructions. |
 | `docs/system/`, `docs/features/`, `design-system/` | Product explanations, feature briefs and design references. A prototype affordance does not establish implementation. |
