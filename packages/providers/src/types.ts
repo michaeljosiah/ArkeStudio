@@ -183,14 +183,16 @@ export class ProviderBusyError extends Error {
    * Without it the queue cannot tell this from a call that vanished mid-flight, and a cloud
    * client with no idempotency key is held for the person to reconcile instead of retried on
    * backoff (codex on PR 1153). A full card names no status and leaves it unset; so does a 5xx,
-   * because a response alone does not prove paid work was rejected.
+   * because a response alone does not prove paid work was rejected. `declare`, not a field: a
+   * class field is defined as `undefined` on every instance, and the ComfyUI client's test reads
+   * the marker's absence with `in`, as the queue's own uncertainty branch could.
    */
-  readonly submissionRejected?: true;
+  declare readonly submissionRejected?: true;
 
   constructor(message: string, options: { witnessed?: boolean } = {}) {
     super(message);
     this.name = "ProviderBusyError";
-    if (options.witnessed === true) this.submissionRejected = true;
+    if (options.witnessed === true) Object.defineProperty(this, "submissionRejected", { value: true, enumerable: true });
   }
 }
 
