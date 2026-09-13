@@ -26,7 +26,7 @@ const FILE_TOOLS: DynamicFunction[] = [
   { type: "function", name: "read", description: "Read a file in this session. PNG, JPEG, GIF and WebP return actual image content. Text reads may use offset and limit.", inputSchema: schema({ path: string, offset: { type: "integer", minimum: 0 }, limit: { type: "integer", minimum: 1, maximum: MAX_TEXT } }, ["path"]) },
   { type: "function", name: "list", description: "List one directory in this session. Links are excluded.", inputSchema: schema({ path: string }, []) },
   { type: "function", name: "search", description: "Find literal text inside this session's text files. No shell or regular expressions. Results include file names and line numbers.", inputSchema: schema({ query: string, path: string, limit: { type: "integer", minimum: 1, maximum: 100 } }, ["query"]) },
-  { type: "function", name: "write", description: "Write a UTF-8 file inside this session. Creates parent directories. Only proposal files may be changed.", inputSchema: schema({ path: string, content: string }, ["path", "content"]) },
+  { type: "function", name: "write", description: "Write a UTF-8 text file inside this session. Creates parent directories. Refuses replacement of binary files. Only proposal files may be changed.", inputSchema: schema({ path: string, content: string }, ["path", "content"]) },
   { type: "function", name: "edit", description: "Replace exactly one matching passage inside a session's UTF-8 text file. Refuses binary files and zero or multiple matches.", inputSchema: schema({ path: string, oldText: string, newText: string }, ["path", "oldText", "newText"]) },
 ];
 const INTENTS = { read: "read", list: "list", search: "search", write: "edit", edit: "edit" } as const;
@@ -86,6 +86,11 @@ function imageType(bytes: Buffer): string | null {
   if (bytes.subarray(0, 6).toString() === "GIF87a" || bytes.subarray(0, 6).toString() === "GIF89a") return "image/gif";
   if (bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP") return "image/webp";
   return null;
+}
+function requireTextFile(bytes: Buffer): void {
+  // Text-only mutations must not decode or replace binary assets. Invalid UTF-8
+  // would otherwise introduce replacement characters, and some image headers are ASCII.
+  if (bytes.includes(0) || !isUtf8(bytes) || imageType(bytes)) throw new Error("Only UTF-8 text files can be edited or replaced.");
 }
 function validatePng(bytes: Buffer): void {
   // A signature alone accepted a corrupt PNG in the real protocol smoke: Codex replaced its
@@ -186,13 +191,15 @@ async function executeFileTool(session: ToolSession, files: ConfinedFiles, name:
   const raw = argument(args, "path"); let content: string;
   if (name === "edit") {
     const bytes = await files.read(raw);
-    // Decoding arbitrary bytes replaces invalid sequences and would corrupt the rest of
-    // an asset even when the requested passage matches. Validate before any mutation.
-    if (bytes.includes(0) || !isUtf8(bytes) || imageType(bytes)) throw new Error("Only UTF-8 text files can be edited.");
+    requireTextFile(bytes);
     const original = bytes.toString("utf8"); const old = argument(args, "oldText");
     if (!old || original.indexOf(old) < 0 || original.indexOf(old) !== original.lastIndexOf(old)) throw new Error("Edit needs exactly one matching passage.");
     content = original.replace(old, () => argument(args, "newText"));
-  } else content = argument(args, "content");
+  } else {
+    content = argument(args, "content");
+    const existing = await files.readExistingForWrite(raw);
+    if (existing !== null) requireTextFile(existing);
+  }
   signal.throwIfAborted(); await files.write(raw, content);
   return { result: textResult(`Updated ${basename(raw)}.`), summary: `edited ${basename(raw)}` };
 }

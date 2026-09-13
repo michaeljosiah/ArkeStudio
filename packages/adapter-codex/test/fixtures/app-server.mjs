@@ -35,9 +35,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   } else if (method === 'thread/archive') result(id, {});
   else if (method === 'turn/start') {
     const thread = threads.get(params.threadId); thread.turn = `turn-${++sequence}`;
-    if (['timeout-once', 'reject-once', 'recovery-init-fails', 'recovery-exits-after-init'].includes(scenario) && !recovered) {
+    if (['timeout-once', 'announced-timeout-once', 'reject-once', 'recovery-init-fails', 'recovery-exits-after-init'].includes(scenario) && !recovered) {
       writeFileSync(process.env.ARKE_CODEX_TEST_STATE, 'uncertain turn was attempted');
-      if (scenario !== 'timeout-once') write({ id, error: { code: -1, message: 'scripted turn rejection' } });
+      if (scenario === 'announced-timeout-once') {
+        notify('turn/started', { threadId: thread.id, turn: { id: thread.turn } });
+        notify('item/agentMessage/delta', { threadId: thread.id, turnId: thread.turn, itemId: 'early-answer', delta: 'announced before acknowledgment' });
+      } else if (scenario !== 'timeout-once') write({ id, error: { code: -1, message: 'scripted turn rejection' } });
       return;
     }
     const base = { threadId: thread.id, turnId: thread.turn };

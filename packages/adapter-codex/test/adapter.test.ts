@@ -12,7 +12,8 @@ import { CodexAdapter, codexCredentialEnv, confinedConfig, type CodexAdapterOpti
 async function fixture(scenario = "normal", overrides: Partial<CodexAdapterOptions> = {}) {
   const root = await mkdtemp(join(tmpdir(), "arke-codex-adapter-")); const log = join(root, "rpc.jsonl");
   const adapter = new CodexAdapter({ command: process.execPath, args: [fileURLToPath(new URL("./fixtures/app-server.mjs", import.meta.url))],
-    env: { ...process.env, ARKE_CODEX_TEST_CASE: scenario, ARKE_CODEX_TEST_LOG: log, ARKE_CODEX_TEST_STATE: join(root, "restart-state") }, requestTimeoutMs: 2000, ...overrides });
+    // Ordinary requests need scheduling headroom beside the suite's native helper processes.
+    env: { ...process.env, ARKE_CODEX_TEST_CASE: scenario, ARKE_CODEX_TEST_LOG: log, ARKE_CODEX_TEST_STATE: join(root, "restart-state") }, requestTimeoutMs: 10_000, ...overrides });
   const events: HarnessEvent[] = []; const abort = new AbortController();
   const drain = (async () => { for await (const event of adapter.streamEvents(abort.signal)) events.push(event); })();
   await adapter.init();
@@ -133,10 +134,45 @@ test("interruption stops the model turn, and concurrent turns cannot displace th
   const f = await fixture("hang"); t.after(f.cleanup);
   const session = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
   const send = f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "wait" }] });
-  const rejected = assert.rejects(send, /cancelled/); await delay(30);
+  const rejected = assert.rejects(send, /cancelled/);
+  // This fixture answers in request order; a later catalog reply proves start was acknowledged.
+  await f.adapter.listModels();
   await assert.rejects(f.adapter.sendMessage({ sessionId: session.sessionId, parts: [{ type: "text", text: "second" }] }), /already running/);
   await f.adapter.interrupt(session.sessionId); await rejected;
   assert.ok((await f.requests()).some(request => request.method === "turn/interrupt"));
+});
+
+for (const scenario of ["timeout-once", "announced-timeout-once"]) for (const dispatch of ["sendMessage", "dispatchAsync"] as const) test(`${scenario} ${dispatch}: Stop retires an unanswered turn/start immediately without replay`, async t => {
+  let spawns = 0; let originalExited = () => false;
+  const f = await fixture(scenario, {
+    requestTimeoutMs: 30_000,
+    onSpawn: async child => { if (++spawns === 1) originalExited = () => child.exitCode !== null || child.signalCode !== null; },
+    killProcess: async child => {
+      if (child.exitCode === null && child.signalCode === null) { const closed = once(child, "close"); child.kill("SIGKILL"); await closed; }
+    },
+  }); t.after(f.cleanup);
+  const old = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  const pending = assert.rejects(f.adapter[dispatch]({ sessionId: old.sessionId, parts: [{ type: "text", text: "cancel pending start" }] }), /cancelled/);
+  await eventually(async () => (await f.requests()).some(request => request.method === "turn/start"));
+  if (scenario === "announced-timeout-once") {
+    await eventually(() => f.events.some(event => event.type === "message.delta" && event.sessionId === old.sessionId && event.text === "announced before acknowledgment"));
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.all([f.adapter.interrupt(old.sessionId), pending]),
+      new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error("Stop waited for the 30-second turn/start deadline")), 5000); }),
+    ]);
+  } finally { if (timer) clearTimeout(timer); }
+  assert.equal(originalExited(), true, "the uncertain generating process must stop before interruption resolves");
+  assert.equal(f.events.filter(event => event.type === "session.ended" && event.sessionId === old.sessionId && event.reason === "cancelled").length, 1);
+  assert.equal(f.events.some(event => event.type === "message.completed" && event.sessionId === old.sessionId), false);
+  await eventually(() => spawns === 2 && f.adapter.readiness().ready);
+  await assert.rejects(f.adapter.sendMessage({ sessionId: old.sessionId, parts: [{ type: "text", text: "stale session" }] }), /Unknown Codex session/);
+  const fresh = await f.adapter.createSession({ cwd: f.root, purpose: "ask" });
+  await f.adapter.sendMessage({ sessionId: fresh.sessionId, parts: [{ type: "text", text: "explicit new work" }] });
+  assert.deepEqual((await f.requests()).filter(request => request.method === "turn/start").map(request => request.params.input[0].text), ["cancel pending start", "explicit new work"]);
+  assert.equal(spawns, 2);
 });
 
 for (const scenario of ["substitute", "instructions"]) test(`unexpected ${scenario} is refused and thread archived`, async t => {
@@ -200,6 +236,7 @@ for (const scenario of ["timeout-once", "reject-once"]) test(`${scenario}: recov
   const gate = new Promise<void>(resolve => { release = resolve; });
   const cleaning = new Promise<void>(resolve => { cleanupStarted = resolve; });
   const f = await fixture(scenario, {
+    requestTimeoutMs: 2000,
     onSpawn: async () => { spawns++; },
     killProcess: async child => {
       if (++kills === 1) { cleanupStarted(); await gate; }

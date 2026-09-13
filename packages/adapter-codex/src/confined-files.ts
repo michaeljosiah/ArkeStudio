@@ -199,9 +199,29 @@ export class ConfinedFiles {
     return this.broker ? path : `/proc/self/fd/${this.directories.get(dirname(path))!.fd}/${basename(path)}`;
   }
   async read(raw: string, limit = MAX_FILE): Promise<Buffer> {
-    const path = await this.leaf(raw);
-    if (this.broker) return Buffer.from(String((await this.broker.request("read", path, { limit })).data), "base64");
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const result = await this.readPinned(await this.leaf(raw), limit, false);
+    if (result === null) throw new ConfinementError();
+    return result;
+  }
+  /** Inspect existing bytes before a proposed text write, preserving nested new-file support. */
+  async readExistingForWrite(raw: string): Promise<Buffer | null> {
+    return this.readPinned(await this.leaf(raw, true), MAX_FILE, true);
+  }
+  private async readPinned(path: string, limit: number, missing: boolean): Promise<Buffer | null> {
+    if (this.broker) {
+      const result = await this.broker.request("read", path, { limit, missing });
+      if (missing && result.missing === true) return null;
+      if (typeof result.data !== "string") throw new ConfinementError();
+      return Buffer.from(result.data, "base64");
+    }
+    let handle: FileHandle;
+    try { handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+    catch (error) {
+      // The parent is already pinned. Only an absent final component permits creation;
+      // denied access, symlinks and other failed opens must never become "new file".
+      if (missing && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
     try {
       const stat = await handle.stat();
       if (!stat.isFile() || stat.nlink !== 1) throw new ConfinementError();

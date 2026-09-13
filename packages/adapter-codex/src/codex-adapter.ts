@@ -65,6 +65,7 @@ class EventQueue {
 }
 interface Turn {
   id: string | null;
+  startPending: boolean;
   correlationId: string;
   items: Map<string, string>;
   phases: Map<string, string>;
@@ -288,10 +289,11 @@ export class CodexAdapter implements HarnessAdapter {
     let settle!: (error?: Error) => void;
     const settled = new Promise<void>((resolve, reject) => { settle = error => error ? reject(error) : resolve(); });
     settled.catch(() => {});
-    const turn: Turn = { id: null, correlationId, items: new Map(), phases: new Map(), settled, settle, abort: new AbortController(), cancelled: false };
+    const turn: Turn = { id: null, startPending: true, correlationId, items: new Map(), phases: new Map(), settled, settle, abort: new AbortController(), cancelled: false };
     session.turn = turn;
     try {
       const response = object(await rpc.request("turn/start", { threadId: session.threadId, input: input.parts.map(part => ({ type: "text", text: part.text })), environments: [] }));
+      turn.startPending = false;
       const id = object(response.turn).id;
       if (typeof id !== "string" || (turn.id !== null && turn.id !== id)) throw new Error("Codex returned an invalid turn identity.");
       turn.id = id;
@@ -301,6 +303,7 @@ export class CodexAdapter implements HarnessAdapter {
       // An uncertain turn/start may already be generating. Stopping our process is the only
       // bounded cancellation available when the server never returned a turn identity.
       await rpc.dispose();
+      if (turn.cancelled) throw new Error("Codex turn cancelled.");
       throw error;
     }
     return { receipt: { sessionId: session.id, correlationId }, turn };
@@ -419,8 +422,15 @@ export class CodexAdapter implements HarnessAdapter {
   async interrupt(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId); const turn = session?.turn; if (!session || !turn) return;
     turn.cancelled = true; turn.abort.abort();
-    if (turn.id === null) return;
     const rpc = this.connection();
+    if (turn.startPending) {
+      // Even turn/started can precede an unanswered turn/start request. Retire that
+      // uncertain transport now so Stop cannot leave generation running until timeout.
+      this.finish(session, "cancelled");
+      await rpc.dispose();
+      return;
+    }
+    if (turn.id === null) return;
     try { await rpc.request("turn/interrupt", { threadId: session.threadId, turnId: turn.id }); }
     catch { this.finish(session, "error", "Codex could not confirm cancellation."); await rpc.dispose(); throw new Error("Codex could not confirm cancellation."); }
     if (session.turn === turn) this.finish(session, "cancelled");

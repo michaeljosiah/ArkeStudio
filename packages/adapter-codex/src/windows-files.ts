@@ -136,8 +136,9 @@ try {
     }
     return $pins[$path].info
   }
-  function FileHandle([string]$path) {
-    $h = OpenRelative $pins[[IO.Path]::GetDirectoryName($path)].handle ([IO.Path]::GetFileName($path)) 2148532224 1 1 0x00200060 $false
+  function FileHandle([string]$path, [bool]$missing) {
+    $h = OpenRelative $pins[[IO.Path]::GetDirectoryName($path)].handle ([IO.Path]::GetFileName($path)) 2148532224 1 1 0x00200060 $missing
+    if ($h -eq [IntPtr]::Zero) { return $h }
     try { $info = Info $h; if ($info.directory -or $info.links -ne 1) { Fail } }
     catch { [void]$k::CloseHandle($h); throw }
     return $h
@@ -186,21 +187,25 @@ try {
       }
       elseif ($r.op -eq 'read') {
         $null = Pin ([IO.Path]::GetDirectoryName($path)) $false
-        $h = FileHandle $path
-        $safe = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($h, $true)
-        $stream = [IO.FileStream]::new($safe, [IO.FileAccess]::Read)
-        try {
-          if ($stream.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
-          $memory = [IO.MemoryStream]::new()
+        $h = FileHandle $path ([bool]$r.missing)
+        if ($h -eq [IntPtr]::Zero) { $result = @{ missing = $true } }
+        else {
+          $safe = [Microsoft.Win32.SafeHandles.SafeFileHandle]::new($h, $true)
+          $stream = $null
           try {
-            $buffer = [byte[]]::new(65536)
-            while (($n = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, [int]$r.limit + 1 - [int]$memory.Length))) -gt 0) {
-              $memory.Write($buffer, 0, $n)
-              if ($memory.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
-            }
-            $result = @{ data = [Convert]::ToBase64String($memory.ToArray()) }
-          } finally { $memory.Dispose() }
-        } finally { $stream.Dispose(); $safe.Dispose() }
+            $stream = [IO.FileStream]::new($safe, [IO.FileAccess]::Read)
+            if ($stream.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
+            $memory = [IO.MemoryStream]::new()
+            try {
+              $buffer = [byte[]]::new(65536)
+              while (($n = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, [int]$r.limit + 1 - [int]$memory.Length))) -gt 0) {
+                $memory.Write($buffer, 0, $n)
+                if ($memory.Length -gt [int]$r.limit) { throw 'This file exceeds the session read limit.' }
+              }
+              $result = @{ data = [Convert]::ToBase64String($memory.ToArray()) }
+            } finally { $memory.Dispose() }
+          } finally { if ($stream) { $stream.Dispose() }; $safe.Dispose() }
+        }
       }
       elseif ($r.op -eq 'write') {
         $parent = [IO.Path]::GetDirectoryName($path)
