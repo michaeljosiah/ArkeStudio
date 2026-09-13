@@ -83,6 +83,32 @@ async function answer(command: Extract<ClientMessage, { kind: "production-setup"
 }
 
 describe("production setup interaction (issue #976)", () => {
+  it("offers the running harness catalog and can reset a removed explicit model (#1123)", async () => {
+    const state = fixture(draft());
+    state.app.health.harness = { status: "healthy" };
+    state.app.harnessInfo = { generation: "claude", source: "path", version: "2.0.0", beta: false };
+    state.app.harnessModelStatus = { status: "ready" };
+    state.app.harnessModels = [{ provider: "anthropic", id: "opus[1m]", displayName: "Opus" }];
+    const m = await mount(state);
+    assert.ok(m.sent.some(message => message.kind === "list-harness-models"));
+    const picker = m.container.querySelector<HTMLSelectElement>(".fy-production-setup__model select")!;
+    assert.ok([...picker.options].some(option => option.value === "anthropic/opus[1m]"));
+    await act(async () => {
+      Object.defineProperty(picker, "value", { configurable: true, value: "anthropic/opus[1m]" });
+      picker.dispatchEvent(new dom.Event("change", { bubbles: true }));
+    });
+    await act(async () => __setStateForTest({
+      ...state, app: { ...state.app, harnessModels: [], harnessModelStatus: { status: "error", reason: "Discovery failed." } },
+    }));
+    assert.match(m.container.textContent!, /anthropic\/opus\[1m\] · unavailable/);
+    assert.equal(picker.disabled, false);
+    await act(async () => {
+      Object.defineProperty(picker, "value", { configurable: true, value: "" });
+      picker.dispatchEvent(new dom.Event("change", { bubbles: true }));
+    });
+    assert.doesNotMatch(m.container.textContent!, /anthropic\/opus\[1m\] · unavailable/);
+  });
+
   it("offers Stop for a live turn and Retry and Review after interruption (#1030)", async () => {
     const m = await mount();
     await answer(m.commands()[0]!, draft());

@@ -1,5 +1,6 @@
 import { createServer, type Server, type ServerResponse } from "node:http";
 import { once } from "node:events";
+import type { WireModel } from "../../src/model-metadata.js";
 
 /**
  * A scripted OpenCode v2 stand-in serving the measured 0.0.0-next-17444 surface: Basic-auth
@@ -39,7 +40,7 @@ export class StubOpenCodeV2 {
   private healthAnswered = false;
   /** The location echoed on session create; null echoes the requested one honestly. */
   echoLocation: string | null = null;
-  models: Array<{ id: string; providerID: string; name?: string; limit?: { context?: number; input?: number } }> = [];
+  models: WireModel[] = [];
   defaultModel: { id: string; providerID: string } | null = null;
   /** The integration catalog GET /api/integration serves — raw wire rows, scripted per test. */
   integrations: unknown[] = [];

@@ -1,0 +1,287 @@
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { describe, it } from "node:test";
+import {
+  agentForPurpose, type ClientMessage, type CreateSessionInput, type DomainEvent,
+  type HarnessAdapter, type ModelInfo, type SessionConfigInput,
+} from "@arke-studio/contracts";
+import { Coordinator } from "../../src/coordinator.js";
+import { FsWorldProvider } from "../../src/world/provider.js";
+import { setProductionModel } from "../../src/productions/ops.js";
+import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
+import { until } from "../wait.js";
+
+const MODELS: ModelInfo[] = [
+  { provider: "anthropic", id: "sonnet", aliases: ["claude-sonnet-5"], displayName: "Sonnet", inputTokenLimit: 200_000 },
+  { provider: "anthropic", id: "opus[1m]", displayName: "Opus", inputModalities: ["text", "image"] },
+  { provider: "openai", id: "spark", displayName: "Spark", inputModalities: ["text"] },
+  { provider: "custom-provider", id: "region/model:fast", displayName: "Custom model" },
+];
+const CHAT = "anthropic/sonnet";
+const STAGE = "anthropic/opus[1m]";
+const TEXT = "openai/spark";
+const CUSTOM = "custom-provider/region/model:fast";
+
+/** Capture the real coordinator preparation boundary, then stop before any generation. */
+class CaptureAdapter implements HarnessAdapter {
+  readonly id = "model-routing-test";
+  ready = true;
+  revision = 0;
+  initCalls = 0;
+  disposeCalls = 0;
+  initError: Error | undefined;
+  list: () => Promise<ModelInfo[]> = async () => MODELS;
+  readonly preparations = new Map<string, SessionConfigInput>();
+  readonly sessions: Array<{ agent?: string; config: SessionConfigInput }> = [];
+  capabilities() { return new Set(["models", "events"] as const); }
+  readiness() { return { ready: this.ready, ...(this.ready ? {} : { reason: "not initialized" }) }; }
+  lifecycleRevision() { return this.revision; }
+  async init() {
+    this.initCalls++;
+    if (this.initError) throw this.initError;
+    this.ready = true;
+  }
+  async dispose() { this.disposeCalls++; this.ready = false; }
+  async listModels() { return this.list(); }
+  prepareSession(input: SessionConfigInput) { this.preparations.set(input.preparationId!, input); }
+  abandonSessionPreparation(id: string) { this.preparations.delete(id); }
+  async createSession(input: CreateSessionInput): Promise<{ sessionId: string }> {
+    const config = this.preparations.get(input.preparationId!);
+    assert.ok(config, "every session receives its own captured preparation");
+    this.sessions.push({ agent: input.agent, config: structuredClone(config) });
+    throw new Error("Test captured preparation; no generation was started.");
+  }
+  async sendMessage(): Promise<never> { throw new Error("unexpected generation"); }
+  async dispatchAsync(): Promise<never> { throw new Error("unexpected generation"); }
+  async *streamEvents() {}
+}
+
+async function fixture(options: {
+  adapter?: CaptureAdapter;
+  agents?: Record<string, { model?: string; brief?: string }>;
+  production?: string;
+} = {}) {
+  const { root, worldDir } = await makeTempRoot();
+  if (options.agents) await writeFile(join(root, "settings.json"), JSON.stringify({ agents: options.agents }), "utf8");
+  const provider = new FsWorldProvider(root);
+  await provider.loadWorld(WORLD_ID);
+  if (options.production) await setProductionModel(provider.openStore()!, "saltlight", "llm", options.production);
+  const adapter = options.adapter ?? new CaptureAdapter();
+  const events: DomainEvent[] = [];
+  const coordinator = new Coordinator({
+    provider, adapter, appRoot: root, appVersion: "test", authoring: { agentForPurpose },
+    changeLogPath: join(root, "changes.jsonl"), observeEvent: event => events.push(event),
+  });
+  await coordinator.start(0);
+  const send = (message: ClientMessage) => (coordinator as unknown as {
+    handleClientMessage(message: ClientMessage): Promise<void>;
+  }).handleClientMessage(message);
+  const close = async () => { await coordinator.stop(); await provider.close(); };
+  const settings = async () => JSON.parse(await readFile(join(root, "settings.json"), "utf8")) as { agents?: Record<string, { model?: string; brief?: string }> };
+  const chat = async (modelId?: string) => {
+    await send({ kind: "world-chat-create", worldId: WORLD_ID, requestId: randomUUID(), title: "Model routing",
+      entryContext: { kind: "production", productionId: "saltlight" } });
+    const conversationId = coordinator.getState().worldChat!.conversationId;
+    await send({ kind: "world-chat-send", worldId: WORLD_ID, requestId: randomUUID(), conversationId,
+      text: "Explain the current production.", attachmentIds: [], ...(modelId ? { modelId } : {}) });
+    return adapter.sessions.filter(session => session.agent === "world-builder").at(-1);
+  };
+  const stage = async () => {
+    const scene = provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.scenes.find(scene => scene.id === "sc_04")!;
+    const requestId = randomUUID();
+    await send({ kind: "stage-construct", worldId: WORLD_ID, productionId: "saltlight", sceneId: scene.id,
+      shotId: "sh_12", baseVersion: scene.version, requestId, instruction: "Frame the scene.", preserve: "none" });
+    await until(() => events.some(event => event.type === "stage.construction" && event.requestId === requestId && event.status === "failed"), "Stage's terminal test result");
+    return events.findLast(event => event.type === "stage.construction" && event.requestId === requestId);
+  };
+  return { root, worldDir, coordinator, adapter, provider, events, send, settings, chat, stage, close };
+}
+
+describe("coordinator harness/model routing (#1122)", () => {
+  it("initializes an owned adapter without an OpenCode supervisor and disposes it on shutdown", async () => {
+    const adapter = new CaptureAdapter();
+    adapter.ready = false;
+    const test = await fixture({ adapter });
+    try {
+      await until(() => test.coordinator.getState().app.health.harness.status === "healthy", "independent harness initialization");
+      assert.equal(adapter.initCalls, 1);
+      await test.send({ kind: "list-harness-models" });
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, MODELS);
+      adapter.ready = false;
+      await until(() => test.coordinator.getState().app.health.harness.status === "unavailable", "owned harness process failure");
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "idle", "process failure invalidates the retained catalog");
+      adapter.list = async () => [MODELS[1]!];
+      adapter.ready = true;
+      await until(() => test.coordinator.getState().app.harnessModels.length === 1, "automatic catalog refresh after readiness recovers");
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, [MODELS[1]!]);
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
+    } finally { await test.close(); }
+    assert.equal(adapter.disposeCalls, 1);
+  });
+
+  it("publishes catalog loading, metadata, failure, and recovery rather than disguising errors as empty", async () => {
+    const test = await fixture();
+    try {
+      let resolve!: (models: ModelInfo[]) => void;
+      test.adapter.list = () => new Promise(done => { resolve = done; });
+      const pending = test.send({ kind: "list-harness-models" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "catalog loading");
+      resolve(MODELS);
+      await pending;
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, MODELS);
+      test.adapter.list = async () => { throw new Error("Sign in to the harness, then retry."); };
+      await test.send({ kind: "list-harness-models" });
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "error");
+      assert.match(test.coordinator.getState().app.harnessModelStatus.reason ?? "", /retry models/i);
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, MODELS, "saved choices still have names during an outage");
+      test.adapter.list = async () => [];
+      await test.send({ kind: "list-harness-models" });
+      assert.deepEqual(test.coordinator.getState().app.harnessModelStatus, { status: "ready" });
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, []);
+    } finally { await test.close(); }
+  });
+
+  it("automatically refreshes the displayed catalog when an owned process recovers between health polls", async () => {
+    const test = await fixture();
+    try {
+      await until(() => test.coordinator.getState().app.health.harness.status === "healthy", "owned harness readiness");
+      await test.send({ kind: "list-harness-models" });
+      assert.equal(test.coordinator.getState().app.harnessModelStatus.status, "ready");
+      let resolve!: (models: ModelInfo[]) => void;
+      test.adapter.list = () => new Promise(done => { resolve = done; });
+      test.adapter.revision++;
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "automatic replacement catalog discovery");
+      assert.equal(test.coordinator.getState().app.health.harness.status, "healthy");
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, MODELS, "old names remain visible while being reverified");
+      resolve([MODELS[1]!]);
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "ready", "replacement catalog publication without a user command");
+      assert.deepEqual(test.coordinator.getState().app.harnessModels, [MODELS[1]!]);
+    } finally { await test.close(); }
+  });
+
+  it("validates new choices against the live catalog, preserves briefs, and permits clearing during an outage", async () => {
+    const test = await fixture();
+    try {
+      await test.send({ kind: "set-agent-config", agent: "world-builder", model: "anthropic/claude-sonnet-5", brief: "A deliberate chat brief." });
+      assert.deepEqual((await test.settings()).agents?.["world-builder"], { model: CHAT, brief: "A deliberate chat brief." });
+      await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: CUSTOM });
+      assert.equal(test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.models?.llm, CUSTOM);
+      await test.send({ kind: "set-agent-config", agent: "world-builder", model: "missing/model" });
+      assert.equal((await test.settings()).agents?.["world-builder"]?.model, CHAT);
+      await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: "missing/model" });
+      assert.equal(test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.models?.llm, CUSTOM);
+      assert.equal(test.events.filter(event => event.type === "command.failed").length, 2);
+      test.adapter.list = async () => { throw new Error("catalog offline"); };
+      await test.send({ kind: "list-harness-models" });
+      await test.send({ kind: "set-agent-config", agent: "world-builder", model: null });
+      await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: null });
+      assert.deepEqual((await test.settings()).agents?.["world-builder"], { brief: "A deliberate chat brief." });
+      assert.equal(test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.models?.llm, undefined);
+    } finally { await test.close(); }
+  });
+
+  it("captures turn, agent, production, and default precedence in real chat session preparation", async () => {
+    const test = await fixture({ production: TEXT, agents: { "world-builder": { model: CHAT, brief: "Chat brief." } } });
+    try {
+      assert.equal((await test.chat())?.config.model, CHAT);
+      assert.equal((await test.chat(CUSTOM))?.config.model, CUSTOM);
+      await test.send({ kind: "set-agent-config", agent: "world-builder", model: null });
+      assert.equal((await test.chat())?.config.model, TEXT);
+      await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: null });
+      assert.equal((await test.chat())?.config.model, undefined);
+      assert.equal(test.adapter.sessions.filter(session => session.agent === "world-builder").length, 4);
+      assert.equal(test.adapter.sessions.find(session => session.agent === "world-builder")?.config.agents?.["world-builder"]?.brief, "Chat brief.");
+      const count = test.adapter.sessions.filter(session => session.agent === "world-builder").length;
+      await test.chat("missing/model");
+      assert.equal(test.adapter.sessions.filter(session => session.agent === "world-builder").length, count, "a bad explicit choice must not fall through to a runnable default");
+      assert.ok(test.coordinator.getState().worldChat?.lastFailure, "the refusal stays visible in the conversation");
+    } finally { await test.close(); }
+  });
+
+  for (const oldModel of [CHAT, "missing/model"]) {
+    it(`keeps later agent clears and brief edits after validating ${oldModel}`, async () => {
+      const test = await fixture({ agents: { "world-builder": { model: TEXT } } });
+      try {
+        let resolve!: (models: ModelInfo[]) => void;
+        test.adapter.list = () => new Promise(done => { resolve = done; });
+        const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: oldModel, brief: "Old brief" });
+        await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent validation");
+        const otherAgent = test.send({ kind: "set-agent-config", agent: "stage-designer", model: STAGE });
+        await test.send({ kind: "set-agent-config", agent: "world-builder", model: null, brief: "Latest brief" });
+        assert.deepEqual((await test.settings()).agents?.["world-builder"], { brief: "Latest brief" }, "clear does not wait for model discovery");
+        resolve(MODELS);
+        await Promise.all([oldChoice, otherAgent]);
+        assert.deepEqual((await test.settings()).agents?.["world-builder"], { brief: "Latest brief" });
+        assert.equal((await test.settings()).agents?.["stage-designer"]?.model, STAGE, "another agent has an independent choice");
+        assert.equal(test.events.filter(event => event.type === "command.failed").length, 0, "a superseded invalid choice must not report a stale failure");
+      } finally { await test.close(); }
+    });
+  }
+
+  it("supersedes agent fields independently while model discovery is pending", async () => {
+    const test = await fixture();
+    try {
+      let resolve!: (models: ModelInfo[]) => void;
+      test.adapter.list = () => new Promise(done => { resolve = done; });
+      const oldChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CHAT, brief: "Keep this brief" });
+      await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed agent choice");
+      const latestChoice = test.send({ kind: "set-agent-config", agent: "world-builder", model: CUSTOM });
+      const stageChoice = test.send({ kind: "set-agent-config", agent: "stage-designer", model: STAGE, brief: "Old Stage brief" });
+      await test.send({ kind: "set-agent-config", agent: "stage-designer", brief: "Latest Stage brief" });
+      resolve(MODELS);
+      await Promise.all([oldChoice, latestChoice, stageChoice]);
+      assert.deepEqual((await test.settings()).agents?.["world-builder"], { model: CUSTOM, brief: "Keep this brief" });
+      assert.deepEqual((await test.settings()).agents?.["stage-designer"], { model: STAGE, brief: "Latest Stage brief" });
+    } finally { await test.close(); }
+  });
+
+  for (const latestModel of [null, CUSTOM]) {
+    it(`keeps a later production ${latestModel === null ? "clear" : "choice"} after delayed model validation`, async () => {
+      const test = await fixture({ production: TEXT });
+      try {
+        let resolve!: (models: ModelInfo[]) => void;
+        test.adapter.list = () => new Promise(done => { resolve = done; });
+        const oldChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: CHAT });
+        await until(() => test.coordinator.getState().app.harnessModelStatus.status === "loading", "delayed production validation");
+        const latestChoice = test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "llm", modelId: latestModel });
+        if (latestModel === null) {
+          await latestChoice;
+          assert.equal(test.provider.openStore()!.getBundle().productions.find(production => production.meta.id === "saltlight")!.meta.models?.llm, undefined, "clear completes during discovery");
+        }
+        await test.send({ kind: "set-production-model", worldId: WORLD_ID, productionId: "saltlight", capability: "image", modelId: "image/independent" });
+        resolve(MODELS);
+        await Promise.all([oldChoice, latestChoice]);
+        const models = JSON.parse(await readFile(join(test.worldDir, "productions", "saltlight", "production.json"), "utf8")).models;
+        assert.equal(models.llm, latestModel ?? undefined);
+        assert.equal(models.image, "image/independent", "other capabilities are not superseded by a language model choice");
+      } finally { await test.close(); }
+    });
+  }
+
+  it("runs Stage with its image-capable override even when the production uses a text-only model", async () => {
+    const test = await fixture({ production: TEXT, agents: { "stage-designer": { model: STAGE, brief: "Stage brief." } } });
+    try {
+      await test.stage();
+      const stage = test.adapter.sessions.find(session => session.agent === "stage-designer");
+      assert.ok(stage, "Stage passed model admission and reached prepared session creation");
+      assert.equal(stage.config.model, STAGE);
+      assert.deepEqual(stage.config.agents?.["stage-designer"], { model: STAGE, brief: "Stage brief." });
+      assert.equal(stage.config.researchWeb, false);
+    } finally { await test.close(); }
+  });
+
+  it("refuses a saved text-only Stage override instead of using the compatible production fallback", async () => {
+    const test = await fixture({ production: STAGE, agents: { "stage-designer": { model: TEXT } } });
+    try {
+      const event = await test.stage();
+      assert.ok(event?.type === "stage.construction");
+      assert.match(event.detail ?? "", /cannot read images/);
+      assert.equal(test.adapter.sessions.length, 0);
+      await test.send({ kind: "set-agent-config", agent: "stage-designer", model: TEXT });
+      assert.ok(test.events.some(event => event.type === "command.failed" && /cannot read images/.test(event.reason)));
+    } finally { await test.close(); }
+  });
+});

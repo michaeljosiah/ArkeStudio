@@ -5,11 +5,12 @@ import {
   type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
+import { listHarnessModels, openWorldChat, send, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
 import { ConversationTranscript, languageChoiceReason } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
 import { Button } from "../components/ui.js";
+import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
 export function ProductionSetupScreen() {
@@ -28,11 +29,15 @@ export function ProductionSetupScreen() {
   const [modelId, setModelId] = useState("");
   const pendingRef = useRef<{ requestId: string; operation: string } | null>(null);
   const opened = useRef<string | null>(null);
-  const models = state?.app.manifest?.models.filter(model => model.capability === "llm") ?? [];
-  const unavailable = languageChoiceReason(state, modelId || undefined, models.find(model => model.id === modelId));
+  const inheritedModel = state?.app.agents.find(agent => agent.name === "world-builder")?.model;
+  const unavailable = languageChoiceReason(state, modelId || inheritedModel);
   const progress = useWorldChatProgress(setupId ?? undefined, workspace?.runStartedAt ?? null);
   const running = workspace?.runStatus === "running" || pending === "send" || pending === "retry";
   const locked = setup?.status === "creating" || setup?.status === "created";
+
+  useEffect(() => {
+    if (state?.app.health.harness.status === "healthy") listHarnessModels();
+  }, [state?.app.health.harness.status, state?.app.harnessInfo?.generation]);
 
   function command(action: ProductionSetupCommand["action"]) {
     if (!worldId || !setupId) return;
@@ -112,11 +117,12 @@ export function ProductionSetupScreen() {
                 <p>We’ll shape it here, with {world?.meta.name ?? "your world"} around us.</p></div>} />
           </div>
           <div className="fy-production-setup__composer">
-            {models.length > 0 && <label className="fy-production-setup__model">Writing model
+            <label className="fy-production-setup__model">Writing model
               <select value={modelId} onChange={event => setModelId(event.target.value)} disabled={running}>
                 <option value="">Configured writing model</option>
-                {models.map(model => <option key={model.id} value={model.id}>{model.displayName}</option>)}
-              </select></label>}
+                <HarnessModelOptions state={state} selected={modelId || undefined} />
+              </select></label>
+            <HarnessModelStatus state={state} />
             <Composer value={message} onChange={setMessage} placeholder="Tell Arke what you have in mind…"
               onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}) })}
               agentLabel="Arke" busy={running} autoFocus

@@ -9,6 +9,7 @@ import {
   type HarnessAdapter,
   type HarnessCapability,
   type HarnessEvent,
+  type ModelInfo,
   type Readiness,
   type SendMessageInput,
   type SendReceipt,
@@ -18,6 +19,7 @@ import {
 import { createNormalizeState, normalizeClaude, type NormalizeState } from "./normalize.js";
 import { resolveRoot } from "./path-confinement.js";
 import { decideTool, type ToolDecision } from "./tool-intents.js";
+import { normalizeClaudeModels, type DiscoverClaudeModels } from "./model-discovery.js";
 
 /**
  * The Claude Code harness adapter (SPEC-005 §1.4, §17).
@@ -55,6 +57,8 @@ export interface ClaudeAdapterOptions {
   onTrace?: (line: Record<string, unknown>) => void;
   /** Seam for tests: the SDK's `query`. */
   runQuery?: RunQuery;
+  /** SDK initialization-only discovery, injected independently from generation. */
+  discoverModels?: DiscoverClaudeModels;
 }
 
 /** The slice of the Agent SDK this adapter uses. Narrow on purpose — it is the whole coupling. */
@@ -165,17 +169,29 @@ export class ClaudeAdapter implements HarnessAdapter {
   private ready: Readiness = { ready: false, reason: "not initialised" };
   /** Prepared settings keyed by an opaque one-use token, never by a reusable directory. */
   private readonly pending = new Map<string, SessionConfigInput>();
+  private readonly discoveries = new Set<AbortController>();
 
   constructor(private readonly opts: ClaudeAdapterOptions) {}
 
   /**
-   * `events` only. Not `permissions`: this adapter refuses an unrecognised tool rather than
+   * Not `permissions`: this adapter refuses an unrecognised tool rather than
    * asking, so there is never a decision for a host to relay — see `tool-intents.ts` for why,
    * and note that declaring the gap is the honest half of it (SPEC-005 R-2, R-4).
-   * Not `models` either: the model is the user's Claude Code default and we do not choose it.
+   * Discovery is declared only when the host supplied its SDK implementation.
    */
   capabilities(): ReadonlySet<HarnessCapability> {
-    return new Set<HarnessCapability>(["events"]);
+    return new Set<HarnessCapability>(["events", ...(this.opts.discoverModels ? ["models" as const] : [])]);
+  }
+
+  async listModels(): Promise<ModelInfo[]> {
+    if (!this.opts.discoverModels) throw new Error("Claude model discovery is not configured");
+    const abort = new AbortController();
+    this.discoveries.add(abort);
+    try {
+      return normalizeClaudeModels(await this.opts.discoverModels({ command: this.opts.command, signal: abort.signal }));
+    } finally {
+      this.discoveries.delete(abort);
+    }
   }
 
   /**
@@ -187,7 +203,10 @@ export class ClaudeAdapter implements HarnessAdapter {
    * misconfiguration, which is what let it go unnoticed.
    */
   prepareSession(input: SessionConfigInput): void {
-    if (input.preparationId !== undefined) this.pending.set(input.preparationId, input);
+    if (input.preparationId !== undefined) {
+      if (this.pending.has(input.preparationId)) throw new Error("session preparation token is already in use");
+      this.pending.set(input.preparationId, structuredClone(input));
+    }
   }
 
   abandonSessionPreparation(preparationId: string): void {
@@ -214,13 +233,16 @@ export class ClaudeAdapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
+    input.signal?.throwIfAborted();
     const prepared = input.preparationId === undefined ? {} : this.pending.get(input.preparationId);
     if (input.preparationId !== undefined) this.pending.delete(input.preparationId);
     if (prepared === undefined) throw new Error("session preparation is missing or was already consumed");
     const agentName = input.agent ?? "sheet-editor";
     const member = ROSTER.find((a) => a.name === agentName);
     if (!member) throw new Error(`no roster agent named ${agentName}`);
-    const override = this.opts.agents?.[agentName];
+    // A prepared map is a settings snapshot: an absent entry there means the user cleared it,
+    // not permission to resurrect a constructor default from before that change.
+    const override = (prepared.agents ?? this.opts.agents)?.[agentName];
     const requestedModel = prepared.model ?? override?.model;
     if (requestedModel !== undefined && !requestedModel.startsWith("anthropic/")) {
       throw new Error(`${requestedModel} is not available through Claude Code`);
@@ -268,7 +290,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       // No `this.opts` fallback: there is no constructor option for it, and inventing an
       // affirmative default is exactly the mistake a default-off privacy setting exists to avoid.
       confinement: confinementFor(member, { web: prepared.researchWeb === true }),
-      worldQueryUrl: this.opts.worldQueryUrl ?? prepared.worldQueryUrl,
+      worldQueryUrl: input.preparationId !== undefined ? prepared.worldQueryUrl : this.opts.worldQueryUrl,
       model: requestedModel?.slice("anthropic/".length),
       systemPrompt: agentPromptFor({
         ...member,
@@ -282,6 +304,7 @@ export class ClaudeAdapter implements HarnessAdapter {
       started: false,
       turn: null,
     };
+    input.signal?.throwIfAborted();
     this.sessions.set(session.id, session);
     this.emit({ type: "session.created", sessionId: session.id });
     return { sessionId: session.id };
@@ -462,6 +485,9 @@ export class ClaudeAdapter implements HarnessAdapter {
 
   /** Stops what this adapter started, and nothing it did not (SPEC-005 R-3). */
   async dispose(): Promise<void> {
+    for (const discovery of this.discoveries) discovery.abort();
+    this.discoveries.clear();
+    this.pending.clear();
     for (const session of this.sessions.values()) {
       session.abort.abort();
       session.inbox.close();

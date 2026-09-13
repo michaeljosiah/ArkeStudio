@@ -130,6 +130,42 @@ it("holds the card for an async harness turn, reports its wait, and lets an expl
   } finally { generation(); finish?.(); gpu.stop(); stop.abort(); await observe; await adapter.dispose!(); }
 });
 
+it("sends repeated default-model Claude turns without discovery or waiting for the graphics card", async () => {
+  const gpu = new LocalGpu(async () => {});
+  const generation = await gpu.acquire("ComfyUI", new AbortController().signal);
+  let discoveries = 0;
+  const sent: string[] = [];
+  const raw: HarnessAdapter = {
+    id: "claude", capabilities: () => new Set(["models"]), readiness: () => ({ ready: true }),
+    listModels: async () => { discoveries++; throw new Error("Discovery is unavailable"); },
+    createSession: async () => ({ sessionId: "default-claude" }),
+    sendMessage: async input => {
+      sent.push(input.sessionId);
+      return { sessionId: input.sessionId, correlationId: "test" };
+    },
+    dispatchAsync: async () => { throw new Error("sendMessage owns completion"); },
+    streamEvents: () => ({ async *[Symbol.asyncIterator]() {} }),
+  };
+  const adapter = withLocalGpu(raw, gpu);
+  let turns: Promise<void> | undefined;
+  try {
+    const session = await adapter.createSession({ purpose: "ask" });
+    turns = (async () => {
+      await adapter.sendMessage({ sessionId: session.sessionId, parts: [] });
+      await adapter.sendMessage({ sessionId: session.sessionId, parts: [] });
+    })();
+    void turns.catch(() => {});
+    await until(() => sent.length === 2, "Claude turns pass while ComfyUI still holds the GPU");
+    await turns;
+    assert.equal(discoveries, 0);
+    assert.deepEqual(sent, [session.sessionId, session.sessionId]);
+  } finally {
+    generation(); gpu.stop();
+    await turns?.catch(() => {});
+    await adapter.dispose!();
+  }
+});
+
 it("keeps pending recovery reservations alive when cancellation is not acknowledged", async () => {
   for (const held of [false, true]) {
     const dir = await tempDir("arke-gpu-recovery-cancel-");

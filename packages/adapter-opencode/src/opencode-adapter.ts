@@ -22,6 +22,7 @@ import { createNormalizeState, normalizeOpenCode, type NormalizeState } from "./
 import { assessV1Permission, buildSessionConfig } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "./permission-policy.js";
 import { parseSse } from "./sse.js";
+import { modelEnabled, modelMetadata, type WireModel } from "./model-metadata.js";
 
 /**
  * The live OpenCode adapter (SPEC-005). Drives the probed /api surface with legacy fallbacks,
@@ -366,40 +367,44 @@ export class OpenCodeAdapter implements HarnessAdapter {
    * one provider's own gateway catalogue — 24 models, 17 of them marked deprecated — so the
    * picker showed a long list of models the user had never heard of while omitting the
    * providers they had actually signed in to. It stays as a fallback for servers with no
-   * `/config/providers`, with deprecated rows dropped.
+   * `/config/providers`, with disabled and deprecated rows dropped. An empty configured list
+   * or a credential failure is authoritative; neither can fall back to a global catalog.
    */
   async listModels(): Promise<ModelInfo[]> {
     try {
       const res = await this.http.req<{
-        providers?: Array<{ id: string; models?: Record<string, { name?: string }> }>;
+        providers?: Array<{ id: string; models?: Record<string, WireModel> }>;
         default?: Record<string, string>;
-      }>("GET", "/config/providers");
+      }>("GET", "/config/providers", undefined, { signal: AbortSignal.timeout(15_000) });
+      if (!Array.isArray(res?.providers)) throw new Error("OpenCode returned an invalid provider catalog");
       const out: ModelInfo[] = [];
       for (const provider of res.providers ?? []) {
         const preferred = res.default?.[provider.id];
         for (const [id, model] of Object.entries(provider.models ?? {})) {
+          if (!id || !provider.id || !modelEnabled(model)) continue;
           out.push({
             id,
             provider: provider.id,
-            ...(model.name ? { displayName: model.name } : {}),
+            ...modelMetadata(model),
             // What this provider would pick if we did not: worth putting first in its group.
             ...(id === preferred ? { isDefault: true } : {}),
           });
         }
       }
-      if (out.length > 0) return out;
-      throw new Error("no providers configured");
-    } catch {
+      return out;
+    } catch (error) {
+      if (!(error instanceof OpenCodeError) || ![404, 405, 501].includes(error.status)) throw error;
       const res = await this.http.req<{
-        data?: Array<{ id?: string; providerID?: string; name?: string; status?: string }>;
-      }>("GET", "/api/model");
-      const rows = Array.isArray(res.data) ? res.data : [];
+        data?: WireModel[];
+      }>("GET", "/api/model", undefined, { signal: AbortSignal.timeout(15_000) });
+      if (!Array.isArray(res?.data)) throw new Error("OpenCode returned an invalid model catalog");
+      const rows = res.data;
       return rows
-        .filter((m) => m.id && m.status !== "deprecated")
+        .filter((m) => m.id && m.providerID && modelEnabled(m))
         .map((m) => ({
           id: m.id!,
-          provider: m.providerID ?? "unknown",
-          ...(m.name ? { displayName: m.name } : {}),
+          provider: m.providerID!,
+          ...modelMetadata(m),
         }));
     }
   }

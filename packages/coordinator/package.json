@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@arke-studio/adapter-claude": "*",
+    "@arke-studio/adapter-codex": "*",
     "@arke-studio/adapter-opencode": "*",
     "@arke-studio/contracts": "*",
     "@arke-studio/providers": "*",

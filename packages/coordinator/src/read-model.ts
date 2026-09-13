@@ -51,6 +51,7 @@ export class ReadModel {
         drift: [],
         agents: [],
         harnessModels: [],
+        harnessModelStatus: { status: "idle" },
         harnessInfo: null,
         queues: [],
         setup: null,
@@ -117,8 +118,11 @@ export class ReadModel {
     this.state = { ...this.state, app: { ...this.state.app, agents } };
   }
 
-  setHarnessModels(harnessModels: ClientState["app"]["harnessModels"]): void {
-    this.state = { ...this.state, app: { ...this.state.app, harnessModels } };
+  setHarnessModels(
+    harnessModels: ClientState["app"]["harnessModels"],
+    harnessModelStatus: ClientState["app"]["harnessModelStatus"] = { status: "ready" },
+  ): void {
+    this.state = { ...this.state, app: { ...this.state.app, harnessModels, harnessModelStatus } };
   }
 
   getState(): ClientState {

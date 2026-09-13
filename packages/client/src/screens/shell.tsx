@@ -43,6 +43,8 @@ import {
   hostCanAttach,
   chooseClaudeExecutable,
   clearClaudeExecutable,
+  chooseCodexExecutable,
+  clearCodexExecutable,
   detectHarnesses,
   downloadUpdate,
   installUpdateAndRestart,
@@ -1912,24 +1914,37 @@ export function SettingsAppearanceScreen() {
  * independently, so this is the courtesy and not the guarantee.
  */
 export function SettingsHarnessScreen() {
-  const { state } = useStore();
+  const { state, connection } = useStore();
   const [searchParams, setSearchParams] = useSearchParams();
   const harness = state?.app.harness ?? null;
   const researchOn = state?.app.research.web === true;
+  const hasSnapshot = state !== null;
 
   useEffect(() => {
-    // Detection costs a subprocess, so it happens when the screen is opened rather than at boot.
-    if (!harness) detectHarnesses();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // A file page can mount before the transport opens. Its first discovery request would be
+    // dropped, so wait for the snapshot and ask again when an unfinished connection recovers.
+    if (connection === "open" && hasSnapshot && harness === null) detectHarnesses();
+  }, [connection, hasSnapshot, harness]);
 
   const harnesses = harness?.harnesses ?? [OPENCODE_AVAILABILITY];
   const engine = harness?.engine ?? "opencode";
+  const generation = state?.app.harnessInfo?.generation;
+  const runningEngine = generation === "claude" || generation === "codex"
+    ? generation
+    : generation === "v1" || generation === "v2" ? "opencode" : harness?.launchEngine ?? null;
+  const harnessHealth = state?.app.health.harness;
+  const activeStatus = harnessHealth?.status === "healthy" ? "running now"
+    : harnessHealth?.status === "starting" ? "starting" : "unavailable";
   const asked = searchParams.get("harness");
   const current = harnesses.some((h) => h.id === asked) ? asked! : (harnesses.find((h) => h.id === engine) ?? harnesses[0]!).id;
   const chosen = harnesses.find((h) => h.id === current) ?? harnesses[0]!;
 
   const [agentsOpen, setAgentsOpen] = useState(false);
+  const requestedAgent = searchParams.get("agent");
+  const focusAgent = state?.app.agents.some(agent => agent.name === requestedAgent) ? requestedAgent! : undefined;
+  useEffect(() => {
+    if (focusAgent !== undefined) setAgentsOpen(true);
+  }, [focusAgent]);
   return (
     <div data-screen="settings-harness" className="fy-set fy-set--runtime">
       <div className="fy-rt">
@@ -1943,17 +1958,36 @@ export function SettingsHarnessScreen() {
               className={cx("fy-rt__railitem", h.id === current && "is-current")}
               onClick={() => setSearchParams({ harness: h.id }, { replace: true })}
             >
-              <span className={cx("fy-set__dot", TONE_CLASS[h.id === engine ? "ok" : h.installed ? "idle" : "warn"])} />
+              <span className={cx("fy-set__dot", TONE_CLASS[h.id === runningEngine && activeStatus === "running now" ? "ok" : h.installed ? "idle" : "warn"])} />
               <span>{h.label}</span>
               <span style={{ flex: 1 }} />
               <span className="fy-rt__count">
-                {h.id === engine ? "in use" : h.installed ? "available" : "not here"}
+                {h.id === runningEngine ? activeStatus : h.id === engine ? "next restart" : h.installed ? "available" : "not here"}
               </span>
             </button>
           ))}
         </div>
         <div className="fy-rt__pane">
-          <HarnessPane harness={chosen} engine={engine} detected={harness !== null} claudePath={harness?.claudePath ?? null} />
+          {harness === null && (
+            <div className="fy-set__note" role="status">
+              {connection === "open" && hasSnapshot ? "Detecting available harnesses…" : "Connecting to detect available harnesses…"}
+            </div>
+          )}
+          <HarnessPane
+            harness={chosen}
+            engine={engine}
+            runningEngine={runningEngine}
+            health={harnessHealth}
+            detected={harness !== null}
+            canDetect={connection === "open" && hasSnapshot}
+            executablePath={chosen.id === "codex" ? harness?.codexPath ?? null : harness?.claudePath ?? null}
+          />
+          {harness?.launchOverride && (
+            <div className="fy-set__note" role="status">
+              ARKE_HARNESS selects {harnesses.find(h => h.id === harness.launchOverride)?.label ?? harness.launchOverride} at launch.
+              {" "}Clear the override to use the saved engine.
+            </div>
+          )}
           {/*
             The one thing the Studio does that leaves this machine, so it lives with the other
             question about what the agent may do rather than behind a provider key. Off until
@@ -2005,7 +2039,7 @@ export function SettingsHarnessScreen() {
             {agentsOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
             Advanced · which model runs each writing agent
           </button>
-          {agentsOpen && <AgentsPanel />}
+          {agentsOpen && <AgentsPanel focusAgent={focusAgent} />}
         </div>
       </div>
     </div>
@@ -2015,22 +2049,32 @@ export function SettingsHarnessScreen() {
 function HarnessPane({
   harness,
   engine,
+  runningEngine,
+  health,
   detected,
-  claudePath,
+  canDetect,
+  executablePath,
 }: {
   harness: HarnessAvailability;
   engine: HarnessEngine;
+  runningEngine: HarnessEngine | null;
+  health?: ComponentHealth;
   detected: boolean;
-  claudePath: string | null;
+  canDetect: boolean;
+  executablePath: string | null;
 }) {
-  const inUse = harness.id === engine;
+  const selected = harness.id === engine;
+  const active = harness.id === runningEngine;
+  const running = active && health?.status === "healthy";
+  const chooseExecutable = harness.id === "codex" ? chooseCodexExecutable : chooseClaudeExecutable;
+  const clearExecutable = harness.id === "codex" ? clearCodexExecutable : clearClaudeExecutable;
   return (
     <>
       <RuntimeHead
         title={harness.label}
         caps={harness.bundled ? "BUNDLED" : "YOUR INSTALLATION"}
-        tone={inUse ? "ok" : harness.installed ? "idle" : "warn"}
-        state={inUse ? "in use" : harness.installed ? "available" : "not here"}
+        tone={active && !running && health?.status !== "starting" ? "warn" : running ? "ok" : harness.installed ? "idle" : "warn"}
+        state={active ? running ? "running now" : health?.status === "starting" ? "starting" : "unavailable" : selected ? "next restart" : harness.installed ? "available" : "not here"}
       />
       <RuntimeSection label="ON THIS MACHINE" />
       <div className="fy-set__row">
@@ -2041,11 +2085,9 @@ function HarnessPane({
             {harness.blocked ?? (harness.version ? `version ${harness.version}` : "installed")}
           </div>
         </div>
-        {!harness.bundled && (
-          <Button variant="ghost" onClick={() => detectHarnesses()}>
-            Check again
-          </Button>
-        )}
+        <Button variant="ghost" disabled={!canDetect} onClick={() => detectHarnesses()}>
+          Check again
+        </Button>
       </div>
       {!harness.bundled && (
         <>
@@ -2053,22 +2095,22 @@ function HarnessPane({
           <div className="fy-set__row">
             <div className="fy-set__name fy-set__name--wide">
               <div className="fy-set__title">
-                {claudePath ?? (harness.source === "path" ? "Found on the system path" : "No file chosen")}
+                {executablePath ?? (harness.source === "path" ? "Found on the system path" : "No file chosen")}
               </div>
               <div className="fy-set__caps">
-                {claudePath
+                {executablePath
                   ? harness.installed
-                    ? "this file is what Arke Studio runs"
+                    ? "used when this harness starts"
                     : "this file did not answer"
                   : "choose a file if Arke Studio cannot find yours"}
               </div>
             </div>
-            {claudePath && (
-              <Button variant="ghost" onClick={() => clearClaudeExecutable()}>
+            {executablePath && (
+              <Button variant="ghost" onClick={() => clearExecutable()}>
                 Clear
               </Button>
             )}
-            <Button variant="secondary" onClick={() => chooseClaudeExecutable()}>
+            <Button variant="secondary" onClick={() => chooseExecutable()}>
               Choose…
             </Button>
           </div>
@@ -2077,21 +2119,25 @@ function HarnessPane({
       <RuntimeSection label="USE FOR AUTHORING" />
       <div className="fy-set__row">
         <div className="fy-set__name fy-set__name--wide">
-          <div className="fy-set__title">{inUse ? "Runs the authoring work" : "Not in use"}</div>
+          <div className="fy-set__title">
+            {active && !running ? health?.status === "starting" ? "Starting harness" : "Harness unavailable" : selected ? active ? "Runs the authoring work" : "Selected for the next restart" : running ? "Running until restart" : harness.installed ? "Available for authoring" : "Not available for authoring"}
+          </div>
           <div className="fy-set__caps">
-            {inUse
-              ? "takes effect on the next restart"
+            {active && !running
+              ? health?.reason ?? (health?.status === "starting" ? "starting the harness" : "the harness is unavailable")
+              : selected
+              ? running ? "new sessions use this harness" : "restart Arke Studio to switch"
               : harness.installed
                 ? "switching takes effect on the next restart"
                 : "unavailable until it is installed"}
           </div>
         </div>
         <Button
-          variant={inUse ? "secondary" : "primary"}
-          disabled={inUse || !harness.installed || !detected}
+          variant={selected ? "secondary" : "primary"}
+          disabled={selected || !harness.installed || !detected}
           onClick={() => setHarnessEngine(harness.id)}
         >
-          {inUse ? "In use" : "Use this"}
+          {selected ? "Selected" : "Use this"}
         </Button>
       </div>
     </>

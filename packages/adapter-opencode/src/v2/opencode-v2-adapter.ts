@@ -22,6 +22,7 @@ import {
 import { assessV2Permission, buildSessionConfigV2 } from "./config.js";
 import { PreparedSessionPolicies, type SessionPermissionPolicy } from "../permission-policy.js";
 import { parseSse } from "../sse.js";
+import { modelEnabled, modelMetadata, type WireModel } from "../model-metadata.js";
 import { OpenCodeV2Http, sameDirectory, wireDirectory } from "./http.js";
 import { OpenCodeError } from "../http.js";
 import { createNormalizeV2State, normalizeOpenCodeV2, type NormalizeV2State } from "./normalize.js";
@@ -467,32 +468,30 @@ export class OpenCodeV2Adapter implements HarnessAdapter {
    * empty list with a healthy server is a readiness reason, not an error.
    */
   async listModels(): Promise<ModelInfo[]> {
-    const rows = await this.http.reqData<
-      Array<{
-        id?: string;
-        providerID?: string;
-        name?: string;
-        disabled?: boolean;
-        limit?: { context?: number; input?: number };
-      }>
-    >("GET", "/api/model");
+    const rows = await this.http.reqData<WireModel[]>("GET", "/api/model", undefined, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!Array.isArray(rows)) throw new Error("OpenCode returned an invalid model catalog");
     let defaultKey: string | null = null;
     try {
-      const def = await this.http.reqData<{ id?: string; providerID?: string }>("GET", "/api/model/default");
+      const def = await this.http.reqData<{ id?: string; providerID?: string }>("GET", "/api/model/default", undefined, {
+        signal: AbortSignal.timeout(15_000),
+      });
       if (def?.id && def.providerID) defaultKey = `${def.providerID}/${def.id}`;
     } catch {
       /* a server with no resolvable default still has a catalog */
     }
     const out: ModelInfo[] = [];
-    for (const row of rows ?? []) {
-      if (!row.id || row.disabled === true) continue;
-      const key = `${row.providerID ?? "unknown"}/${row.id}`;
-      const window = row.limit?.input ?? row.limit?.context ?? null;
-      if (key === defaultKey && window !== null) this.lastKnownWindow = window;
+    this.lastKnownWindow = null;
+    for (const row of rows) {
+      if (!row.id || !row.providerID || !modelEnabled(row)) continue;
+      const key = `${row.providerID}/${row.id}`;
+      const metadata = modelMetadata(row);
+      if (key === defaultKey) this.lastKnownWindow = metadata.inputTokenLimit ?? null;
       out.push({
         id: row.id,
-        provider: row.providerID ?? "unknown",
-        ...(row.name ? { displayName: row.name } : {}),
+        provider: row.providerID,
+        ...metadata,
         ...(key === defaultKey ? { isDefault: true } : {}),
       });
     }

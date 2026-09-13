@@ -1,6 +1,8 @@
 import { referenceInputProblem } from "@arke-studio/contracts";
 import { LocalGpu, memoryWait, queueableLocalMemory } from "./local-ai/gpu.js";
 import { withLocalGpu } from "./harness/local-gpu.js";
+import { withModelValidation } from "./harness/model-validation.js";
+import { HarnessModelCatalog, selectHarnessModel, type LanguageModelSelection } from "./harness/model-catalog.js";
 import { prepareReferences } from "./media/prepare-references.js";
 import { stageConstructionHandoff } from "./world-chat/actions.js";
 import { handleProductionSetupCommand } from "./productions/setup-command.js";
@@ -47,6 +49,7 @@ import {
   type Capability,
   type ClientMessage,
   type HarnessAvailability,
+  type HarnessEngine,
   type ClientState,
   type DomainEvent,
   type HarnessAdapter,
@@ -76,7 +79,6 @@ import {
   comfyUiRecoveryDecision,
   estimateMicroUsd,
   modelEligible,
-  providerModelId,
   modelForCapability,
   gateLocalRuntimes,
   type EngineLocalities,
@@ -348,7 +350,7 @@ import {
   MIN_CLONE_SECONDS,
   wavSeconds,
 } from "./voice/library.js";
-import { atomicWriteFile } from "./world/atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "./world/atomic.js";
 import { BibleStaleError, readBible, restoreBible, saveBible } from "./world/bible.js";
 import { changesForEntity } from "./world/change-writer.js";
 import { classify, CommitPlanError, MEDIA_HAS_VIDEO_SCHEMA_VERSION } from "./world/commit.js";
@@ -748,7 +750,7 @@ export interface CoordinatorOptions {
    * into app state so Settings can name it (issue 327 §9, SPEC-005 R-1).
    */
   harnessInfo?: {
-    generation: "v2" | "v1" | "claude";
+    generation: "v2" | "v1" | "claude" | "codex";
     source: "configured" | "path" | "bundled";
     version: string | null;
     beta: boolean;
@@ -761,6 +763,10 @@ export interface CoordinatorOptions {
    * the shared store v1 silently leaned on is closed by design (issue 327 §2).
    */
   relaunchHarness?: (credentials: Record<string, string | undefined>) => Promise<void>;
+  harnessUnavailableReason?: string;
+  harnessEngineOverride?: import("@arke-studio/contracts").HarnessEngine;
+  /** The host's effective launch choice, even if discovery failed before producing metadata. */
+  harnessLaunchEngine?: HarnessEngine;
   /** Shared with provider-call capture so known credentials are scrubbed from owner-visible payloads. */
   secretRegistry?: SecretRegistry;
   providerCalls?: ProviderCallStore;
@@ -784,9 +790,10 @@ export interface CoordinatorOptions {
    * subscription, which is fine at launch when they have asked for the harness and wrong when
    * they have merely opened Settings.
    */
-  detectHarnesses?: (configuredPath: string | null) => Promise<HarnessAvailability[]>;
+  detectHarnesses?: (configuredPath: string | null, codexPath: string | null) => Promise<HarnessAvailability[]>;
   /** The host's native file dialog for pointing at a Claude Code PATH does not carry. */
   chooseClaudeExecutable?: () => Promise<string | null>;
+  chooseCodexExecutable?: () => Promise<string | null>;
   /**
    * The ComfyUI engine (SPEC-021): the service that discovers, supervises and verifies it,
    * plus the host's own directory pickers — selected paths go straight to settings and never
@@ -1753,62 +1760,57 @@ export class Coordinator {
     return resolve(purpose, model?.family, model?.id);
   }
 
-  /** Resolve a production's language choice exactly; absence preserves the harness default. */
+  private modelCatalogValue: HarnessModelCatalog | undefined;
+  private get modelCatalog(): HarnessModelCatalog {
+    return this.modelCatalogValue ??= new HarnessModelCatalog(this.opts.adapter, (models, status) => {
+      this.readModel.setHarnessModels(models, status);
+      if (this.started && !this.stopping) this.transport.broadcastSnapshot();
+    });
+  }
+
+  private async validateLanguageModel(modelId: string, needsImages = false): Promise<LanguageModelSelection> {
+    try {
+      return selectHarnessModel(modelId, await this.modelCatalog.get(), this.readModel.getState().app, needsImages);
+    } catch {
+      return { modelId, reason: "The running harness's models could not be verified. Retry models in Settings → Harness → Advanced or the production's Develop conversation." };
+    }
+  }
+
+  /** The winning choice alone is validated; a stale production default cannot mask an agent override. */
   private async languageModelFor(
     context: WorldChatContext | undefined,
     requestedId?: string,
-  ): Promise<{ modelId?: string; sessionModel?: string; reason?: string }> {
+    agent = "world-builder",
+  ): Promise<LanguageModelSelection> {
     const productionId = context && "productionId" in context ? context.productionId : undefined;
-    if (productionId === undefined && context?.kind !== "production-setup") {
-      return requestedId === undefined
-        ? {}
-        : { modelId: requestedId, reason: "A language model can only be chosen inside a production." };
+    if (requestedId !== undefined && productionId === undefined && context?.kind !== "production-setup") {
+      return { modelId: requestedId, reason: "A language model can only be chosen inside a production." };
     }
     const production = this.opts.provider
       .openStore?.()
       ?.getBundle()
       .productions.find((candidate) => candidate.meta.id === productionId);
-    const modelId = requestedId ?? production?.meta.models?.llm;
+    const modelId = requestedId ?? this.agentOverrides?.[agent]?.model ?? production?.meta.models?.llm;
     if (modelId === undefined) return {};
-    const model = this.opts.manifest?.models.find(
-      (candidate) => candidate.id === modelId && candidate.capability === "llm",
-    );
-    if (model === undefined) {
-      return { modelId, reason: `This production still names ${modelId}, which is no longer available.` };
-    }
-    const app = this.readModel.getState().app;
-    const local = PROVIDERS[model.provider].local === true;
-    if (
-      app.models.disabled.includes(model.id) ||
-      (local &&
-        !modelEligible(model, {
-          providers: app.providers,
-          disabled: app.models.disabled,
-          recipes: app.comfyui?.recipes ?? [],
-          comfyUiLocality: app.comfyui?.engine.locality,
-          gated: app.runtime?.models ?? [],
-        }))
-    ) {
-      return { modelId, reason: `${model.displayName} is unavailable and has not been replaced.` };
-    }
-    const adapter = this.opts.adapter;
-    if (adapter?.id === "claude" && model.provider !== "anthropic") {
-      return { modelId, reason: `${model.displayName} is not available through Claude Code.` };
-    }
-    if (adapter?.capabilities().has("models") && adapter.listModels) {
-      const available = await adapter.listModels().catch(() => []);
-      if (!available.some((candidate) => candidate.provider === model.provider && candidate.id === providerModelId(model))) {
-        return { modelId, reason: `${model.displayName} is not available through the current harness.` };
-      }
-    }
-    return {
-      modelId,
-      sessionModel: `${model.provider}/${providerModelId(model)}`,
-      ...(model.limits.maxContextTokens !== undefined ? { inputTokenLimit: model.limits.maxContextTokens } : {}),
-    };
+    return this.validateLanguageModel(modelId, agent === "stage-designer");
   }
   /** Per-agent model and brief overrides, as last read from settings. */
   private agentOverrides: Record<string, { model?: string; brief?: string }> | undefined;
+  private launchEngine: HarnessEngine | undefined;
+  private readonly validatedSettingChanges = new Map<string, symbol>();
+
+  /** A reset or later choice must outrank a selection still waiting for its catalog. */
+  private beginValidatedSettingChange(key: string) {
+    const token = Symbol();
+    this.validatedSettingChanges.set(key, token);
+    const current = () => this.validatedSettingChanges.get(key) === token && !this.stopping;
+    return {
+      current,
+      finish: () => {
+        if (this.validatedSettingChanges.get(key) === token) this.validatedSettingChanges.delete(key);
+      },
+    };
+  }
 
   /**
    * The model family the next authoring session drafts for (SPEC-019 R-16), cached the way the
@@ -1911,7 +1913,10 @@ export class Coordinator {
       await opts.dispatchClients?.[engine === "Ollama" ? "ollama" : "comfyui"]?.unload?.(signal);
       this.clearLocalResidency(engine === "Ollama" ? "ollama" : "comfyui");
     });
-    if (opts.adapter) opts.adapter = withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); });
+    if (opts.adapter) opts.adapter = withModelValidation(
+      withLocalGpu(opts.adapter, this.localGpu, () => { void this.refreshLocalResidency(); }),
+      (reference, needsImages) => this.validateLanguageModel(reference, needsImages),
+    );
     this.secrets = opts.secretRegistry ?? new SecretRegistry();
     this.readModel = new ReadModel(opts.appVersion);
     this.changeLog = new ChangeLog(opts.changeLogPath);
@@ -2727,6 +2732,7 @@ export class Coordinator {
       }
       try {
         await this.opts.relaunchHarness(credentials);
+        this.modelCatalogValue?.invalidate();
       } catch {
         /* best-effort by design; the harness's own readiness states the consequence */
       }
@@ -2748,6 +2754,8 @@ export class Coordinator {
         const adapter = this.opts.adapter;
         void adapter.init!()
           .then(() => {
+            if (this.stopping) return;
+            this.modelCatalogValue?.invalidate();
             const readiness = adapter.readiness();
             this.emit({
               at: new Date().toISOString(),
@@ -2846,7 +2854,7 @@ export class Coordinator {
     // The harness adapter's readiness is reflected once at start; a live adapter's own events
     // refine it later (SPEC-005). With no adapter the reason is stated, not silent (R-6).
     if (this.opts.adapter === null && !this.supervisors.has("harness")) {
-      this.readModel.setHealth("harness", { status: "unavailable", reason: "OpenCode is not configured" });
+      this.readModel.setHealth("harness", { status: "unavailable", reason: this.opts.harnessUnavailableReason ?? "The harness is not configured" });
     } else if (this.opts.adapter !== null) {
       const readiness = this.opts.adapter.readiness();
       this.readModel.setHealth(
@@ -2943,6 +2951,57 @@ export class Coordinator {
     await this.refreshHarnessEnv();
     for (const supervisor of this.supervisors.values()) {
       void supervisor.start();
+    }
+    // Stdio and SDK engines own their lifecycle; an unrelated OpenCode health event must
+    // never be the trigger that initializes them.
+    if (this.opts.adapter?.init && !this.supervisors.has("harness")) {
+      const ownAdapter = this.opts.adapter;
+      this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status: "starting" });
+      this.trackBackground(ownAdapter.init!().then(() => {
+        if (this.stopping) return;
+        const ready = ownAdapter.readiness();
+        this.modelCatalogValue?.invalidate();
+        this.emit({ at: this.nowIso(), type: "health.changed", component: "harness",
+          status: ready.ready ? "healthy" : "unavailable", ...(ready.reason ? { reason: ready.reason } : {}) });
+        if (ready.ready && this.modelCatalogValue) this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
+        if (ready.ready) void this.vendorAuth.refresh({ patient: true }).catch(() => {});
+      }).catch((error: unknown) => {
+        if (this.stopping) return;
+        this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status: "unavailable",
+          reason: `Harness startup failed: ${describeCoordinatorError(error)}` });
+      }));
+    }
+    if (this.opts.adapter && !this.supervisors.has("harness")) {
+      // Own-process failures do not travel through ChildSupervisor. Reflect them even when
+      // no authoring session happens to be listening to the adapter's event stream.
+      let previousReadiness = { ...this.opts.adapter.readiness() };
+      let previousRevision = this.opts.adapter.lifecycleRevision?.();
+      const healthTimer = setInterval(() => {
+        if (this.stopping) return;
+        const readiness = this.opts.adapter!.readiness();
+        const revision = this.opts.adapter!.lifecycleRevision?.();
+        const revisionChanged = previousRevision !== revision;
+        if (revisionChanged) {
+          previousRevision = revision;
+          this.modelCatalogValue?.invalidate();
+        }
+        if (this.readModel.getState().app.health.harness.status === "starting") return;
+        const status = readiness.ready ? "healthy" : "unavailable";
+        const readinessChanged = previousReadiness.ready !== readiness.ready || previousReadiness.reason !== readiness.reason;
+        if (readinessChanged) {
+          previousReadiness = { ...readiness };
+          this.emit({ at: this.nowIso(), type: "health.changed", component: "harness", status,
+            ...(readiness.reason ? { reason: readiness.reason } : {}) });
+          if (!readiness.ready) this.modelCatalogValue?.invalidate();
+        }
+        // Mounted pickers may observe healthy → healthy across a restart. Refresh the catalog
+        // here, where that lifecycle is known, rather than waiting for another UI command.
+        if (readiness.ready && this.modelCatalogValue && (revisionChanged || readinessChanged)) {
+          this.trackBackground(this.modelCatalogValue.get().catch(() => {}));
+        }
+      }, 1_000);
+      healthTimer.unref();
+      this.lifecycleTimers.add(healthTimer);
     }
 
     // The permission backstop pump (R-16, R-17): remembered grants answer silently; the rest
@@ -3395,6 +3454,12 @@ export class Coordinator {
     }
     const manifest = this.opts.manifest ?? null;
     const settings = this.appSettings ? await this.appSettings.load() : null;
+    // Capture this before commands can change the saved preference. Failed discovery has no
+    // harnessInfo, but Settings must still attach its health failure to the engine we tried.
+    const generation = this.opts.harnessInfo?.generation;
+    this.launchEngine = generation === "claude" || generation === "codex" ? generation
+      : generation === "v1" || generation === "v2" ? "opencode"
+      : this.opts.harnessLaunchEngine ?? this.opts.harnessEngineOverride ?? settings?.harness.engine ?? "opencode";
     // Read once here so the first session of the run already carries the user's choices —
     // not the second, after something happened to touch settings.
     this.agentOverrides = settings?.agents;
@@ -6826,30 +6891,36 @@ export class Coordinator {
       }
       case "set-agent-config": {
         if (!this.appSettings) return;
-        const settings = await this.appSettings.setAgent(msg.agent, {
-          ...(msg.model !== undefined ? { model: msg.model } : {}),
-          ...(msg.brief !== undefined ? { brief: msg.brief } : {}),
-        });
-        this.agentOverrides = settings.agents;
-        // Sessions already open keep the config they were started with; the next one picks
-        // this up. Said plainly in the UI rather than pretended away.
-        this.refreshAgents(settings.agents);
-        this.transport.broadcastSnapshot();
+        const modelChange = msg.model !== undefined
+          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "model"])) : undefined;
+        const briefChange = msg.brief !== undefined
+          ? this.beginValidatedSettingChange(JSON.stringify(["agent", msg.agent, "brief"])) : undefined;
+        try {
+          const selected = msg.model ? await this.validateLanguageModel(msg.model, msg.agent === "stage-designer") : undefined;
+          const applyModel = modelChange?.current();
+          const applyBrief = briefChange?.current();
+          if (!applyModel && !applyBrief) return;
+          if (applyModel && selected?.reason) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
+            return;
+          }
+          const settings = await this.appSettings.setAgent(msg.agent, {
+            ...(applyModel ? { model: selected?.sessionModel ?? msg.model } : {}),
+            ...(applyBrief ? { brief: msg.brief } : {}),
+          });
+          this.agentOverrides = settings.agents;
+          // Sessions already open keep the config they were started with; the next one picks
+          // this up. Said plainly in the UI rather than pretended away.
+          this.refreshAgents(settings.agents);
+          this.transport.broadcastSnapshot();
+        } finally {
+          modelChange?.finish();
+          briefChange?.finish();
+        }
         return;
       }
       case "list-harness-models": {
-        const list = this.opts.adapter?.listModels;
-        if (!list) return;
-        const models = await list.call(this.opts.adapter).catch(() => []);
-        this.readModel.setHarnessModels(
-          models.map((m) => ({
-            id: m.id,
-            provider: m.provider,
-            ...(m.displayName ? { displayName: m.displayName } : {}),
-            ...(m.isDefault ? { isDefault: true } : {}),
-          })),
-        );
-        this.transport.broadcastSnapshot();
+        await this.modelCatalog.get(true).catch(() => {});
         return;
       }
       case "set-spend-threshold": {
@@ -8296,17 +8367,32 @@ export class Coordinator {
       }
       case "set-production-model": {
         const store = this.opts.provider.openStore?.();
-        if (!store) return;
+        if (!store || store.worldId !== msg.worldId) return;
+        const change = this.beginValidatedSettingChange(JSON.stringify(["production", store.dir, msg.productionId, msg.capability]));
         try {
-          await setProductionModel(store, msg.productionId, msg.capability, msg.modelId);
+          const selected = msg.capability === "llm" && msg.modelId
+            ? await this.validateLanguageModel(msg.modelId) : undefined;
+          if (!change.current() || !this.stillOpen(store)) return;
+          if (selected?.reason) {
+            this.emit({ at: this.nowIso(), type: "command.failed", command: msg.kind, requestId: null, reason: selected.reason });
+            return;
+          }
+          // Capabilities share one file. Queue the short read/commit, not catalog discovery,
+          // so a clear can land immediately and independent capability edits cannot collide.
+          await serializeFileMutation(join(store.dir, "productions", msg.productionId, "production.json"), async () => {
+            if (!change.current() || !this.stillOpen(store)) return;
+            await setProductionModel(store, msg.productionId, msg.capability, selected?.sessionModel ?? msg.modelId);
+          });
         } catch (err) {
           void this.appLog?.append({
             kind: "production-edit.refused",
             reason: err instanceof Error ? err.message : String(err),
             detail: { productionId: msg.productionId, capability: msg.capability, modelId: msg.modelId },
           });
+        } finally {
+          change.finish();
         }
-        await this.refreshWorldSnapshot(msg.worldId);
+        this.refreshIfStillOpen(store);
         return;
       }
       case "compile-scene-board":
@@ -8456,10 +8542,10 @@ export class Coordinator {
           approved = true;
         }
         const adapter = this.opts.adapter;
-        if (!adapter?.readiness().ready) { fail("The language model is unavailable. Configure a capable image-reading model in Settings."); return; }
-        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId });
-        const configured = selected.sessionModel ?? this.agentOverrides?.["stage-designer"]?.model;
-        if (selected.reason || !configured) { fail(selected.reason ?? "Choose a production language model or a Stage designer model in Settings first."); return; }
+        if (!adapter?.readiness().ready) { fail("The harness is unavailable. Check the running engine in Settings."); return; }
+        const selected = await this.languageModelFor({ kind: "production", productionId: msg.productionId }, undefined, "stage-designer");
+        const configured = selected.sessionModel;
+        if (selected.reason || !configured) { fail(selected.reason ?? "Choose Stage designer under Settings → Harness → Advanced, or a language model in this production's Develop conversation."); return; }
         this.trackBackground(this.stageConstructor.run(store, msg, {
           adapter, sessionInput: this.sessionInput, model: configured,
           scratchRoot: this.opts.appRoot ? join(this.opts.appRoot, ".stage") : `${this.opts.changeLogPath}.stage`,
@@ -13971,6 +14057,20 @@ export class Coordinator {
         await this.emitHarnessStatus();
         return;
       }
+      case "choose-codex-executable": {
+        if (!this.appSettings || !this.opts.chooseCodexExecutable) return;
+        const chosen = await this.opts.chooseCodexExecutable().catch(() => null);
+        if (chosen === null) return;
+        await this.appSettings.setCodexPath(chosen);
+        await this.emitHarnessStatus();
+        return;
+      }
+      case "clear-codex-executable": {
+        if (!this.appSettings) return;
+        await this.appSettings.setCodexPath(null);
+        await this.emitHarnessStatus();
+        return;
+      }
       case "detect-runtimes": {
         if (!this.opts.manifest || !this.opts.probeRuntime) return;
         try {
@@ -15873,9 +15973,11 @@ export class Coordinator {
    * harness, always available — rather than an empty list a screen would have to explain.
    */
   private async harnessAvailability(): Promise<HarnessAvailability[]> {
-    const claudePath = (await this.appSettings?.load())?.harness.claudePath ?? null;
+    const settings = await this.appSettings?.load();
+    const claudePath = settings?.harness.claudePath ?? null;
+    const codexPath = settings?.harness.codexPath ?? null;
     const detected = this.opts.detectHarnesses
-      ? await this.opts.detectHarnesses(claudePath).catch(() => [])
+      ? await this.opts.detectHarnesses(claudePath, codexPath).catch(() => [])
       : [];
     return [OPENCODE_AVAILABILITY, ...detected];
   }
@@ -15883,22 +15985,22 @@ export class Coordinator {
   /**
    * The list and the current choice, sent together (see `HarnessStatus`).
    *
-   * The stored engine is reported only if it is still available. A user who chose Claude Code
-   * and then uninstalled it is running on OpenCode — the launch path already fell back — and a
-   * screen still showing Claude Code selected would be describing a session that does not
-   * exist. The setting on disk is left alone: reinstalling should restore their choice, not
-   * find it quietly erased.
+   * The saved engine is kept even when unavailable. Availability explains the refusal;
+   * harnessInfo and health describe the running process separately, so reinstalling restores
+   * the user's choice without pretending that another engine was selected.
    */
   private async emitHarnessStatus(known?: HarnessAvailability[]): Promise<void> {
     const harnesses = known ?? (await this.harnessAvailability());
     const settings = await this.appSettings?.load();
     const stored = settings?.harness.engine ?? "opencode";
     const claudePath = settings?.harness.claudePath ?? null;
-    const engine = harnesses.find((h) => h.id === stored)?.installed ? stored : "opencode";
+    const codexPath = settings?.harness.codexPath ?? null;
+    const engine = stored;
     this.emit({
       at: new Date().toISOString(),
       type: "harness.status",
-      harness: { engine, harnesses, claudePath },
+      harness: { engine, harnesses, claudePath, codexPath,
+        launchOverride: this.opts.harnessEngineOverride ?? null, launchEngine: this.launchEngine },
     });
   }
 
